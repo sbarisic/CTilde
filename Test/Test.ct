@@ -1,5 +1,15 @@
 ﻿class TestClass {
-	void A(string S wat wat) {
+	int Member;
+
+	__ctor() {
+	}
+
+	__dtor() {
+	}
+
+	string Member2;
+
+	void A(string S) {
 	}
 
 	void B(string S) {

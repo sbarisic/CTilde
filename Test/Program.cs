@@ -13,11 +13,11 @@ namespace Test {
 			Tokenizer Tokenizer = new Tokenizer(Args[0]);
 			Parser Parser = new Parser(Tokenizer);
 
-			try {
-	Console.WriteLine(Parser.Parse().ToC());
-			} catch (Exception E) {
+			//try {
+				Console.WriteLine(Parser.Compile());
+			/*} catch (Exception E) {
 				Console.WriteLine(E.Message);
-			}
+			}*/
 		
 			Console.WriteLine("Done!");
 			Console.ReadLine();

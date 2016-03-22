@@ -16,6 +16,20 @@ namespace CTilde {
 		public override string ToString() {
 			throw new NotImplementedException();
 		}
+
+		public static Expression ParseAny(Tokenizer Tok) {
+			if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor)
+				|| (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)))
+				return new Expr_FuncDef().Parse(Tok);
+			else if (Tok.Peek().Is(Keyword.@class))
+				return new Expr_ClassDef().Parse(Tok);
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Semicolon)) {
+				Expression Var = new Expr_VariableDef().Parse(Tok);
+				Tok.NextToken().Assert(Symbol.Semicolon);
+				return Var;
+			}
+			throw new Exception();
+		}
 	}
 
 	public class Expr_Module : Expression {
@@ -37,15 +51,8 @@ namespace CTilde {
 		}
 
 		public override Expression Parse(Tokenizer Tok) {
-			while (Tok.Peek() != null) {
-				if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)) {
-					Add(new Expr_FuncDef().Parse(Tok));
-				} else if (Tok.Peek().Is(Keyword.@class))
-					Add(new Expr_ClassDef().Parse(Tok));
-				else
-					throw new Exception();
-			}
-
+			while (Tok.Peek() != null)
+				Add(Expression.ParseAny(Tok));
 			return this;
 		}
 	}
@@ -57,12 +64,10 @@ namespace CTilde {
 			Expressions = new List<Expression>();
 		}
 
-		public void Add(Expression E) {
-			Expressions.Add(E);
-		}
-
 		public override Expression Parse(Tokenizer Tok) {
 			Tok.NextToken().Assert(Symbol.LBrace);
+			while (!Tok.Peek().Is(Symbol.RBrace))
+				Expressions.Add(Expression.ParseAny(Tok));
 			Tok.NextToken().Assert(Symbol.RBrace);
 			return this;
 		}
@@ -80,7 +85,7 @@ namespace CTilde {
 	public class Expr_TypeDef : Expression {
 		public string Type;
 		public bool IsArray, IsPointer;
-		
+
 		public override Expression Parse(Tokenizer Tok) {
 			Type = Tok.NextToken().Assert(TokenType.Identifier).Text;
 			if (Tok.Peek().Is(Symbol.Star)) {
@@ -109,6 +114,12 @@ namespace CTilde {
 			Ref.IsPointer = true;
 			return Ref;
 		}
+
+		public static Expr_TypeDef MakeVoid() {
+			Expr_TypeDef Void = new Expr_TypeDef();
+			Void.Type = "void";
+			return Void;
+		}
 	}
 
 	public class Expr_VariableDef : Expression {
@@ -123,6 +134,13 @@ namespace CTilde {
 
 		public override string ToC() {
 			return string.Format("{0} {1}", Type.ToC(), Name);
+		}
+
+		public static Expr_VariableDef MakeThisPtr(string ClassName) {
+			Expr_VariableDef ThisVar = new Expr_VariableDef();
+			ThisVar.Type = Expr_TypeDef.MakeClassRef(ClassName);
+			ThisVar.Name = "this";
+			return ThisVar;
 		}
 	}
 
@@ -161,9 +179,31 @@ namespace CTilde {
 		public Expr_VariableDef FuncDef;
 		public Expr_ParamsDef Params;
 		public Expr_Block Body;
+		public bool IsCtor, IsDtor;
+
+		public Expr_FuncDef() {
+		}
 
 		public override Expression Parse(Tokenizer Tok) {
-			FuncDef = new Expr_VariableDef().Parse<Expr_VariableDef>(Tok);
+			IsCtor = IsDtor = false;
+			if (Tok.Peek().Is(Keyword.__ctor))
+				IsCtor = true;
+			else if (Tok.Peek().Is(Keyword.__dtor))
+				IsDtor = true;
+
+			if (IsCtor || IsDtor) {
+				Tok.NextToken();
+				FuncDef = new Expr_VariableDef();
+				FuncDef.Name = Expr_ClassDef.CurrentClass.Name;
+				FuncDef.Type = Expr_TypeDef.MakeVoid();
+			} else
+				FuncDef = new Expr_VariableDef().Parse<Expr_VariableDef>(Tok);
+
+			if (IsCtor)
+				FuncDef.Name += "__ctor";
+			else if (IsDtor)
+				FuncDef.Name += "__dtor";
+
 			Params = new Expr_ParamsDef().Parse<Expr_ParamsDef>(Tok);
 			Body = new Expr_Block().Parse<Expr_Block>(Tok);
 			return this;
@@ -177,16 +217,26 @@ namespace CTilde {
 	}
 
 	public class Expr_ClassDef : Expression {
+		public static Expr_ClassDef CurrentClass;
+
 		public string Name;
+		public List<Expr_VariableDef> Variables;
 		public List<Expr_FuncDef> Functions;
 
 		public Expr_ClassDef() {
 			Functions = new List<Expr_FuncDef>();
+			Variables = new List<Expr_VariableDef>();
 		}
 
 		public override string ToC() {
 			StringBuilder SB = new StringBuilder();
-			SB.AppendFormat("typedef struct {{ }} {0};\n", Name);
+			SB.AppendLine("typedef struct {");
+			foreach (var Var in Variables)
+				SB.AppendLine(Var.ToC() + ";");
+			SB.Append("} ");
+			SB.Append(Name);
+			SB.AppendLine(";");
+			SB.AppendLine();
 
 			foreach (var Func in Functions)
 				SB.AppendLine(Func.ToC());
@@ -195,20 +245,28 @@ namespace CTilde {
 		}
 
 		public override Expression Parse(Tokenizer Tok) {
+			CurrentClass = this;
+
 			Tok.NextToken().Assert(Keyword.@class);
 			Name = Tok.NextToken().Assert(TokenType.Identifier).Text;
 			Tok.NextToken().Assert(Symbol.LBrace);
 
 			while (!Tok.Peek().Is(Symbol.RBrace)) {
-				Expr_FuncDef MemberFunc = new Expr_FuncDef().Parse<Expr_FuncDef>(Tok);
-				Expr_VariableDef ThisPtr = new Expr_VariableDef();
-				ThisPtr.Name = "this";
-				ThisPtr.Type = Expr_TypeDef.MakeClassRef(Name);
-				MemberFunc.Params.Prepend(ThisPtr);
-				Functions.Add(MemberFunc);
+				Expression E = Expression.ParseAny(Tok);
+				if (E is Expr_FuncDef) {
+					Expr_FuncDef MemberFunc = (Expr_FuncDef)E;
+					MemberFunc.Params.Prepend(Expr_VariableDef.MakeThisPtr(Name));
+					Functions.Add(MemberFunc);
+				} else if (E is Expr_VariableDef) {
+					Expr_VariableDef Var = (Expr_VariableDef)E;
+					Variables.Add(Var);
+				} else
+					throw new Exception("Unexpected expression type " + E.GetType());
 			}
 
 			Tok.NextToken().Assert(Symbol.RBrace);
+
+			CurrentClass = null;
 			return this;
 		}
 	}

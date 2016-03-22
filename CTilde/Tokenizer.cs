@@ -7,7 +7,7 @@ using System.IO;
 
 namespace CTilde {
 	public enum Keyword : int {
-		@class,
+		@class, __ctor, __dtor,
 		@if, @else,
 	}
 
@@ -27,7 +27,7 @@ namespace CTilde {
 			string[] KeywordNames = Enum.GetNames(typeof(Keyword));
 			Settings.Keywords = new Dictionary<string, int>();
 			foreach (var Keywd in KeywordNames)
-				if (!Keywd.StartsWith("__"))
+				//if (!Keywd.StartsWith("__"))
 					Settings.Keywords.Add(Keywd, (int)(Keyword)Enum.Parse(typeof(Keyword), Keywd));
 
 			Settings.Symbols = new Dictionary<string, int>() {

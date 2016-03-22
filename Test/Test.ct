@@ -1,0 +1,10 @@
+﻿class TestClass {
+	void A(string S wat wat) {
+	}
+
+	void B(string S) {
+	}
+}
+
+void main(int argc, string* argv) {
+}

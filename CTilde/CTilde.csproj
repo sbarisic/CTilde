@@ -9,8 +9,9 @@
     <AppDesignerFolder>Properties</AppDesignerFolder>
     <RootNamespace>CTilde</RootNamespace>
     <AssemblyName>CTilde</AssemblyName>
-    <TargetFrameworkVersion>v4.6</TargetFrameworkVersion>
+    <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
+    <TargetFrameworkProfile />
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
@@ -40,11 +41,22 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="Expressions.cs" />
+    <Compile Include="Expr\Expr_ClassDef.cs" />
+    <Compile Include="Expr\Expr_FuncDef.cs" />
+    <Compile Include="Expr\Expr_ParamsDef.cs" />
+    <Compile Include="Expr\Expr_VariableDef.cs" />
+    <Compile Include="Expr\Expr_TypeDef.cs" />
+    <Compile Include="Expr\Expr_Block.cs" />
+    <Compile Include="Expr\Expr_Module.cs" />
+    <Compile Include="LangProvider.cs" />
+    <Compile Include="Langs\CLangProvider.cs" />
     <Compile Include="Lexer.cs" />
     <Compile Include="Parser.cs" />
     <Compile Include="Tokenizer.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="Expr\Expression.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <!-- To modify your build process, add your task inside one of the targets below and uncomment it. 

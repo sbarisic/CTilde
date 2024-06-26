@@ -28,13 +28,15 @@ namespace CTilde {
 			Settings.Keywords = new Dictionary<string, int>();
 			foreach (var Keywd in KeywordNames)
 				//if (!Keywd.StartsWith("__"))
-					Settings.Keywords.Add(Keywd, (int)(Keyword)Enum.Parse(typeof(Keyword), Keywd));
+				Settings.Keywords.Add(Keywd, (int)(Keyword)Enum.Parse(typeof(Keyword), Keywd));
 
 			Settings.Symbols = new Dictionary<string, int>() {
-				{  "(", (int)Symbol.LParen }, {  ")", (int)Symbol.RParen },
-				{  "{", (int)Symbol.LBrace }, {  "}", (int)Symbol.RBrace },
-				{  "[", (int)Symbol.LBracket }, {  "]", (int)Symbol.RBracket },
-				{ ",", (int)Symbol.Comma }, {"*", (int)Symbol.Star }, {";", (int)Symbol.Semicolon }
+				{ "(", (int)Symbol.LParen }, { ")", (int)Symbol.RParen },
+				{ "{", (int)Symbol.LBrace }, { "}", (int)Symbol.RBrace },
+				{ "[", (int)Symbol.LBracket }, { "]", (int)Symbol.RBracket },
+				{ ",", (int)Symbol.Comma },
+				{ "*", (int)Symbol.Star },
+				{ ";", (int)Symbol.Semicolon }
 			};
 
 			L = new Lexer(Reader, Settings);

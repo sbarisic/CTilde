@@ -15,6 +15,10 @@ namespace CTilde.Expr {
 		}
 
 		public static Expression ParseAny(Tokenizer Tok) {
+			for (int i = 0; i < 5; i++) {
+				Console.WriteLine(Tok.Peek(i + 1));
+			}
+
 			if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)))
 				return new Expr_FuncDef().Parse(Tok);
 

@@ -22,11 +22,14 @@ namespace CTilde.Expr {
 
 		public override Expression Parse(Tokenizer Tok) {
 			Tok.NextToken().Assert(Symbol.LParen);
+
 			while (!Tok.Peek().IsSymbol(Symbol.RParen)) {
 				Append(new Expr_VariableDef().Parse<Expr_VariableDef>(Tok));
+
 				if (!Tok.Peek().IsSymbol(Symbol.RParen))
 					Tok.NextToken().Assert(Symbol.Comma);
 			}
+
 			Tok.NextToken().Assert(Symbol.RParen);
 			return this;
 		}

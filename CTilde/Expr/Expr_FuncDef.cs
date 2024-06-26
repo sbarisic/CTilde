@@ -18,6 +18,7 @@ namespace CTilde.Expr {
 			IsCtor = IsDtor = false;
 			if (Tok.Peek().Is(Keyword.__ctor))
 				IsCtor = true;
+
 			else if (Tok.Peek().Is(Keyword.__dtor))
 				IsDtor = true;
 
@@ -28,6 +29,7 @@ namespace CTilde.Expr {
 				FuncVariableDef.Type = Expr_TypeDef.MakeVoid();
 			} else
 				FuncVariableDef = new Expr_VariableDef().Parse<Expr_VariableDef>(Tok);
+
 
 			if (IsCtor)
 				FuncVariableDef.Name += "__ctor";

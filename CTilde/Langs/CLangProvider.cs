@@ -12,6 +12,8 @@ using System.Xml.Linq;
 
 namespace CTilde.Langs {
 	public class CLangProvider : LangProvider {
+		bool OmmitSemicolon = false;
+
 		public override void Compile(Expression Ex) {
 			if (Ex == null)
 				throw new ArgumentNullException(nameof(Ex));
@@ -44,11 +46,15 @@ namespace CTilde.Langs {
 				}
 
 				case Expr_FuncDef FuncDef: {
+					OmmitSemicolon = true;
 					Compile(FuncDef.FuncVariableDef);
 
 					Append("(");
+
 					Compile(FuncDef.FuncParams);
+
 					Append(")");
+					OmmitSemicolon = false;
 
 					Compile(FuncDef.FuncBody);
 					break;
@@ -66,7 +72,7 @@ namespace CTilde.Langs {
 						Expr_VariableDef VarDef = ParamsDef.Definitions[i];
 						Compile(VarDef);
 
-						if (i - 1 < ParamsDef.Definitions.Count)
+						if (i + 1 < ParamsDef.Definitions.Count)
 							Append(", ");
 					}
 
@@ -87,7 +93,11 @@ namespace CTilde.Langs {
 
 				case Expr_VariableDef VariableDef: {
 					Compile(VariableDef.Type);
-					AppendLine(" {0};", VariableDef.Name);
+					Append(" {0}", VariableDef.Name);
+
+					if (!OmmitSemicolon)
+						AppendLine(";");
+
 					break;
 				}
 

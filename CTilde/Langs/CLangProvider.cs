@@ -1,4 +1,5 @@
 ﻿using CTilde.Expr;
+
 using System;
 using System.CodeDom;
 using System.Collections;
@@ -17,81 +18,82 @@ namespace CTilde.Langs {
 
 			switch (Ex) {
 				case Expr_Block Block: {
-						AppendLine("{");
+					AppendLine("{");
 
-						foreach (var E in Block.Expressions) {
-							Compile(E);
-						}
-
-						AppendLine("}");
-						break;
+					foreach (var E in Block.Expressions) {
+						Compile(E);
 					}
+
+					AppendLine("}");
+					break;
+				}
 
 				case Expr_ClassDef ClassDef: {
-						AppendLine("typedef struct {");
+					AppendLine("typedef struct {");
 
-						foreach (var E in ClassDef.Variables) {
-							Compile(E);
-						}
-
-						AppendLine("}} {0};", ClassDef.Name);
-
-						foreach (var F in ClassDef.Functions) {
-							Compile(F);
-						}
-						break;
+					foreach (var E in ClassDef.Variables) {
+						Compile(E);
 					}
+
+					AppendLine("}} {0};", ClassDef.Name);
+
+					foreach (var F in ClassDef.Functions) {
+						Compile(F);
+					}
+					break;
+				}
 
 				case Expr_FuncDef FuncDef: {
-						Compile(FuncDef.FuncVariableDef);
+					Compile(FuncDef.FuncVariableDef);
 
-						Append("(");
-						Compile(FuncDef.FuncParams);
-						Append(")");
+					Append("(");
+					Compile(FuncDef.FuncParams);
+					Append(")");
 
-						Compile(FuncDef.FuncBody);
-						break;
-					}
+					Compile(FuncDef.FuncBody);
+					break;
+				}
 
 				case Expr_Module Module: {
-						foreach (var E in Module.Expressions)
-							Compile(E);
+					foreach (var E in Module.Expressions)
+						Compile(E);
 
-						break;
-					}
+					break;
+				}
 
 				case Expr_ParamsDef ParamsDef: {
-						for (int i = 0; i < ParamsDef.Definitions.Count; i++) {
-							Expr_VariableDef VarDef = ParamsDef.Definitions[i];
-							Compile(VarDef);
+					for (int i = 0; i < ParamsDef.Definitions.Count; i++) {
+						Expr_VariableDef VarDef = ParamsDef.Definitions[i];
+						Compile(VarDef);
 
-							if (i - 1 < ParamsDef.Definitions.Count)
-								Append(", ");
-						}
-
-						break;
+						if (i - 1 < ParamsDef.Definitions.Count)
+							Append(", ");
 					}
+
+					break;
+				}
 
 				case Expr_TypeDef TypeDef: {
-						string T = TypeDef.Type;
+					string T = TypeDef.Type;
 
-						if (TypeDef.IsPointer)
-							T += "*";
-						else if (TypeDef.IsArray)
-							T += "[]";
+					if (TypeDef.IsPointer)
+						T += "*";
+					else if (TypeDef.IsArray)
+						T += "[]";
 
-						Append(T);
-						break;
-					}
+					Append(T);
+					break;
+				}
 
 				case Expr_VariableDef VariableDef: {
-						Append("{0} {1}", VariableDef.Type, VariableDef.Name);
-						break;
-					}
+					Compile(VariableDef.Type);
+					AppendLine(" {0};", VariableDef.Name);
+					break;
+				}
 
 				default: {
-						throw new NotImplementedException("Could not compile expression of type " + Ex.GetType());
-					}
+					throw new NotImplementedException("Could not compile expression of type " + Ex.GetType());
+				}
 			}
 		}
 	}

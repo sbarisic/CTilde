@@ -26,6 +26,11 @@ namespace CTilde {
 
 			string[] KeywordNames = Enum.GetNames(typeof(Keyword));
 			Settings.Keywords = new Dictionary<string, int>();
+			Settings.CommentBegin = "/*";
+			Settings.CommentEnd = "*/";
+			Settings.StringEscapeChar = '\\';
+			Settings.StringQuotes = new char[] { '"' };
+
 			foreach (var Keywd in KeywordNames)
 				//if (!Keywd.StartsWith("__"))
 				Settings.Keywords.Add(Keywd, (int)(Keyword)Enum.Parse(typeof(Keyword), Keywd));
@@ -80,6 +85,7 @@ namespace CTilde {
 		public static string Position(this Token T) {
 			if (T != null)
 				return T.GetPos();
+
 			return "NULL";
 		}
 

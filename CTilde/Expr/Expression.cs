@@ -14,10 +14,6 @@ namespace CTilde.Expr {
 			return (T)Parse(Tok);
 		}
 
-		public override string ToString() {
-			throw new NotImplementedException();
-		}
-
 		public static Expression ParseAny(Tokenizer Tok) {
 			if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)))
 				return new Expr_FuncDef().Parse(Tok);
@@ -31,6 +27,11 @@ namespace CTilde.Expr {
 				return Var;
 			}
 			throw new Exception();
+		}
+
+
+		public override string ToString() {
+			throw new InvalidOperationException();
 		}
 	}
 }

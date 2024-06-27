@@ -42,8 +42,11 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Expr\Expr_ClassDef.cs" />
+    <Compile Include="Expr\Expr_Identifier.cs" />
     <Compile Include="Expr\Expr_FuncDef.cs" />
     <Compile Include="Expr\Expr_ParamsDef.cs" />
+    <Compile Include="Expr\Expr_AssignedVariableDef.cs" />
+    <Compile Include="Expr\Expr_ConstNumber.cs" />
     <Compile Include="Expr\Expr_VariableDef.cs" />
     <Compile Include="Expr\Expr_TypeDef.cs" />
     <Compile Include="Expr\Expr_Block.cs" />

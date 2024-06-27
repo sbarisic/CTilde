@@ -6,7 +6,11 @@ using System.Threading.Tasks;
 
 namespace CTilde.Expr {
 	public class Expr_FuncDef : Expression {
-		public Expr_VariableDef FuncVariableDef;
+		public Expr_TypeDef FuncReturnTypeDef;
+		public string FuncName;
+
+		//public Expr_VariableDef FuncVariableDef;
+
 		public Expr_ParamsDef FuncParams;
 		public Expr_Block FuncBody;
 		public bool IsCtor, IsDtor;
@@ -24,19 +28,24 @@ namespace CTilde.Expr {
 
 			if (IsCtor || IsDtor) {
 				Tok.NextToken();
-				FuncVariableDef = new Expr_VariableDef();
-				FuncVariableDef.Name = Expr_ClassDef.CurrentClass.Name;
-				FuncVariableDef.Type = Expr_TypeDef.MakeVoid();
-			} else
-				FuncVariableDef = new Expr_VariableDef().Parse<Expr_VariableDef>(Tok);
+
+				FuncReturnTypeDef = Expr_TypeDef.MakeVoid();
+				FuncName = Expr_ClassDef.CurrentClass.Name;
+
+				if (IsCtor)
+					FuncName += "__ctor";
+				else if (IsDtor)
+					FuncName += "__dtor";
+			} else {
+				FuncReturnTypeDef = new Expr_TypeDef().Parse<Expr_TypeDef>(Tok);
+				FuncName = Tok.NextToken().Assert(TokenType.Identifier).Text;
+			}
 
 
-			if (IsCtor)
-				FuncVariableDef.Name += "__ctor";
-			else if (IsDtor)
-				FuncVariableDef.Name += "__dtor";
-
+			Tok.NextToken().Assert(Symbol.LParen);
 			FuncParams = new Expr_ParamsDef().Parse<Expr_ParamsDef>(Tok);
+			Tok.NextToken().Assert(Symbol.RParen);
+
 			FuncBody = new Expr_Block().Parse<Expr_Block>(Tok);
 			return this;
 		}

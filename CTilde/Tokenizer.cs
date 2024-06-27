@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using System.IO;
+using System.Runtime.Remoting.Contexts;
 
 namespace CTilde {
 	public enum Keyword : int {
@@ -12,8 +13,19 @@ namespace CTilde {
 	}
 
 	public enum Symbol : int {
-		LParen, RParen, LBrace, RBrace, LBracket, RBracket,
-		Comma, Star, Semicolon,
+		LParen, 
+		RParen, 
+		LBrace, 
+		RBrace,
+		LBracket,
+		RBracket,
+		Comma, 
+		Star, 
+		Semicolon,
+		Equals,
+		Assignment,
+		Addition,
+		Subtraction
 	}
 
 	public class Tokenizer {
@@ -26,6 +38,7 @@ namespace CTilde {
 
 			string[] KeywordNames = Enum.GetNames(typeof(Keyword));
 			Settings.Keywords = new Dictionary<string, int>();
+			Settings.InlineComments = new string[] { "//" };
 			Settings.CommentBegin = "/*";
 			Settings.CommentEnd = "*/";
 			Settings.StringEscapeChar = '\\';
@@ -39,8 +52,12 @@ namespace CTilde {
 				{ "(", (int)Symbol.LParen }, { ")", (int)Symbol.RParen },
 				{ "{", (int)Symbol.LBrace }, { "}", (int)Symbol.RBrace },
 				{ "[", (int)Symbol.LBracket }, { "]", (int)Symbol.RBracket },
-				{ ",", (int)Symbol.Comma },
 				{ "*", (int)Symbol.Star },
+				{ "+", (int)Symbol.Addition },
+				{ "-", (int)Symbol.Subtraction },
+				{ "==", (int)Symbol.Equals },
+				{ "=", (int)Symbol.Assignment },
+				{ ",", (int)Symbol.Comma },
 				{ ";", (int)Symbol.Semicolon }
 			};
 

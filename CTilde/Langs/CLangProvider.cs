@@ -12,7 +12,7 @@ using System.Xml.Linq;
 
 namespace CTilde.Langs {
 	public class CLangProvider : LangProvider {
-		bool OmmitSemicolon = false;
+		//bool OmmitSemicolon = false;
 
 		public override void Compile(Expression Ex) {
 			if (Ex == null)
@@ -20,90 +20,116 @@ namespace CTilde.Langs {
 
 			switch (Ex) {
 				case Expr_Block Block: {
-					AppendLine("{");
+						AppendLine("{");
 
-					foreach (var E in Block.Expressions) {
-						Compile(E);
+						foreach (var E in Block.Expressions) {
+							Compile(E);
+						}
+
+						AppendLine("}");
+						break;
 					}
-
-					AppendLine("}");
-					break;
-				}
 
 				case Expr_ClassDef ClassDef: {
-					AppendLine("typedef struct {");
+						AppendLine("typedef struct {");
 
-					foreach (var E in ClassDef.Variables) {
-						Compile(E);
+						foreach (var E in ClassDef.Variables) {
+							Compile(E);
+						}
+
+						AppendLine("}} {0};", ClassDef.Name);
+
+						foreach (var F in ClassDef.Functions) {
+							Compile(F);
+						}
+						break;
 					}
-
-					AppendLine("}} {0};", ClassDef.Name);
-
-					foreach (var F in ClassDef.Functions) {
-						Compile(F);
-					}
-					break;
-				}
 
 				case Expr_FuncDef FuncDef: {
-					OmmitSemicolon = true;
-					Compile(FuncDef.FuncVariableDef);
+						//OmmitSemicolon = true;
+						Compile(FuncDef.FuncReturnTypeDef);
+						Append(" {0}(", FuncDef.FuncName);
 
-					Append("(");
+						Compile(FuncDef.FuncParams);
 
-					Compile(FuncDef.FuncParams);
+						Append(")");
+						//OmmitSemicolon = false;
 
-					Append(")");
-					OmmitSemicolon = false;
-
-					Compile(FuncDef.FuncBody);
-					break;
-				}
-
-				case Expr_Module Module: {
-					foreach (var E in Module.Expressions)
-						Compile(E);
-
-					break;
-				}
-
-				case Expr_ParamsDef ParamsDef: {
-					for (int i = 0; i < ParamsDef.Definitions.Count; i++) {
-						Expr_VariableDef VarDef = ParamsDef.Definitions[i];
-						Compile(VarDef);
-
-						if (i + 1 < ParamsDef.Definitions.Count)
-							Append(", ");
+						Compile(FuncDef.FuncBody);
+						break;
 					}
 
-					break;
-				}
+				case Expr_Module Module: {
+						foreach (var E in Module.Expressions)
+							Compile(E);
+
+						break;
+					}
+
+				case Expr_ParamsDef ParamsDef: {
+						for (int i = 0; i < ParamsDef.Definitions.Count; i++) {
+							ParamDefData ParamDef = ParamsDef.Definitions[i];
+							//Compile(ParamDef);
+
+							Compile(ParamDef.ParamType);
+							Append(" {0}", ParamDef.Name);
+
+							if (i + 1 < ParamsDef.Definitions.Count)
+								Append(", ");
+						}
+
+						break;
+					}
 
 				case Expr_TypeDef TypeDef: {
-					string T = TypeDef.Type;
+						string T = TypeDef.Type;
 
-					if (TypeDef.IsPointer)
-						T += "*";
-					else if (TypeDef.IsArray)
-						T += "[]";
+						if (TypeDef.IsPointer)
+							T += "*";
+						else if (TypeDef.IsArray)
+							T += "[]";
 
-					Append(T);
-					break;
-				}
+						Append(T);
+						break;
+					}
 
 				case Expr_VariableDef VariableDef: {
-					Compile(VariableDef.Type);
-					Append(" {0}", VariableDef.Name);
-
-					if (!OmmitSemicolon)
+						Compile(VariableDef.Type);
+						Append(" ");
+						Compile(VariableDef.Ident);
 						AppendLine(";");
 
-					break;
-				}
+						/*if (!OmmitSemicolon)
+							AppendLine(";");*/
+
+						break;
+					}
+
+				case Expr_AssignedVariableDef AssVariableDef: {
+						Compile(AssVariableDef.VariableDef.Type);
+						Append(" ");
+						Compile(AssVariableDef.VariableDef.Ident);
+						Append(" = ");
+
+						Compile(AssVariableDef.AssignmentValue);
+
+						AppendLine(";");
+						break;
+					}
+
+				case Expr_Identifier IdentifierEx: {
+						Append(IdentifierEx.Identifier);
+						break;
+					}
+
+				case Expr_ConstNumber NumberEx: {
+						Append(NumberEx.NumberLiteral);
+						break;
+					}
 
 				default: {
-					throw new NotImplementedException("Could not compile expression of type " + Ex.GetType());
-				}
+						throw new NotImplementedException("Could not compile expression of type " + Ex.GetType());
+					}
 			}
 		}
 	}

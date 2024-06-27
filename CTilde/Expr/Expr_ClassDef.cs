@@ -26,13 +26,18 @@ namespace CTilde.Expr {
 
 			while (!Tok.Peek().Is(Symbol.RBrace)) {
 				Expression E = Expression.ParseAny(Tok);
+
 				if (E is Expr_FuncDef) {
+
 					Expr_FuncDef MemberFunc = (Expr_FuncDef)E;
-					MemberFunc.FuncParams.Prepend(Expr_VariableDef.MakeThisPtr(Name));
+					MemberFunc.FuncParams.Prepend(new ParamDefData(Expr_TypeDef.MakeClassRef(Name), "this"));
 					Functions.Add(MemberFunc);
+
 				} else if (E is Expr_VariableDef) {
+
 					Expr_VariableDef Var = (Expr_VariableDef)E;
 					Variables.Add(Var);
+
 				} else
 					throw new Exception("Unexpected expression type " + E.GetType());
 			}

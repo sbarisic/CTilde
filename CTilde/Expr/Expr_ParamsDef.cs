@@ -5,32 +5,39 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace CTilde.Expr {
+	public class ParamDefData {
+		public Expr_TypeDef ParamType;
+		public string Name;
+
+		public ParamDefData(Expr_TypeDef ParamType, string Name) {
+			this.ParamType = ParamType;
+			this.Name = Name;
+		}
+	}
+
 	public class Expr_ParamsDef : Expression {
-		public List<Expr_VariableDef> Definitions;
+		public List<ParamDefData> Definitions = new List<ParamDefData>();
 
-		public Expr_ParamsDef() {
-			Definitions = new List<Expr_VariableDef>();
+		public Expr_ParamsDef Append(ParamDefData Dat) {
+			Definitions.Add(Dat);
+			return this;
 		}
 
-		public void Append(Expr_VariableDef Var) {
-			Definitions.Add(Var);
-		}
-
-		public void Prepend(Expr_VariableDef Var) {
-			Definitions.Insert(0, Var);
+		public Expr_ParamsDef Prepend(ParamDefData Dat) {
+			Definitions.Insert(0, Dat);
+			return this;
 		}
 
 		public override Expression Parse(Tokenizer Tok) {
-			Tok.NextToken().Assert(Symbol.LParen);
-
 			while (!Tok.Peek().IsSymbol(Symbol.RParen)) {
-				Append(new Expr_VariableDef().Parse<Expr_VariableDef>(Tok));
+				ParamDefData Def = new ParamDefData(new Expr_TypeDef().Parse<Expr_TypeDef>(Tok), Tok.NextToken().Assert(TokenType.Identifier).Text);
+
+				Append(Def);
 
 				if (!Tok.Peek().IsSymbol(Symbol.RParen))
 					Tok.NextToken().Assert(Symbol.Comma);
 			}
 
-			Tok.NextToken().Assert(Symbol.RParen);
 			return this;
 		}
 	}

@@ -55,15 +55,18 @@ namespace CTilde.Expr {
 			throw new Exception();
 		}
 
-		public static Expression ParseExpression(Tokenizer Tok) {
+		public static Expression ParseExpression(Tokenizer Tok, Expression LExpr = null) {
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
 
-			if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal)) {
-				return new Expr_ConstNumber().Parse(Tok);
-			}
 
-			if (Tok.Peek().Is(TokenType.Identifier)) {
+
+			if (Tok.Peek().Is(Symbol.Addition)) {
+
+
+			} else if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal)) {
+				return new Expr_ConstNumber().Parse(Tok);
+			} else if (Tok.Peek().Is(TokenType.Identifier)) {
 				return new Expr_Identifier().Parse(Tok);
 			}
 

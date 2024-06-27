@@ -47,6 +47,7 @@
     <Compile Include="Expr\Expr_ParamsDef.cs" />
     <Compile Include="Expr\Expr_AssignedVariableDef.cs" />
     <Compile Include="Expr\Expr_ConstNumber.cs" />
+    <Compile Include="Expr\Expr_MathOp.cs" />
     <Compile Include="Expr\Expr_VariableDef.cs" />
     <Compile Include="Expr\Expr_TypeDef.cs" />
     <Compile Include="Expr\Expr_Block.cs" />

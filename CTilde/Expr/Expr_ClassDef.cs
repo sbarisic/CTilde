@@ -25,7 +25,7 @@ namespace CTilde.Expr {
 			Tok.NextToken().Assert(Symbol.LBrace);
 
 			while (!Tok.Peek().Is(Symbol.RBrace)) {
-				Expression E = Expression.ParseAny(Tok);
+				Expression E = Expression.ParseStatement(Tok);
 
 				if (E is Expr_FuncDef) {
 

@@ -18,7 +18,7 @@ namespace CTilde.Expr {
 
 		public override Expression Parse(Tokenizer Tok) {
 			while (Tok.Peek() != null)
-				Add(Expression.ParseAny(Tok));
+				Add(Expression.ParseStatement(Tok));
 
 			return this;
 		}

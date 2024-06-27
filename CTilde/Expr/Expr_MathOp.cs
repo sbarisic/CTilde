@@ -18,19 +18,21 @@ namespace CTilde.Expr {
 		public MathOperation Op;
 		public Expression RExpr;
 
-		public override Expression Parse(Tokenizer Tok) {
-			LExpr = Expression.ParseExpression(Tok);
+		public Expr_MathOp(Expression LExpr) {
+			this.LExpr = LExpr;
+		}
 
+		public override Expression Parse(Tokenizer Tok) {
 			Token T = Tok.NextToken();
+
 			if (T.Is(Symbol.Addition))
 				Op = MathOperation.Add;
 			else if (T.Is(Symbol.Subtraction))
 				Op = MathOperation.Sub;
 			else
-				throw new NotImplementedException("Throw proper error here");
+				throw new NotImplementedException("Unexpected token " + T);
 
 			RExpr = Expression.ParseExpression(Tok);
-
 			return this;
 		}
 	}

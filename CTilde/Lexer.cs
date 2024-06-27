@@ -110,18 +110,14 @@ namespace System.Text {
 
 		private const char EndOfTextChar = unchecked((char)-1);
 
-		public Token Current
-		{
-			get
-			{
+		public Token Current {
+			get {
 				return current;
 			}
 		}
 
-		public bool IsEmpty
-		{
-			get
-			{
+		public bool IsEmpty {
+			get {
 				return text == null;
 			}
 		}
@@ -846,10 +842,8 @@ namespace System.Text {
 
 		#region IEnumerator Members
 
-		object IEnumerator.Current
-		{
-			get
-			{
+		object IEnumerator.Current {
+			get {
 				return current;
 			}
 		}
@@ -942,18 +936,14 @@ namespace System.Text {
 			return string.Format("[{0}:{1}]", LineNumber + 1, LinePosition + 1);
 		}
 
-		public int LinePosition
-		{
-			get
-			{
+		public int LinePosition {
+			get {
 				return StartPosition - LineBegin;
 			}
 		}
 
-		public int EndLinePosition
-		{
-			get
-			{
+		public int EndLinePosition {
+			get {
 				return EndPosition - EndLineBegin;
 			}
 		}
@@ -978,10 +968,8 @@ namespace System.Text {
 		public string CommentEnd;
 		public string DecimalSeparator;
 
-		public static LexerSettings Default
-		{
-			get
-			{
+		public static LexerSettings Default {
+			get {
 				LexerSettings settings = new LexerSettings();
 				settings.CultureInfo = CultureInfo.InvariantCulture;
 				settings.CompareInfo = CultureInfo.InvariantCulture.CompareInfo;

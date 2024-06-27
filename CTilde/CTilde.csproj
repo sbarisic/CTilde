@@ -44,6 +44,7 @@
     <Compile Include="Expr\Expr_ClassDef.cs" />
     <Compile Include="Expr\Expr_Identifier.cs" />
     <Compile Include="Expr\Expr_FuncDef.cs" />
+    <Compile Include="Expr\Expr_FuncCall.cs" />
     <Compile Include="Expr\Expr_ParamsDef.cs" />
     <Compile Include="Expr\Expr_AssignedVariableDef.cs" />
     <Compile Include="Expr\Expr_ConstNumber.cs" />

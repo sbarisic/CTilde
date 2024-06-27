@@ -13,6 +13,7 @@ namespace CTilde.Expr {
 		public override Expression Parse(Tokenizer Tok) {
 			Type = new Expr_TypeDef().Parse<Expr_TypeDef>(Tok);
 			Ident = new Expr_Identifier().Parse<Expr_Identifier>(Tok);
+
 			return this;
 		}
 

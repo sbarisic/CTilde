@@ -13,14 +13,14 @@ namespace CTilde {
 	}
 
 	public enum Symbol : int {
-		LParen, 
-		RParen, 
-		LBrace, 
+		LParen,
+		RParen,
+		LBrace,
 		RBrace,
 		LBracket,
 		RBracket,
-		Comma, 
-		Star, 
+		Comma,
+		Star,
 		Semicolon,
 		Equals,
 		Assignment,

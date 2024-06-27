@@ -9,15 +9,8 @@ namespace CTilde.Expr {
 	public class Expr_ConstNumber : Expression {
 		public string NumberLiteral;
 
-		public override Expression Parse(Tokenizer Tok) {
-			Token T = Tok.NextToken();
-
-			if (T.Is(TokenType.Number) || T.Is(TokenType.Decimal))
-				NumberLiteral = T.Text;
-			else
-				throw new NotImplementedException("Expected number or decimal");
-
-			return this;
+		public Expr_ConstNumber(string NumberLiteral) {
+			this.NumberLiteral = NumberLiteral;
 		}
 	}
 }

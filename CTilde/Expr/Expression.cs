@@ -6,7 +6,13 @@ using System.Threading.Tasks;
 
 namespace CTilde.Expr {
 	public abstract class Expression {
-		public abstract Expression Parse(Tokenizer Tok);
+		public virtual Expression Parse(Tokenizer Tok) {
+			throw new NotImplementedException();
+		}
+
+		/*public virtual Expression Parse(Tokenizer Tok, Expression LExpr) {
+			throw new NotImplementedException();
+		}*/
 
 		public T Parse<T>(Tokenizer Tok) where T : Expression {
 			return (T)Parse(Tok);
@@ -23,7 +29,7 @@ namespace CTilde.Expr {
 			return DebugTokens;
 		}
 
-		public static Expression ParseAny(Tokenizer Tok) {
+		public static Expression ParseStatement(Tokenizer Tok) {
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
 			if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen))) {
@@ -41,13 +47,19 @@ namespace CTilde.Expr {
 				// Variable definition
 				Expression Var = new Expr_VariableDef().Parse(Tok);
 				Tok.NextToken().Assert(Symbol.Semicolon);
+
 				return Var;
 
 			} else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Assignment)) {
 
-				// 
+				// Variable definition with expression assignment
 				Expression Var = new Expr_AssignedVariableDef().Parse(Tok);
-				Tok.NextToken().Assert(Symbol.Semicolon);
+				return Var;
+
+			} else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LParen)) {
+
+				// Function call
+				Expression Var = new Expr_FuncCall().Parse(Tok);
 				return Var;
 
 			}
@@ -55,29 +67,32 @@ namespace CTilde.Expr {
 			throw new Exception();
 		}
 
-		public static Expression ParseExpression(Tokenizer Tok, Expression LExpr = null) {
+		public static Expression ParseExpression(Tokenizer Tok) {
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
+			Expression LeftExpr = null;
+
+			while (!Tok.Peek().Is(Symbol.Semicolon)) {
+				if (LeftExpr != null) {
+					if (Tok.Peek().Is(Symbol.Addition) || Tok.Peek().Is(Symbol.Subtraction)) {
+						return new Expr_MathOp(LeftExpr).Parse<Expr_MathOp>(Tok);
+					}
+
+					throw new InvalidOperationException("Unexpected token " + Tok.Peek());
+				}
 
 
 
-			if (Tok.Peek().Is(Symbol.Addition)) {
-
-
-			} else if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal)) {
-				return new Expr_ConstNumber().Parse(Tok);
-			} else if (Tok.Peek().Is(TokenType.Identifier)) {
-				return new Expr_Identifier().Parse(Tok);
+				if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal)) {
+					LeftExpr = new Expr_ConstNumber(Tok.NextToken().Text);
+				} else if (Tok.Peek().Is(TokenType.Identifier)) {
+					LeftExpr = new Expr_Identifier().Parse<Expr_Identifier>(Tok);
+				} else
+					throw new NotImplementedException();
 			}
 
-			//==
-
-
-			if (Tok.Peek(2).Is(Symbol.Addition)) {
-				Expression Left = ParseExpression(Tok);
-			}
-
-			throw new Exception();
+			Tok.NextToken().Assert(Symbol.Semicolon);
+			return LeftExpr;
 		}
 
 

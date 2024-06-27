@@ -1,0 +1,7 @@
+﻿
+void A(string S) {
+	int var_a = 2;
+	int var_b = 3;
+	int result = var_a + var_b;
+	printf(result);
+}

@@ -127,6 +127,32 @@ namespace CTilde.Langs {
 					break;
 				}
 
+				case Expr_MathOp MathExp: {
+					Compile(MathExp.LExpr);
+
+					Append(" {0} ", MathExp.OpString);
+
+					Compile(MathExp.RExpr);
+					break;
+				}
+
+				case Expr_FuncCall FuncCallExp: {
+					Compile(FuncCallExp.Function);
+
+					Append("(");
+
+
+					for (int i = 0; i < FuncCallExp.Arguments.Count; i++) {
+						Compile(FuncCallExp.Arguments[i]);
+
+						if (i < FuncCallExp.Arguments.Count - 1)
+							Append(", ");
+					}
+
+					AppendLine(");");
+					break;
+				}
+
 				default: {
 					throw new NotImplementedException("Could not compile expression of type " + Ex.GetType());
 				}

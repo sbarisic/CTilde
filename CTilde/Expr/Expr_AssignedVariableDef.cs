@@ -15,7 +15,7 @@ namespace CTilde.Expr {
 
 			Tok.NextToken().Assert(Symbol.Assignment);
 
-			AssignmentValue = Expression.ParseExpression(Tok);
+			AssignmentValue = Expression.ParseExpression(Tok, Symbol.Semicolon);
 			return this;
 		}
 	}

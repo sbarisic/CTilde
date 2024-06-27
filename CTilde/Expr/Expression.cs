@@ -60,25 +60,32 @@ namespace CTilde.Expr {
 
 				// Function call
 				Expression Var = new Expr_FuncCall().Parse(Tok);
+				Tok.NextToken().Assert(Symbol.Semicolon);
+
 				return Var;
 
 			}
 
+			// Empty statement
+			/*if (Tok.Peek().Is(Symbol.Semicolon))
+				return null;*/
+			
 			throw new Exception();
 		}
 
-		public static Expression ParseExpression(Tokenizer Tok) {
+		public static Expression ParseExpression(Tokenizer Tok, Symbol StopSymbol) {
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
 			Expression LeftExpr = null;
 
-			while (!Tok.Peek().Is(Symbol.Semicolon)) {
+			while (!Tok.Peek().Is(StopSymbol)) {
 				if (LeftExpr != null) {
 					if (Tok.Peek().Is(Symbol.Addition) || Tok.Peek().Is(Symbol.Subtraction)) {
 						return new Expr_MathOp(LeftExpr).Parse<Expr_MathOp>(Tok);
 					}
 
-					throw new InvalidOperationException("Unexpected token " + Tok.Peek());
+					return LeftExpr;
+					//throw new InvalidOperationException("Unexpected token " + Tok.Peek());
 				}
 
 
@@ -91,7 +98,7 @@ namespace CTilde.Expr {
 					throw new NotImplementedException();
 			}
 
-			Tok.NextToken().Assert(Symbol.Semicolon);
+			Tok.NextToken().Assert(StopSymbol);
 			return LeftExpr;
 		}
 

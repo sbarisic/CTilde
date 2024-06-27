@@ -18,6 +18,21 @@ namespace CTilde.Expr {
 		public MathOperation Op;
 		public Expression RExpr;
 
+		public string OpString {
+			get {
+				switch (Op) {
+					case MathOperation.Add:
+						return "+";
+
+					case MathOperation.Sub:
+						return "-";
+
+					default:
+						throw new NotImplementedException();
+				}
+			}
+		}
+
 		public Expr_MathOp(Expression LExpr) {
 			this.LExpr = LExpr;
 		}
@@ -32,7 +47,7 @@ namespace CTilde.Expr {
 			else
 				throw new NotImplementedException("Unexpected token " + T);
 
-			RExpr = Expression.ParseExpression(Tok);
+			RExpr = Expression.ParseExpression(Tok, Symbol.Semicolon);
 			return this;
 		}
 	}

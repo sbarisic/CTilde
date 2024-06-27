@@ -12,7 +12,7 @@ namespace Test {
 	class Program {
 		static void Main(string[] Args) {
 			if (Args.Length == 0)
-				Args = new string[] { "Test.ct" };
+				Args = new string[] { "tests/Test.ct" };
 
 			Console.Title = "C~ Test";
 

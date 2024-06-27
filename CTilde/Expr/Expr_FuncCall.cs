@@ -15,7 +15,7 @@ namespace CTilde.Expr {
 			Tok.NextToken().Assert(Symbol.LParen);
 
 			while (!Tok.Peek().Is(Symbol.RParen)) {
-				Expression E = Expression.ParseExpression(Tok);
+				Expression E = Expression.ParseExpression(Tok, Symbol.Comma);
 				Arguments.Add(E);
 
 				if (!Tok.Peek().Is(Symbol.RParen)) {

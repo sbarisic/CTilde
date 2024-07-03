@@ -2,18 +2,28 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Test.Properties {
 	static class Model11 {
 		public static void Main2(string[] Args) {
 			string[] Test = new string[] {
+				// Vazeci
 				"800528864087-23124-1",
 				"800528864079-24015-1",
 				"800528864095-24023-1",
 				"800528864036-24031-1",
 				"800528864079-24040-1",
-				"800528864001-24058-1"
+				"800528864001-24058-1",
+
+				// Ne vazeci
+				"800128864087-13128-1",
+				"800528874079-24115-1",
+				"710528864095-22023-1",
+				"800328864036-24038-1",
+				"800527864079-24045-1",
+				"200528864001-23058-1"
 			};
 
 
@@ -30,13 +40,27 @@ namespace Test.Properties {
 				P1 = new string(P1.Take(P1.Length - 1).ToArray());
 				P2 = new string(P2.Take(P2.Length - 1).ToArray());
 
-				PrintPnB(P1, P2, P3, P1K, P2K);
+				CheckPozivNaBroj(P1, P2, P3, P1K, P2K);
 			}
 
-			Console.ReadLine();
+			Console.WriteLine();
+
+			while (true) {
+				Console.Write(">> ");
+				PrintChecksum(Console.ReadLine().Trim());
+			}
 		}
 
-		static void PrintPnB(string P1, string P2, string P3, string P1K, string P2K) {
+		static void PrintChecksum(string Str) {
+			Console.Write(Str);
+
+			Console.ForegroundColor = ConsoleColor.DarkYellow;
+
+			Console.WriteLine(KontrolniBroj(Str));
+			Console.ResetColor();
+		}
+
+		static void CheckPozivNaBroj(string P1, string P2, string P3, string P1K, string P2K) {
 			string CalcP1K = KontrolniBroj(P1).ToString();
 			string CalcP2K = KontrolniBroj(P2).ToString();
 
@@ -64,7 +88,9 @@ namespace Test.Properties {
 		}
 
 		static int KontrolniBroj(string s) {
-			int Faktor = s.Length + 1;
+			// MOD11INI
+
+			int Weight = s.Length + 1;
 			int Sum = 0;
 
 			for (int i = 0; i < s.Length; i++) {
@@ -73,8 +99,8 @@ namespace Test.Properties {
 				if (N < 0 || N > 9)
 					throw new Exception("Expected single digit number [0-9]");
 
-				Sum += Faktor * N;
-				Faktor--;
+				Sum += Weight * N;
+				Weight--;
 			}
 
 			if (Sum >= 0) {

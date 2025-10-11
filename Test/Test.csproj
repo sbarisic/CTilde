@@ -49,6 +49,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+    <None Include="tests\FishAsm.ct">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="tests\Test2.ct">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

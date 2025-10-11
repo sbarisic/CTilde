@@ -4,9 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace CTilde.Expr {
-	public abstract class Expression {
-		public virtual Expression Parse(Tokenizer Tok) {
+namespace CTilde.Expr
+{
+	public abstract class Expression
+	{
+		public virtual Expression Parse(Tokenizer Tok)
+		{
 			throw new NotImplementedException();
 		}
 
@@ -14,14 +17,17 @@ namespace CTilde.Expr {
 			throw new NotImplementedException();
 		}*/
 
-		public T Parse<T>(Tokenizer Tok) where T : Expression {
+		public T Parse<T>(Tokenizer Tok) where T : Expression
+		{
 			return (T)Parse(Tok);
 		}
 
-		static Token[] GetDebugTokens(Tokenizer Tok) {
+		static Token[] GetDebugTokens(Tokenizer Tok)
+		{
 			Token[] DebugTokens = new Token[5];
 
-			for (int i = 0; i < 5; i++) {
+			for (int i = 0; i < 5; i++)
+			{
 				DebugTokens[i] = Tok.Peek(i + 1);
 				Console.WriteLine("{0} - {1}", i, DebugTokens[i]);
 			}
@@ -29,20 +35,31 @@ namespace CTilde.Expr {
 			return DebugTokens;
 		}
 
-		public static Expression ParseStatement(Tokenizer Tok) {
+		public static Expression ParseStatement(Tokenizer Tok)
+		{
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
-			if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen))) {
+			if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.LParen))
+			{
+				// Function definition with pointer return type
+				return new Expr_FuncDef().Parse(Tok);
+			}
+			else if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)))
+			{
 
 				// Function definition
 				return new Expr_FuncDef().Parse(Tok);
 
-			} else if (Tok.Peek().Is(Keyword.@class)) {
+			}
+			else if (Tok.Peek().Is(Keyword.@class))
+			{
 
 				// Class definition
 				return new Expr_ClassDef().Parse(Tok);
 
-			} else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Semicolon)) {
+			}
+			else if ((Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Semicolon)) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.Semicolon)))
+			{
 
 				// Variable definition
 				Expression Var = new Expr_VariableDef().Parse(Tok);
@@ -50,13 +67,17 @@ namespace CTilde.Expr {
 
 				return Var;
 
-			} else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Assignment)) {
+			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Assignment) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.Assignment)))
+			{
 
 				// Variable definition with expression assignment
 				Expression Var = new Expr_AssignedVariableDef().Parse(Tok);
 				return Var;
 
-			} else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LParen)) {
+			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LParen))
+			{
 
 				// Function call
 				Expression Var = new Expr_FuncCall().Parse(Tok);
@@ -69,18 +90,22 @@ namespace CTilde.Expr {
 			// Empty statement
 			/*if (Tok.Peek().Is(Symbol.Semicolon))
 				return null;*/
-			
+
 			throw new Exception();
 		}
 
-		public static Expression ParseExpression(Tokenizer Tok, Symbol StopSymbol) {
+		public static Expression ParseExpression(Tokenizer Tok, Symbol StopSymbol)
+		{
 			Token[] DebugTokens = GetDebugTokens(Tok);
 
 			Expression LeftExpr = null;
 
-			while (!Tok.Peek().Is(StopSymbol)) {
-				if (LeftExpr != null) {
-					if (Tok.Peek().Is(Symbol.Addition) || Tok.Peek().Is(Symbol.Subtraction)) {
+			while (!Tok.Peek().Is(StopSymbol))
+			{
+				if (LeftExpr != null)
+				{
+					if (Tok.Peek().Is(Symbol.Addition) || Tok.Peek().Is(Symbol.Subtraction))
+					{
 						return new Expr_MathOp(LeftExpr).Parse<Expr_MathOp>(Tok);
 					}
 
@@ -90,11 +115,15 @@ namespace CTilde.Expr {
 
 
 
-				if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal)) {
+				if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal))
+				{
 					LeftExpr = new Expr_ConstNumber(Tok.NextToken().Text);
-				} else if (Tok.Peek().Is(TokenType.Identifier)) {
+				}
+				else if (Tok.Peek().Is(TokenType.Identifier))
+				{
 					LeftExpr = new Expr_Identifier().Parse<Expr_Identifier>(Tok);
-				} else
+				}
+				else
 					throw new NotImplementedException();
 			}
 
@@ -103,7 +132,8 @@ namespace CTilde.Expr {
 		}
 
 
-		public override string ToString() {
+		public override string ToString()
+		{
 			throw new InvalidOperationException();
 		}
 	}

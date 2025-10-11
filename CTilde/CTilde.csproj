@@ -54,6 +54,7 @@
     <Compile Include="Expr\Expr_Block.cs" />
     <Compile Include="Expr\Expr_Module.cs" />
     <Compile Include="LangProvider.cs" />
+    <Compile Include="Langs\FishAsmProvider.cs" />
     <Compile Include="Langs\CLangProvider.cs" />
     <Compile Include="Lexer.cs" />
     <Compile Include="Parser.cs" />

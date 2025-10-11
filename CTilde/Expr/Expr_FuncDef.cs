@@ -46,6 +46,12 @@ namespace CTilde.Expr {
 			FuncParams = new Expr_ParamsDef().Parse<Expr_ParamsDef>(Tok);
 			Tok.NextToken().Assert(Symbol.RParen);
 
+			if (Tok.Peek().Is(Symbol.Semicolon)) {
+				Tok.NextToken().Assert(Symbol.Semicolon);
+				FuncBody = null;
+				return this;
+			}
+
 			FuncBody = new Expr_Block().Parse<Expr_Block>(Tok);
 			return this;
 		}

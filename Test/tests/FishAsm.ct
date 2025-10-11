@@ -1,0 +1,4 @@
+﻿long input_readline(char* dst);
+void* alloc(long bytes);
+
+void fk_init();

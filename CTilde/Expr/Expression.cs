@@ -38,6 +38,7 @@ namespace CTilde.Expr
 		public static Expression ParseStatement(Tokenizer Tok)
 		{
 			Token[] DebugTokens = GetDebugTokens(Tok);
+			Token PT = Tok.Peek();
 
 			if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.LParen))
 			{
@@ -68,11 +69,18 @@ namespace CTilde.Expr
 				return Var;
 
 			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Assignment))
+			{
+				Expression Var = new Expr_AssignVariable().Parse(Tok);
+
+				return Var;
+			}
 			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Assignment) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.Assignment)))
 			{
 
 				// Variable definition with expression assignment
 				Expression Var = new Expr_AssignedVariableDef().Parse(Tok);
+
 				return Var;
 
 			}
@@ -114,7 +122,7 @@ namespace CTilde.Expr
 				}
 
 
-
+				Token PT = Tok.Peek();
 				if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal))
 				{
 					LeftExpr = new Expr_ConstNumber(Tok.NextToken().Text);
@@ -122,6 +130,10 @@ namespace CTilde.Expr
 				else if (Tok.Peek().Is(TokenType.Identifier))
 				{
 					LeftExpr = new Expr_Identifier().Parse<Expr_Identifier>(Tok);
+				}
+				else if (Tok.Peek().Is(TokenType.QuotedString))
+				{
+					LeftExpr = new Expr_ConstString(Tok.NextToken().Text);
 				}
 				else
 					throw new NotImplementedException();

@@ -1,5 +1,5 @@
 ﻿using CTilde.Expr;
-
+using CTilde.FishAsm;
 using System;
 using System.CodeDom;
 using System.Collections;
@@ -15,6 +15,52 @@ namespace CTilde.Langs
 	public class FishAsmProvider : LangProvider
 	{
 		//bool OmmitSemicolon = false;
+		FishCompileState State;
+
+		public FishAsmProvider(FishCompileState State)
+		{
+			this.State = State;
+		}
+
+		string FormatArgs(object[] args)
+		{
+			string[] argsStr = new string[args.Length];
+
+			for (int i = 0; i < args.Length; i++)
+			{
+				if (args[i] is Reg R)
+				{
+					argsStr[i] = FishUtils.RegToString(R);
+				}
+				else if (args[i] is uint UI)
+				{
+					argsStr[i] = string.Format("${0}", UI);
+				}
+				else
+				{
+					argsStr[i] = args[i].ToString();
+				}
+			}
+
+			return string.Join(", ", argsStr);
+		}
+
+		void EmitInstruction(FishInst inst, params object[] args)
+		{
+			//Indent();
+			AppendLine("{0} {1}", inst, FormatArgs(args));
+			//Unindent();
+		}
+
+		void EmitRaw(string raw)
+		{
+			AppendLine(raw);
+		}
+
+		void EmitRaw(string fmt, params object[] args)
+		{
+			EmitRaw(string.Format(fmt, args));
+		}
 
 		public override void Compile(Expression Ex)
 		{
@@ -25,14 +71,14 @@ namespace CTilde.Langs
 			{
 				case Expr_Block Block:
 					{
-						AppendLine("{");
+						//AppendLine("{");
 
 						foreach (var E in Block.Expressions)
 						{
 							Compile(E);
 						}
 
-						AppendLine("}");
+						//AppendLine("}");
 						break;
 					}
 
@@ -56,25 +102,38 @@ namespace CTilde.Langs
 
 				case Expr_FuncDef FuncDef:
 					{
-						if (FuncDef.FuncBody == null)
+						EmitRaw(".globl {0}", FuncDef.FuncName);
+
+						if (FuncDef.FuncBody != null)
 						{
+							State.ClearVarOffsets();
 
+							EmitRaw("{0}:", FuncDef.FuncName);
+							Indent();
+							State.IsInsideFunctionDef = true;
+							EmitInstruction(FishInst.PUSH_REG, Reg.EBP);
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
+
+							//OmmitSemicolon = true;
+							//Compile(FuncDef.FuncReturnTypeDef);
+							//Append(" {0}(", FuncDef.FuncName);
+
+							Compile(FuncDef.FuncParams);
+
+							//Append(")");
+							//OmmitSemicolon = false;
+
+							State.IsInsideFunctionDef = false;
+							State.IsInsideFunctionBody = true;
+
+							Compile(FuncDef.FuncBody);
+
+							EmitInstruction(FishInst.LEAVE);
+							EmitInstruction(FishInst.RET);
+							State.IsInsideFunctionBody = false;
+
+							Unindent();
 						}
-						else
-						{
-
-						}
-
-						//OmmitSemicolon = true;
-						Compile(FuncDef.FuncReturnTypeDef);
-						Append(" {0}(", FuncDef.FuncName);
-
-						Compile(FuncDef.FuncParams);
-
-						Append(")");
-						//OmmitSemicolon = false;
-
-						Compile(FuncDef.FuncBody);
 						break;
 					}
 
@@ -93,11 +152,14 @@ namespace CTilde.Langs
 							ParamDefData ParamDef = ParamsDef.Definitions[i];
 							//Compile(ParamDef);
 
-							Compile(ParamDef.ParamType);
+							/*Compile(ParamDef.ParamType);
 							Append(" {0}", ParamDef.Name);
 
 							if (i + 1 < ParamsDef.Definitions.Count)
-								Append(", ");
+								Append(", ");*/
+
+							int Size = State.GetTypeSize(ParamDef.ParamType);
+							State.DefineVar(ParamDef.Name, Size, true);
 						}
 
 						break;
@@ -118,10 +180,13 @@ namespace CTilde.Langs
 
 				case Expr_VariableDef VariableDef:
 					{
-						Compile(VariableDef.Type);
+						/*Compile(VariableDef.Type);
 						Append(" ");
 						Compile(VariableDef.Ident);
-						AppendLine(";");
+						AppendLine(";");*/
+
+						int Size = State.GetTypeSize(VariableDef.Type);
+						State.DefineVar(VariableDef.Ident.Identifier, Size, false);
 
 						/*if (!OmmitSemicolon)
 							AppendLine(";");*/
@@ -142,6 +207,16 @@ namespace CTilde.Langs
 						break;
 					}
 
+				case Expr_AssignVariable AssVariable:
+					{
+						Compile(AssVariable.AssignmentValue);
+
+						int VarID = State.GetVarOffset(AssVariable.Variable.Identifier);
+						EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+
+						break;
+					}
+
 				case Expr_Identifier IdentifierEx:
 					{
 						Append(IdentifierEx.Identifier);
@@ -150,7 +225,15 @@ namespace CTilde.Langs
 
 				case Expr_ConstNumber NumberEx:
 					{
-						Append(NumberEx.NumberLiteral);
+						//Append(NumberEx.NumberLiteral);
+						uint Num = uint.Parse(NumberEx.NumberLiteral);
+						EmitInstruction(FishInst.MOVE_LONG_REG, Num, Reg.EAX);
+						break;
+					}
+
+				case Expr_ConstString StringEx:
+					{
+						Append(StringEx.StringLiteral);
 						break;
 					}
 
@@ -166,20 +249,39 @@ namespace CTilde.Langs
 
 				case Expr_FuncCall FuncCallExp:
 					{
-						Compile(FuncCallExp.Function);
-
-						Append("(");
-
-
-						for (int i = 0; i < FuncCallExp.Arguments.Count; i++)
+						if (FuncCallExp.Function.Identifier == "__asm")
 						{
-							Compile(FuncCallExp.Arguments[i]);
-
-							if (i < FuncCallExp.Arguments.Count - 1)
-								Append(", ");
+							foreach (var Arg in FuncCallExp.Arguments)
+							{
+								if (Arg is Expr_ConstString S)
+								{
+									EmitRaw(S.RawString);
+								}
+								else
+								{
+									throw new NotImplementedException("Only string literals are supported in __asm");
+								}
+							}
 						}
+						else
+						{
+							throw new NotImplementedException();
 
-						AppendLine(");");
+							Compile(FuncCallExp.Function);
+
+							Append("(");
+
+
+							for (int i = 0; i < FuncCallExp.Arguments.Count; i++)
+							{
+								Compile(FuncCallExp.Arguments[i]);
+
+								if (i < FuncCallExp.Arguments.Count - 1)
+									Append(", ");
+							}
+
+							AppendLine(");");
+						}
 						break;
 					}
 

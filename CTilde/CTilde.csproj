@@ -41,7 +41,9 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Expr\Expr_AssignVariable.cs" />
     <Compile Include="Expr\Expr_ClassDef.cs" />
+    <Compile Include="Expr\Expr_ConstString.cs" />
     <Compile Include="Expr\Expr_Identifier.cs" />
     <Compile Include="Expr\Expr_FuncDef.cs" />
     <Compile Include="Expr\Expr_FuncCall.cs" />
@@ -53,6 +55,8 @@
     <Compile Include="Expr\Expr_TypeDef.cs" />
     <Compile Include="Expr\Expr_Block.cs" />
     <Compile Include="Expr\Expr_Module.cs" />
+    <Compile Include="FishAsm\Enums.cs" />
+    <Compile Include="FishAsm\FishCompileState.cs" />
     <Compile Include="LangProvider.cs" />
     <Compile Include="Langs\FishAsmProvider.cs" />
     <Compile Include="Langs\CLangProvider.cs" />

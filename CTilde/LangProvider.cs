@@ -36,17 +36,17 @@ namespace CTilde
 
 		protected void AppendLine(string Str)
 		{
-			SB.AppendLine(Str);
-		}
-
-		protected void AppendLine(string Fmt, params object[] Args)
-		{
 			string IndentStr = "";
 
 			if (IndentLevel > 0)
 				IndentStr = new string(' ', IndentLevel * 4);
 
-			AppendLine(IndentStr + string.Format(Fmt, Args));
+			SB.AppendLine(IndentStr + Str);
+		}
+
+		protected void AppendLine(string Fmt, params object[] Args)
+		{
+			AppendLine(string.Format(Fmt, Args));
 		}
 
 		// Scopes

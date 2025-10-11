@@ -2,3 +2,11 @@
 void* alloc(long bytes);
 
 void fk_init();
+
+void kmain(uint arg1, uint arg2) {
+	uint val;
+	val = 23;
+	__asm("SYSCALL $0");
+	uint val2;
+	val2 = 44;
+}

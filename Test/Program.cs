@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CTilde;
 using CTilde.Langs;
 using CTilde.Expr;
+using CTilde.FishAsm;
 
 namespace Test {
 	class Program {
@@ -19,7 +20,8 @@ namespace Test {
 			Tokenizer Tokenizer = new Tokenizer(Args[0]);
 			Parser Parser = new Parser(Tokenizer);
 
-			LangProvider Lng = new FishAsmProvider();
+			FishCompileState State = new FishCompileState();
+			LangProvider Lng = new FishAsmProvider(State);
 			Lng.Compile(Parser.Parse());
 
 			File.WriteAllText("out.asm", Lng.CompileToSource());

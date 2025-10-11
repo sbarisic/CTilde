@@ -1,12 +1,11 @@
 ﻿long input_readline(char* dst);
 void* alloc(long bytes);
+void print(string str);
 
 void fk_init();
 
 void kmain(uint arg1, uint arg2) {
-	uint val;
-	val = 23;
+	print("Hello, World!\n");
+
 	__asm("SYSCALL $0");
-	uint val2;
-	val2 = 44;
 }

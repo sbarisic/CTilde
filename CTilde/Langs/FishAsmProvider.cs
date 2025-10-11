@@ -103,6 +103,7 @@ namespace CTilde.Langs
 				case Expr_FuncDef FuncDef:
 					{
 						EmitRaw(".globl {0}", FuncDef.FuncName);
+						State.DefineLabel(FuncDef.FuncName);
 
 						if (FuncDef.FuncBody != null)
 						{
@@ -131,8 +132,18 @@ namespace CTilde.Langs
 							EmitInstruction(FishInst.LEAVE);
 							EmitInstruction(FishInst.RET);
 							State.IsInsideFunctionBody = false;
-
 							Unindent();
+
+							FishLabel[] Lbls = State.GetNewLabels();
+
+							foreach (FishLabel L in Lbls)
+							{
+								EmitRaw(L.Name + ":");
+								Indent();
+								EmitRaw(".Raw {0}", L.Value);
+								Unindent();
+							}
+
 						}
 						break;
 					}
@@ -187,6 +198,7 @@ namespace CTilde.Langs
 
 						int Size = State.GetTypeSize(VariableDef.Type);
 						State.DefineVar(VariableDef.Ident.Identifier, Size, false);
+						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
 
 						/*if (!OmmitSemicolon)
 							AppendLine(";");*/
@@ -219,7 +231,8 @@ namespace CTilde.Langs
 
 				case Expr_Identifier IdentifierEx:
 					{
-						Append(IdentifierEx.Identifier);
+						EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, State.GetVarOffset(IdentifierEx.Identifier), Reg.EBP, Reg.EAX);
+						//Append(IdentifierEx.Identifier);
 						break;
 					}
 
@@ -233,7 +246,10 @@ namespace CTilde.Langs
 
 				case Expr_ConstString StringEx:
 					{
-						Append(StringEx.StringLiteral);
+						string LblName = State.DefineLabel(null, StringEx.StringLiteral);
+
+						EmitInstruction(FishInst.MOVE_LONG_REG, LblName, Reg.EAX);
+						//Append(StringEx.StringLiteral);
 						break;
 					}
 
@@ -241,9 +257,21 @@ namespace CTilde.Langs
 					{
 						Compile(MathExp.LExpr);
 
-						Append(" {0} ", MathExp.OpString);
+						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
+						//Append(" {0} ", MathExp.OpString);
 						Compile(MathExp.RExpr);
+
+						switch (MathExp.Op)
+						{
+							case MathOperation.Add:
+								EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
+								break;
+
+							default:
+								throw new NotImplementedException();
+						}
+
 						break;
 					}
 
@@ -265,7 +293,18 @@ namespace CTilde.Langs
 						}
 						else
 						{
-							throw new NotImplementedException();
+							for (int i = 0; i < FuncCallExp.Arguments.Count; i++)
+							{
+								Compile(FuncCallExp.Arguments[i]);
+								EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+							}
+
+							EmitInstruction(FishInst.MOVE_LONG_REG, FuncCallExp.Function.Identifier, Reg.EAX);
+							EmitInstruction(FishInst.CALL_REG, Reg.EAX);
+
+							EmitInstruction(FishInst.ADD_LONG_REG, (uint)(FuncCallExp.Arguments.Count * 4), Reg.ESP);
+
+							/*throw new NotImplementedException();
 
 							Compile(FuncCallExp.Function);
 
@@ -280,7 +319,7 @@ namespace CTilde.Langs
 									Append(", ");
 							}
 
-							AppendLine(");");
+							AppendLine(");");*/
 						}
 						break;
 					}

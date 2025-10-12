@@ -186,7 +186,7 @@ namespace CTilde.Langs
 								Append(", ");*/
 
 							int Size = State.GetTypeSize(ParamDef.ParamType);
-							State.DefineVar(ParamDef.Name, Size, true);
+							State.DefineVar(ParamDef.Name, Size, true, ParamDef.ParamType);
 						}
 
 						break;
@@ -213,7 +213,7 @@ namespace CTilde.Langs
 						AppendLine(";");*/
 
 						int Size = State.GetTypeSize(VariableDef.Type);
-						State.DefineVar(VariableDef.Ident.Identifier, Size, false);
+						State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type);
 						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
 
 						/*if (!OmmitSemicolon)
@@ -225,7 +225,7 @@ namespace CTilde.Langs
 				case Expr_AssignedVariableDef AssVariableDef:
 					{
 						int Size = State.GetTypeSize(AssVariableDef.VariableDef.Type);
-						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false);
+						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type);
 						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
 
 						Compile(AssVariableDef.AssignmentValue);
@@ -247,6 +247,7 @@ namespace CTilde.Langs
 
 				case Expr_Identifier IdentifierEx:
 					{
+						Expr_TypeDef TypeDef = State.GetVarType(IdentifierEx.Identifier);
 						EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, State.GetVarOffset(IdentifierEx.Identifier), Reg.EBP, Reg.EAX);
 						//Append(IdentifierEx.Identifier);
 						break;
@@ -357,7 +358,20 @@ namespace CTilde.Langs
 
 						Compile(IndexExpr.LExpr);
 						EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
-						EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+
+						Expr_Identifier IDExpr = IndexExpr.LExpr as Expr_Identifier;
+						Expr_TypeDef VarType = State.GetVarType(IDExpr.Identifier);
+
+						int CopyBytes = State.GetPointerTypeSize(VarType);
+
+						if (CopyBytes == 1)
+							EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+						else if (CopyBytes == 2)
+							EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+						else if (CopyBytes == 4)
+							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+						else
+							throw new NotImplementedException();
 
 						break;
 					}

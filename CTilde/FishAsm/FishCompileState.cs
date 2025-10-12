@@ -13,12 +13,14 @@ namespace CTilde.FishAsm
 		public string Name;
 		public int EBPOffset;
 		public int Size;
+		public Expr_TypeDef TypeStr;
 
-		public FishVarDef(string Name, int EBPOffset, int Size)
+		public FishVarDef(string Name, int EBPOffset, int Size, Expr_TypeDef TypeStr)
 		{
 			this.Name = Name;
 			this.EBPOffset = EBPOffset;
 			this.Size = Size;
+			this.TypeStr = TypeStr;
 		}
 	}
 
@@ -111,15 +113,31 @@ namespace CTilde.FishAsm
 			return Label;
 		}
 
+		int GetRawTypeSize(Expr_TypeDef Type)
+		{
+			if (Type.Type == "int" || Type.Type == "uint" || Type.Type == "float" || Type.Type == "bool" || Type.Type == "string")
+				return 4;
+
+			throw new NotImplementedException();
+		}
+
 		public int GetTypeSize(Expr_TypeDef Type)
 		{
 			if (Type.IsPointer || Type.IsArray)
 				return 4;
 
-			if (Type.Type == "int" || Type.Type == "uint" || Type.Type == "float" || Type.Type == "bool" || Type.Type == "string")
-				return 4;
+			return GetRawTypeSize(Type);
+		}
 
-			throw new NotImplementedException();
+		public int GetPointerTypeSize(Expr_TypeDef Type)
+		{	
+			if (Type.Type == "string")
+				return 1; // string is array of bytes
+
+			if (!(Type.IsPointer || Type.IsArray))
+				throw new Exception("Not pointer or array type");
+
+			return GetRawTypeSize(Type);
 		}
 
 		public void ClearVarOffsets()
@@ -150,7 +168,7 @@ namespace CTilde.FishAsm
 			return null;
 		}
 
-		void SetKeyValue(string Key, int EBPOffset, int Size)
+		void SetKeyValue(string Key, int EBPOffset, int Size, Expr_TypeDef TypeStr)
 		{
 			for (int i = 0; i < VarOffsets.Count; i++)
 			{
@@ -158,31 +176,32 @@ namespace CTilde.FishAsm
 				{
 					VarOffsets[i].EBPOffset = EBPOffset;
 					VarOffsets[i].Size = Size;
+					VarOffsets[i].TypeStr = TypeStr;
 					return;
 				}
 			}
 
-			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size));
+			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size, TypeStr));
 		}
 
-		public void DefineVar(string VarName, int EBPOffset, int Size)
+		public void DefineVar(string VarName, int EBPOffset, int Size, Expr_TypeDef TypeStr)
 		{
 			if (ContainsKey(VarName))
 				throw new Exception(string.Format("Variable '{0}' is already defined", VarName));
 
-			SetKeyValue(VarName, EBPOffset, Size);
+			SetKeyValue(VarName, EBPOffset, Size, TypeStr);
 			StackSize += Size;
 		}
 
-		public void DefineVar(string VarName, int Size, bool IsParam)
+		public void DefineVar(string VarName, int Size, bool IsParam, Expr_TypeDef TypeStr)
 		{
 			if (IsParam)
 			{
-				DefineVar(VarName, 8 + (ParamCount * 4), Size);
+				DefineVar(VarName, 8 + (ParamCount * 4), Size, TypeStr);
 			}
 			else
 			{
-				DefineVar(VarName, -4 - (ArgCount * 4), Size);
+				DefineVar(VarName, -4 - (ArgCount * 4), Size, TypeStr);
 			}
 
 			if (IsParam)
@@ -191,10 +210,26 @@ namespace CTilde.FishAsm
 				ArgCount++;
 		}
 
+		/*public void GetVarS(string VarName)
+		{
+			if (ContainsKey(VarName))
+				return GetKeyValue(VarName).EBPOffset;
+
+			throw new Exception(string.Format("Could not find variable '{0}'", VarName));
+		}*/
+
 		public int GetVarOffset(string VarName)
 		{
 			if (ContainsKey(VarName))
 				return GetKeyValue(VarName).EBPOffset;
+
+			throw new Exception(string.Format("Could not find variable '{0}'", VarName));
+		}
+
+		public Expr_TypeDef GetVarType(string VarName)
+		{
+			if (ContainsKey(VarName))
+				return GetKeyValue(VarName).TypeStr;
 
 			throw new Exception(string.Format("Could not find variable '{0}'", VarName));
 		}

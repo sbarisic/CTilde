@@ -1,15 +1,5 @@
-﻿//long input_readline(char* dst);
-//void* alloc(long bytes);
-//void fk_init();
-
-void syscall_2(uint num, uint arg1);
-
-void print(string str) {
+﻿void print(string str) {
 	uint i = 0;
-	uint chr0 = 0;
-
-	chr0 = str[0];
-	__asm("DBG_BREAK");
 
 	while (str[i] != 0) {
 		syscall_2(1, str[i]);

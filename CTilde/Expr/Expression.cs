@@ -55,6 +55,12 @@ namespace CTilde.Expr
 
 				return new Expr_WhileStatement().Parse(Tok);
 			}
+			else if (Tok.Peek().Is(Keyword.@if))
+			{
+				Tok.NextToken().Assert(Keyword.@if);
+
+				return new Expr_IfElseStatement().Parse(Tok);
+			}
 			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.LParen))
 			{
 				// Function definition with pointer return type
@@ -137,7 +143,17 @@ namespace CTilde.Expr
 
 				Token PT = Tok.Peek();
 
-				if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LBracket))
+				if (Tok.Peek().Is(Keyword.@true))
+				{
+					Tok.NextToken().Assert(Keyword.@true);
+					LeftExpr = new Expr_ConstNumber("1");
+				}
+				else if (Tok.Peek().Is(Keyword.@false))
+				{
+					Tok.NextToken().Assert(Keyword.@false);
+					LeftExpr = new Expr_ConstNumber("0");
+				}
+				else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LBracket))
 				{
 					LeftExpr = new Expr_IndexOp(new Expr_Identifier().Parse<Expr_Identifier>(Tok)).Parse<Expr_IndexOp>(Tok);
 				}
@@ -151,7 +167,20 @@ namespace CTilde.Expr
 				}
 				else if (Tok.Peek().Is(TokenType.QuotedString))
 				{
-					LeftExpr = new Expr_ConstString(Tok.NextToken().Text);
+					PT = Tok.Peek();
+
+					if (PT.Text.StartsWith("'") && PT.Text.EndsWith("'") && PT.Text.Length == 3)
+					{
+						PT = Tok.NextToken();
+
+						char Chr = PT.Text[1];
+						string RawChr = PT.Text;
+						LeftExpr = new Expr_ConstChar(Chr, RawChr);
+					}
+					else if (PT.Text.StartsWith("\"") && PT.Text.EndsWith("\""))
+						LeftExpr = new Expr_ConstString(Tok.NextToken().Text);
+					else
+						throw new NotImplementedException();
 				}
 				else
 					throw new NotImplementedException();

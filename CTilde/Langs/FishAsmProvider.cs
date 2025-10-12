@@ -270,6 +270,12 @@ namespace CTilde.Langs
 						break;
 					}
 
+				case Expr_ConstChar CharEx:
+					{
+						EmitInstruction(FishInst.MOVES_LONG_REG, (uint)CharEx.CharLiteral, Reg.EAX);
+						break;
+					}
+
 				case Expr_MathOp MathExp:
 					{
 						Compile(MathExp.LExpr);
@@ -315,6 +321,46 @@ namespace CTilde.Langs
 								throw new NotImplementedException();
 						}*/
 
+						break;
+					}
+
+				case Expr_IfElseStatement IfExpr:
+					{
+						string EndLblName = State.DefineFreeLabel("ENDIF");
+						string ElseLblName = EndLblName;
+
+						if (IfExpr.ElseBody != null)
+							ElseLblName = State.DefineFreeLabel("ELSE");
+
+						Compile(IfExpr.ConditionValue);
+
+						if (IfExpr.ConditionValue is Expr_ComparisonOp Cmp)
+						{
+							if (Cmp.Op == ComparisonOp.Equals)
+							{
+								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, ElseLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.NotEquals)
+							{
+								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, ElseLblName);
+							}
+							else
+								throw new NotImplementedException();
+
+						}
+						else
+							throw new NotImplementedException();
+
+						Compile(IfExpr.Body);
+
+						if (IfExpr.ElseBody != null)
+						{
+							EmitInstruction(FishInst.JUMP_LONG, EndLblName);
+							EmitRaw("{0}:", ElseLblName);
+							Compile(IfExpr.ElseBody);
+						}
+
+						EmitRaw("{0}:", EndLblName);
 						break;
 					}
 

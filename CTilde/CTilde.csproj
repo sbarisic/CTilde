@@ -43,7 +43,9 @@
   <ItemGroup>
     <Compile Include="Expr\Expr_AssignVariable.cs" />
     <Compile Include="Expr\Expr_ComparisonOp.cs" />
+    <Compile Include="Expr\Expr_ConstChar.cs" />
     <Compile Include="Expr\Expr_IndexOp.cs" />
+    <Compile Include="Expr\Expr_IfElseStatement.cs" />
     <Compile Include="Expr\Expr_WhileStatement.cs" />
     <Compile Include="Expr\Expr_ClassDef.cs" />
     <Compile Include="Expr\Expr_ConstString.cs" />

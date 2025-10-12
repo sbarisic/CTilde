@@ -16,6 +16,8 @@ namespace CTilde
 		@if,
 		@else,
 		@while,
+		@true,
+		@false,
 		naked
 	}
 
@@ -57,7 +59,7 @@ namespace CTilde
 			Settings.CommentBegin = "/*";
 			Settings.CommentEnd = "*/";
 			Settings.StringEscapeChar = '\\';
-			Settings.StringQuotes = new char[] { '"' };
+			Settings.StringQuotes = new char[] { '"', '\'' };
 
 			foreach (var Keywd in KeywordNames)
 				//if (!Keywd.StartsWith("__"))

@@ -19,7 +19,7 @@ namespace CTilde.Expr {
 				Arguments.Add(E);
 
 				if (!Tok.Peek().Is(Symbol.RParen)) {
-					Tok.NextToken().Assert(Symbol.Comma);
+					//Tok.NextToken().Assert(Symbol.Comma);
 				}
 			}
 

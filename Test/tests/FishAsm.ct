@@ -1,10 +1,23 @@
-﻿long input_readline(char* dst);
-void* alloc(long bytes);
-void print(string str);
+﻿//long input_readline(char* dst);
+//void* alloc(long bytes);
+//void fk_init();
 
-void fk_init();
+void syscall_2(uint num, uint arg1);
 
-void kmain(uint arg1, uint arg2) {
+void print(string str) {
+	uint i = 0;
+	uint chr0 = 0;
+
+	chr0 = str[0];
+	__asm("DBG_BREAK");
+
+	while (str[i] != 0) {
+		syscall_2(1, str[i]);
+		i = i + 1;
+	}
+}
+
+naked void kmain() {
 	print("Hello, World!\n");
 
 	__asm("SYSCALL $0");

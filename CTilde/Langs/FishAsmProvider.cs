@@ -112,8 +112,12 @@ namespace CTilde.Langs
 							EmitRaw("{0}:", FuncDef.FuncName);
 							Indent();
 							State.IsInsideFunctionDef = true;
-							EmitInstruction(FishInst.PUSH_REG, Reg.EBP);
-							EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
+
+							if (!FuncDef.Naked)
+							{
+								EmitInstruction(FishInst.PUSH_REG, Reg.EBP);
+								EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
+							}
 
 							//OmmitSemicolon = true;
 							//Compile(FuncDef.FuncReturnTypeDef);
@@ -129,8 +133,11 @@ namespace CTilde.Langs
 
 							Compile(FuncDef.FuncBody);
 
-							EmitInstruction(FishInst.LEAVE);
-							EmitInstruction(FishInst.RET);
+							if (!FuncDef.Naked)
+							{
+								EmitInstruction(FishInst.LEAVE);
+								EmitInstruction(FishInst.RET);
+							}
 							State.IsInsideFunctionBody = false;
 							Unindent();
 
@@ -140,7 +147,16 @@ namespace CTilde.Langs
 							{
 								EmitRaw(L.Name + ":");
 								Indent();
-								EmitRaw(".Raw {0}", L.Value);
+
+								if (L.Value.StartsWith("\"") && L.Value.EndsWith("\""))
+								{
+									EmitRaw(".String {0}", L.Value);
+								}
+								else
+								{
+									EmitRaw(".long {0}", L.Value);
+								}
+
 								Unindent();
 							}
 
@@ -208,14 +224,14 @@ namespace CTilde.Langs
 
 				case Expr_AssignedVariableDef AssVariableDef:
 					{
-						Compile(AssVariableDef.VariableDef.Type);
-						Append(" ");
-						Compile(AssVariableDef.VariableDef.Ident);
-						Append(" = ");
+						int Size = State.GetTypeSize(AssVariableDef.VariableDef.Type);
+						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false);
+						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
 
 						Compile(AssVariableDef.AssignmentValue);
 
-						AppendLine(";");
+						int VarID = State.GetVarOffset(AssVariableDef.VariableDef.Ident.Identifier);
+						EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
 						break;
 					}
 
@@ -275,6 +291,77 @@ namespace CTilde.Langs
 						break;
 					}
 
+				case Expr_ComparisonOp CompExpr:
+					{
+						Compile(CompExpr.LExpr);
+						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+						Compile(CompExpr.RExpr);
+
+						EmitInstruction(FishInst.CMP_REG_REG, Reg.EAX, Reg.EBX);
+
+						/*switch (CompExpr.Op)
+						{
+							case ComparisonOp.Equals:
+								throw new NotImplementedException();
+								break;
+
+							case ComparisonOp.NotEquals:
+								EmitRaw("# NOTEQUALS"); 
+								throw new NotImplementedException();
+								break;
+
+							default:
+								throw new NotImplementedException();
+						}*/
+
+						break;
+					}
+
+				case Expr_WhileStatement WhileExpr:
+					{
+						string LblName = State.DefineFreeLabel("WHILE");
+						string EndLblName = State.DefineFreeLabel("ENDWHILE");
+						EmitRaw("{0}:", LblName);
+						Compile(WhileExpr.ConditionValue);
+
+						if (WhileExpr.ConditionValue is Expr_ComparisonOp Cmp)
+						{
+							if (Cmp.Op == ComparisonOp.Equals)
+							{
+								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, EndLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.NotEquals)
+							{
+								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, EndLblName);
+							}
+							else
+								throw new NotImplementedException();
+
+						}
+						else
+							throw new NotImplementedException();
+
+						//EmitRaw("# Body goes here");
+						Compile(WhileExpr.Body);
+
+						EmitInstruction(FishInst.JUMP_LONG, LblName);
+						EmitRaw("{0}:", EndLblName);
+						//throw new NotImplementedException();
+						break;
+					}
+
+				case Expr_IndexOp IndexExpr:
+					{
+						Compile(IndexExpr.IndexValExpr);
+						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+
+						Compile(IndexExpr.LExpr);
+						EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
+						EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+
+						break;
+					}
+
 				case Expr_FuncCall FuncCallExp:
 					{
 						if (FuncCallExp.Function.Identifier == "__asm")
@@ -290,6 +377,33 @@ namespace CTilde.Langs
 									throw new NotImplementedException("Only string literals are supported in __asm");
 								}
 							}
+						}
+						else if (FuncCallExp.Function.Identifier == "syscall_2")
+						{
+							if (FuncCallExp.Arguments.Count != 2)
+								throw new Exception("syscall_2 requires exactly 2 arguments");
+
+							Expr_ConstNumber NumExp = FuncCallExp.Arguments[0] as Expr_ConstNumber;
+							Expression A0 = FuncCallExp.Arguments[1];
+
+							Compile(A0);
+							EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+							EmitInstruction(FishInst.MOVE_LONG_REG, "$" + NumExp.NumberLiteral, Reg.EAX);
+							EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+
+							EmitInstruction(FishInst.SYSCALL_2);
+
+							/*foreach (var Arg in FuncCallExp.Arguments)
+							{
+								if (Arg is Expr_ConstString S)
+								{
+									EmitRaw(S.RawString);
+								}
+								else
+								{
+									throw new NotImplementedException("Only string literals are supported in __asm");
+								}
+							}*/
 						}
 						else
 						{

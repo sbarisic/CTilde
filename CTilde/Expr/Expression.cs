@@ -40,34 +40,43 @@ namespace CTilde.Expr
 			Token[] DebugTokens = GetDebugTokens(Tok);
 			Token PT = Tok.Peek();
 
-			if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.LParen))
+			if (Tok.Peek().Is(Keyword.naked))
+			{
+				Tok.NextToken().Assert(Keyword.naked);
+
+				Expr_FuncDef FDef = (Expr_FuncDef)new Expr_FuncDef().Parse(Tok);
+				FDef.Naked = true;
+
+				return FDef;
+			}
+			else if (Tok.Peek().Is(Keyword.@while))
+			{
+				Tok.NextToken().Assert(Keyword.@while);
+
+				return new Expr_WhileStatement().Parse(Tok);
+			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.LParen))
 			{
 				// Function definition with pointer return type
 				return new Expr_FuncDef().Parse(Tok);
 			}
 			else if (Tok.Peek().Is(Keyword.__ctor) || Tok.Peek().Is(Keyword.__dtor) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.LParen)))
 			{
-
 				// Function definition
 				return new Expr_FuncDef().Parse(Tok);
-
 			}
 			else if (Tok.Peek().Is(Keyword.@class))
 			{
-
 				// Class definition
 				return new Expr_ClassDef().Parse(Tok);
-
 			}
 			else if ((Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Semicolon)) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.Semicolon)))
 			{
-
 				// Variable definition
 				Expression Var = new Expr_VariableDef().Parse(Tok);
 				Tok.NextToken().Assert(Symbol.Semicolon);
 
 				return Var;
-
 			}
 			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Assignment))
 			{
@@ -77,12 +86,10 @@ namespace CTilde.Expr
 			}
 			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(TokenType.Identifier) && Tok.Peek(3).Is(Symbol.Assignment) || (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Star) && Tok.Peek(3).Is(TokenType.Identifier) && Tok.Peek(4).Is(Symbol.Assignment)))
 			{
-
 				// Variable definition with expression assignment
 				Expression Var = new Expr_AssignedVariableDef().Parse(Tok);
 
 				return Var;
-
 			}
 			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LParen))
 			{
@@ -92,7 +99,6 @@ namespace CTilde.Expr
 				Tok.NextToken().Assert(Symbol.Semicolon);
 
 				return Var;
-
 			}
 
 			// Empty statement
@@ -117,13 +123,25 @@ namespace CTilde.Expr
 						return new Expr_MathOp(LeftExpr).Parse<Expr_MathOp>(Tok);
 					}
 
+					if (Tok.Peek().Is(Symbol.Equals) || Tok.Peek().Is(Symbol.NotEquals) ||
+						Tok.Peek().Is(Symbol.GreaterThan) || Tok.Peek().Is(Symbol.LessThan) ||
+						Tok.Peek().Is(Symbol.GreaterThanOrEqual) || Tok.Peek().Is(Symbol.LessThanOrEqual))
+					{
+						return new Expr_ComparisonOp(LeftExpr).Parse<Expr_ComparisonOp>(Tok);
+					}
+
 					return LeftExpr;
 					//throw new InvalidOperationException("Unexpected token " + Tok.Peek());
 				}
 
 
 				Token PT = Tok.Peek();
-				if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal))
+
+				if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.LBracket))
+				{
+					LeftExpr = new Expr_IndexOp(new Expr_Identifier().Parse<Expr_Identifier>(Tok)).Parse<Expr_IndexOp>(Tok);
+				}
+				else if (Tok.Peek().Is(TokenType.Number) || Tok.Peek().Is(TokenType.Decimal))
 				{
 					LeftExpr = new Expr_ConstNumber(Tok.NextToken().Text);
 				}

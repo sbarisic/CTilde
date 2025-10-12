@@ -55,6 +55,16 @@ namespace CTilde.FishAsm
 
 		List<FishLabel> Labels = new List<FishLabel>();
 
+		public string DefineFreeLabel(string LabelName)
+		{
+			if (!string.IsNullOrEmpty(LabelName))
+				LabelName = "." + LabelName + "_" + (FreeLabel++).ToString("X4");
+
+			DefineLabel(LabelName);
+
+			return LabelName;
+		}
+
 		public void DefineLabel(string LabelName)
 		{
 			if (Labels.Any(l => l.Name == LabelName))

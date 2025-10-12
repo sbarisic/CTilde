@@ -15,6 +15,8 @@ namespace CTilde.Expr {
 		public Expr_Block FuncBody;
 		public bool IsCtor, IsDtor;
 
+		public bool Naked;
+
 		public Expr_FuncDef() {
 		}
 

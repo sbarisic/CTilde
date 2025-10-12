@@ -6,13 +6,21 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Runtime.Remoting.Contexts;
 
-namespace CTilde {
-	public enum Keyword : int {
-		@class, __ctor, __dtor,
-		@if, @else,
+namespace CTilde
+{
+	public enum Keyword : int
+	{
+		@class,
+		__ctor,
+		__dtor,
+		@if,
+		@else,
+		@while,
+		naked
 	}
 
-	public enum Symbol : int {
+	public enum Symbol : int
+	{
 		LParen,
 		RParen,
 		LBrace,
@@ -23,17 +31,24 @@ namespace CTilde {
 		Star,
 		Semicolon,
 		Equals,
+		NotEquals,
 		Assignment,
 		Addition,
-		Subtraction
+		Subtraction,
+		GreaterThan,
+		GreaterThanOrEqual,
+		LessThan,
+		LessThanOrEqual
 	}
 
-	public class Tokenizer {
+	public class Tokenizer
+	{
 		Lexer L;
 		Token[] Tokens;
 		int Pos;
 
-		public Tokenizer(TextReader Reader) {
+		public Tokenizer(TextReader Reader)
+		{
 			LexerSettings Settings = LexerSettings.Default;
 
 			string[] KeywordNames = Enum.GetNames(typeof(Keyword));
@@ -55,7 +70,12 @@ namespace CTilde {
 				{ "*", (int)Symbol.Star },
 				{ "+", (int)Symbol.Addition },
 				{ "-", (int)Symbol.Subtraction },
+				{ ">=", (int)Symbol.GreaterThanOrEqual },
+				{ "<=", (int)Symbol.LessThanOrEqual },
 				{ "==", (int)Symbol.Equals },
+				{ "!=", (int)Symbol.NotEquals },
+				{ ">", (int)Symbol.GreaterThan },
+				{ "<", (int)Symbol.LessThan },
 				{ "=", (int)Symbol.Assignment },
 				{ ",", (int)Symbol.Comma },
 				{ ";", (int)Symbol.Semicolon }
@@ -66,31 +86,38 @@ namespace CTilde {
 			Pos = 0;
 		}
 
-		public Tokenizer(string Filename) : this(new StringReader(File.ReadAllText(Filename))) {
+		public Tokenizer(string Filename) : this(new StringReader(File.ReadAllText(Filename)))
+		{
 		}
 
-		IEnumerable<Token> GetTokens() {
-			foreach (var T in L) {
+		IEnumerable<Token> GetTokens()
+		{
+			foreach (var T in L)
+			{
 				if (T.Type != TokenType.Comment && T.Type != TokenType.WhiteSpace)
 					yield return T;
 			}
 		}
 
-		Token[] GetTokenArray() {
+		Token[] GetTokenArray()
+		{
 			return GetTokens().ToArray();
 		}
 
-		public Token NextToken() {
+		public Token NextToken()
+		{
 			if (Pos >= Tokens.Length)
 				return null;
 			return Tokens[Pos++];
 		}
 
-		public Token NextToken(TokenType T) {
+		public Token NextToken(TokenType T)
+		{
 			return NextToken().Assert(T);
 		}
 
-		public Token Peek(int Fwd = 1) {
+		public Token Peek(int Fwd = 1)
+		{
 			int P = Pos + Fwd - 1;
 			if (P >= Tokens.Length)
 				return null;
@@ -98,53 +125,64 @@ namespace CTilde {
 		}
 	}
 
-	public static class TokenizerExtensions {
-		public static string Position(this Token T) {
+	public static class TokenizerExtensions
+	{
+		public static string Position(this Token T)
+		{
 			if (T != null)
 				return T.GetPos();
 
 			return "NULL";
 		}
 
-		public static bool IsKeyword(this Token T, Keyword K) {
+		public static bool IsKeyword(this Token T, Keyword K)
+		{
 			return T.Type == TokenType.Keyword && T.GetID<Keyword>() == K;
 		}
 
-		public static bool IsSymbol(this Token T, Symbol S) {
+		public static bool IsSymbol(this Token T, Symbol S)
+		{
 			return T.Type == TokenType.Symbol && T.GetID<Symbol>() == S;
 		}
 
-		public static bool IsTokenType(this Token T, TokenType Type) {
+		public static bool IsTokenType(this Token T, TokenType Type)
+		{
 			return T.Type == Type;
 		}
 
-		public static bool Is(this Token T, Keyword K) {
+		public static bool Is(this Token T, Keyword K)
+		{
 			return T.IsKeyword(K);
 		}
 
-		public static bool Is(this Token T, Symbol S) {
+		public static bool Is(this Token T, Symbol S)
+		{
 			return T.IsSymbol(S);
 		}
 
-		public static bool Is(this Token T, TokenType Type) {
+		public static bool Is(this Token T, TokenType Type)
+		{
 			return T.IsTokenType(Type);
 		}
 
-		public static Token Assert(this Token T, Keyword K) {
+		public static Token Assert(this Token T, Keyword K)
+		{
 			if (!T.IsKeyword(K))
 				throw new Exception("Expected keyword " + K + " @ " + T.Position());
 
 			return T;
 		}
 
-		public static Token Assert(this Token T, Symbol S) {
+		public static Token Assert(this Token T, Symbol S)
+		{
 			if (!T.IsSymbol(S))
 				throw new Exception("Expected symbol " + S + " @ " + T.Position());
 
 			return T;
 		}
 
-		public static Token Assert(this Token T, TokenType Typ) {
+		public static Token Assert(this Token T, TokenType Typ)
+		{
 			if (T.Type != Typ)
 				throw new Exception("Expected " + Typ + " @ " + T.Position());
 

@@ -14,13 +14,15 @@ namespace CTilde.FishAsm
 		public int EBPOffset;
 		public int Size;
 		public Expr_TypeDef TypeStr;
+		public bool Global;
 
-		public FishVarDef(string Name, int EBPOffset, int Size, Expr_TypeDef TypeStr)
+		public FishVarDef(string Name, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global)
 		{
 			this.Name = Name;
 			this.EBPOffset = EBPOffset;
 			this.Size = Size;
 			this.TypeStr = TypeStr;
+			this.Global = Global;
 		}
 	}
 
@@ -29,11 +31,13 @@ namespace CTilde.FishAsm
 		public string Name;
 		public string Value;
 		public bool Generated = false;
+		public bool Global = false;
 
-		public FishLabel(string Name)
+		public FishLabel(string Name, bool Global)
 		{
 			this.Name = Name;
 			Value = "";
+			this.Global = Global;
 		}
 
 		public FishLabel(string Name, string Value)
@@ -47,6 +51,7 @@ namespace CTilde.FishAsm
 	{
 		public bool IsInsideFunctionBody = false;
 		public bool IsInsideFunctionDef = false;
+		public bool IndexEmitOnlyAddress = false;
 
 		public int StackSize;
 		public int FreeLabel = 0;
@@ -57,22 +62,22 @@ namespace CTilde.FishAsm
 
 		List<FishLabel> Labels = new List<FishLabel>();
 
-		public string DefineFreeLabel(string LabelName)
+		public string DefineFreeLabel(string LabelName, bool Global)
 		{
 			if (!string.IsNullOrEmpty(LabelName))
 				LabelName = "." + LabelName + "_" + (FreeLabel++).ToString("X4");
 
-			DefineLabel(LabelName);
-
+			DefineLabel(LabelName, Global);
 			return LabelName;
 		}
 
-		public void DefineLabel(string LabelName)
+		public void DefineLabel(string LabelName, bool Global)
 		{
 			if (Labels.Any(l => l.Name == LabelName))
 				throw new Exception(string.Format("Label '{0}' is already defined", LabelName));
 
-			Labels.Add(new FishLabel(LabelName));
+			FreeLabel++;
+			Labels.Add(new FishLabel(LabelName, Global));
 		}
 
 		public FishLabel[] GetNewLabels()
@@ -130,7 +135,7 @@ namespace CTilde.FishAsm
 		}
 
 		public int GetPointerTypeSize(Expr_TypeDef Type)
-		{	
+		{
 			if (Type.Type == "string")
 				return 1; // string is array of bytes
 
@@ -142,7 +147,20 @@ namespace CTilde.FishAsm
 
 		public void ClearVarOffsets()
 		{
-			VarOffsets.Clear();
+			List<FishVarDef> RemoveList = new List<FishVarDef>();
+
+			foreach (var VO in VarOffsets)
+			{
+				if (Labels.Where(L => L.Name == VO.Name && L.Global).Count() <= 0)
+					RemoveList.Add(VO);
+			}
+
+			foreach (var RemoveItm in RemoveList)
+			{
+				VarOffsets.Remove(RemoveItm);
+			}
+
+			//VarOffsets.Clear();
 			StackSize = 0;
 		}
 
@@ -168,8 +186,13 @@ namespace CTilde.FishAsm
 			return null;
 		}
 
-		void SetKeyValue(string Key, int EBPOffset, int Size, Expr_TypeDef TypeStr)
+		void SetKeyValue(string Key, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global)
 		{
+			if (Global)
+			{
+				EBPOffset = 0;
+			}
+
 			for (int i = 0; i < VarOffsets.Count; i++)
 			{
 				if (VarOffsets[i].Name == Key)
@@ -177,37 +200,41 @@ namespace CTilde.FishAsm
 					VarOffsets[i].EBPOffset = EBPOffset;
 					VarOffsets[i].Size = Size;
 					VarOffsets[i].TypeStr = TypeStr;
+					VarOffsets[i].Global = Global;
 					return;
 				}
 			}
 
-			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size, TypeStr));
+			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size, TypeStr, Global));
 		}
 
-		public void DefineVar(string VarName, int EBPOffset, int Size, Expr_TypeDef TypeStr)
+		public void DefineVar(string VarName, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global = false)
 		{
 			if (ContainsKey(VarName))
 				throw new Exception(string.Format("Variable '{0}' is already defined", VarName));
 
-			SetKeyValue(VarName, EBPOffset, Size, TypeStr);
+			SetKeyValue(VarName, EBPOffset, Size, TypeStr, Global);
 			StackSize += Size;
 		}
 
-		public void DefineVar(string VarName, int Size, bool IsParam, Expr_TypeDef TypeStr)
+		public void DefineVar(string VarName, int Size, bool IsParam, Expr_TypeDef TypeStr, bool Global = false)
 		{
 			if (IsParam)
 			{
-				DefineVar(VarName, 8 + (ParamCount * 4), Size, TypeStr);
+				DefineVar(VarName, 8 + (ParamCount * 4), Size, TypeStr, Global);
 			}
 			else
 			{
-				DefineVar(VarName, -4 - (ArgCount * 4), Size, TypeStr);
+				DefineVar(VarName, -4 - (ArgCount * 4), Size, TypeStr, Global);
 			}
 
-			if (IsParam)
-				ParamCount++;
-			else
-				ArgCount++;
+			if (!Global)
+			{
+				if (IsParam)
+					ParamCount++;
+				else
+					ArgCount++;
+			}
 		}
 
 		/*public void GetVarS(string VarName)
@@ -231,7 +258,36 @@ namespace CTilde.FishAsm
 			if (ContainsKey(VarName))
 				return GetKeyValue(VarName).TypeStr;
 
-			throw new Exception(string.Format("Could not find variable '{0}'", VarName));
+			//throw new Exception(string.Format("Could not find variable '{0}'", VarName));
+			return null;
+		}
+
+		public bool IsVarGlobal(string VarName)
+		{
+			if (Labels.Where(L => L.Global && L.Name == VarName).Count() > 0)
+				return true;
+
+			return false;
+		}
+
+		Stack<string> BreakLabels = new Stack<string>();
+
+		public void PushBreakLabel(string BreakLabel)
+		{
+			BreakLabels.Push(BreakLabel);
+		}
+
+		public string PeekBreakLabel()
+		{
+			if (BreakLabels.Count == 0)
+				throw new Exception("No break label in stack");
+
+			return BreakLabels.Peek();
+		}
+
+		public string PopBreakLabel()
+		{
+			return BreakLabels.Pop();
 		}
 	}
 }

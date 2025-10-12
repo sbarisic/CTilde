@@ -18,10 +18,15 @@ namespace CTilde
 			IndentLevel++;
 		}
 
-		protected void Unindent()
+		protected bool Unindent()
 		{
 			if (IndentLevel > 0)
+			{
 				IndentLevel--;
+				return true;
+			}
+
+			return false;
 		}
 
 		protected void Append(string Str)

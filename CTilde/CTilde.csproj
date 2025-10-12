@@ -41,9 +41,13 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Expr\Expr_DerefOp.cs" />
+    <Compile Include="Expr\Expr_AssignValue.cs" />
     <Compile Include="Expr\Expr_AssignVariable.cs" />
     <Compile Include="Expr\Expr_ComparisonOp.cs" />
     <Compile Include="Expr\Expr_ConstChar.cs" />
+    <Compile Include="Expr\Expr_BreakExpr.cs" />
+    <Compile Include="Expr\Expr_AddressOfOp.cs" />
     <Compile Include="Expr\Expr_IndexOp.cs" />
     <Compile Include="Expr\Expr_IfElseStatement.cs" />
     <Compile Include="Expr\Expr_WhileStatement.cs" />

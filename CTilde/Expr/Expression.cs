@@ -49,6 +49,11 @@ namespace CTilde.Expr
 
 				return FDef;
 			}
+			else if (Tok.Peek().Is(Keyword.@break))
+			{
+				Expr_BreakExpr BDef = (Expr_BreakExpr)new Expr_BreakExpr().Parse(Tok);
+				return BDef;
+			}
 			else if (Tok.Peek().Is(Keyword.@while))
 			{
 				Tok.NextToken().Assert(Keyword.@while);
@@ -107,6 +112,10 @@ namespace CTilde.Expr
 				return Var;
 			}
 
+			Expression EE = ParseExpression(Tok, Symbol.Semicolon);
+			if (EE is Expr_AssignValue ExprAssignVal)
+				return ExprAssignVal;
+
 			// Empty statement
 			/*if (Tok.Peek().Is(Symbol.Semicolon))
 				return null;*/
@@ -124,6 +133,11 @@ namespace CTilde.Expr
 			{
 				if (LeftExpr != null)
 				{
+					if (Tok.Peek().Is(Symbol.Assignment))
+					{
+						return new Expr_AssignValue(LeftExpr).Parse<Expr_AssignValue>(Tok);
+					}
+
 					if (Tok.Peek().Is(Symbol.Addition) || Tok.Peek().Is(Symbol.Subtraction))
 					{
 						return new Expr_MathOp(LeftExpr).Parse<Expr_MathOp>(Tok);
@@ -143,7 +157,21 @@ namespace CTilde.Expr
 
 				Token PT = Tok.Peek();
 
-				if (Tok.Peek().Is(Keyword.@true))
+				if (Tok.Peek().Is(Symbol.AddressOf) && Tok.Peek(2).Is(TokenType.Identifier))
+				{
+					LeftExpr = new Expr_AddressOfOp().Parse<Expr_AddressOfOp>(Tok);
+				}
+				else if (Tok.Peek().Is(Symbol.Star) && Tok.Peek(2).Is(TokenType.Identifier))
+				{
+					LeftExpr = new Expr_DerefOp().Parse<Expr_DerefOp>(Tok);
+				}
+				else if (Tok.Peek().Is(Symbol.LParen))
+				{
+					Tok.NextToken().Assert(Symbol.LParen);
+					LeftExpr = Expression.ParseExpression(Tok, Symbol.RParen);
+					Tok.NextToken().Assert(Symbol.RParen);
+				}
+				else if (Tok.Peek().Is(Keyword.@true))
 				{
 					Tok.NextToken().Assert(Keyword.@true);
 					LeftExpr = new Expr_ConstNumber("1");

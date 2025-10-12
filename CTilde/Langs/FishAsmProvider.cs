@@ -6,6 +6,8 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Text;
 using System.Threading.Tasks;
 using System.Xml.Linq;
@@ -62,6 +64,40 @@ namespace CTilde.Langs
 			EmitRaw(string.Format(fmt, args));
 		}
 
+		void EmitRawUnindented(string fmt, params object[] args)
+		{
+			bool Unindented = false;
+			if (Unindent())
+				Unindented = true;
+
+			EmitRaw(string.Format(fmt, args));
+
+			if (Unindented)
+				Indent();
+		}
+
+		void EmitLabels()
+		{
+			FishLabel[] Lbls = State.GetNewLabels();
+
+			foreach (FishLabel L in Lbls)
+			{
+				EmitRaw(L.Name + ":");
+				Indent();
+
+				if (L.Value.StartsWith("\"") && L.Value.EndsWith("\""))
+				{
+					EmitRaw(".String {0}", L.Value);
+				}
+				else
+				{
+					EmitRaw(".long {0}", L.Value);
+				}
+
+				Unindent();
+			}
+		}
+
 		public override void Compile(Expression Ex)
 		{
 			if (Ex == null)
@@ -103,7 +139,7 @@ namespace CTilde.Langs
 				case Expr_FuncDef FuncDef:
 					{
 						EmitRaw(".globl {0}", FuncDef.FuncName);
-						State.DefineLabel(FuncDef.FuncName);
+						State.DefineLabel(FuncDef.FuncName, true);
 
 						if (FuncDef.FuncBody != null)
 						{
@@ -141,24 +177,7 @@ namespace CTilde.Langs
 							State.IsInsideFunctionBody = false;
 							Unindent();
 
-							FishLabel[] Lbls = State.GetNewLabels();
-
-							foreach (FishLabel L in Lbls)
-							{
-								EmitRaw(L.Name + ":");
-								Indent();
-
-								if (L.Value.StartsWith("\"") && L.Value.EndsWith("\""))
-								{
-									EmitRaw(".String {0}", L.Value);
-								}
-								else
-								{
-									EmitRaw(".long {0}", L.Value);
-								}
-
-								Unindent();
-							}
+							//EmitLabels();
 
 						}
 						break;
@@ -169,6 +188,7 @@ namespace CTilde.Langs
 						foreach (var E in Module.Expressions)
 							Compile(E);
 
+						EmitLabels();
 						break;
 					}
 
@@ -212,10 +232,27 @@ namespace CTilde.Langs
 						Compile(VariableDef.Ident);
 						AppendLine(";");*/
 
-						int Size = State.GetTypeSize(VariableDef.Type);
-						State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type);
-						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
+						EmitRaw("# VariableDef BEGIN - {0}", VariableDef.Ident.Identifier);
+						Indent();
 
+						if (!State.IsInsideFunctionBody)
+						{
+							State.DefineLabel(VariableDef.Ident.Identifier, true);
+							EmitRaw(".globl {0}", VariableDef.Ident.Identifier);
+
+							int Size = State.GetTypeSize(VariableDef.Type);
+							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type, true);
+						}
+						else
+						{
+							int Size = State.GetTypeSize(VariableDef.Type);
+							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type);
+
+							EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
+						}
+
+						Unindent();
+						EmitRaw("# VariableDef END - {0}", VariableDef.Ident.Identifier);
 						/*if (!OmmitSemicolon)
 							AppendLine(";");*/
 
@@ -224,14 +261,47 @@ namespace CTilde.Langs
 
 				case Expr_AssignedVariableDef AssVariableDef:
 					{
+						EmitRaw("# VariableDef BEGIN - {0}", AssVariableDef.VariableDef.Ident.Identifier);
+						Indent();
+
 						int Size = State.GetTypeSize(AssVariableDef.VariableDef.Type);
 						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type);
 						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
+
+						Unindent();
+						EmitRaw("# VariableDef END - {0}", AssVariableDef.VariableDef.Ident.Identifier);
 
 						Compile(AssVariableDef.AssignmentValue);
 
 						int VarID = State.GetVarOffset(AssVariableDef.VariableDef.Ident.Identifier);
 						EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+						break;
+					}
+
+				case Expr_AssignValue AssValue:
+					{
+						if (AssValue.LExpr is Expr_IndexOp IndexOp)
+						{
+							EmitRaw("# Expr_AssignValue BEGIN");
+							Indent();
+
+							State.IndexEmitOnlyAddress = true;
+							Compile(AssValue.LExpr);
+							State.IndexEmitOnlyAddress = true;
+
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+
+							Compile(AssValue.ValueExpr);
+
+							EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
+							//EmitRaw("# REST OF ASSVALUE HERE");
+
+							Unindent();
+							EmitRaw("# Expr_AssignValue END");
+						}
+						else
+							throw new NotImplementedException();
+
 						break;
 					}
 
@@ -247,8 +317,16 @@ namespace CTilde.Langs
 
 				case Expr_Identifier IdentifierEx:
 					{
-						Expr_TypeDef TypeDef = State.GetVarType(IdentifierEx.Identifier);
-						EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, State.GetVarOffset(IdentifierEx.Identifier), Reg.EBP, Reg.EAX);
+						//Expr_TypeDef TypeDef = State.GetVarType(IdentifierEx.Identifier);
+
+						if (State.IsVarGlobal(IdentifierEx.Identifier))
+						{
+							EmitInstruction(FishInst.MOVE_LONG_REG, IdentifierEx.Identifier, Reg.EAX);
+						}
+						else
+						{
+							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, State.GetVarOffset(IdentifierEx.Identifier), Reg.EBP, Reg.EAX);
+						}
 						//Append(IdentifierEx.Identifier);
 						break;
 					}
@@ -263,6 +341,7 @@ namespace CTilde.Langs
 
 				case Expr_ConstString StringEx:
 					{
+						//EmitRaw(".globl {0}", StringEx.StringLiteral);
 						string LblName = State.DefineLabel(null, StringEx.StringLiteral);
 
 						EmitInstruction(FishInst.MOVE_LONG_REG, LblName, Reg.EAX);
@@ -278,6 +357,10 @@ namespace CTilde.Langs
 
 				case Expr_MathOp MathExp:
 					{
+						EmitRaw("# MathOp BEGIN ({0})", MathExp.OpString);
+						Indent();
+						EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
+
 						Compile(MathExp.LExpr);
 
 						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
@@ -291,9 +374,17 @@ namespace CTilde.Langs
 								EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
 								break;
 
+							case MathOperation.Sub:
+								EmitInstruction(FishInst.SUB_REG_REG, Reg.EBX, Reg.EAX);
+								break;
+
 							default:
 								throw new NotImplementedException();
 						}
+
+						EmitInstruction(FishInst.POP_REG, Reg.EBX);
+						Unindent();
+						EmitRaw("# MathOp END ({0})", MathExp.OpString);
 
 						break;
 					}
@@ -326,11 +417,14 @@ namespace CTilde.Langs
 
 				case Expr_IfElseStatement IfExpr:
 					{
-						string EndLblName = State.DefineFreeLabel("ENDIF");
+						EmitRaw("# If BEGIN");
+						Indent();
+
+						string EndLblName = State.DefineFreeLabel("ENDIF", false);
 						string ElseLblName = EndLblName;
 
 						if (IfExpr.ElseBody != null)
-							ElseLblName = State.DefineFreeLabel("ELSE");
+							ElseLblName = State.DefineFreeLabel("ELSE", false);
 
 						Compile(IfExpr.ConditionValue);
 
@@ -351,23 +445,41 @@ namespace CTilde.Langs
 						else
 							throw new NotImplementedException();
 
+						State.PushBreakLabel(EndLblName);
 						Compile(IfExpr.Body);
+						State.PopBreakLabel();
 
 						if (IfExpr.ElseBody != null)
 						{
 							EmitInstruction(FishInst.JUMP_LONG, EndLblName);
+							Unindent();
+							EmitRaw("# Else BEGIN");
+							Indent();
 							EmitRaw("{0}:", ElseLblName);
+
+							State.PushBreakLabel(EndLblName);
 							Compile(IfExpr.ElseBody);
+							State.PopBreakLabel();
+
+							Unindent();
+							EmitRaw("# Else END");
+							Indent();
 						}
 
 						EmitRaw("{0}:", EndLblName);
+
+						Unindent();
+						EmitRaw("# If END");
 						break;
 					}
 
 				case Expr_WhileStatement WhileExpr:
 					{
-						string LblName = State.DefineFreeLabel("WHILE");
-						string EndLblName = State.DefineFreeLabel("ENDWHILE");
+						EmitRaw("# While BEGIN");
+						Indent();
+
+						string LblName = State.DefineFreeLabel("WHILE", false);
+						string EndLblName = State.DefineFreeLabel("ENDWHILE", false);
 						EmitRaw("{0}:", LblName);
 						Compile(WhileExpr.ConditionValue);
 
@@ -388,17 +500,52 @@ namespace CTilde.Langs
 						else
 							throw new NotImplementedException();
 
+						State.PushBreakLabel(EndLblName);
+
 						//EmitRaw("# Body goes here");
 						Compile(WhileExpr.Body);
+
+						State.PopBreakLabel();
 
 						EmitInstruction(FishInst.JUMP_LONG, LblName);
 						EmitRaw("{0}:", EndLblName);
 						//throw new NotImplementedException();
+
+						Unindent();
+						EmitRaw("# While END");
+						break;
+					}
+
+				case Expr_BreakExpr BreakExpr:
+					{
+						string BreakLbl = State.PeekBreakLabel();
+						EmitInstruction(FishInst.JUMP_LONG, BreakLbl);
+
+						break;
+					}
+
+				case Expr_AddressOfOp AddrOfExpr:
+					{
+						EmitRaw("# Expr_AddressOfOp BEGIN");
+						Indent();
+
+						if (AddrOfExpr.ValExpr is Expr_Identifier Ident)
+						{
+							EmitInstruction(FishInst.MOVE_LONG_REG, Ident.Identifier, Reg.EAX);
+						}
+						else
+							throw new NotImplementedException();
+
+						Unindent();
+						EmitRaw("# Expr_AddressOfOp END");
 						break;
 					}
 
 				case Expr_IndexOp IndexExpr:
 					{
+						EmitRaw("# IndexOp BEGIN");
+						Indent();
+
 						Compile(IndexExpr.IndexValExpr);
 						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
@@ -408,17 +555,35 @@ namespace CTilde.Langs
 						Expr_Identifier IDExpr = IndexExpr.LExpr as Expr_Identifier;
 						Expr_TypeDef VarType = State.GetVarType(IDExpr.Identifier);
 
+						/*if (VarType == null)
+						{
+							EmitInstruction(FishInst.MOVE_LONG_REG, IDExpr.Identifier, Reg.EAX);
+						}
+						else
+						{*/
 						int CopyBytes = State.GetPointerTypeSize(VarType);
 
-						if (CopyBytes == 1)
-							EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
-						else if (CopyBytes == 2)
-							EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
-						else if (CopyBytes == 4)
-							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
-						else
-							throw new NotImplementedException();
 
+
+						if (State.IndexEmitOnlyAddress)
+						{
+
+						}
+						else
+						{
+							if (CopyBytes == 1)
+								EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+							else if (CopyBytes == 2)
+								EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+							else if (CopyBytes == 4)
+								EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+							else
+								throw new NotImplementedException();
+						}
+						//}
+
+						Unindent();
+						EmitRaw("# IndexOp END");
 						break;
 					}
 
@@ -440,6 +605,9 @@ namespace CTilde.Langs
 						}
 						else if (FuncCallExp.Function.Identifier == "syscall_2")
 						{
+							EmitRaw("# syscall_2 BEGIN");
+							Indent();
+
 							if (FuncCallExp.Arguments.Count != 2)
 								throw new Exception("syscall_2 requires exactly 2 arguments");
 
@@ -464,9 +632,15 @@ namespace CTilde.Langs
 									throw new NotImplementedException("Only string literals are supported in __asm");
 								}
 							}*/
+
+							Unindent();
+							EmitRaw("# syscall_2 END");
 						}
 						else
 						{
+							EmitRaw("# FuncCall BEGIN - {0}", FuncCallExp.Function.Identifier);
+							Indent();
+
 							for (int i = 0; i < FuncCallExp.Arguments.Count; i++)
 							{
 								Compile(FuncCallExp.Arguments[i]);
@@ -494,7 +668,12 @@ namespace CTilde.Langs
 							}
 
 							AppendLine(");");*/
+
+							Unindent();
+							EmitRaw("# FuncCall END - {0}", FuncCallExp.Function.Identifier);
 						}
+
+
 						break;
 					}
 

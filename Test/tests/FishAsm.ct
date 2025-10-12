@@ -1,4 +1,7 @@
-﻿void print(string str) {
+﻿uint* int_table;
+
+
+void print(string str) {
 	uint i = 0;
 
 	while (str[i] != 0) {
@@ -7,7 +10,13 @@
 	}
 }
 
-naked void kmain() {
+void handler_int0() {
+	print("INT0\n");
+}
+
+void kmain() {
+	int_table[0] = &handler_int0;
+
 	print("Hello, World!\n");
 
 	__asm("SYSCALL $0");

@@ -18,7 +18,8 @@ namespace CTilde
 		@while,
 		@true,
 		@false,
-		naked
+		naked,
+		@break,
 	}
 
 	public enum Symbol : int
@@ -40,7 +41,8 @@ namespace CTilde
 		GreaterThan,
 		GreaterThanOrEqual,
 		LessThan,
-		LessThanOrEqual
+		LessThanOrEqual,
+		AddressOf,
 	}
 
 	public class Tokenizer
@@ -80,7 +82,8 @@ namespace CTilde
 				{ "<", (int)Symbol.LessThan },
 				{ "=", (int)Symbol.Assignment },
 				{ ",", (int)Symbol.Comma },
-				{ ";", (int)Symbol.Semicolon }
+				{ ";", (int)Symbol.Semicolon },
+				{ "&", (int)Symbol.AddressOf }
 			};
 
 			L = new Lexer(Reader, Settings);

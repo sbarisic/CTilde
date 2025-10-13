@@ -1,5 +1,5 @@
 ﻿uint* int_table;
-string temp_buffer = static string[128];
+//string temp_buffer = static string[20];
 
 void print(string str) {
 	uint i = 0;

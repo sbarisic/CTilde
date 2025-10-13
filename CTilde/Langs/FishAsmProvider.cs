@@ -227,7 +227,7 @@ namespace CTilde.Langs
 
 				case Expr_StaticValue StaticValueExpr:
 					{
-						string StatVar = State.DefineFreeLabel("STATVAR", true);
+						string StatVar = State.DefineFreeLabel("STATVAR", false);
 						EmitRaw("{0}:", StatVar);
 
 						if (StaticValueExpr.TypeDefExpr.Type == "string" && StaticValueExpr.TypeDefExpr.IsArray)
@@ -286,6 +286,7 @@ namespace CTilde.Langs
 						}
 						else
 						{
+							EmitRaw(".globl {0}", AssVariableDef.VariableDef.Ident.Identifier);
 							EmitRaw("{0}:", AssVariableDef.VariableDef.Ident.Identifier);
 						}
 

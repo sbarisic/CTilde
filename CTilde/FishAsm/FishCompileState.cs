@@ -15,14 +15,21 @@ namespace CTilde.FishAsm
 		public int Size;
 		public Expr_TypeDef TypeStr;
 		public bool Global;
+		public bool Param;
 
-		public FishVarDef(string Name, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global)
+		public FishVarDef(string Name, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global, bool Param)
 		{
 			this.Name = Name;
 			this.EBPOffset = EBPOffset;
 			this.Size = Size;
 			this.TypeStr = TypeStr;
 			this.Global = Global;
+			this.Param = Param;
+		}
+
+		public override string ToString()
+		{
+			return string.Format("FishVarDef({0}, EBPOffset {1}, Size {2}, {3}, Global {4})", Name, EBPOffset, Size, TypeStr?.ToString() ?? "null", Global);
 		}
 	}
 
@@ -57,8 +64,8 @@ namespace CTilde.FishAsm
 		public int FreeLabel = 0;
 
 		List<FishVarDef> VarOffsets = new List<FishVarDef>();
-		int ParamCount;
-		int ArgCount;
+		int ParamOffset;
+		int ArgOffset;
 
 		List<FishLabel> Labels = new List<FishLabel>();
 
@@ -120,8 +127,10 @@ namespace CTilde.FishAsm
 
 		int GetRawTypeSize(Expr_TypeDef Type)
 		{
-			if (Type.Type == "int" || Type.Type == "uint" || Type.Type == "float" || Type.Type == "bool" || Type.Type == "string")
+			if (Type.Type == "int" || Type.Type == "uint" || Type.Type == "float" || Type.Type == "string")
 				return 4;
+			else if (Type.Type == "byte" || Type.Type == "bool")
+				return 1;
 
 			throw new NotImplementedException();
 		}
@@ -152,6 +161,12 @@ namespace CTilde.FishAsm
 			foreach (var VO in VarOffsets)
 			{
 				if (Labels.Where(L => L.Name == VO.Name && L.Global).Count() <= 0)
+				{
+					RemoveList.Add(VO);
+					continue;
+				}
+
+				if (VO.Param)
 					RemoveList.Add(VO);
 			}
 
@@ -162,6 +177,7 @@ namespace CTilde.FishAsm
 
 			//VarOffsets.Clear();
 			StackSize = 0;
+			ParamOffset = 0;
 		}
 
 		bool ContainsKey(string Key)
@@ -186,7 +202,7 @@ namespace CTilde.FishAsm
 			return null;
 		}
 
-		void SetKeyValue(string Key, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global)
+		void SetKeyValue(string Key, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global, bool Param)
 		{
 			if (Global)
 			{
@@ -201,39 +217,50 @@ namespace CTilde.FishAsm
 					VarOffsets[i].Size = Size;
 					VarOffsets[i].TypeStr = TypeStr;
 					VarOffsets[i].Global = Global;
+					VarOffsets[i].Param = Param;
 					return;
 				}
 			}
 
-			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size, TypeStr, Global));
+			VarOffsets.Add(new FishVarDef(Key, EBPOffset, Size, TypeStr, Global, Param));
 		}
 
-		public void DefineVar(string VarName, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global = false)
+		public void DefineVar(string VarName, int EBPOffset, int Size, Expr_TypeDef TypeStr, bool Global, bool Param)
 		{
 			if (ContainsKey(VarName))
 				throw new Exception(string.Format("Variable '{0}' is already defined", VarName));
 
-			SetKeyValue(VarName, EBPOffset, Size, TypeStr, Global);
+			SetKeyValue(VarName, EBPOffset, Size, TypeStr, Global, Param);
 			StackSize += Size;
 		}
 
-		public void DefineVar(string VarName, int Size, bool IsParam, Expr_TypeDef TypeStr, bool Global = false)
+		public void DefineVar(string VarName, int Size, bool IsParam, Expr_TypeDef TypeStr, bool Global, bool Param)
 		{
 			if (IsParam)
 			{
-				DefineVar(VarName, 8 + (ParamCount * 4), Size, TypeStr, Global);
+				DefineVar(VarName, 4 + (ParamOffset + Size), Size, TypeStr, Global, Param);
 			}
 			else
 			{
-				DefineVar(VarName, -4 - (ArgCount * 4), Size, TypeStr, Global);
+				/*int Offset = 0;
+
+				for (int i = 0; i < VarOffsets.Count; i++)
+				{
+					if (VarOffsets[i].Global)
+						continue;
+
+					Offset += VarOffsets[i].Size;
+				}*/
+
+				DefineVar(VarName, -4 - (ArgOffset), Size, TypeStr, Global, Param);
 			}
 
 			if (!Global)
 			{
 				if (IsParam)
-					ParamCount++;
+					ParamOffset += Size;
 				else
-					ArgCount++;
+					ArgOffset += Size;
 			}
 		}
 

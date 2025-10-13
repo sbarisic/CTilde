@@ -20,6 +20,7 @@ namespace CTilde
 		@false,
 		naked,
 		@break,
+		@static,
 	}
 
 	public enum Symbol : int

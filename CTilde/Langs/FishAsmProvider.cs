@@ -206,7 +206,7 @@ namespace CTilde.Langs
 								Append(", ");*/
 
 							int Size = State.GetTypeSize(ParamDef.ParamType);
-							State.DefineVar(ParamDef.Name, Size, true, ParamDef.ParamType);
+							State.DefineVar(ParamDef.Name, Size, true, ParamDef.ParamType, false, true);
 						}
 
 						break;
@@ -222,6 +222,19 @@ namespace CTilde.Langs
 							T += "[]";
 
 						Append(T);
+						break;
+					}
+
+				case Expr_StaticValue StaticValueExpr:
+					{
+						string StatVar = State.DefineFreeLabel("STATVAR", true);
+						EmitRaw("{0}:", StatVar);
+
+						if (StaticValueExpr.TypeDefExpr.Type == "string" && StaticValueExpr.TypeDefExpr.IsArray)
+						{
+							EmitRaw(".String \"{0}\"", new string('x', StaticValueExpr.TypeDefExpr.ArraySize));
+						}
+
 						break;
 					}
 
@@ -241,12 +254,12 @@ namespace CTilde.Langs
 							EmitRaw(".globl {0}", VariableDef.Ident.Identifier);
 
 							int Size = State.GetTypeSize(VariableDef.Type);
-							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type, true);
+							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type, true, false);
 						}
 						else
 						{
 							int Size = State.GetTypeSize(VariableDef.Type);
-							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type);
+							State.DefineVar(VariableDef.Ident.Identifier, Size, false, VariableDef.Type, false, false);
 
 							EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
 						}
@@ -265,16 +278,33 @@ namespace CTilde.Langs
 						Indent();
 
 						int Size = State.GetTypeSize(AssVariableDef.VariableDef.Type);
-						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type);
-						EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
+						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type, false, false);
+
+						if (State.IsInsideFunctionBody)
+						{
+							EmitInstruction(FishInst.SUB_LONG_REG, (uint)Size, Reg.ESP);
+						}
+						else
+						{
+							EmitRaw("{0}:", AssVariableDef.VariableDef.Ident.Identifier);
+						}
 
 						Unindent();
 						EmitRaw("# VariableDef END - {0}", AssVariableDef.VariableDef.Ident.Identifier);
 
+						EmitRaw("# VariableAssign BEGIN");
+						Indent();
+
 						Compile(AssVariableDef.AssignmentValue);
 
-						int VarID = State.GetVarOffset(AssVariableDef.VariableDef.Ident.Identifier);
-						EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+						if (State.IsInsideFunctionBody)
+						{
+							int VarID = State.GetVarOffset(AssVariableDef.VariableDef.Ident.Identifier);
+							EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+						}
+
+						Unindent();
+						EmitRaw("# VariableAssign END");
 						break;
 					}
 
@@ -292,6 +322,26 @@ namespace CTilde.Langs
 							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
 							Compile(AssValue.ValueExpr);
+
+							if (IndexOp.LExpr is Expr_Identifier Id)
+							{
+								Expr_TypeDef VarType = State.GetVarType(Id.Identifier);
+								int CopyBytes = State.GetPointerTypeSize(VarType);
+
+								if (CopyBytes == 1)
+									EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
+								else if (CopyBytes == 2)
+								{
+									EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.AL, 0, Reg.EBX);
+									EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.AH, 1, Reg.EBX);
+								}
+								else if (CopyBytes == 4)
+									EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
+								else
+									throw new NotImplementedException();
+							}
+							else
+								throw new NotImplementedException();
 
 							EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
 							//EmitRaw("# REST OF ASSVALUE HERE");
@@ -325,7 +375,8 @@ namespace CTilde.Langs
 						}
 						else
 						{
-							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, State.GetVarOffset(IdentifierEx.Identifier), Reg.EBP, Reg.EAX);
+							int VarOffset = State.GetVarOffset(IdentifierEx.Identifier);
+							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, VarOffset, Reg.EBP, Reg.EAX);
 						}
 						//Append(IdentifierEx.Identifier);
 						break;
@@ -481,21 +532,31 @@ namespace CTilde.Langs
 						string LblName = State.DefineFreeLabel("WHILE", false);
 						string EndLblName = State.DefineFreeLabel("ENDWHILE", false);
 						EmitRaw("{0}:", LblName);
-						Compile(WhileExpr.ConditionValue);
 
 						if (WhileExpr.ConditionValue is Expr_ComparisonOp Cmp)
 						{
 							if (Cmp.Op == ComparisonOp.Equals)
 							{
+								Compile(WhileExpr.ConditionValue);
 								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, EndLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.NotEquals)
 							{
+								Compile(WhileExpr.ConditionValue);
 								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, EndLblName);
 							}
 							else
 								throw new NotImplementedException();
 
+						}
+						else if (WhileExpr.ConditionValue is Expr_ConstNumber CNum)
+						{
+							if (CNum.NumberLiteral == "1")
+							{
+								EmitInstruction(FishInst.NOP);
+							}
+							else
+								throw new NotImplementedException();
 						}
 						else
 							throw new NotImplementedException();
@@ -547,9 +608,29 @@ namespace CTilde.Langs
 						Indent();
 
 						Compile(IndexExpr.IndexValExpr);
+
 						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
-						Compile(IndexExpr.LExpr);
+
+						if (IndexExpr.LExpr is Expr_Identifier Id)
+						{
+							Expr_TypeDef IdType = State.GetVarType(Id.Identifier);
+							int Sz = State.GetPointerTypeSize(IdType);
+
+							if (Sz > 1)
+							{
+								EmitInstruction(FishInst.MOVE_LONG_REG, "$" + Sz, Reg.EAX);
+								EmitInstruction(FishInst.MUL_REG, Reg.EBX);
+								EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+							}
+
+							Compile(IndexExpr.LExpr);
+						}
+						else
+						{
+							Compile(IndexExpr.LExpr);
+						}
+
 						EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
 
 						Expr_Identifier IDExpr = IndexExpr.LExpr as Expr_Identifier;

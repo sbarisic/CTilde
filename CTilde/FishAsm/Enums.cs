@@ -105,6 +105,8 @@ namespace CTilde.FishAsm
 
 		AL,
 		AX,
+		AH,
+		BH,
 		BL,
 		BX,
 		CL,
@@ -127,6 +129,8 @@ namespace CTilde.FishAsm
 			[Reg.EDI] = "%edi",
 			[Reg.ESI] = "%esi",
 			[Reg.AL] = "%al",
+			[Reg.AH] = "%ah",
+			[Reg.BH] = "%bh",
 			[Reg.AX] = "%ax",
 			[Reg.BL] = "%bl",
 			[Reg.BX] = "%bx",

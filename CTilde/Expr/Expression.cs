@@ -157,7 +157,11 @@ namespace CTilde.Expr
 
 				Token PT = Tok.Peek();
 
-				if (Tok.Peek().Is(Symbol.AddressOf) && Tok.Peek(2).Is(TokenType.Identifier))
+				if (Tok.Peek().Is(Keyword.@static))
+				{
+					LeftExpr = new Expr_StaticValue().Parse<Expr_StaticValue>(Tok);
+				}
+				else if (Tok.Peek().Is(Symbol.AddressOf) && Tok.Peek(2).Is(TokenType.Identifier))
 				{
 					LeftExpr = new Expr_AddressOfOp().Parse<Expr_AddressOfOp>(Tok);
 				}
@@ -219,9 +223,9 @@ namespace CTilde.Expr
 		}
 
 
-		public override string ToString()
+		/*public override string ToString()
 		{
 			throw new InvalidOperationException();
-		}
+		}*/
 	}
 }

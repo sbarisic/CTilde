@@ -1,5 +1,5 @@
 ﻿uint* int_table;
-
+string temp_buffer = static string[128];
 
 void print(string str) {
 	uint i = 0;
@@ -14,10 +14,26 @@ void handler_int0() {
 	print("INT0\n");
 }
 
+void handler_int1_keyboardkey(uint key) {
+}
+
+void handler_int2_keyboardchar(uint key2) {
+	string tst = "Hello";
+	tst[0] = key2; 
+	tst[1] = '-'; 
+	tst[2] = 0; 
+	print(tst);
+}
+
 void kmain() {
 	int_table[0] = &handler_int0;
+	int_table[1] = &handler_int1_keyboardkey;
+	int_table[2] = &handler_int2_keyboardchar;
 
 	print("Hello, World!\n");
+
+	while (true) {
+	}
 
 	__asm("SYSCALL $0");
 }

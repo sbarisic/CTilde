@@ -42,6 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CTTypes.cs" />
+    <Compile Include="Expr\Expr_IncDecOp.cs" />
     <Compile Include="Expr\Expr_StaticValue.cs" />
     <Compile Include="Expr\Expr_DerefOp.cs" />
     <Compile Include="Expr\Expr_AssignValue.cs" />
@@ -52,6 +53,7 @@
     <Compile Include="Expr\Expr_AddressOfOp.cs" />
     <Compile Include="Expr\Expr_IndexOp.cs" />
     <Compile Include="Expr\Expr_IfElseStatement.cs" />
+    <Compile Include="Expr\Expr_ReturnStatement.cs" />
     <Compile Include="Expr\Expr_WhileStatement.cs" />
     <Compile Include="Expr\Expr_ClassDef.cs" />
     <Compile Include="Expr\Expr_ConstString.cs" />

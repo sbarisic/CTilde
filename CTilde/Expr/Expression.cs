@@ -60,6 +60,10 @@ namespace CTilde.Expr
 
 				return new Expr_WhileStatement().Parse(Tok);
 			}
+			else if (Tok.Peek().Is(Keyword.@return))
+			{
+				return new Expr_ReturnStatement().Parse(Tok);
+			}
 			else if (Tok.Peek().Is(Keyword.@if))
 			{
 				Tok.NextToken().Assert(Keyword.@if);
@@ -109,6 +113,18 @@ namespace CTilde.Expr
 				Expression Var = new Expr_FuncCall().Parse(Tok);
 				Tok.NextToken().Assert(Symbol.Semicolon);
 
+				return Var;
+			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Increment))
+			{
+				Expression Var = new Expr_IncDecOp(false).Parse<Expr_IncDecOp>(Tok);
+				Tok.NextToken().Assert(Symbol.Semicolon);
+				return Var;
+			}
+			else if (Tok.Peek().Is(TokenType.Identifier) && Tok.Peek(2).Is(Symbol.Decrement))
+			{
+				Expression Var = new Expr_IncDecOp(true).Parse<Expr_IncDecOp>(Tok);
+				Tok.NextToken().Assert(Symbol.Semicolon);
 				return Var;
 			}
 
@@ -201,11 +217,53 @@ namespace CTilde.Expr
 				{
 					PT = Tok.Peek();
 
-					if (PT.Text.StartsWith("'") && PT.Text.EndsWith("'") && PT.Text.Length == 3)
+					if (PT.Text.StartsWith("'") && PT.Text.EndsWith("'") && (PT.Text.Length == 3 || PT.Text.Length == 4))
 					{
 						PT = Tok.NextToken();
+						char Chr = (char)0;
 
-						char Chr = PT.Text[1];
+						if (PT.Text.Length == 3)
+							Chr = PT.Text[1];
+						else
+						{
+							if (PT.Text[1] != '\\')
+								throw new Exception("Invalid character literal " + PT.Text);
+
+							switch (PT.Text[2])
+							{
+								case 'n':
+									Chr = '\n';
+									break;
+
+								case 'r':
+									Chr = '\r';
+									break;
+
+								case 't':
+									Chr = '\t';
+									break;
+
+								case 'b':
+									Chr = '\b';
+									break;
+
+								case '\'':
+									Chr = '\'';
+									break;
+
+								case '\"':
+									Chr = '\"';
+									break;
+
+								case '\\':
+									Chr = '\\';
+									break;
+
+								default:
+									throw new Exception("Invalid escape sequence \\" + PT.Text[2]);
+							}
+						}
+
 						string RawChr = PT.Text;
 						LeftExpr = new Expr_ConstChar(Chr, RawChr);
 					}

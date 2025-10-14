@@ -21,6 +21,7 @@ namespace CTilde
 		naked,
 		@break,
 		@static,
+		@return,
 	}
 
 	public enum Symbol : int
@@ -44,6 +45,8 @@ namespace CTilde
 		LessThan,
 		LessThanOrEqual,
 		AddressOf,
+		Increment,
+		Decrement
 	}
 
 	public class Tokenizer
@@ -73,8 +76,8 @@ namespace CTilde
 				{ "{", (int)Symbol.LBrace }, { "}", (int)Symbol.RBrace },
 				{ "[", (int)Symbol.LBracket }, { "]", (int)Symbol.RBracket },
 				{ "*", (int)Symbol.Star },
-				{ "+", (int)Symbol.Addition },
-				{ "-", (int)Symbol.Subtraction },
+				{ "++", (int)Symbol.Increment },
+				{ "--", (int)Symbol.Decrement },
 				{ ">=", (int)Symbol.GreaterThanOrEqual },
 				{ "<=", (int)Symbol.LessThanOrEqual },
 				{ "==", (int)Symbol.Equals },
@@ -84,7 +87,9 @@ namespace CTilde
 				{ "=", (int)Symbol.Assignment },
 				{ ",", (int)Symbol.Comma },
 				{ ";", (int)Symbol.Semicolon },
-				{ "&", (int)Symbol.AddressOf }
+				{ "&", (int)Symbol.AddressOf },
+				{ "+", (int)Symbol.Addition },
+				{ "-", (int)Symbol.Subtraction },
 			};
 
 			L = new Lexer(Reader, Settings);

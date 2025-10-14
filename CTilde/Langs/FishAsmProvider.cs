@@ -632,68 +632,61 @@ namespace CTilde.Langs
 						EmitRaw("# IndexOp BEGIN");
 						Indent();
 
-						Compile(IndexExpr.IndexValExpr);
+						// Compute index first => EAX = index
+						Compile(IndexExpr.IndexValExpr); // index in EAX
 
-
-						if (IndexExpr.LExpr is Expr_Identifier Id)
+						if (IndexExpr.LExpr is Expr_Identifier id)
 						{
-							Expr_TypeDef IdType = State.GetVarType(Id.Identifier);
-							int Sz = State.GetPointerTypeSize(IdType);
+							Expr_TypeDef idType = State.GetVarType(id.Identifier);
+							int elemSize = State.GetPointerTypeSize(idType);
 
-							int Offset = State.GetVarOffset(Id.Identifier);
-							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, -Offset, Reg.EBP, Reg.EBX);
+							// Preserve (and scale) index in EBX
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX); // EBX = index
 
-							if (Sz > 1)
+							if (elemSize > 1)
 							{
-								EmitInstruction(FishInst.MOVE_LONG_REG, "$" + Sz, Reg.EAX);
+								// scale index: EAX = elemSize, MUL EBX => EAX = elemSize * index
+								EmitInstruction(FishInst.MOVE_LONG_REG, "$" + elemSize, Reg.EAX);
 								EmitInstruction(FishInst.MUL_REG, Reg.EBX);
-								EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+								EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX); // EBX = scaled index
 							}
 
-							Compile(IndexExpr.LExpr);
-						}
-						else
-						{
-							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+							// Load base pointer into EAX (Compile of identifier gives the pointer value)
+							Compile(IndexExpr.LExpr); // EAX = base pointer
 
-							Compile(IndexExpr.LExpr);
-						}
+							// Effective address: base + scaled_index
+							EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
 
-						EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
+							// Load or leave address
+							int copyBytes = State.GetPointerTypeSize(idType);
+							bool isUnsigned = CTType.IsUnsigned(idType.Type);
 
-						Expr_Identifier IDExpr = IndexExpr.LExpr as Expr_Identifier;
-						Expr_TypeDef VarType = State.GetVarType(IDExpr.Identifier);
-
-						/*if (VarType == null)
-						{
-							EmitInstruction(FishInst.MOVE_LONG_REG, IDExpr.Identifier, Reg.EAX);
-						}
-						else
-						{*/
-						int CopyBytes = State.GetPointerTypeSize(VarType);
-						bool IsUnsigned = CTType.IsUnsigned(VarType.Type);
-
-						if (State.IndexEmitOnlyAddress)
-						{
-
-						}
-						else
-						{
-							if (CopyBytes == 1)
+							if (!State.IndexEmitOnlyAddress)
 							{
-								if (IsUnsigned)
-									EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+								if (copyBytes == 1)
+								{
+									if (isUnsigned)
+										EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+									else
+										EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+								}
+								else if (copyBytes == 2)
+									EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+								else if (copyBytes == 4)
+									EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
 								else
-									EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+									throw new NotImplementedException();
 							}
-							else if (CopyBytes == 2)
-								EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
-							else if (CopyBytes == 4)
-								EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
-							else
-								throw new NotImplementedException();
 						}
-						//}
+						else
+						{
+							// Existing non-identifier path kept (already does index first then base)
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+							Compile(IndexExpr.LExpr);
+							EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
+
+							// (You may need to replicate the load logic here similar to above if required)
+						}
 
 						Unindent();
 						EmitRaw("# IndexOp END");

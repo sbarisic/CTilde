@@ -523,34 +523,42 @@ namespace CTilde.Langs
 						{
 							if (Cmp.Op == ComparisonOp.Equals)
 							{
+								// Jump to Else when not equal (false)
 								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.NotEquals)
 							{
+								// Jump to Else when equal (false)
 								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThan)
 							{
-								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
+								// Jump to Else when NOT greater => a <= b
+								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThan)
 							{
-								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, ElseLblName);
+								// Jump to Else when NOT less => a >= b
+								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThanOrEqual)
 							{
-								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, ElseLblName);
+								// Jump to Else when NOT (a >= b) => a < b is false only if a < b is true? No:
+								// We want Else when a < b (false for >=)
+								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThanOrEqual)
 							{
-								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, ElseLblName);
+								// Jump to Else when NOT (a <= b) => a > b
+								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
 							}
 							else
 								throw new NotImplementedException();
-
 						}
 						else
+						{
 							throw new NotImplementedException();
+						}
 
 						State.PushBreakLabel(EndLblName);
 						Compile(IfExpr.Body);

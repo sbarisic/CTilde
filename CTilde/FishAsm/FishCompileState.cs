@@ -243,39 +243,27 @@ namespace CTilde.FishAsm
 		{
 			if (IsParam)
 			{
-				DefineVar(VarName, 4 + (ParamOffset + Size), Size, TypeStr, Global, Param);
+				// Parameters are passed via 32-bit pushes and live at [EBP+8 + ParamOffset]
+				DefineVar(VarName, 8 + ParamOffset, Size, TypeStr, Global, Param);
 			}
 			else
 			{
-				/*int Offset = 0;
-
-				for (int i = 0; i < VarOffsets.Count; i++)
-				{
-					if (VarOffsets[i].Global)
-						continue;
-
-					Offset += VarOffsets[i].Size;
-				}*/
-
 				DefineVar(VarName, -4 - (ArgOffset), Size, TypeStr, Global, Param);
 			}
 
 			if (!Global)
 			{
 				if (IsParam)
-					ParamOffset += Size;
+				{
+					// Advance by one 32-bit slot per argument
+					ParamOffset += 4;
+				}
 				else
+				{
 					ArgOffset += Size;
+				}
 			}
 		}
-
-		/*public void GetVarS(string VarName)
-		{
-			if (ContainsKey(VarName))
-				return GetKeyValue(VarName).EBPOffset;
-
-			throw new Exception(string.Format("Could not find variable '{0}'", VarName));
-		}*/
 
 		public int GetVarOffset(string VarName)
 		{
@@ -290,7 +278,6 @@ namespace CTilde.FishAsm
 			if (ContainsKey(VarName))
 				return GetKeyValue(VarName).TypeStr;
 
-			//throw new Exception(string.Format("Could not find variable '{0}'", VarName));
 			return null;
 		}
 

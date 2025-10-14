@@ -1,5 +1,5 @@
 ﻿uint* int_table;
-//string temp_buffer = static string[20];
+string temp_buffer = static string[20];
 
 void print(string str) {
 	uint i = 0;
@@ -32,8 +32,8 @@ void kmain() {
 
 	print("Hello, World!\n");
 
-	while (true) {
-	}
+	//while (true) {
+	//}
 
 	__asm("SYSCALL $0");
 }

@@ -47,8 +47,25 @@ namespace CTilde.Langs
 			return string.Join(", ", argsStr);
 		}
 
+		const bool SkipDuplicates = true;
+		FishInst LastInst;
+		object[] LastArgs;
+		FishInst[] AllowSkip = new FishInst[] { FishInst.MOVE_REG_OFFSET_REG };
+
 		void EmitInstruction(FishInst inst, params object[] args)
 		{
+			if (SkipDuplicates)
+			{
+				if (inst == LastInst && args.Length == LastArgs.Length && args.SequenceEqual(LastArgs) && AllowSkip.Contains(inst))
+				{
+					//EmitRawUnindented("# Skipping duplicate instruction {0} {1}", inst, FormatArgs(args));
+					return;
+				}
+
+				LastInst = inst;
+				LastArgs = args;
+			}
+
 			//Indent();
 			AppendLine("{0} {1}", inst, FormatArgs(args));
 			//Unindent();
@@ -323,11 +340,12 @@ namespace CTilde.Langs
 							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
 							Compile(AssValue.ValueExpr);
+							int CopyBytes = 0;
 
 							if (IndexOp.LExpr is Expr_Identifier Id)
 							{
 								Expr_TypeDef VarType = State.GetVarType(Id.Identifier);
-								int CopyBytes = State.GetPointerTypeSize(VarType);
+								CopyBytes = State.GetPointerTypeSize(VarType);
 
 								if (CopyBytes == 1)
 									EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
@@ -344,7 +362,8 @@ namespace CTilde.Langs
 							else
 								throw new NotImplementedException();
 
-							EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
+							if (CopyBytes == 4)
+								EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
 							//EmitRaw("# REST OF ASSVALUE HERE");
 
 							Unindent();
@@ -565,7 +584,11 @@ namespace CTilde.Langs
 						State.PushBreakLabel(EndLblName);
 
 						//EmitRaw("# Body goes here");
+						EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
+						EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
 						Compile(WhileExpr.Body);
+						EmitInstruction(FishInst.POP_REG, Reg.EAX);
+						EmitInstruction(FishInst.POP_REG, Reg.EBX);
 
 						State.PopBreakLabel();
 
@@ -610,13 +633,14 @@ namespace CTilde.Langs
 
 						Compile(IndexExpr.IndexValExpr);
 
-						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
-
 
 						if (IndexExpr.LExpr is Expr_Identifier Id)
 						{
 							Expr_TypeDef IdType = State.GetVarType(Id.Identifier);
 							int Sz = State.GetPointerTypeSize(IdType);
+
+							int Offset = State.GetVarOffset(Id.Identifier);
+							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, -Offset, Reg.EBP, Reg.EBX);
 
 							if (Sz > 1)
 							{
@@ -629,6 +653,8 @@ namespace CTilde.Langs
 						}
 						else
 						{
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+
 							Compile(IndexExpr.LExpr);
 						}
 
@@ -644,8 +670,7 @@ namespace CTilde.Langs
 						else
 						{*/
 						int CopyBytes = State.GetPointerTypeSize(VarType);
-
-
+						bool IsUnsigned = CTType.IsUnsigned(VarType.Type);
 
 						if (State.IndexEmitOnlyAddress)
 						{
@@ -654,7 +679,12 @@ namespace CTilde.Langs
 						else
 						{
 							if (CopyBytes == 1)
-								EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+							{
+								if (IsUnsigned)
+									EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+								else
+									EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
+							}
 							else if (CopyBytes == 2)
 								EmitInstruction(FishInst.MOVEZ_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
 							else if (CopyBytes == 4)

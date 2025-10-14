@@ -161,6 +161,7 @@ namespace CTilde.Langs
 						if (FuncDef.FuncBody != null)
 						{
 							State.ClearVarOffsets();
+							State.ClearArgOffset();
 
 							EmitRaw("{0}:", FuncDef.FuncName);
 							Indent();

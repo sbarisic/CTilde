@@ -180,6 +180,11 @@ namespace CTilde.FishAsm
 			ParamOffset = 0;
 		}
 
+		public void ClearArgOffset()
+		{
+			ArgOffset = 0;
+		}
+
 		bool ContainsKey(string Key)
 		{
 			for (int i = 0; i < VarOffsets.Count; i++)

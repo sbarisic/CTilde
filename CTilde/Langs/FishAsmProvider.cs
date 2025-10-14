@@ -296,7 +296,9 @@ namespace CTilde.Langs
 						Indent();
 
 						int Size = State.GetTypeSize(AssVariableDef.VariableDef.Type);
-						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type, false, false);
+						bool Global = State.IsInsideFunctionBody ? false : true;
+
+						State.DefineVar(AssVariableDef.VariableDef.Ident.Identifier, Size, false, AssVariableDef.VariableDef.Type, Global, false);
 
 						if (State.IsInsideFunctionBody)
 						{
@@ -304,6 +306,7 @@ namespace CTilde.Langs
 						}
 						else
 						{
+							State.DefineLabel(AssVariableDef.VariableDef.Ident.Identifier, true);
 							EmitRaw(".globl {0}", AssVariableDef.VariableDef.Ident.Identifier);
 							EmitRaw("{0}:", AssVariableDef.VariableDef.Ident.Identifier);
 						}
@@ -584,12 +587,15 @@ namespace CTilde.Langs
 
 						State.PushBreakLabel(EndLblName);
 
-						//EmitRaw("# Body goes here");
-						EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
-						EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
-						Compile(WhileExpr.Body);
-						EmitInstruction(FishInst.POP_REG, Reg.EAX);
-						EmitInstruction(FishInst.POP_REG, Reg.EBX);
+						if (WhileExpr.Body.Expressions.Count > 0)
+						{
+							//EmitRaw("# Body goes here");
+							EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
+							EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+							Compile(WhileExpr.Body);
+							EmitInstruction(FishInst.POP_REG, Reg.EAX);
+							EmitInstruction(FishInst.POP_REG, Reg.EBX);
+						}
 
 						State.PopBreakLabel();
 

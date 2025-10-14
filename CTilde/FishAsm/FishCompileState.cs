@@ -129,7 +129,7 @@ namespace CTilde.FishAsm
 		{
 			if (Type.Type == "int" || Type.Type == "uint" || Type.Type == "float" || Type.Type == "string")
 				return 4;
-			else if (Type.Type == "byte" || Type.Type == "bool")
+			else if (Type.Type == "byte" || Type.Type == "char" || Type.Type == "bool")
 				return 1;
 
 			throw new NotImplementedException();

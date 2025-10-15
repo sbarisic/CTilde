@@ -162,8 +162,8 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x13B8: JUMP_IF_NOT_ZERO_LONG 0x142A
-EIP 0x142A hex, 5162 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13B8: JUMP_IF_ZERO_LONG 0x142A
+EIP 0x13BD hex, 5053 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
 EAX = 0x00000008 hex, 8 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
@@ -171,120 +171,29 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x142A: PUSH_REG %EBX
-: Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
-EIP 0x142C hex, 5164 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13BD: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x8 hex; 8 dec; new value 0x0 hex; 0 dec;
+EIP 0x13C3 hex, 5059 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x142C: MOVE_LONG_REG 0x1064, %EBX
-: Write EBX = 0x48 hex; 72 dec; new value 0x1064 hex; 4196 dec;
-EIP 0x1432 hex, 5170 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1432: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
-: Write EAX = 0x8 hex; 8 dec; new value 0x32 hex; 50 dec;
-EIP 0x1439 hex, 5177 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000032 hex, 50 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000032 hex, 50 dec; AX = 0x00000032 hex, 50 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1439: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x1064 hex; 4196 dec; new value 0x32 hex; 50 dec;
-EIP 0x143C hex, 5180 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000032 hex, 50 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000032 hex, 50 dec; AX = 0x00000032 hex, 50 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x143C: MOVE_LONG_REG 0x1, %EAX
-: Write EAX = 0x32 hex; 50 dec; new value 0x1 hex; 1 dec;
-EIP 0x1442 hex, 5186 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000001 hex, 1 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1442: SUB_REG_REG %EBX, %EAX
-: Write EAX = 0x1 hex; 1 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-EIP 0x1445 hex, 5189 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1445: POP_REG %EBX
-: Write EBX = 0x32 hex; 50 dec; new value 0x48 hex; 72 dec;
-: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x1447 hex, 5191 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1447: PUSH_REG %EAX
+IP 0x13C3: PUSH_REG %EAX
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
-EIP 0x1449 hex, 5193 dec; RFLAGS 0x0030 hex, 48 dec; 
+EIP 0x13C5 hex, 5061 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1449: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x48 hex; 72 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-EIP 0x144C hex, 5196 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0xFFFFFFCF hex, 4294967247 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000CF hex, 207 dec; BX = 0x0000FFCF hex, 65487 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x144C: MOVE_LONG_REG 0x1068, %EBX
-: Write EBX = 0xFFFFFFCF hex; 4294967247 dec; new value 0x1068 hex; 4200 dec;
-EIP 0x1452 hex, 5202 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1452: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
-: Write EAX = 0xFFFFFFCF hex; 4294967247 dec; new value 0x0 hex; 0 dec;
-EIP 0x1459 hex, 5209 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000048 hex, 72 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000048 hex, 72 dec; BX = 0x00000048 hex, 72 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x1459: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x1068 hex; 4200 dec; new value 0x0 hex; 0 dec;
-EIP 0x145C hex, 5212 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13C5: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x48 hex; 72 dec; new value 0x0 hex; 0 dec;
+EIP 0x13C8 hex, 5064 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
 EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
@@ -292,197 +201,345 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x145C: POP_REG %EAX
-: Write EAX = 0x0 hex; 0 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x145E hex, 5214 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13C8: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x13CE hex, 5070 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x145E: CMP_REG_REG %EBX, %EAX
-EIP 0x1461 hex, 5217 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+IP 0x13CE: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+EIP 0x13D5 hex, 5077 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x1461: JUMP_IF_LESS_LONG 0x14D2
-EIP 0x14D2 hex, 5330 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+IP 0x13D5: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0x0 hex; 0 dec;
+EIP 0x13D8 hex, 5080 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x14D2: LEAVE
+IP 0x13D8: POP_REG %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
+EIP 0x13DA hex, 5082 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13DA: CMP_REG_REG %EBX, %EAX
+EIP 0x13DD hex, 5085 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13DD: JUMP_IF_GREAT_LONG 0x142A
+EIP 0x13E2 hex, 5090 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13E2: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x13E8 hex, 5096 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13E8: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+EIP 0x13EF hex, 5103 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13EF: SUB_LONG_REG 0x1, %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x13F5 hex, 5109 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13F5: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x13FB hex, 5115 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13FB: MOVE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x1402 hex, 5122 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1402: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x1408 hex, 5128 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1408: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x140F hex, 5135 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x140F: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x1412 hex, 5138 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1412: ADD_LONG_REG 0x1000, %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFF hex; 4095 dec;
+EIP 0x1418 hex, 5144 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000FFF hex, 4095 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x00000FFF hex, 4095 dec; 
+AH = 0x0000000F hex, 15 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1418: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFF hex; 4095 dec;
+EIP 0x141B hex, 5147 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000FFF hex, 4095 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x00000FFF hex, 4095 dec; 
+AH = 0x0000000F hex, 15 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x141B: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0xFFF hex; 4095 dec; new value 0x0 hex; 0 dec;
+EIP 0x1421 hex, 5153 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1421: MOVEBYTE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x1428 hex, 5160 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1428: LEAVE
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFF0 hex; 131056 dec;
 : Write EBP = 0x1FFF0 hex; 131056 dec; new value 0x1FFFC hex; 131068 dec;
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFF4 hex; 131060 dec;
-EIP 0x14D3 hex, 5331 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1429 hex, 5161 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF4 hex, 131060 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x14D3: RET
+IP 0x1429: RET
 : Write ESP = 0x1FFF4 hex; 131060 dec; new value 0x1FFF8 hex; 131064 dec;
-EIP 0x1807 hex, 6151 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1807 hex, 6151 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF8 hex, 131064 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1807: ADD_LONG_REG 0x4, %ESP
 : Write ESP = 0x1FFF8 hex; 131064 dec; new value 0x1FFFC hex; 131068 dec;
-EIP 0x180D hex, 6157 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x180D hex, 6157 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFFC hex, 131068 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x180D: MOVES_LONG_REG 0xA, %EAX
-: Write EAX = 0xFFFFFFCF hex; 4294967247 dec; new value 0xA hex; 10 dec;
-EIP 0x1813 hex, 6163 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x0000000A hex, 10 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+: Write EAX = 0x0 hex; 0 dec; new value 0xA hex; 10 dec;
+EIP 0x1813 hex, 6163 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFFC hex, 131068 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1813: PUSH_REG %EAX
 : Write ESP = 0x1FFFC hex; 131068 dec; new value 0x1FFF8 hex; 131064 dec;
-EIP 0x1815 hex, 6165 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x0000000A hex, 10 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1815 hex, 6165 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF8 hex, 131064 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1815: MOVE_LONG_REG 0x1392, %EAX
 : Write EAX = 0xA hex; 10 dec; new value 0x1392 hex; 5010 dec;
-EIP 0x181B hex, 6171 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x181B hex, 6171 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF8 hex, 131064 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000092 hex, 146 dec; AX = 0x00001392 hex, 5010 dec; 
-AH = 0x00000013 hex, 19 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000013 hex, 19 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x181B: CALL_REG %EAX
 : Write ESP = 0x1FFF8 hex; 131064 dec; new value 0x1FFF4 hex; 131060 dec;
-EIP 0x1392 hex, 5010 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1392 hex, 5010 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF4 hex, 131060 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000092 hex, 146 dec; AX = 0x00001392 hex, 5010 dec; 
-AH = 0x00000013 hex, 19 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000013 hex, 19 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1392: PUSH_REG %EBP
 : Write ESP = 0x1FFF4 hex; 131060 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x1394 hex, 5012 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1394 hex, 5012 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000092 hex, 146 dec; AX = 0x00001392 hex, 5010 dec; 
-AH = 0x00000013 hex, 19 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000013 hex, 19 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1394: MOVE_REG_REG %ESP, %EBP
 : Write EBP = 0x1FFFC hex; 131068 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x1397 hex, 5015 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1397 hex, 5015 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00001392 hex, 5010 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000092 hex, 146 dec; AX = 0x00001392 hex, 5010 dec; 
-AH = 0x00000013 hex, 19 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000013 hex, 19 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1397: MOVES_LONG_REG 0x8, %EAX
 : Write EAX = 0x1392 hex; 5010 dec; new value 0x8 hex; 8 dec;
-EIP 0x139D hex, 5021 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x139D hex, 5021 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000008 hex, 8 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x139D: PUSH_REG %EAX
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
-EIP 0x139F hex, 5023 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x139F hex, 5023 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000008 hex, 8 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x139F: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x0 hex; 0 dec; new value 0x8 hex; 8 dec;
-EIP 0x13A2 hex, 5026 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
+: Write EBX = 0xFFF hex; 4095 dec; new value 0x8 hex; 8 dec;
+EIP 0x13A2 hex, 5026 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
 EAX = 0x00000008 hex, 8 dec; EBX = 0x00000008 hex, 8 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000008 hex, 8 dec; BX = 0x00000008 hex, 8 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x13A2: LEA_OFFSET_REG_REG 8(%EBP), %EAX
 : Write EAX = 0x8 hex; 8 dec; new value 0x1FFF8 hex; 131064 dec;
-EIP 0x13A9 hex, 5033 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
+EIP 0x13A9 hex, 5033 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
 EAX = 0x0001FFF8 hex, 131064 dec; EBX = 0x00000008 hex, 8 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000F8 hex, 248 dec; AX = 0x0000FFF8 hex, 65528 dec; 
 AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000008 hex, 8 dec; BX = 0x00000008 hex, 8 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x13A9: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
 : Write EAX = 0x1FFF8 hex; 131064 dec; new value 0xA hex; 10 dec;
-EIP 0x13B0 hex, 5040 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
+EIP 0x13B0 hex, 5040 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
 EAX = 0x0000000A hex, 10 dec; EBX = 0x00000008 hex, 8 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000008 hex, 8 dec; BX = 0x00000008 hex, 8 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x13B0: MOVE_REG_REG %EAX, %EBX
 : Write EBX = 0x8 hex; 8 dec; new value 0xA hex; 10 dec;
-EIP 0x13B3 hex, 5043 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
+EIP 0x13B3 hex, 5043 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
 EAX = 0x0000000A hex, 10 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x13B3: POP_REG %EAX
 : Write EAX = 0xA hex; 10 dec; new value 0x8 hex; 8 dec;
 : Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x13B5 hex, 5045 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
+EIP 0x13B5 hex, 5045 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
 EAX = 0x00000008 hex, 8 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x13B5: CMP_REG_REG %EBX, %EAX
 EIP 0x13B8 hex, 5048 dec; RFLAGS 0x0030 hex, 48 dec; 
@@ -493,8 +550,8 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x13B8: JUMP_IF_NOT_ZERO_LONG 0x142A
-EIP 0x142A hex, 5162 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13B8: JUMP_IF_ZERO_LONG 0x142A
+EIP 0x13BD hex, 5053 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
 EAX = 0x00000008 hex, 8 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
@@ -502,120 +559,29 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x142A: PUSH_REG %EBX
-: Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
-EIP 0x142C hex, 5164 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13BD: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x8 hex; 8 dec; new value 0x0 hex; 0 dec;
+EIP 0x13C3 hex, 5059 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x142C: MOVE_LONG_REG 0x1064, %EBX
-: Write EBX = 0xA hex; 10 dec; new value 0x1064 hex; 4196 dec;
-EIP 0x1432 hex, 5170 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000008 hex, 8 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000008 hex, 8 dec; AX = 0x00000008 hex, 8 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1432: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
-: Write EAX = 0x8 hex; 8 dec; new value 0x32 hex; 50 dec;
-EIP 0x1439 hex, 5177 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000032 hex, 50 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000032 hex, 50 dec; AX = 0x00000032 hex, 50 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1439: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x1064 hex; 4196 dec; new value 0x32 hex; 50 dec;
-EIP 0x143C hex, 5180 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000032 hex, 50 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000032 hex, 50 dec; AX = 0x00000032 hex, 50 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x143C: MOVE_LONG_REG 0x1, %EAX
-: Write EAX = 0x32 hex; 50 dec; new value 0x1 hex; 1 dec;
-EIP 0x1442 hex, 5186 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000001 hex, 1 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1442: SUB_REG_REG %EBX, %EAX
-: Write EAX = 0x1 hex; 1 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-EIP 0x1445 hex, 5189 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000032 hex, 50 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000032 hex, 50 dec; BX = 0x00000032 hex, 50 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1445: POP_REG %EBX
-: Write EBX = 0x32 hex; 50 dec; new value 0xA hex; 10 dec;
-: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x1447 hex, 5191 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1447: PUSH_REG %EAX
+IP 0x13C3: PUSH_REG %EAX
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
-EIP 0x1449 hex, 5193 dec; RFLAGS 0x0030 hex, 48 dec; 
+EIP 0x13C5 hex, 5061 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1449: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0xA hex; 10 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-EIP 0x144C hex, 5196 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0xFFFFFFCF hex, 4294967247 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000CF hex, 207 dec; BX = 0x0000FFCF hex, 65487 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x144C: MOVE_LONG_REG 0x1068, %EBX
-: Write EBX = 0xFFFFFFCF hex; 4294967247 dec; new value 0x1068 hex; 4200 dec;
-EIP 0x1452 hex, 5202 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
-
-IP 0x1452: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
-: Write EAX = 0xFFFFFFCF hex; 4294967247 dec; new value 0x0 hex; 0 dec;
-EIP 0x1459 hex, 5209 dec; RFLAGS 0x0030 hex, 48 dec; 
-IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
 XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
-AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x1459: MOVE_REG_REG %EAX, %EBX
-: Write EBX = 0x1068 hex; 4200 dec; new value 0x0 hex; 0 dec;
-EIP 0x145C hex, 5212 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13C5: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xA hex; 10 dec; new value 0x0 hex; 0 dec;
+EIP 0x13C8 hex, 5064 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
 EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
@@ -623,75 +589,1194 @@ XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0
 AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x145C: POP_REG %EAX
-: Write EAX = 0x0 hex; 0 dec; new value 0xFFFFFFCF hex; 4294967247 dec;
-: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
-EIP 0x145E hex, 5214 dec; RFLAGS 0x0030 hex, 48 dec; 
+IP 0x13C8: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x13CE hex, 5070 dec; RFLAGS 0x0030 hex, 48 dec; 
 IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13CE: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x13D5 hex, 5077 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13D5: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x13D8 hex, 5080 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13D8: POP_REG %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0x0 hex; 0 dec;
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
+EIP 0x13DA hex, 5082 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13DA: CMP_REG_REG %EBX, %EAX
+EIP 0x13DD hex, 5085 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x13DD: JUMP_IF_GREAT_LONG 0x142A
+EIP 0x142A hex, 5162 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x142A: PUSH_REG %EBX
+: Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
+EIP 0x142C hex, 5164 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x142C: MOVE_LONG_REG 0x1, %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1 hex; 1 dec;
+EIP 0x1432 hex, 5170 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1432: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xFFFFFFFF hex; 4294967295 dec; new value 0x1 hex; 1 dec;
+EIP 0x1435 hex, 5173 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1435: MOVE_LONG_REG 0x1064, %EBX
+: Write EBX = 0x1 hex; 1 dec; new value 0x1064 hex; 4196 dec;
+EIP 0x143B hex, 5179 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x143B: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x32 hex; 50 dec;
+EIP 0x1442 hex, 5186 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000032 hex, 50 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000032 hex, 50 dec; AX = 0x00000032 hex, 50 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1442: SUB_REG_REG %EBX, %EAX
+: Write EAX = 0x32 hex; 50 dec; new value 0xFFFFEFCE hex; 4294963150 dec;
+EIP 0x1445 hex, 5189 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0x00001064 hex, 4196 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000064 hex, 100 dec; BX = 0x00001064 hex, 4196 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1445: POP_REG %EBX
+: Write EBX = 0x1064 hex; 4196 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
+EIP 0x1447 hex, 5191 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1447: PUSH_REG %EAX
+: Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
+EIP 0x1449 hex, 5193 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1449: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFFFEFCE hex; 4294963150 dec;
+EIP 0x144C hex, 5196 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFEFCE hex, 4294963150 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000EF hex, 239 dec; BL = 0x000000CE hex, 206 dec; BX = 0x0000EFCE hex, 61390 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x144C: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0xFFFFEFCE hex; 4294963150 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x1452 hex, 5202 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1452: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0xFFFFEFCE hex; 4294963150 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x1459 hex, 5209 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1459: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x145C hex, 5212 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x145C: POP_REG %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFFFEFCE hex; 4294963150 dec;
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
+EIP 0x145E hex, 5214 dec; RFLAGS 0x0032 hex, 50 dec; 
+IsZero 0; Sign 1; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000032 hex, 50 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x145E: CMP_REG_REG %EBX, %EAX
+EIP 0x1461 hex, 5217 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1461: JUMP_IF_LESS_LONG 0x14D2
+EIP 0x1466 hex, 5222 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1466: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0xFFFFFFFF hex; 4294967295 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x146C hex, 5228 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFEFCE hex, 4294963150 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CE hex, 206 dec; AX = 0x0000EFCE hex, 61390 dec; 
+AH = 0x000000EF hex, 239 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x146C: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0xFFFFEFCE hex; 4294963150 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x1473 hex, 5235 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1473: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x1476 hex, 5238 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1476: ADD_LONG_REG 0x1000, %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFF hex; 4095 dec;
+EIP 0x147C hex, 5244 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000FFF hex, 4095 dec; EBX = 0xFFFFFFFF hex, 4294967295 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x00000FFF hex, 4095 dec; 
+AH = 0x0000000F hex, 15 dec; BH = 0x000000FF hex, 255 dec; BL = 0x000000FF hex, 255 dec; BX = 0x0000FFFF hex, 65535 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x147C: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xFFFFFFFF hex; 4294967295 dec; new value 0xFFF hex; 4095 dec;
+EIP 0x147F hex, 5247 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000FFF hex, 4095 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x00000FFF hex, 4095 dec; 
+AH = 0x0000000F hex, 15 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x147F: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0xFFF hex; 4095 dec; new value 0x1FFF8 hex; 131064 dec;
+EIP 0x1486 hex, 5254 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFF8 hex, 131064 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000F8 hex, 248 dec; AX = 0x0000FFF8 hex, 65528 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1486: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFF8 hex; 131064 dec; new value 0xA hex; 10 dec;
+EIP 0x148D hex, 5261 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x148D: MOVEBYTE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x1494 hex, 5268 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000FFF hex, 4095 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x0000000F hex, 15 dec; BL = 0x000000FF hex, 255 dec; BX = 0x00000FFF hex, 4095 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1494: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0xFFF hex; 4095 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x149A hex, 5274 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x149A: MOVE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0xFFFFFFFF hex; 4294967295 dec;
+EIP 0x14A1 hex, 5281 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0xFFFFFFFF hex, 4294967295 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000FF hex, 255 dec; AX = 0x0000FFFF hex, 65535 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14A1: ADD_LONG_REG 0x1, %EAX
+: Write EAX = 0xFFFFFFFF hex; 4294967295 dec; new value 0x0 hex; 0 dec;
+EIP 0x14A7 hex, 5287 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14A7: MOVE_LONG_REG 0x1068, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0x1068 hex; 4200 dec;
+EIP 0x14AD hex, 5293 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14AD: MOVE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x14B4 hex, 5300 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14B4: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFF8 hex; 131064 dec;
+EIP 0x14BB hex, 5307 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFF8 hex, 131064 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000F8 hex, 248 dec; AX = 0x0000FFF8 hex, 65528 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14BB: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFF8 hex; 131064 dec; new value 0xA hex; 10 dec;
+EIP 0x14C2 hex, 5314 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14C2: PUSH_REG %EAX
+: Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFEC hex; 131052 dec;
+EIP 0x14C4 hex, 5316 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14C4: MOVE_LONG_REG 0x1137, %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0x1137 hex; 4407 dec;
+EIP 0x14CA hex, 5322 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001137 hex, 4407 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000037 hex, 55 dec; AX = 0x00001137 hex, 4407 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14CA: CALL_REG %EAX
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFE8 hex; 131048 dec;
+EIP 0x1137 hex, 4407 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001137 hex, 4407 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFE8 hex, 131048 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000037 hex, 55 dec; AX = 0x00001137 hex, 4407 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1137: PUSH_REG %EBP
+: Write ESP = 0x1FFE8 hex; 131048 dec; new value 0x1FFE4 hex; 131044 dec;
+EIP 0x1139 hex, 4409 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001137 hex, 4407 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000037 hex, 55 dec; AX = 0x00001137 hex, 4407 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1139: MOVE_REG_REG %ESP, %EBP
+: Write EBP = 0x1FFF0 hex; 131056 dec; new value 0x1FFE4 hex; 131044 dec;
+EIP 0x113C hex, 4412 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001137 hex, 4407 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000037 hex, 55 dec; AX = 0x00001137 hex, 4407 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x113C: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x1137 hex; 4407 dec; new value 0x0 hex; 0 dec;
+EIP 0x1142 hex, 4418 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001068 hex, 4200 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000010 hex, 16 dec; BL = 0x00000068 hex, 104 dec; BX = 0x00001068 hex, 4200 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1142: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1068 hex; 4200 dec; new value 0x0 hex; 0 dec;
+EIP 0x1145 hex, 4421 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1145: ADD_LONG_REG 0x1135, %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1135 hex; 4405 dec;
+EIP 0x114B hex, 4427 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001135 hex, 4405 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000035 hex, 53 dec; AX = 0x00001135 hex, 4405 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x114B: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x1135 hex; 4405 dec;
+EIP 0x114E hex, 4430 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001135 hex, 4405 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000035 hex, 53 dec; AX = 0x00001135 hex, 4405 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x114E: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0x1135 hex; 4405 dec; new value 0x1FFEC hex; 131052 dec;
+EIP 0x1155 hex, 4437 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFEC hex, 131052 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000EC hex, 236 dec; AX = 0x0000FFEC hex, 65516 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1155: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFEC hex; 131052 dec; new value 0xA hex; 10 dec;
+EIP 0x115C hex, 4444 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x115C: MOVEBYTE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x1163 hex, 4451 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1163: MOVE_LONG_REG 0x1, %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0x1 hex; 1 dec;
+EIP 0x1169 hex, 4457 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1169: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1135 hex; 4405 dec; new value 0x1 hex; 1 dec;
+EIP 0x116C hex, 4460 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x116C: ADD_LONG_REG 0x1135, %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x1136 hex; 4406 dec;
+EIP 0x1172 hex, 4466 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001136 hex, 4406 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000036 hex, 54 dec; AX = 0x00001136 hex, 4406 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1172: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1 hex; 1 dec; new value 0x1136 hex; 4406 dec;
+EIP 0x1175 hex, 4469 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00001136 hex, 4406 dec; EBX = 0x00001136 hex, 4406 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000036 hex, 54 dec; AX = 0x00001136 hex, 4406 dec; 
+AH = 0x00000011 hex, 17 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000036 hex, 54 dec; BX = 0x00001136 hex, 4406 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1175: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x1136 hex; 4406 dec; new value 0x0 hex; 0 dec;
+EIP 0x117B hex, 4475 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001136 hex, 4406 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000036 hex, 54 dec; BX = 0x00001136 hex, 4406 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x117B: MOVEBYTE_REG_OFFSET_REG %EAX, 0(%EBX)
+EIP 0x1182 hex, 4482 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001136 hex, 4406 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000036 hex, 54 dec; BX = 0x00001136 hex, 4406 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1182: MOVE_LONG_REG 0x1135, %EBX
+: Write EBX = 0x1136 hex; 4406 dec; new value 0x1135 hex; 4405 dec;
+EIP 0x1188 hex, 4488 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1188: MOVEBYTE_OFFSET_REG_REG 0(%EBX), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0xA hex; 10 dec;
+EIP 0x118F hex, 4495 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x118F: PUSH_REG %EAX
+: Write ESP = 0x1FFE4 hex; 131044 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x1191 hex, 4497 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE0 hex, 131040 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1191: MOVE_LONG_REG 0x106C, %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0x106C hex; 4204 dec;
+EIP 0x1197 hex, 4503 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000106C hex, 4204 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE0 hex, 131040 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000006C hex, 108 dec; AX = 0x0000106C hex, 4204 dec; 
+AH = 0x00000010 hex, 16 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1197: CALL_REG %EAX
+: Write ESP = 0x1FFE0 hex; 131040 dec; new value 0x1FFDC hex; 131036 dec;
+EIP 0x106C hex, 4204 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000106C hex, 4204 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFDC hex, 131036 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000006C hex, 108 dec; AX = 0x0000106C hex, 4204 dec; 
+AH = 0x00000010 hex, 16 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x106C: PUSH_REG %EBP
+: Write ESP = 0x1FFDC hex; 131036 dec; new value 0x1FFD8 hex; 131032 dec;
+EIP 0x106E hex, 4206 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000106C hex, 4204 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFD8 hex, 131032 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000006C hex, 108 dec; AX = 0x0000106C hex, 4204 dec; 
+AH = 0x00000010 hex, 16 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x106E: MOVE_REG_REG %ESP, %EBP
+: Write EBP = 0x1FFE4 hex; 131044 dec; new value 0x1FFD8 hex; 131032 dec;
+EIP 0x1071 hex, 4209 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000106C hex, 4204 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD8 hex, 131032 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000006C hex, 108 dec; AX = 0x0000106C hex, 4204 dec; 
+AH = 0x00000010 hex, 16 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1071: SUB_LONG_REG 0x4, %ESP
+: Write ESP = 0x1FFD8 hex; 131032 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x1077 hex, 4215 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000106C hex, 4204 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000006C hex, 108 dec; AX = 0x0000106C hex, 4204 dec; 
+AH = 0x00000010 hex, 16 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1077: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x106C hex; 4204 dec; new value 0x0 hex; 0 dec;
+EIP 0x107D hex, 4221 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x107D: MOVE_REG_OFFSET_REG %EAX, -4(%EBP)
+EIP 0x1084 hex, 4228 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1084: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+EIP 0x108A hex, 4234 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108A: PUSH_REG %EAX
+: Write ESP = 0x1FFD4 hex; 131028 dec; new value 0x1FFD0 hex; 131024 dec;
+EIP 0x108C hex, 4236 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00001135 hex, 4405 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000011 hex, 17 dec; BL = 0x00000035 hex, 53 dec; BX = 0x00001135 hex, 4405 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108C: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1135 hex; 4405 dec; new value 0x0 hex; 0 dec;
+EIP 0x108F hex, 4239 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108F: LEA_OFFSET_REG_REG -4(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x1096 hex, 4246 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFD4 hex, 131028 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000D4 hex, 212 dec; AX = 0x0000FFD4 hex, 65492 dec; 
 AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
 CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x145E: CMP_REG_REG %EBX, %EAX
-EIP 0x1461 hex, 5217 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+IP 0x1096: MOVE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFD4 hex; 131028 dec; new value 0x0 hex; 0 dec;
+EIP 0x109D hex, 4253 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
 
-IP 0x1461: JUMP_IF_LESS_LONG 0x14D2
-EIP 0x14D2 hex, 5330 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
-EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
+IP 0x109D: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+EIP 0x10A0 hex, 4256 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10A0: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x10A7 hex, 4263 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE0 hex, 131040 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E0 hex, 224 dec; AX = 0x0000FFE0 hex, 65504 dec; 
 AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10A7: ADD_REG_REG %EBX, %EAX
+: Write EAX = 0x1FFE0 hex; 131040 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x10AA hex, 4266 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE0 hex, 131040 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E0 hex, 224 dec; AX = 0x0000FFE0 hex, 65504 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10AA: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFE0 hex; 131040 dec; new value 0xA hex; 10 dec;
+EIP 0x10B1 hex, 4273 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B1: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0xA hex; 10 dec;
+EIP 0x10B4 hex, 4276 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B4: POP_REG %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0x0 hex; 0 dec;
+: Write ESP = 0x1FFD0 hex; 131024 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x10B6 hex, 4278 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B6: CMP_REG_REG %EBX, %EAX
+EIP 0x10B9 hex, 4281 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B9: JUMP_IF_ZERO_LONG 0x1113
+EIP 0x10BE hex, 4286 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD4 hex, 131028 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10BE: PUSH_REG %EBX
+: Write ESP = 0x1FFD4 hex; 131028 dec; new value 0x1FFD0 hex; 131024 dec;
+EIP 0x10C0 hex, 4288 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFD0 hex, 131024 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10C0: PUSH_REG %EAX
+: Write ESP = 0x1FFD0 hex; 131024 dec; new value 0x1FFCC hex; 131020 dec;
+EIP 0x10C2 hex, 4290 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10C2: LEA_OFFSET_REG_REG -4(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x10C9 hex, 4297 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFD4 hex, 131028 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000D4 hex, 212 dec; AX = 0x0000FFD4 hex, 65492 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10C9: MOVE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFD4 hex; 131028 dec; new value 0x0 hex; 0 dec;
+EIP 0x10D0 hex, 4304 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10D0: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xA hex; 10 dec; new value 0x0 hex; 0 dec;
+EIP 0x10D3 hex, 4307 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10D3: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x10DA hex, 4314 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE0 hex, 131040 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E0 hex, 224 dec; AX = 0x0000FFE0 hex, 65504 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10DA: ADD_REG_REG %EBX, %EAX
+: Write EAX = 0x1FFE0 hex; 131040 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x10DD hex, 4317 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE0 hex, 131040 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E0 hex, 224 dec; AX = 0x0000FFE0 hex, 65504 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10DD: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFE0 hex; 131040 dec; new value 0xA hex; 10 dec;
+EIP 0x10E4 hex, 4324 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10E4: PUSH_REG %EAX
+: Write ESP = 0x1FFCC hex; 131020 dec; new value 0x1FFC8 hex; 131016 dec;
+EIP 0x10E6 hex, 4326 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0000000A hex, 10 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x0000000A hex, 10 dec; AX = 0x0000000A hex, 10 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10E6: MOVE_LONG_REG 0x1, %EAX
+: Write EAX = 0xA hex; 10 dec; new value 0x1 hex; 1 dec;
+EIP 0x10EC hex, 4332 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10EC: PUSH_REG %EAX
+: Write ESP = 0x1FFC8 hex; 131016 dec; new value 0x1FFC4 hex; 131012 dec;
+EIP 0x10EE hex, 4334 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10EE: SYSCALL_2
+SYSCALL PrintChar
+PrintChar '
+'
+EIP 0x10EF hex, 4335 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10EF: LEA_OFFSET_REG_REG -4(%EBP), %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x10F6 hex, 4342 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFD4 hex, 131028 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000D4 hex, 212 dec; AX = 0x0000FFD4 hex, 65492 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10F6: MOVE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFD4 hex; 131028 dec; new value 0x0 hex; 0 dec;
+EIP 0x10FD hex, 4349 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10FD: ADD_LONG_REG 0x1, %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1 hex; 1 dec;
+EIP 0x1103 hex, 4355 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1103: MOVE_REG_OFFSET_REG %EAX, -4(%EBP)
+EIP 0x110A hex, 4362 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC4 hex, 131012 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x110A: POP_REG %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x1 hex; 1 dec;
+: Write ESP = 0x1FFC4 hex; 131012 dec; new value 0x1FFC8 hex; 131016 dec;
+EIP 0x110C hex, 4364 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x110C: POP_REG %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0xA hex; 10 dec;
+: Write ESP = 0x1FFC8 hex; 131016 dec; new value 0x1FFCC hex; 131020 dec;
+EIP 0x110E hex, 4366 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x110E: JUMP_LONG 0x1084
+EIP 0x1084 hex, 4228 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1084: MOVE_LONG_REG 0x0, %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x0 hex; 0 dec;
+EIP 0x108A hex, 4234 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108A: PUSH_REG %EAX
+: Write ESP = 0x1FFCC hex; 131020 dec; new value 0x1FFC8 hex; 131016 dec;
+EIP 0x108C hex, 4236 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x0000000A hex, 10 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x0000000A hex, 10 dec; BX = 0x0000000A hex, 10 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108C: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0xA hex; 10 dec; new value 0x0 hex; 0 dec;
+EIP 0x108F hex, 4239 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x108F: LEA_OFFSET_REG_REG -4(%EBP), %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x1FFD4 hex; 131028 dec;
+EIP 0x1096 hex, 4246 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFD4 hex, 131028 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000D4 hex, 212 dec; AX = 0x0000FFD4 hex, 65492 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1096: MOVE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFD4 hex; 131028 dec; new value 0x1 hex; 1 dec;
+EIP 0x109D hex, 4253 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x109D: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x0 hex; 0 dec; new value 0x1 hex; 1 dec;
+EIP 0x10A0 hex, 4256 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000001 hex, 1 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000001 hex, 1 dec; AX = 0x00000001 hex, 1 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10A0: LEA_OFFSET_REG_REG 8(%EBP), %EAX
+: Write EAX = 0x1 hex; 1 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x10A7 hex, 4263 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE0 hex, 131040 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E0 hex, 224 dec; AX = 0x0000FFE0 hex, 65504 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10A7: ADD_REG_REG %EBX, %EAX
+: Write EAX = 0x1FFE0 hex; 131040 dec; new value 0x1FFE1 hex; 131041 dec;
+EIP 0x10AA hex, 4266 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x0001FFE1 hex, 131041 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000E1 hex, 225 dec; AX = 0x0000FFE1 hex, 65505 dec; 
+AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10AA: MOVEBYTE_OFFSET_REG_REG 0(%EAX), %EAX
+: Write EAX = 0x1FFE1 hex; 131041 dec; new value 0x0 hex; 0 dec;
+EIP 0x10B1 hex, 4273 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000001 hex, 1 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000001 hex, 1 dec; BX = 0x00000001 hex, 1 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B1: MOVE_REG_REG %EAX, %EBX
+: Write EBX = 0x1 hex; 1 dec; new value 0x0 hex; 0 dec;
+EIP 0x10B4 hex, 4276 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFC8 hex, 131016 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B4: POP_REG %EAX
+: Write EAX = 0x0 hex; 0 dec; new value 0x0 hex; 0 dec;
+: Write ESP = 0x1FFC8 hex; 131016 dec; new value 0x1FFCC hex; 131020 dec;
+EIP 0x10B6 hex, 4278 dec; RFLAGS 0x0030 hex, 48 dec; 
+IsZero 0; Sign 0; LessThan 0; Equal 0; GreaterThan 1; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000030 hex, 48 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B6: CMP_REG_REG %EBX, %EAX
+EIP 0x10B9 hex, 4281 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x10B9: JUMP_IF_ZERO_LONG 0x1113
+EIP 0x1113 hex, 4371 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFD8 hex, 131032 dec; ESP = 0x0001FFCC hex, 131020 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1113: LEAVE
+: Write ESP = 0x1FFCC hex; 131020 dec; new value 0x1FFD8 hex; 131032 dec;
+: Write EBP = 0x1FFD8 hex; 131032 dec; new value 0x1FFE4 hex; 131044 dec;
+: Write ESP = 0x1FFD8 hex; 131032 dec; new value 0x1FFDC hex; 131036 dec;
+EIP 0x1114 hex, 4372 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFDC hex, 131036 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1114: RET
+: Write ESP = 0x1FFDC hex; 131036 dec; new value 0x1FFE0 hex; 131040 dec;
+EIP 0x1199 hex, 4505 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE0 hex, 131040 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x1199: ADD_LONG_REG 0x4, %ESP
+: Write ESP = 0x1FFE0 hex; 131040 dec; new value 0x1FFE4 hex; 131044 dec;
+EIP 0x119F hex, 4511 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFE4 hex, 131044 dec; ESP = 0x0001FFE4 hex, 131044 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x119F: LEAVE
+: Write ESP = 0x1FFE4 hex; 131044 dec; new value 0x1FFE4 hex; 131044 dec;
+: Write EBP = 0x1FFE4 hex; 131044 dec; new value 0x1FFF0 hex; 131056 dec;
+: Write ESP = 0x1FFE4 hex; 131044 dec; new value 0x1FFE8 hex; 131048 dec;
+EIP 0x11A0 hex, 4512 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFE8 hex, 131048 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x11A0: RET
+: Write ESP = 0x1FFE8 hex; 131048 dec; new value 0x1FFEC hex; 131052 dec;
+EIP 0x14CC hex, 5324 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFEC hex, 131052 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
+
+IP 0x14CC: ADD_LONG_REG 0x4, %ESP
+: Write ESP = 0x1FFEC hex; 131052 dec; new value 0x1FFF0 hex; 131056 dec;
+EIP 0x14D2 hex, 5330 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EBP = 0x0001FFF0 hex, 131056 dec; ESP = 0x0001FFF0 hex, 131056 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x14D2: LEAVE
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFF0 hex; 131056 dec;
 : Write EBP = 0x1FFF0 hex; 131056 dec; new value 0x1FFFC hex; 131068 dec;
 : Write ESP = 0x1FFF0 hex; 131056 dec; new value 0x1FFF4 hex; 131060 dec;
-EIP 0x14D3 hex, 5331 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x14D3 hex, 5331 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF4 hex, 131060 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x14D3: RET
 : Write ESP = 0x1FFF4 hex; 131060 dec; new value 0x1FFF8 hex; 131064 dec;
-EIP 0x181D hex, 6173 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x181D hex, 6173 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFF8 hex, 131064 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x181D: ADD_LONG_REG 0x4, %ESP
 : Write ESP = 0x1FFF8 hex; 131064 dec; new value 0x1FFFC hex; 131068 dec;
-EIP 0x1823 hex, 6179 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1823 hex, 6179 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFFC hex, 131068 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 IP 0x1823: SYSCALL 0x0
 SYSCALL StopMachine
-EIP 0x1828 hex, 6184 dec; RFLAGS 0x0024 hex, 36 dec; 
-IsZero 0; Sign 0; LessThan 1; Equal 0; GreaterThan 0; IntEnabled 1
-EAX = 0xFFFFFFCF hex, 4294967247 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
+EIP 0x1828 hex, 6184 dec; RFLAGS 0x0029 hex, 41 dec; 
+IsZero 1; Sign 0; LessThan 0; Equal 1; GreaterThan 0; IntEnabled 1
+EAX = 0x00000000 hex, 0 dec; EBX = 0x00000000 hex, 0 dec; ECX = 0x00000000 hex, 0 dec; EDX = 0x00000000 hex, 0 dec; 
 EBP = 0x0001FFFC hex, 131068 dec; ESP = 0x0001FFFC hex, 131068 dec; EDI = 0x00000000 hex, 0 dec; ESI = 0x00000000 hex, 0 dec; 
-XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x000000CF hex, 207 dec; AX = 0x0000FFCF hex, 65487 dec; 
-AH = 0x000000FF hex, 255 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
-CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000024 hex, 36 dec; ST0 = 0x00000000 hex, 0 dec; 
+XSC = 0x00000000 hex, 0 dec; XR1 = 0x00000000 hex, 0 dec; AL = 0x00000000 hex, 0 dec; AX = 0x00000000 hex, 0 dec; 
+AH = 0x00000000 hex, 0 dec; BH = 0x00000000 hex, 0 dec; BL = 0x00000000 hex, 0 dec; BX = 0x00000000 hex, 0 dec; 
+CL = 0x00000000 hex, 0 dec; RFLAGS = 0x00000029 hex, 41 dec; ST0 = 0x00000000 hex, 0 dec; 
 
 Done!

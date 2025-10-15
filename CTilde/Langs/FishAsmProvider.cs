@@ -667,11 +667,11 @@ namespace CTilde.Langs
 						Indent();
 						EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
 
-						Compile(MathExp.LExpr);
+						Compile(MathExp.RExpr);
 
 						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
-						Compile(MathExp.RExpr);
+						Compile(MathExp.LExpr);
 
 						switch (MathExp.Op)
 						{
@@ -744,11 +744,11 @@ namespace CTilde.Langs
 						{
 							if (Cmp.Op == ComparisonOp.Equals)
 							{
-								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.NotEquals)
 							{
-								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThan)
 							{

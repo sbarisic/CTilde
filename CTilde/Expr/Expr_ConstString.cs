@@ -14,5 +14,10 @@ namespace CTilde.Expr {
 			this.StringLiteral = StringLiteral;
 			RawString = StringLiteral.Substring(1, StringLiteral.Length - 2).Replace("\\n", "\n").Replace("\\t", "\t").Replace("\\\"", "\"").Replace("\\\\", "\\");
 		}
+
+		public override string ToSourceStr()
+		{
+			return string.Format("\"{0}\"", RawString.Replace("\\", "\\\\").Replace("\n", "\\n").Replace("\t", "\\t").Replace("\"", "\\\""));
+		}
 	}
 }

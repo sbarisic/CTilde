@@ -23,7 +23,9 @@ namespace CTilde.Expr
 				RetValExpr = Expression.ParseExpression(Tok, Symbol.Semicolon);
 			}
 
-			Tok.NextToken().Assert(Symbol.Semicolon);
+			if (RetValExpr == null)
+				Tok.NextToken().Assert(Symbol.Semicolon);
+
 			return this;
 		}
 	}

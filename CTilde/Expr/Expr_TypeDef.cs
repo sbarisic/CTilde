@@ -41,6 +41,10 @@ namespace CTilde.Expr
 				Tok.NextToken().Assert(Symbol.RBracket);
 				IsArray = true;
 			}
+
+			if (Type == "string")
+				IsPointer = true;
+
 			return this;
 		}
 

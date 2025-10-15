@@ -143,6 +143,13 @@ namespace CTilde.FishAsm
 			return GetRawTypeSize(Type);
 		}
 
+		public bool IsUnsigned(string TypeName)
+		{
+			if (TypeName == "byte" || TypeName == "uint" || TypeName == "bool" )
+				return true;
+			return false;
+		}
+
 		public int GetPointerTypeSize(Expr_TypeDef Type)
 		{
 			if (Type.Type == "string")
@@ -290,10 +297,16 @@ namespace CTilde.FishAsm
 		}
 
 		Stack<string> BreakLabels = new Stack<string>();
+		Stack<string> LoopLabels = new Stack<string>();
 
 		public void PushBreakLabel(string BreakLabel)
 		{
 			BreakLabels.Push(BreakLabel);
+		}
+
+		public void PushLoopLabel(string LoopLabel)
+		{
+			LoopLabels.Push(LoopLabel);
 		}
 
 		public string PeekBreakLabel()
@@ -302,6 +315,22 @@ namespace CTilde.FishAsm
 				throw new Exception("No break label in stack");
 
 			return BreakLabels.Peek();
+		}
+
+		public string PeekLoopLabel()
+		{
+			if (LoopLabels.Count == 0)
+				throw new Exception("No loop label in stack");
+
+			return LoopLabels.Peek();
+		}
+
+		public string PopLoopLabel()
+		{
+			if (LoopLabels.Count == 0)
+				throw new Exception("No break label in stack");
+
+			return LoopLabels.Peek();
 		}
 
 		public string PopBreakLabel()

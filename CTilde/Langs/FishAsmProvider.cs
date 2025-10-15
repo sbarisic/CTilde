@@ -4,6 +4,7 @@ using System;
 using System.CodeDom;
 using System.Collections;
 using System.Collections.Generic;
+using System.Data;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -125,6 +126,131 @@ namespace CTilde.Langs
 			EmitInstruction(FishInst.RET);
 		}
 
+		void EmitLoadFromAddress(int size, int offset, Reg SrcAddr, Reg DstReg, bool isunsigned)
+		{
+			if (size == 0)
+			{
+				EmitInstruction(FishInst.LEA_OFFSET_REG_REG, offset, SrcAddr, DstReg);
+			}
+			else if (size == 4)
+			{
+				EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, offset, SrcAddr, DstReg);
+
+			}
+			else if (size == 2)
+			{
+				if (DstReg == Reg.EAX)
+				{
+					EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, offset, SrcAddr, Reg.AL);
+					EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, offset + 1, SrcAddr, Reg.AH);
+				}
+				else if (DstReg == Reg.EBX)
+				{
+					EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, offset, SrcAddr, Reg.BL);
+					EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, offset + 1, SrcAddr, Reg.BH);
+				}
+				else
+					throw new NotImplementedException();
+			}
+			else if (size == 1)
+			{
+				if (isunsigned)
+					EmitInstruction(FishInst.MOVEBYTE_OFFSET_REG_REG, offset, SrcAddr, DstReg);
+				else
+					EmitInstruction(FishInst.MOVES_OFFSET_REG_REG, offset, SrcAddr, DstReg);
+			}
+			else
+				throw new NotImplementedException();
+		}
+
+		void EmitStoreToAddress(int size, int offset, Reg SrcReg, Reg DstAddr, bool isunsigned)
+		{
+			if (size == 4)
+			{
+				EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, SrcReg, offset, DstAddr);
+			}
+			else if (size == 2)
+			{
+				if (SrcReg == Reg.EAX)
+				{
+					EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.AL, offset, DstAddr);
+					EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.AH, offset + 1, DstAddr);
+				}
+				else if (SrcReg == Reg.EBX)
+				{
+					EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.BL, offset, DstAddr);
+					EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.BH, offset + 1, DstAddr);
+				}
+				else
+					throw new NotImplementedException();
+			}
+			else if (size == 1)
+			{
+				EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, SrcReg, offset, DstAddr);
+			}
+			else
+				throw new NotImplementedException();
+		}
+
+		void FetchIdentifier(string name, int size, bool ispointer, Reg DestReg, bool isunsigned, bool sumEBX)
+		{
+			if (State.IsVarGlobal(name))
+			{
+
+				if (size != 0)
+				{
+					EmitInstruction(FishInst.MOVE_LONG_REG, name, Reg.EBX);
+					EmitLoadFromAddress(size, 0, Reg.EBX, DestReg, isunsigned);
+				}
+				else
+				{
+					EmitInstruction(FishInst.ADD_LONG_REG, name, DestReg); // NOP to prevent skipping
+				}
+			}
+			else
+			{
+				int VarOffset = State.GetVarOffset(name);
+				// EAX = [EBP+offset]
+				EmitInstruction(FishInst.LEA_OFFSET_REG_REG, VarOffset, Reg.EBP, DestReg);
+
+				if (sumEBX)
+					EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, DestReg);
+
+				if (size != 0)
+				{
+					EmitLoadFromAddress(size, 0, DestReg, DestReg, isunsigned);
+				}
+				//EmitLoadFromAddress(size, VarOffset, Reg.EBP, DestReg);
+			}
+		}
+
+		void StoreIdentifier(string name, int size, bool ispointer, Reg SrcReg, bool isunsigned)
+		{
+			if (State.IsVarGlobal(name))
+			{
+				EmitInstruction(FishInst.MOVE_LONG_REG, name, Reg.EBX);
+				EmitStoreToAddress(size, 0, SrcReg, Reg.EBX, isunsigned);
+			}
+			else
+			{
+				int VarOffset = State.GetVarOffset(name);
+				EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned);
+			}
+		}
+
+		void StoreIdentifier(string name, int size, bool ispointer, Reg SrcReg, Reg DstAddr, bool isunsigned)
+		{
+			if (State.IsVarGlobal(name))
+			{
+				EmitStoreToAddress(size, 0, SrcReg, DstAddr, isunsigned);
+			}
+			else
+			{
+				int VarOffset = State.GetVarOffset(name);
+				EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned);
+			}
+		}
+
 		public override void Compile(Expression Ex)
 		{
 			if (Ex == null)
@@ -134,14 +260,10 @@ namespace CTilde.Langs
 			{
 				case Expr_Block Block:
 					{
-						//AppendLine("{");
-
 						foreach (var E in Block.Expressions)
 						{
 							Compile(E);
 						}
-
-						//AppendLine("}");
 						break;
 					}
 
@@ -165,6 +287,101 @@ namespace CTilde.Langs
 
 				case Expr_FuncDef FuncDef:
 					{
+						// Interrupt handler wrapper generation:
+						// If a function name starts with "handler_", emit an interrupt-safe stub that saves/restores registers,
+						// forwards args, and calls the real implementation (FuncName + "__impl").
+						if (FuncDef.FuncName != null && FuncDef.FuncName.StartsWith("handler_"))
+						{
+							string implName = FuncDef.FuncName + "__impl";
+
+							// Generate the real implementation first under implName
+							EmitRaw(".globl {0}", implName);
+							State.DefineLabel(implName, true);
+
+							if (FuncDef.FuncBody != null)
+							{
+								State.ClearVarOffsets();
+								State.ClearArgOffset();
+
+								EmitRaw("{0}:", implName);
+								Indent();
+								State.IsInsideFunctionDef = true;
+
+								if (!FuncDef.Naked)
+								{
+									EmitInstruction(FishInst.PUSH_REG, Reg.EBP);
+									EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
+								}
+
+								Compile(FuncDef.FuncParams);
+
+								State.IsInsideFunctionDef = false;
+								State.IsInsideFunctionBody = true;
+
+								Compile(FuncDef.FuncBody);
+
+								if (!FuncDef.Naked)
+								{
+									EmitReturn();
+								}
+								State.IsInsideFunctionBody = false;
+								Unindent();
+							}
+
+							// Generate the stub at the original name (what int_table[] points to)
+							EmitRaw(".globl {0}", FuncDef.FuncName);
+							State.DefineLabel(FuncDef.FuncName, true);
+							EmitRaw("{0}:", FuncDef.FuncName);
+							Indent();
+
+							// Standard prologue
+							EmitInstruction(FishInst.PUSH_REG, Reg.EBP);
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
+
+							// Save registers potentially clobbered by the handler body/calls
+							Reg[] saveRegs = new[] { Reg.EAX, Reg.EBX, Reg.ECX, Reg.EDX, Reg.ESI, Reg.EDI };
+							foreach (var r in saveRegs)
+								EmitInstruction(FishInst.PUSH_REG, r);
+
+							// Forward arguments
+							int argCount = FuncDef.FuncParams != null ? FuncDef.FuncParams.Definitions.Count : 0;
+							/**if (argCount == 1)
+							{
+								// VM passes the event payload in XR1; use that as the single arg
+								EmitInstruction(FishInst.MOVE_REG_REG, Reg.XR1, Reg.EAX);
+								EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+							}
+							else if (argCount > 1)**/
+							{
+								// Fallback: load args from the VM-provided frame (least reliable path)
+								for (int i = 0; i < argCount; i++)
+								{
+									EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, (8 + i * 4), Reg.EBP, Reg.EAX);
+									EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+								}
+							}
+
+							// Call the real implementation
+							EmitInstruction(FishInst.MOVE_LONG_REG, implName, Reg.EAX);
+							EmitInstruction(FishInst.CALL_REG, Reg.EAX);
+
+							// Clean up pushed arguments
+							if (argCount > 0)
+								EmitInstruction(FishInst.ADD_LONG_REG, (uint)(argCount * 4), Reg.ESP);
+
+							// Restore registers (reverse order)
+							for (int i = saveRegs.Length - 1; i >= 0; i--)
+								EmitInstruction(FishInst.POP_REG, saveRegs[i]);
+
+							// Epilogue
+							EmitInstruction(FishInst.LEAVE);
+							EmitInstruction(FishInst.RET);
+
+							Unindent();
+							break; // done
+						}
+
+						// Normal function generation (unchanged)
 						EmitRaw(".globl {0}", FuncDef.FuncName);
 						State.DefineLabel(FuncDef.FuncName, true);
 
@@ -183,14 +400,7 @@ namespace CTilde.Langs
 								EmitInstruction(FishInst.MOVE_REG_REG, Reg.ESP, Reg.EBP);
 							}
 
-							//OmmitSemicolon = true;
-							//Compile(FuncDef.FuncReturnTypeDef);
-							//Append(" {0}(", FuncDef.FuncName);
-
 							Compile(FuncDef.FuncParams);
-
-							//Append(")");
-							//OmmitSemicolon = false;
 
 							State.IsInsideFunctionDef = false;
 							State.IsInsideFunctionBody = true;
@@ -203,9 +413,6 @@ namespace CTilde.Langs
 							}
 							State.IsInsideFunctionBody = false;
 							Unindent();
-
-							//EmitLabels();
-
 						}
 						break;
 					}
@@ -224,14 +431,6 @@ namespace CTilde.Langs
 						for (int i = 0; i < ParamsDef.Definitions.Count; i++)
 						{
 							ParamDefData ParamDef = ParamsDef.Definitions[i];
-							//Compile(ParamDef);
-
-							/*Compile(ParamDef.ParamType);
-							Append(" {0}", ParamDef.Name);
-
-							if (i + 1 < ParamsDef.Definitions.Count)
-								Append(", ");*/
-
 							int Size = State.GetTypeSize(ParamDef.ParamType);
 							State.DefineVar(ParamDef.Name, Size, true, ParamDef.ParamType, false, true);
 						}
@@ -267,11 +466,6 @@ namespace CTilde.Langs
 
 				case Expr_VariableDef VariableDef:
 					{
-						/*Compile(VariableDef.Type);
-						Append(" ");
-						Compile(VariableDef.Ident);
-						AppendLine(";");*/
-
 						EmitRaw("# VariableDef BEGIN - {0}", VariableDef.Ident.Identifier);
 						Indent();
 
@@ -293,9 +487,6 @@ namespace CTilde.Langs
 
 						Unindent();
 						EmitRaw("# VariableDef END - {0}", VariableDef.Ident.Identifier);
-						/*if (!OmmitSemicolon)
-							AppendLine(";");*/
-
 						break;
 					}
 
@@ -360,7 +551,12 @@ namespace CTilde.Langs
 								Expr_TypeDef VarType = State.GetVarType(Id.Identifier);
 								CopyBytes = State.GetPointerTypeSize(VarType);
 
-								if (CopyBytes == 1)
+								//EmitStoreToAddress(CopyBytes, 0, Reg.EAX, Reg.EBX, State.IsUnsigned(VarType.Type));
+								StoreIdentifier(Id.Identifier, CopyBytes, VarType.IsPointer, Reg.EAX, Reg.EBX, State.IsUnsigned(VarType.Type));
+
+								//StoreIdentifier(Id.Identifier, CopyBytes, VarType.IsPointer, Reg.EAX, State.IsUnsigned(VarType.Type));
+
+								/*if (CopyBytes == 1)
 									EmitInstruction(FishInst.MOVEBYTE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
 								else if (CopyBytes == 2)
 								{
@@ -370,14 +566,13 @@ namespace CTilde.Langs
 								else if (CopyBytes == 4)
 									EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
 								else
-									throw new NotImplementedException();
+									throw new NotImplementedException();*/
 							}
 							else
 								throw new NotImplementedException();
 
-							if (CopyBytes == 4)
-								EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
-							//EmitRaw("# REST OF ASSVALUE HERE");
+							//if (CopyBytes == 4)
+							//	EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
 
 							Unindent();
 							EmitRaw("# Expr_AssignValue END");
@@ -392,32 +587,47 @@ namespace CTilde.Langs
 					{
 						Compile(AssVariable.AssignmentValue);
 
-						int VarID = State.GetVarOffset(AssVariable.Variable.Identifier);
-						EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+						//int VarID = State.GetVarOffset(AssVariable.Variable.Identifier);
+						//EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarID, Reg.EBP);
+						Expr_TypeDef td = State.GetVarType(AssVariable.Variable.Identifier);
+						int sz = State.GetTypeSize(td);
+
+						EmitRaw("# Expr_AssignValue BEGIN");
+						Indent();
+						StoreIdentifier(AssVariable.Variable.Identifier, sz, td.IsPointer, Reg.EAX, State.IsUnsigned(td.Type));
+						Unindent();
+						EmitRaw("# Expr_AssignValue END");
 
 						break;
 					}
 
 				case Expr_Identifier IdentifierEx:
 					{
-						//Expr_TypeDef TypeDef = State.GetVarType(IdentifierEx.Identifier);
+						Expr_TypeDef IdType = State.GetVarType(IdentifierEx.Identifier);
+						int sz = 0;
+						bool ispointer = IdType.IsPointer || IdType.IsArray;
 
-						if (State.IsVarGlobal(IdentifierEx.Identifier))
-						{
-							EmitInstruction(FishInst.MOVE_LONG_REG, IdentifierEx.Identifier, Reg.EAX);
-						}
+						if (ispointer)
+							sz = State.GetPointerTypeSize(IdType);
 						else
-						{
-							int VarOffset = State.GetVarOffset(IdentifierEx.Identifier);
-							EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, VarOffset, Reg.EBP, Reg.EAX);
-						}
-						//Append(IdentifierEx.Identifier);
+							sz = State.GetTypeSize(IdType);
+
+						//if (State.IsVarGlobal(IdentifierEx.Identifier))
+						//{
+						// EmitInstruction(FishInst.MOVE_LONG_REG, IdentifierEx.Identifier, Reg.EAX);
+						FetchIdentifier(IdentifierEx.Identifier, sz, IdType.IsPointer, Reg.EAX, true, false);
+						//}
+						//else
+						//{
+						//	int VarOffset = State.GetVarOffset(IdentifierEx.Identifier);
+						//EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, VarOffset, Reg.EBP, Reg.EAX);
+						//	FetchIdentifier(IdentifierEx.Identifier, VarOffset, IdType.IsPointer, Reg.EAX);
+						//}
 						break;
 					}
 
 				case Expr_ConstNumber NumberEx:
 					{
-						//Append(NumberEx.NumberLiteral);
 						uint Num = uint.Parse(NumberEx.NumberLiteral);
 
 						if (State.IsInsideFunctionBody)
@@ -432,11 +642,9 @@ namespace CTilde.Langs
 
 				case Expr_ConstString StringEx:
 					{
-						//EmitRaw(".globl {0}", StringEx.StringLiteral);
 						string LblName = State.DefineLabel(null, StringEx.StringLiteral);
 
 						EmitInstruction(FishInst.MOVE_LONG_REG, LblName, Reg.EAX);
-						//Append(StringEx.StringLiteral);
 						break;
 					}
 
@@ -456,7 +664,6 @@ namespace CTilde.Langs
 
 						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 
-						//Append(" {0} ", MathExp.OpString);
 						Compile(MathExp.RExpr);
 
 						switch (MathExp.Op)
@@ -487,22 +694,6 @@ namespace CTilde.Langs
 						Compile(CompExpr.RExpr);
 
 						EmitInstruction(FishInst.CMP_REG_REG, Reg.EAX, Reg.EBX);
-
-						/*switch (CompExpr.Op)
-						{
-							case ComparisonOp.Equals:
-								throw new NotImplementedException();
-								break;
-
-							case ComparisonOp.NotEquals:
-								EmitRaw("# NOTEQUALS"); 
-								throw new NotImplementedException();
-								break;
-
-							default:
-								throw new NotImplementedException();
-						}*/
-
 						break;
 					}
 
@@ -523,33 +714,26 @@ namespace CTilde.Langs
 						{
 							if (Cmp.Op == ComparisonOp.Equals)
 							{
-								// Jump to Else when not equal (false)
 								EmitInstruction(FishInst.JUMP_IF_NOT_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.NotEquals)
 							{
-								// Jump to Else when equal (false)
 								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThan)
 							{
-								// Jump to Else when NOT greater => a <= b
 								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThan)
 							{
-								// Jump to Else when NOT less => a >= b
 								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThanOrEqual)
 							{
-								// Jump to Else when NOT (a >= b) => a < b is false only if a < b is true? No:
-								// We want Else when a < b (false for >=)
 								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThanOrEqual)
 							{
-								// Jump to Else when NOT (a <= b) => a > b
 								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
 							}
 							else
@@ -596,6 +780,7 @@ namespace CTilde.Langs
 						string LblName = State.DefineFreeLabel("WHILE", false);
 						string EndLblName = State.DefineFreeLabel("ENDWHILE", false);
 						EmitRaw("{0}:", LblName);
+						State.PushLoopLabel(LblName);
 
 						if (WhileExpr.ConditionValue is Expr_ComparisonOp Cmp)
 						{
@@ -608,6 +793,26 @@ namespace CTilde.Langs
 							{
 								Compile(WhileExpr.ConditionValue);
 								EmitInstruction(FishInst.JUMP_IF_ZERO_LONG, EndLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.LessThan)
+							{
+								Compile(WhileExpr.ConditionValue);
+								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, EndLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.GreaterThan)
+							{
+								Compile(WhileExpr.ConditionValue);
+								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, EndLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.LessThanOrEqual)
+							{
+								Compile(WhileExpr.ConditionValue);
+								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, EndLblName);
+							}
+							else if (Cmp.Op == ComparisonOp.GreaterThanOrEqual)
+							{
+								Compile(WhileExpr.ConditionValue);
+								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, EndLblName);
 							}
 							else
 								throw new NotImplementedException();
@@ -629,7 +834,6 @@ namespace CTilde.Langs
 
 						if (WhileExpr.Body.Expressions.Count > 0)
 						{
-							//EmitRaw("# Body goes here");
 							EmitInstruction(FishInst.PUSH_REG, Reg.EBX);
 							EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
 							Compile(WhileExpr.Body);
@@ -638,10 +842,10 @@ namespace CTilde.Langs
 						}
 
 						State.PopBreakLabel();
+						State.PopLoopLabel();
 
 						EmitInstruction(FishInst.JUMP_LONG, LblName);
 						EmitRaw("{0}:", EndLblName);
-						//throw new NotImplementedException();
 
 						Unindent();
 						EmitRaw("# While END");
@@ -651,6 +855,15 @@ namespace CTilde.Langs
 				case Expr_BreakExpr BreakExpr:
 					{
 						string BreakLbl = State.PeekBreakLabel();
+						EmitInstruction(FishInst.JUMP_LONG, BreakLbl);
+
+						break;
+					}
+
+				case Expr_ContinueExpr ContinueExpr:
+					{
+						EmitRaw("# Continue");
+						string BreakLbl = State.PeekLoopLabel();
 						EmitInstruction(FishInst.JUMP_LONG, BreakLbl);
 
 						break;
@@ -678,7 +891,7 @@ namespace CTilde.Langs
 						EmitRaw("# IndexOp BEGIN");
 						Indent();
 
-						// Compute index first => EAX = index
+						EmitRaw("#: EAX = {0}", IndexExpr.IndexValExpr.ToSourceStr());
 						Compile(IndexExpr.IndexValExpr); // index in EAX
 
 						if (IndexExpr.LExpr is Expr_Identifier id)
@@ -686,26 +899,34 @@ namespace CTilde.Langs
 							Expr_TypeDef idType = State.GetVarType(id.Identifier);
 							int elemSize = State.GetPointerTypeSize(idType);
 
-							// Preserve (and scale) index in EBX
 							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX); // EBX = index
 
 							if (elemSize > 1)
 							{
-								// scale index: EAX = elemSize, MUL EBX => EAX = elemSize * index
+								EmitRaw("#: EBX = EBX * {0}", elemSize);
 								EmitInstruction(FishInst.MOVE_LONG_REG, "$" + elemSize, Reg.EAX);
 								EmitInstruction(FishInst.MUL_REG, Reg.EBX);
 								EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX); // EBX = scaled index
 							}
 
-							// Load base pointer into EAX (Compile of identifier gives the pointer value)
-							Compile(IndexExpr.LExpr); // EAX = base pointer
-
-							// Effective address: base + scaled_index
-							EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
-
-							// Load or leave address
-							int copyBytes = State.GetPointerTypeSize(idType);
 							bool isUnsigned = CTType.IsUnsigned(idType.Type);
+
+							EmitRaw("#: {0}[EBX]", id.Identifier);
+							//Compile(IndexExpr.LExpr); // EAX = base pointer
+
+							if (State.IndexEmitOnlyAddress)
+							{
+								FetchIdentifier(id.Identifier, 0, idType.IsPointer, Reg.EAX, true, true);
+							}
+							else
+							{
+								FetchIdentifier(id.Identifier, elemSize, idType.IsPointer, Reg.EAX, true, true);
+							}
+
+
+							//EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
+
+							/*int copyBytes = State.GetPointerTypeSize(idType);
 
 							if (!State.IndexEmitOnlyAddress)
 							{
@@ -722,16 +943,13 @@ namespace CTilde.Langs
 									EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EAX, Reg.EAX);
 								else
 									throw new NotImplementedException();
-							}
+							}*/
 						}
 						else
 						{
-							// Existing non-identifier path kept (already does index first then base)
 							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
 							Compile(IndexExpr.LExpr);
 							EmitInstruction(FishInst.ADD_REG_REG, Reg.EBX, Reg.EAX);
-
-							// (You may need to replicate the load logic here similar to above if required)
 						}
 
 						Unindent();
@@ -746,15 +964,50 @@ namespace CTilde.Langs
 
 						if (IncDecExp.LExpr is Expr_Identifier Id)
 						{
-							int VarOffset = State.GetVarOffset(Id.Identifier);
-							Compile(IncDecExp.LExpr);
+							string name = Id.Identifier;
+							Expr_TypeDef nameType = State.GetVarType(name);
+							int sz = 0;
+							bool ispointer = nameType.IsPointer || nameType.IsArray;
+
+							if (ispointer)
+								sz = State.GetPointerTypeSize(nameType);
+							else
+								sz = State.GetTypeSize(nameType);
+
+							FetchIdentifier(name, sz, ispointer, Reg.EAX, false, false);
 
 							if (IncDecExp.Inc)
 								EmitInstruction(FishInst.ADD_LONG_REG, "$" + 1, Reg.EAX);
 							else
 								EmitInstruction(FishInst.SUB_LONG_REG, "$" + 1, Reg.EAX);
 
-							EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarOffset, Reg.EBP);
+							StoreIdentifier(name, sz, ispointer, Reg.EAX, false);
+							/*if (State.IsVarGlobal(name))
+							{
+								// EAX = [global], modify, [global] = EAX
+								EmitInstruction(FishInst.MOVE_LONG_REG, name, Reg.EBX);
+								EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, 0, Reg.EBX, Reg.EAX);
+
+								if (IncDecExp.Inc)
+									EmitInstruction(FishInst.ADD_LONG_REG, "$" + 1, Reg.EAX);
+								else
+									EmitInstruction(FishInst.SUB_LONG_REG, "$" + 1, Reg.EAX);
+
+								EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, 0, Reg.EBX);
+							}
+							else
+							{
+								int VarOffset = State.GetVarOffset(name);
+								// EAX = [EBP+offset]
+								EmitInstruction(FishInst.MOVE_OFFSET_REG_REG, VarOffset, Reg.EBP, Reg.EAX);
+
+								if (IncDecExp.Inc)
+									EmitInstruction(FishInst.ADD_LONG_REG, "$" + 1, Reg.EAX);
+								else
+									EmitInstruction(FishInst.SUB_LONG_REG, "$" + 1, Reg.EAX);
+
+								EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, Reg.EAX, VarOffset, Reg.EBP);
+							}*/
 						}
 						else
 							throw new NotImplementedException();
@@ -775,7 +1028,6 @@ namespace CTilde.Langs
 						}
 
 						EmitReturn();
-
 
 						Unindent();
 						EmitRaw("# Expr_ReturnStatement END");
@@ -816,18 +1068,6 @@ namespace CTilde.Langs
 
 							EmitInstruction(FishInst.SYSCALL_2);
 
-							/*foreach (var Arg in FuncCallExp.Arguments)
-							{
-								if (Arg is Expr_ConstString S)
-								{
-									EmitRaw(S.RawString);
-								}
-								else
-								{
-									throw new NotImplementedException("Only string literals are supported in __asm");
-								}
-							}*/
-
 							Unindent();
 							EmitRaw("# syscall_2 END");
 						}
@@ -847,27 +1087,9 @@ namespace CTilde.Langs
 
 							EmitInstruction(FishInst.ADD_LONG_REG, (uint)(FuncCallExp.Arguments.Count * 4), Reg.ESP);
 
-							/*throw new NotImplementedException();
-
-							Compile(FuncCallExp.Function);
-
-							Append("(");
-
-
-							for (int i = 0; i < FuncCallExp.Arguments.Count; i++)
-							{
-								Compile(FuncCallExp.Arguments[i]);
-
-								if (i < FuncCallExp.Arguments.Count - 1)
-									Append(", ");
-							}
-
-							AppendLine(");");*/
-
 							Unindent();
 							EmitRaw("# FuncCall END - {0}", FuncCallExp.Function.Identifier);
 						}
-
 
 						break;
 					}

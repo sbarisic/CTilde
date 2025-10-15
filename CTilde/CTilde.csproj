@@ -42,6 +42,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CTTypes.cs" />
+    <Compile Include="Expr\Expr_ContinueExpr.cs" />
     <Compile Include="Expr\Expr_IncDecOp.cs" />
     <Compile Include="Expr\Expr_StaticValue.cs" />
     <Compile Include="Expr\Expr_DerefOp.cs" />

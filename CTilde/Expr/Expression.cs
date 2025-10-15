@@ -54,6 +54,11 @@ namespace CTilde.Expr
 				Expr_BreakExpr BDef = (Expr_BreakExpr)new Expr_BreakExpr().Parse(Tok);
 				return BDef;
 			}
+			else if (Tok.Peek().Is(Keyword.@continue))
+			{
+				Expr_ContinueExpr BDef = (Expr_ContinueExpr)new Expr_ContinueExpr().Parse(Tok);
+				return BDef;
+			}
 			else if (Tok.Peek().Is(Keyword.@while))
 			{
 				Tok.NextToken().Assert(Keyword.@while);
@@ -280,6 +285,10 @@ namespace CTilde.Expr
 			return LeftExpr;
 		}
 
+		public virtual string ToSourceStr()
+		{
+			throw new NotImplementedException();
+		}
 
 		/*public override string ToString()
 		{

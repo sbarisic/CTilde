@@ -35,5 +35,10 @@ namespace CTilde.Expr
 			RExpr = Expression.ParseExpression(Tok, Symbol.Semicolon);*/
 			return this;
 		}
+
+		public override string ToSourceStr()
+		{
+			return string.Format("{0}[{1}]", LExpr.ToSourceStr(), IndexValExpr.ToSourceStr());
+		}
 	}
 }

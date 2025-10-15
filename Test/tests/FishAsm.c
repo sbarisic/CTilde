@@ -118,25 +118,25 @@ void handler_int2_keyboardchar(uint key2) {
 }
 
 void kmain() {
-	int_table[0] = &handler_int0;
-	int_table[1] = &handler_int1_keyboardkey;
-	int_table[2] = &handler_int2_keyboardchar;
+	//int_table[0] = &handler_int0;
+	//int_table[1] = &handler_int1_keyboardkey;
+	//int_table[2] = &handler_int2_keyboardchar;
 
-	//print("Hello, World!\n");
+	//print("Hello, Universe!\n");
 	input_add('H');
-	input_add('e');
-	input_add('l');
-	input_add('l');
-	input_add('o');
-	input_add(' ');
-	input_add('W');
-	input_add('o');
-	input_add('r');
-	input_add('l');
-	input_add('d');
+	//input_add('e');
+	//input_add('l');
+	//input_add('l');
+	//input_add('o');
+	//input_add(' ');
+	//input_add('W');
+	//input_add('o');
+	//input_add('r');
+	//input_add('l');
+	//input_add('d');
 	input_add('\n');
 
-	while (true) {
+	/*while (true) {
 		print("In: ");
 		input_readline(temp_buffer2);
 		print("You typed: ");
@@ -144,7 +144,7 @@ void kmain() {
 		print("\n");
 
 		__asm("WAIT");
-	}
+	}*/
 
 	__asm("SYSCALL $0");
 }

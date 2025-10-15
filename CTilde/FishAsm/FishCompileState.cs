@@ -59,6 +59,7 @@ namespace CTilde.FishAsm
 		public bool IsInsideFunctionBody = false;
 		public bool IsInsideFunctionDef = false;
 		public bool IndexEmitOnlyAddress = false;
+		public bool CmpPreserveEAX;
 
 		public int StackSize;
 		public int FreeLabel = 0;
@@ -145,7 +146,7 @@ namespace CTilde.FishAsm
 
 		public bool IsUnsigned(string TypeName)
 		{
-			if (TypeName == "byte" || TypeName == "uint" || TypeName == "bool" )
+			if (TypeName == "byte" || TypeName == "uint" || TypeName == "bool")
 				return true;
 			return false;
 		}

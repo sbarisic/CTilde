@@ -50,5 +50,32 @@ namespace CTilde.Expr
 			RExpr = Expression.ParseExpression(Tok, Symbol.Semicolon);
 			return this;
 		}
+
+		public override string ToSourceStr()
+		{
+			switch (Op)
+			{
+				case ComparisonOp.Equals:
+					return string.Format("{0} == {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				case ComparisonOp.NotEquals:
+					return string.Format("{0} != {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				case ComparisonOp.GreaterThan:
+					return string.Format("{0} > {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				case ComparisonOp.GreaterThanOrEqual:
+					return string.Format("{0} >= {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				case ComparisonOp.LessThan:
+					return string.Format("{0} < {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				case ComparisonOp.LessThanOrEqual:
+					return string.Format("{0} <= {1}", LExpr.ToSourceStr(), RExpr.ToSourceStr());
+
+				default:
+					throw new NotImplementedException();
+			}
+		}
 	}
 }

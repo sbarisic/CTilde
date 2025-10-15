@@ -17,5 +17,10 @@ namespace CTilde.Expr
 			this.CharLiteral = CharLiteral;
 			this.RawString = RawString;
 		}
+
+		public override string ToSourceStr()
+		{
+			return RawString;
+		}
 	}
 }

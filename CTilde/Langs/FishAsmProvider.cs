@@ -163,8 +163,11 @@ namespace CTilde.Langs
 				throw new NotImplementedException();
 		}
 
-		void EmitStoreToAddress(int size, int offset, Reg SrcReg, Reg DstAddr, bool isunsigned)
+		void EmitStoreToAddress(int size, int offset, Reg SrcReg, Reg DstAddr, bool isunsigned, bool useEBX)
 		{
+			if (useEBX)
+				DstAddr = Reg.EBX;
+
 			if (size == 4)
 			{
 				EmitInstruction(FishInst.MOVE_REG_OFFSET_REG, SrcReg, offset, DstAddr);
@@ -229,25 +232,29 @@ namespace CTilde.Langs
 			if (State.IsVarGlobal(name))
 			{
 				EmitInstruction(FishInst.MOVE_LONG_REG, name, Reg.EBX);
-				EmitStoreToAddress(size, 0, SrcReg, Reg.EBX, isunsigned);
+				EmitStoreToAddress(size, 0, SrcReg, Reg.EBX, isunsigned, false);
 			}
 			else
 			{
 				int VarOffset = State.GetVarOffset(name);
-				EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned);
+				EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned, false);
 			}
 		}
 
-		void StoreIdentifier(string name, int size, bool ispointer, Reg SrcReg, Reg DstAddr, bool isunsigned)
+		void StoreIdentifier(string name, int size, bool ispointer, Reg SrcReg, Reg DstAddr, bool isunsigned, bool useEBX)
 		{
 			if (State.IsVarGlobal(name))
 			{
-				EmitStoreToAddress(size, 0, SrcReg, DstAddr, isunsigned);
+				EmitStoreToAddress(size, 0, SrcReg, DstAddr, isunsigned, useEBX);
 			}
 			else
 			{
 				int VarOffset = State.GetVarOffset(name);
-				EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned);
+
+				if (useEBX)
+					EmitStoreToAddress(size, 0, SrcReg, Reg.EBX, isunsigned, true);
+				else
+					EmitStoreToAddress(size, VarOffset, SrcReg, Reg.EBP, isunsigned, false);
 			}
 		}
 
@@ -552,7 +559,7 @@ namespace CTilde.Langs
 								CopyBytes = State.GetPointerTypeSize(VarType);
 
 								//EmitStoreToAddress(CopyBytes, 0, Reg.EAX, Reg.EBX, State.IsUnsigned(VarType.Type));
-								StoreIdentifier(Id.Identifier, CopyBytes, VarType.IsPointer, Reg.EAX, Reg.EBX, State.IsUnsigned(VarType.Type));
+								StoreIdentifier(Id.Identifier, CopyBytes, VarType.IsPointer, Reg.EAX, Reg.EBX, State.IsUnsigned(VarType.Type), true);
 
 								//StoreIdentifier(Id.Identifier, CopyBytes, VarType.IsPointer, Reg.EAX, State.IsUnsigned(VarType.Type));
 
@@ -689,11 +696,31 @@ namespace CTilde.Langs
 
 				case Expr_ComparisonOp CompExpr:
 					{
-						Compile(CompExpr.LExpr);
-						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+						EmitRaw("# Expr_ComparisonOp BEGIN");
+						Indent();
+
 						Compile(CompExpr.RExpr);
 
+						if (State.CmpPreserveEAX)
+						{
+							EmitInstruction(FishInst.PUSH_REG, Reg.EAX);
+						}
+
+						EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+						Compile(CompExpr.LExpr);
+
+						if (State.CmpPreserveEAX)
+						{
+							EmitInstruction(FishInst.MOVE_REG_REG, Reg.EAX, Reg.EBX);
+							EmitInstruction(FishInst.POP_REG, Reg.EAX);
+						}
+
+						EmitRaw("#: {0}", CompExpr.ToSourceStr());
+						EmitRaw("#: EAX - EBX semantics");
 						EmitInstruction(FishInst.CMP_REG_REG, Reg.EAX, Reg.EBX);
+
+						Unindent();
+						EmitRaw("# Expr_ComparisonOp END");
 						break;
 					}
 
@@ -707,6 +734,9 @@ namespace CTilde.Langs
 
 						if (IfExpr.ElseBody != null)
 							ElseLblName = State.DefineFreeLabel("ELSE", false);
+
+						EmitRaw("#: {0}", IfExpr.ConditionValue.ToSourceStr());
+						State.CmpPreserveEAX = true;
 
 						Compile(IfExpr.ConditionValue);
 
@@ -722,19 +752,19 @@ namespace CTilde.Langs
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThan)
 							{
-								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThan)
 							{
-								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThanOrEqual)
 							{
-								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThanOrEqual)
 							{
-								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, ElseLblName);
+								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, ElseLblName);
 							}
 							else
 								throw new NotImplementedException();
@@ -743,6 +773,8 @@ namespace CTilde.Langs
 						{
 							throw new NotImplementedException();
 						}
+
+						State.CmpPreserveEAX = false;
 
 						State.PushBreakLabel(EndLblName);
 						Compile(IfExpr.Body);
@@ -784,6 +816,8 @@ namespace CTilde.Langs
 
 						if (WhileExpr.ConditionValue is Expr_ComparisonOp Cmp)
 						{
+							State.CmpPreserveEAX = true;
+
 							if (Cmp.Op == ComparisonOp.Equals)
 							{
 								Compile(WhileExpr.ConditionValue);
@@ -797,26 +831,27 @@ namespace CTilde.Langs
 							else if (Cmp.Op == ComparisonOp.LessThan)
 							{
 								Compile(WhileExpr.ConditionValue);
-								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, EndLblName);
+								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, EndLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThan)
 							{
 								Compile(WhileExpr.ConditionValue);
-								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, EndLblName);
+								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, EndLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.LessThanOrEqual)
 							{
 								Compile(WhileExpr.ConditionValue);
-								EmitInstruction(FishInst.JUMP_IF_LESSEQ_LONG, EndLblName);
+								EmitInstruction(FishInst.JUMP_IF_GREAT_LONG, EndLblName);
 							}
 							else if (Cmp.Op == ComparisonOp.GreaterThanOrEqual)
 							{
 								Compile(WhileExpr.ConditionValue);
-								EmitInstruction(FishInst.JUMP_IF_GREATEQ_LONG, EndLblName);
+								EmitInstruction(FishInst.JUMP_IF_LESS_LONG, EndLblName);
 							}
 							else
 								throw new NotImplementedException();
 
+							State.CmpPreserveEAX = false;
 						}
 						else if (WhileExpr.ConditionValue is Expr_ConstNumber CNum)
 						{

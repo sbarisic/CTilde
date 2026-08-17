@@ -1,11 +1,11 @@
 # C~
 
-C~ is an experimental C-like language compiler for the Fishmachine virtual machine.
+C~ is an experimental C#-inspired systems language for the Fishmachine virtual machine.
 
-The compiler reads C~ source, builds an abstract syntax tree, and emits FishAsm text. The repository also contains an early C source backend.
+The current compiler reads prototype C~ source, builds an abstract syntax tree, and emits FishAsm text. The repository also contains an early C source backend.
 
 > [!WARNING]
-> C~ is a prototype. The included demonstration compiles, but many language features are incomplete or generate incorrect FishAsm.
+> The compiler predates the draft C#-style specification. The included demonstration compiles, but many features are incomplete or generate incorrect FishAsm.
 
 ## Project status
 
@@ -17,10 +17,10 @@ The newer Fishmachine repository contains a separate C~ copy with later language
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) describes the syntax accepted by this repository.
+- [LANGUAGE.md](LANGUAGE.md) defines the proposed C#-style C~ language.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler pipeline and FishAsm backend.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) lists supported features, defects, and roadmap priorities.
-- [CTilde/todo.md](CTilde/todo.md) keeps the original language idea that is not yet scheduled.
+- [CTilde/todo.md](CTilde/todo.md) tracks the original single-assignment idea and its draft `readonly` design.
 
 ## Requirements
 
@@ -57,21 +57,26 @@ The harness writes `out.asm` in the current directory. It also prints parser deb
 
 The harness does not assemble or run the generated FishAsm. Use the separate [Fishmachine](https://github.com/sbarisic/Fishmachine) project for the assembler and virtual machine.
 
-## Small C~ example
+## Design target example
 
-```c
-void print_number(uint value) {
-	syscall_2(2, value);
-}
+```csharp
+using Fishmachine.Runtime;
 
-void kmain() {
-	uint result = 2 + 3;
-	print_number(result);
-	__asm("SYSCALL $0");
+namespace Examples;
+
+public static class Program
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        uint result = 2 + 3;
+        FishVm.Syscall(2, result);
+        FishVm.Stop();
+    }
 }
 ```
 
-This example stays within the narrow supported syntax. See the status document before you rely on generated code.
+This example follows the draft specification. The current compiler does not accept the complete example yet.
 
 ## Compiler library example
 

@@ -10,6 +10,28 @@ This result does not validate the generated program. The console harness does no
 
 The current maturity level is an experimental prototype.
 
+## Specification alignment
+
+[LANGUAGE.md](LANGUAGE.md) defines a proposed C#-style design for C~ draft 0.2. The current parser and backends implement an older C-like prototype.
+
+The draft changes program structure, classes, arrays, constructors, low-level intrinsics, and interrupt declarations. The migration table in the specification maps old forms to new forms.
+
+No draft 0.2 feature is conforming until the compiler validates it through the complete Fishmachine path.
+
+| Draft 0.2 area | Current implementation |
+| --- | --- |
+| Namespaces and `using` directives | Not implemented |
+| Type-contained program structure | Prototype uses module-level functions and variables |
+| C#-style constructors | Prototype uses `__ctor` |
+| Structures and enumerations | Not implemented in this repository |
+| Properties and member access | Not implemented |
+| Attributes | Prototype uses keywords and function-name conventions |
+| `T[]` arrays and `new` | Prototype uses limited static string arrays |
+| Method calls as expressions | Not implemented |
+| C# operator precedence | Not implemented |
+| Safe and unsafe contexts | Not implemented |
+| Managed class and array references | Not implemented |
+
 ## Support matrix
 
 The terms in this table have these meanings:
@@ -159,11 +181,13 @@ Move shared compiler code into one project. Make Fishmachine reference that proj
 
 Record the supported FishAsm and bytecode versions.
 
-### Phase 2: Add correctness foundations
+### Phase 2: Build the draft 0.2 frontend
 
-Replace fixed look-ahead parsing with a grammar that has explicit precedence and terminator ownership.
+Replace fixed look-ahead parsing with the draft grammar and its explicit operator precedence.
 
 Add a binder with nested scopes and symbol tables. Add a type checker with explicit expression result types.
+
+Add namespaces, using directives, type declarations, members, constructors, properties, attributes, and access modifiers.
 
 Define and test one calling convention. Separate pointer values, array storage, and pointee loads.
 
@@ -175,7 +199,7 @@ Fix parameter order, local offsets, uninitialized globals, condition branches, l
 
 Implement function calls as expressions. Complete dereference and address-of behavior for local and global values.
 
-Make arrays use one documented syntax and storage model.
+Replace prototype arrays with the specified `T[]` type and `new T[length]` allocation model.
 
 ### Phase 4: Add diagnostics and tests
 
@@ -185,13 +209,13 @@ Remove unconditional token output. Add an optional compiler trace.
 
 Create automated tests for the frontend, backend, assembler, and virtual machine path.
 
-### Phase 5: Complete language features
+### Phase 5: Complete the draft language
 
 Implement multiplication, division, modulo, unary operators, logical operators, and bitwise operators.
 
-Add `for`, `switch`, structures, enums, member access, casts, and function pointers only after the core is stable.
+Add `for`, `foreach`, `do`, `switch`, structures, enums, member access, casts, arrays, and object creation.
 
-Define whether classes remain part of C~. If they remain, specify layout, construction, destruction, allocation, and method calls.
+Implement the specified class layout, construction, managed references, allocation, properties, and method calls.
 
 ### Phase 6: Add user tooling
 

@@ -6,6 +6,8 @@ This document describes the standalone CTilde solution. The solution contains a 
 
 The repository does not contain the FishAsm assembler or the Fishmachine virtual machine.
 
+The current frontend predates the proposed C#-style language in [LANGUAGE.md](LANGUAGE.md). This document describes the implementation that exists today.
+
 ## Pipeline
 
 ```text
@@ -193,7 +195,7 @@ The two compiler copies have changed independently. This standalone repository c
 
 ## Main architectural gaps
 
-The next compiler design needs these explicit phases:
+The draft language requires these explicit compiler phases:
 
 ```text
 Source

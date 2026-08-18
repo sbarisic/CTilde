@@ -14,7 +14,7 @@ The generated file includes only C standard-library headers. Compile-time assert
 - Exact `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int32_t`, and `uint32_t` types when used.
 - Two's-complement `int32_t`.
 - A four-byte IEEE-754 binary32 `float`.
-- C23 language support. The canonical GCC and Clang mode is `-std=gnu23`; `-std=gnu2x` is accepted as a compatibility spelling on older toolchains.
+- C23 language support. The native test driver first uses `-std=gnu23`. It retries with `-std=gnu2x` only after an option error. `CTILDE_C_STANDARD` selects an explicit dialect and disables this retry.
 
 References and unsafe pointers use native C pointer width. A 64-bit C target therefore uses 64-bit references and pointers. C~ scalar integer sizes do not change with the target.
 
@@ -33,6 +33,8 @@ References and unsafe pointers use native C pointer width. A 64-bit C target the
 | `T*` | the mapped C type followed by `*` |
 
 Signed addition, subtraction, multiplication, negation, and shifts use generated helpers to avoid C signed-overflow undefined behavior. Draft 0.3 defines two's-complement wrapping. Integer division and remainder check zero before the C operation.
+
+The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
 ## Name encoding
 
@@ -152,9 +154,11 @@ int main(void)
 
 ## Extern methods
 
-`[Extern("symbol")]` applies to a static, bodyless method. The symbol string must be a portable C identifier.
+`[Extern("symbol")]` applies to a static, bodyless method. The symbol string must be a portable C identifier. It cannot be a C23 keyword. It cannot start with an underscore.
 
 The compiler emits an external C prototype using the mappings in this document. The native definition must use exactly that ABI. Arrays, strings, classes, and structures are C~ runtime layouts, not libc substitutes.
+
+External names cannot collide with `main`, a runtime definition, or a generated C symbol. Multiple declarations can use one external name only when their signatures match. The compiler emits one prototype for matching aliases. Diagnostic `CT4102` reports incompatible declarations and identifies the first declaration.
 
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
 

@@ -34,6 +34,161 @@ Run("structured syntax diagnostic", () =>
     Assert(tree.Diagnostics.Any(diagnostic => diagnostic.Code.StartsWith("CT0", StringComparison.Ordinal)), "Expected a syntax diagnostic.");
 });
 
+Run("full fidelity syntax round trip", () =>
+{
+    const string valid = "// lead\r\npublic static class Program { /* body */ [EntryPoint] public static void Main() { } }\r\n";
+    var validTree = SyntaxTree.ParseText(valid, "valid.ct");
+    Assert(validTree.ToFullString() == valid, "Valid syntax did not round-trip exactly.");
+    Assert(validTree.Root.ToFullString() == valid, "The compilation-unit node did not round-trip exactly.");
+    Assert(validTree.Root.ChildNodesAndTokens().Any(item => item.IsNode) && validTree.Root.ChildNodesAndTokens().Any(item => item.IsToken), "Node/token traversal did not expose both child forms.");
+    Assert(validTree.Tokens.Any(token => token.LeadingTrivia.Concat(token.TrailingTrivia).Any(trivia => trivia.Kind == SyntaxTriviaKind.SingleLineComment)), "Single-line comment trivia was not retained.");
+    Assert(validTree.Tokens.Any(token => token.LeadingTrivia.Concat(token.TrailingTrivia).Any(trivia => trivia.Kind == SyntaxTriviaKind.BlockComment)), "Block comment trivia was not retained.");
+    Assert(validTree.Tokens.Any(token => token.TrailingTrivia.Length > 0), "Trailing trivia was not retained.");
+
+    const string invalid = "public static class Program { @ [EntryPoint] public static void Main( { } }";
+    var invalidTree = SyntaxTree.ParseText(invalid, "invalid.ct");
+    Assert(invalidTree.ToFullString() == invalid, "Invalid syntax did not round-trip exactly.");
+    Assert(invalidTree.Tokens.Any(token => token.IsMissing), "Parser recovery did not retain a missing token.");
+    Assert(invalidTree.SkippedTokens.Length > 0, "Parser recovery did not retain skipped tokens.");
+});
+
+Run("conversion and recursive unsafe safety", () =>
+{
+    const string source = """
+        public class A { }
+        public class B { }
+        public struct Holder { public unsafe int* Pointer; }
+        public static class Program
+        {
+            public static int*[] Expose(int*[] value) { return value; }
+            public static Holder Echo(Holder value) { return value; }
+            [EntryPoint]
+            public static void Main()
+            {
+                A a = new A();
+                B b = (B)a;
+                string text = "x";
+                int[] values = (int[])text;
+                int*[] pointers = new int*[1];
+            }
+        }
+        """;
+    var diagnostics = Compile(source).GetDiagnostics();
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2137") >= 2, "Unrelated reference casts were not rejected.");
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2141") >= 4, "Pointer-containing public signatures were not recursively unsafe-checked.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2139"), "Pointer-containing local uses were not recursively unsafe-checked.");
+
+    const string valid = "public static class Program { public static unsafe int** Convert(int** value) { return (int**)value; } [EntryPoint] public static void Main() { unsafe { int*[] values = new int*[1]; } } }";
+    Assert(!Compile(valid).GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Valid pointer casts and pointer arrays were rejected in unsafe contexts.");
+});
+
+Run("integral only operators", () =>
+{
+    const string source = "public static class Program { [EntryPoint] public static void Main() { float a = 5.0; float b = a % 2.0; a %= 2.0; float c = ~a; } }";
+    var diagnostics = Compile(source).GetDiagnostics();
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2149") == 2, "float remainder forms were not rejected.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2148"), "Bitwise complement on float was not rejected.");
+});
+
+Run("C float literal formatting", () =>
+{
+    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { float whole = 5.0; float negativeZero = -0.0; float infinity = 1.0 / 0.0; float notANumber = 0.0 / 0.0; Console.WriteLine((0.0 / 0.0) == (0.0 / 0.0)); } }";
+    var generated = Emit(source);
+    Assert(generated.Contains("5.0f", StringComparison.Ordinal), "An integral-valued float literal was not emitted with a decimal point.");
+    Assert(generated.Contains("-0.0f", StringComparison.Ordinal), "Negative zero was not preserved.");
+    Assert(generated.Contains("INFINITY", StringComparison.Ordinal), "A folded infinity was not emitted with the C macro.");
+    Assert(generated.Contains("NAN", StringComparison.Ordinal), "A folded NaN was not emitted with the C macro.");
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) == "False\n", "Folded NaN equality did not use IEEE semantics.");
+});
+
+Run("pairwise overload ambiguity", () =>
+{
+    const string source = "public static class Program { private static void Pick(short a, float b) { } private static void Pick(int a, uint b) { } [EntryPoint] public static void Main() { byte a = 1; ushort b = 2; Pick(a, b); } }";
+    Assert(Compile(source).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT2123"), "Cross-argument overload preferences were not reported as ambiguous.");
+});
+
+Run("do and switch control flow", () =>
+{
+    const string assigned = "public static class Program { [EntryPoint] public static void Main() { int value; do { value = 1; } while (false); int copy = value; } }";
+    Assert(!Compile(assigned).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3108"), "Assignment through a do body was not preserved.");
+
+    const string broken = "public static class Program { [EntryPoint] public static void Main() { int value; do { if (true) break; value = 1; } while (false); int copy = value; } }";
+    Assert(Compile(broken).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3108"), "An early do break incorrectly assigned a local.");
+
+    const string returning = "public static class Program { private static int Pick(int value) { switch (value) { case 0: return 1; default: return 2; } } [EntryPoint] public static void Main() { } }";
+    Assert(!Compile(returning).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3100"), "A fully returning switch was rejected.");
+
+    const string incomplete = "public static class Program { private static int Pick(int value) { switch (value) { case 0: break; default: return 2; } } [EntryPoint] public static void Main() { } }";
+    Assert(Compile(incomplete).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3100"), "A switch break incorrectly completed a non-void return.");
+});
+
+Run("switch case conversion", () =>
+{
+    const string duplicates = "public static class Program { [EntryPoint] public static void Main() { byte value = 0; switch (value) { case 1: break; case (byte)1: break; case 300: break; default: break; } } }";
+    var diagnostics = Compile(duplicates).GetDiagnostics();
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT3109"), "Duplicate converted case labels were not rejected.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2108"), "Out-of-range case label was not rejected.");
+});
+
+Run("extern ABI validation", () =>
+{
+    const string identical = "public static class A { [Extern(\"native_value\")] public static int Get(int value); } public static class B { [Extern(\"native_value\")] public static int Read(int value); [EntryPoint] public static void Main() { } }";
+    var emitted = Emit(identical);
+    Assert(emitted.Split("extern int32_t native_value", StringSplitOptions.None).Length == 2, "Identical extern aliases did not emit exactly one prototype.");
+
+    const string incompatible = "public static class A { [Extern(\"native_value\")] public static int Get(int value); } public static class B { [Extern(\"native_value\")] public static uint Read(uint value); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(incompatible).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4102" && diagnostic.RelatedLocation is not null), "Incompatible extern aliases did not report the earlier declaration.");
+
+    const string reserved = "public static class Program { [Extern(\"main\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(reserved).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "Reserved external main was not rejected.");
+
+    const string runtime = "public static class Program { [Extern(\"ct_alloc\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(runtime).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A runtime external collision was not rejected.");
+
+    const string generated = "public static class Program { private static void Helper() { } [Extern(\"ct_m__7_Program_6_Helper\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(generated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated external collision was not rejected.");
+
+    const string dynamicGenerated = "public static class Program { [Extern(\"ct_new_ct_a_i32\")] public static int Native(); [EntryPoint] public static void Main() { int[] values = new int[1]; } }";
+    Assert(Compile(dynamicGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated array-allocator collision was not rejected.");
+});
+
+Run("target validation precedes output", () =>
+{
+    const string source = "public struct Recursive { public Recursive Value; } public static class Program { [EntryPoint] public static void Main() { } }";
+    var compilation = Compile(source);
+    Assert(compilation.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4100"), "A recursive value layout was not rejected during analysis.");
+    using var writer = new StringWriter(CultureInfo.InvariantCulture);
+    var result = compilation.EmitC(writer);
+    Assert(!result.Success && writer.GetStringBuilder().Length == 0, "Target validation wrote partial C output.");
+});
+
+Run("directory mode output safety", () =>
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ctilde-directory-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+    Directory.CreateDirectory(directory);
+    try
+    {
+        File.WriteAllText(Path.Combine(directory, "valid.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+        File.WriteAllText(Path.Combine(directory, "generated.ct"), "public static class Broken {");
+        File.WriteAllText(Path.Combine(directory, "generated.c"), "/* Generated by C~ old output. Do not edit. */\nold");
+        File.WriteAllText(Path.Combine(directory, "handwritten.ct"), "public static class Broken {");
+        File.WriteAllText(Path.Combine(directory, "handwritten.c"), "/* handwritten */\nint value;");
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+        Assert(File.Exists(cliDll), $"CLI test dependency was not found at {cliDll}.");
+        var result = RunProcess("dotnet", [cliDll, "--compile-directory", directory]);
+        Assert(result.ExitCode == 1, "Directory mode did not report invalid siblings.");
+        Assert(File.Exists(Path.Combine(directory, "valid.c")), "A valid sibling did not produce C output.");
+        Assert(!File.Exists(Path.Combine(directory, "generated.c")), "Stale generated output was not removed.");
+        Assert(File.ReadAllText(Path.Combine(directory, "handwritten.c")) == "/* handwritten */\nint value;", "Handwritten C output was modified.");
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+});
+
 Run("semantic diagnostics", () =>
 {
     const string source = """
@@ -102,6 +257,15 @@ Run("readonly flow analysis", () =>
 
     const string invalid = "public static class Program { [EntryPoint] public static void Main() { readonly int value; value = 1; value = 2; } }";
     Assert(Compile(invalid).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3130"), "Expected a duplicate readonly assignment diagnostic.");
+
+    const string singleDo = "public static class Program { [EntryPoint] public static void Main() { readonly int value; do { value = 1; } while (false); int copy = value; } }";
+    Assert(!Compile(singleDo).GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "A one-shot do assignment to readonly storage was rejected.");
+
+    const string repeatedDo = "public static class Program { [EntryPoint] public static void Main() { readonly int value; bool repeat = true; do { value = 1; } while (repeat); } }";
+    Assert(Compile(repeatedDo).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3130"), "A repeatable do assignment to readonly storage was accepted.");
+
+    const string repeatedField = "public class Box { public readonly int Value; public Box(bool repeat) { do { Value = 1; } while (repeat); } } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(repeatedField).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3131"), "A repeatable constructor assignment to a readonly field was accepted.");
 });
 
 Run("numeric promotion and compound assignment", () =>
@@ -536,7 +700,7 @@ static ProcessResult CompileAndRun(string source)
         File.WriteAllText(cPath, Emit(source), new UTF8Encoding(false));
         var compilerResult = RunCompiler(cPath, executablePath);
         Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
-        return RunProcess(executablePath, []);
+        return RunCompiledProgram(executablePath);
     }
     finally
     {
@@ -550,15 +714,24 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
     if (!string.IsNullOrWhiteSpace(configured))
     {
+        if (configured.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase))
+        {
+            var compiler = configured[4..];
+            var linuxSource = WslPath(cPath);
+            var linuxOutput = WslPath(executablePath);
+            return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput);
+        }
         var compilerName = Path.GetFileNameWithoutExtension(configured);
         var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
             ? new[] { "/nologo", "/std:clatest", "/W4", "/WX", $"/Fe:{executablePath}", cPath }
-            : new[] { "-std=gnu23", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath };
-        return RunProcess(configured, arguments);
+            : null;
+        return arguments is not null
+            ? RunProcess(configured, arguments)
+            : RunGnuCompiler(configured, [], cPath, executablePath);
     }
 
     if (!OperatingSystem.IsWindows())
-        return RunProcess("cc", ["-std=gnu23", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+        return RunGnuCompiler("cc", [], cPath, executablePath);
 
     var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
     Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -569,6 +742,43 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
     File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /W4 /WX /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
     return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
+}
+
+static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath)
+{
+    var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
+    var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
+    var result = RunProcess(command, [.. prefix, $"-std={standard}", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+    if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
+        return result;
+    return RunProcess(command, [.. prefix, "-std=gnu2x", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+}
+
+static bool RejectedCStandard(ProcessResult result)
+{
+    if (result.ExitCode == 0)
+        return false;
+    var output = result.StandardOutput + result.StandardError;
+    return output.Contains("gnu23", StringComparison.OrdinalIgnoreCase) &&
+        (output.Contains("unrecognized", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("unknown", StringComparison.OrdinalIgnoreCase) ||
+         output.Contains("invalid value", StringComparison.OrdinalIgnoreCase));
+}
+
+static string WslPath(string path)
+{
+    var windowsPath = Path.GetFullPath(path).Replace('\\', '/');
+    var result = RunProcess("wsl", ["--exec", "wslpath", "-a", "-u", windowsPath]);
+    Assert(result.ExitCode == 0, result.StandardError);
+    return result.StandardOutput.Trim();
+}
+
+static ProcessResult RunCompiledProgram(string executablePath)
+{
+    var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+    return configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true
+        ? RunProcess("wsl", ["--exec", WslPath(executablePath)])
+        : RunProcess(executablePath, []);
 }
 
 static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments)

@@ -30,6 +30,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Enum;
     public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Array or CTypeKind.String;
     public bool IsPointerLike => IsReference || Kind == CTypeKind.Pointer;
+    public bool ContainsPointer => ContainsPointerCore(this, []);
     public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum;
 
     public string DisplayName => Kind switch
@@ -39,6 +40,18 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
         CTypeKind.Pointer => $"{ElementType!.DisplayName}*",
         _ => Kind.ToString().ToLowerInvariant(),
     };
+
+    private static bool ContainsPointerCore(CType type, HashSet<TypeSymbol> visited)
+    {
+        if (type.Kind == CTypeKind.Pointer)
+            return true;
+        if (type.ElementType is not null && ContainsPointerCore(type.ElementType, visited))
+            return true;
+        if (type.Symbol is null || !visited.Add(type.Symbol))
+            return false;
+        return type.Symbol.Fields.Any(field => ContainsPointerCore(field.Type, visited)) ||
+            type.Symbol.Properties.Any(property => ContainsPointerCore(property.Type, visited));
+    }
 }
 
 internal enum DeclaredTypeKind { Class, Struct, Enum, StaticClass }
@@ -108,6 +121,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
     public string? ExternName { get; init; }
+    public bool IsTrustedExtern { get; init; }
     public string CName => ExternName ?? NameMangler.Method(this);
 }
 
@@ -121,6 +135,7 @@ internal sealed class LocalSymbol
     public required SyntaxNode Syntax { get; init; }
     public bool IsReadonly { get; init; }
     public bool IsConst { get; init; }
+    public int LoopDepthAtDeclaration { get; init; }
     public bool IsAssigned { get; set; }
     public int AssignmentCount { get; set; }
     public string? ConstantCode { get; set; }
@@ -145,12 +160,23 @@ internal static class NameMangler
 
     public static string TypeCode(CType type) => type.Kind switch
     {
-        CTypeKind.Void => "v", CTypeKind.Bool => "b", CTypeKind.Byte => "u8", CTypeKind.Sbyte => "i8",
-        CTypeKind.Short => "i16", CTypeKind.Ushort => "u16", CTypeKind.Char => "c8", CTypeKind.Int => "i32",
-        CTypeKind.Uint => "u32", CTypeKind.Float => "f32", CTypeKind.String => "str",
-        CTypeKind.Class => $"r{Encode(type.Symbol!.FullName)}", CTypeKind.Struct => $"s{Encode(type.Symbol!.FullName)}",
-        CTypeKind.Enum => $"e{Encode(type.Symbol!.FullName)}", CTypeKind.Array => $"a{TypeCode(type.ElementType!)}",
-        CTypeKind.Pointer => $"p{TypeCode(type.ElementType!)}", _ => "err",
+        CTypeKind.Void => "v",
+        CTypeKind.Bool => "b",
+        CTypeKind.Byte => "u8",
+        CTypeKind.Sbyte => "i8",
+        CTypeKind.Short => "i16",
+        CTypeKind.Ushort => "u16",
+        CTypeKind.Char => "c8",
+        CTypeKind.Int => "i32",
+        CTypeKind.Uint => "u32",
+        CTypeKind.Float => "f32",
+        CTypeKind.String => "str",
+        CTypeKind.Class => $"r{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Struct => $"s{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Enum => $"e{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Array => $"a{TypeCode(type.ElementType!)}",
+        CTypeKind.Pointer => $"p{TypeCode(type.ElementType!)}",
+        _ => "err",
     };
 
     private static string Encode(string text)
@@ -173,9 +199,18 @@ internal static class TypeFacts
 {
     public static CType? BuiltIn(string name) => name switch
     {
-        "void" => CType.Void, "bool" => CType.Bool, "byte" => CType.Byte, "sbyte" => CType.Sbyte,
-        "short" => CType.Short, "ushort" => CType.Ushort, "char" => CType.Char, "int" => CType.Int,
-        "uint" => CType.Uint, "float" => CType.Float, "string" => CType.String, _ => null,
+        "void" => CType.Void,
+        "bool" => CType.Bool,
+        "byte" => CType.Byte,
+        "sbyte" => CType.Sbyte,
+        "short" => CType.Short,
+        "ushort" => CType.Ushort,
+        "char" => CType.Char,
+        "int" => CType.Int,
+        "uint" => CType.Uint,
+        "float" => CType.Float,
+        "string" => CType.String,
+        _ => null,
     };
 
     public static bool CanImplicitlyConvert(CType from, CType to)
@@ -196,32 +231,9 @@ internal static class TypeFacts
     }
 
     public static bool CanExplicitlyConvert(CType from, CType to) =>
-        CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric || from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum || from.IsPointerLike && to.IsPointerLike;
-
-    public static int ImplicitConversionScore(CType from, CType to)
-    {
-        if (from == to)
-            return 0;
-        if (!CanImplicitlyConvert(from, to))
-            return 100;
-        return (from.Kind, to.Kind) switch
-        {
-            (CTypeKind.Byte, CTypeKind.Short or CTypeKind.Ushort) => 1,
-            (CTypeKind.Byte, CTypeKind.Int) => 2,
-            (CTypeKind.Byte, CTypeKind.Uint) => 3,
-            (CTypeKind.Byte, CTypeKind.Float) => 4,
-            (CTypeKind.Sbyte, CTypeKind.Short) => 1,
-            (CTypeKind.Sbyte, CTypeKind.Int) => 2,
-            (CTypeKind.Sbyte, CTypeKind.Float) => 3,
-            (CTypeKind.Short, CTypeKind.Int) => 1,
-            (CTypeKind.Short, CTypeKind.Float) => 2,
-            (CTypeKind.Ushort or CTypeKind.Char, CTypeKind.Int) => 1,
-            (CTypeKind.Ushort or CTypeKind.Char, CTypeKind.Uint) => 2,
-            (CTypeKind.Ushort or CTypeKind.Char, CTypeKind.Float) => 3,
-            (CTypeKind.Int or CTypeKind.Uint, CTypeKind.Float) => 1,
-            _ => 1,
-        };
-    }
+        CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
+        from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum ||
+        from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer;
 
     public static CType PromoteNumeric(CType left, CType right)
     {

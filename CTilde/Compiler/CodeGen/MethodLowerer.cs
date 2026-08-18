@@ -37,6 +37,8 @@ internal sealed class MethodLowerer
     private readonly Dictionary<string, ParameterSymbol> _parameters;
     private readonly Stack<string> _breakLabels = [];
     private readonly Stack<string> _continueLabels = [];
+    private readonly Stack<List<AssignmentSnapshot>> _breakAssignmentStates = [];
+    private readonly Stack<List<AssignmentSnapshot>> _continueAssignmentStates = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
     private readonly Dictionary<FieldSymbol, int> _fieldAssignmentCounts = [];
     private readonly HashSet<FieldSymbol> _constantFieldsBeingEvaluated = [];
@@ -44,6 +46,7 @@ internal sealed class MethodLowerer
     private int _tempId;
     private int _labelId;
     private int _unsafeDepth;
+    private int _repeatableLoopDepth;
 
     public MethodLowerer(CEmitter emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "")
     {
@@ -141,15 +144,23 @@ internal sealed class MethodLowerer
 
     private FlowResult EmitStatements(CWriter writer, ImmutableArray<StatementSyntax> statements)
     {
-        var returns = false;
+        var exits = FlowExit.None;
+        var reachable = true;
         foreach (var statement in statements)
         {
-            if (returns)
+            if (!reachable)
                 Report("CT3101", "Unreachable statement.", statement);
+            var before = reachable ? null : SnapshotAssignments();
             var flow = EmitStatement(writer, statement);
-            returns |= flow.AlwaysReturns;
+            if (!reachable)
+            {
+                RestoreAssignments(before!);
+                continue;
+            }
+            exits |= flow.Exits & ~FlowExit.FallThrough;
+            reachable = flow.FallsThrough;
         }
-        return new FlowResult(returns);
+        return new FlowResult(exits | (reachable ? FlowExit.FallThrough : FlowExit.None));
     }
 
     private FlowResult EmitStatement(CWriter writer, StatementSyntax statement)
@@ -171,20 +182,19 @@ internal sealed class MethodLowerer
                 EmitLocal(writer, local);
                 return FlowResult.None;
             case ExpressionStatementSyntax expression:
-            {
-                var lowered = LowerExpression(expression.Expression);
-                EmitPrelude(writer, lowered.Prelude);
-                writer.WriteLine($"(void)({lowered.Code});");
-                return FlowResult.None;
-            }
+                {
+                    var lowered = LowerExpression(expression.Expression);
+                    EmitPrelude(writer, lowered.Prelude);
+                    writer.WriteLine($"(void)({lowered.Code});");
+                    return FlowResult.None;
+                }
             case IfStatementSyntax @if:
                 return EmitIf(writer, @if);
             case WhileStatementSyntax @while:
                 EmitWhile(writer, @while);
                 return FlowResult.None;
             case DoStatementSyntax @do:
-                EmitDo(writer, @do);
-                return FlowResult.None;
+                return EmitDo(writer, @do);
             case ForStatementSyntax @for:
                 EmitFor(writer, @for);
                 return FlowResult.None;
@@ -192,23 +202,28 @@ internal sealed class MethodLowerer
                 EmitForeach(writer, @foreach);
                 return FlowResult.None;
             case SwitchStatementSyntax @switch:
-                EmitSwitch(writer, @switch);
-                return FlowResult.None;
+                return EmitSwitch(writer, @switch);
             case BreakStatementSyntax:
                 if (_breakLabels.Count == 0)
                     Report("CT3102", "break is valid only inside a loop or switch.", statement);
                 else
+                {
+                    _breakAssignmentStates.Peek().Add(SnapshotAssignments());
                     writer.WriteLine($"goto {_breakLabels.Peek()};");
-                return new FlowResult(true);
+                }
+                return new FlowResult(FlowExit.Break);
             case ContinueStatementSyntax:
                 if (_continueLabels.Count == 0)
                     Report("CT3103", "continue is valid only inside a loop.", statement);
                 else
+                {
+                    _continueAssignmentStates.Peek().Add(SnapshotAssignments());
                     writer.WriteLine($"goto {_continueLabels.Peek()};");
-                return new FlowResult(true);
+                }
+                return new FlowResult(FlowExit.Continue);
             case ReturnStatementSyntax @return:
                 EmitReturn(writer, @return);
-                return new FlowResult(true);
+                return new FlowResult(FlowExit.Return);
             case UnsafeStatementSyntax unsafeStatement:
                 _unsafeDepth++;
                 var unsafeFlow = EmitStatement(writer, unsafeStatement.Body);
@@ -243,15 +258,22 @@ internal sealed class MethodLowerer
         }
         else if (syntax.Type.Name == "var")
             Report("CT2103", "var requires an initializer.", syntax);
-        if (type.Kind == CTypeKind.Pointer)
+        if (type.ContainsPointer)
             RequireUnsafe(syntax);
         if (syntax.IsConst && initializer is not null && !initializer.IsConstant)
             Report("CT2104", "A const initializer must be a compile-time constant.", syntax.Initializer!);
 
         var symbol = new LocalSymbol
         {
-            Name = syntax.Name, Type = type, Id = _localId++, Syntax = syntax, IsReadonly = syntax.IsReadonly,
-            IsConst = syntax.IsConst, IsAssigned = initializer is not null, AssignmentCount = initializer is null ? 0 : 1,
+            Name = syntax.Name,
+            Type = type,
+            Id = _localId++,
+            Syntax = syntax,
+            IsReadonly = syntax.IsReadonly,
+            IsConst = syntax.IsConst,
+            LoopDepthAtDeclaration = _repeatableLoopDepth,
+            IsAssigned = initializer is not null,
+            AssignmentCount = initializer is null ? 0 : 1,
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
         };
@@ -268,7 +290,7 @@ internal sealed class MethodLowerer
         var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
         EmitPrelude(writer, condition.Prelude);
         var before = SnapshotAssignments();
-        writer.WriteLine($"if ({condition.Code})");
+        writer.WriteLine($"if {FormatCondition(condition.Code)}");
         var thenFlow = EmitEmbedded(writer, syntax.Then);
         var thenAssignments = SnapshotAssignments();
         RestoreAssignments(before);
@@ -282,8 +304,13 @@ internal sealed class MethodLowerer
         }
         else
             elseAssignments = before;
-        RestoreAssignments(MergeAssignments(before, thenAssignments, elseAssignments));
-        return new FlowResult(thenFlow.AlwaysReturns && syntax.Else is not null && elseFlow.AlwaysReturns);
+        var fallthroughStates = new List<AssignmentSnapshot>();
+        if (thenFlow.FallsThrough)
+            fallthroughStates.Add(thenAssignments);
+        if (elseFlow.FallsThrough)
+            fallthroughStates.Add(elseAssignments);
+        RestoreAssignments(fallthroughStates.Count == 0 ? before : MergeAssignments(fallthroughStates));
+        return new FlowResult(thenFlow.Exits | elseFlow.Exits);
     }
 
     private FlowResult EmitEmbedded(CWriter writer, StatementSyntax statement)
@@ -308,10 +335,14 @@ internal sealed class MethodLowerer
         writer.WriteLine($"{start}:;");
         var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
         EmitPrelude(writer, condition.Prelude);
-        writer.WriteLine($"if (!({condition.Code})) goto {@break};");
+        writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
+        _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
+        _repeatableLoopDepth--;
         _continueLabels.Pop(); _breakLabels.Pop();
+        _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
         writer.WriteLine($"goto {start};");
@@ -319,24 +350,50 @@ internal sealed class MethodLowerer
         RestoreAssignments(before);
     }
 
-    private void EmitDo(CWriter writer, DoStatementSyntax syntax)
+    private FlowResult EmitDo(CWriter writer, DoStatementSyntax syntax)
     {
         var start = NewLabel("do_body");
         var @continue = NewLabel("do_continue");
         var @break = NewLabel("do_break");
         var before = SnapshotAssignments();
         writer.WriteLine($"{start}:;");
+        var breakStates = new List<AssignmentSnapshot>();
+        var continueStates = new List<AssignmentSnapshot>();
+        _breakAssignmentStates.Push(breakStates); _continueAssignmentStates.Push(continueStates);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
-        EmitEmbedded(writer, syntax.Body);
+        var canRepeat = syntax.Condition is not LiteralExpressionSyntax { LiteralKind: SyntaxKind.FalseKeyword };
+        if (canRepeat)
+            _repeatableLoopDepth++;
+        var bodyFlow = EmitEmbedded(writer, syntax.Body);
+        if (canRepeat)
+            _repeatableLoopDepth--;
+        var bodyState = SnapshotAssignments();
         _continueLabels.Pop(); _breakLabels.Pop();
+        _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
-        var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
-        EmitPrelude(writer, condition.Prelude);
-        writer.WriteLine($"if ({condition.Code}) goto {start};");
+        var conditionStates = new List<AssignmentSnapshot>(continueStates);
+        if (bodyFlow.FallsThrough)
+            conditionStates.Add(bodyState);
+        AssignmentSnapshot? conditionExit = null;
+        if (conditionStates.Count > 0)
+        {
+            RestoreAssignments(MergeAssignments(conditionStates));
+            var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
+            EmitPrelude(writer, condition.Prelude);
+            conditionExit = SnapshotAssignments();
+            writer.WriteLine($"if {FormatCondition(condition.Code)} goto {start};");
+        }
         writer.WriteLine($"goto {@break};");
         writer.WriteLine($"{@break}:;");
-        RestoreAssignments(before);
+        var exits = new List<AssignmentSnapshot>(breakStates);
+        if (conditionExit is not null)
+            exits.Add(conditionExit);
+        RestoreAssignments(exits.Count == 0 ? before : MergeAssignments(exits));
+        var flowExits = bodyFlow.Exits & FlowExit.Return;
+        if (exits.Count > 0)
+            flowExits |= FlowExit.FallThrough;
+        return new FlowResult(flowExits);
     }
 
     private void EmitFor(CWriter writer, ForStatementSyntax syntax)
@@ -353,11 +410,15 @@ internal sealed class MethodLowerer
         {
             var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
             EmitPrelude(writer, condition.Prelude);
-            writer.WriteLine($"if (!({condition.Code})) goto {@break};");
+            writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
         }
+        _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
+        _repeatableLoopDepth--;
         _continueLabels.Pop(); _breakLabels.Pop();
+        _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
         if (syntax.Iterator is not null)
@@ -383,41 +444,63 @@ internal sealed class MethodLowerer
         var declaredType = syntax.Type.Name == "var" ? elementType : _model.ResolveType(syntax.Type, TreeFor(syntax));
         if (!TypeFacts.CanImplicitlyConvert(elementType, declaredType))
             Report("CT2106", $"Array element type '{elementType.DisplayName}' cannot convert to '{declaredType.DisplayName}'.", syntax.Type);
-        var local = new LocalSymbol { Name = syntax.Name, Type = declaredType, Id = _localId++, Syntax = syntax, IsAssigned = true, AssignmentCount = 1 };
+        var local = new LocalSymbol
+        {
+            Name = syntax.Name,
+            Type = declaredType,
+            Id = _localId++,
+            Syntax = syntax,
+            IsAssigned = true,
+            AssignmentCount = 1,
+            LoopDepthAtDeclaration = _repeatableLoopDepth + 1,
+        };
         _scopes.Peek()[syntax.Name] = local;
         var index = NewTemp();
         writer.WriteLine($"int32_t {index} = 0;");
         var start = NewLabel("foreach_test");
         var @continue = NewLabel("foreach_continue");
         var @break = NewLabel("foreach_break");
+        var before = SnapshotAssignments();
         writer.WriteLine($"{start}:;");
         writer.WriteLine($"if ({index} >= {collection.Code}->Length) goto {@break};");
         writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {collection.Code}->Data[{index}];");
+        _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
+        _repeatableLoopDepth--;
         _continueLabels.Pop(); _breakLabels.Pop();
+        _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
         writer.WriteLine($"{index} = ct_i32_add({index}, 1);");
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
         PopScope();
+        RestoreAssignments(before);
     }
 
-    private void EmitSwitch(CWriter writer, SwitchStatementSyntax syntax)
+    private FlowResult EmitSwitch(CWriter writer, SwitchStatementSyntax syntax)
     {
         var value = Materialize(LowerExpression(syntax.Expression), syntax.Expression);
         if (!value.Type.IsIntegral)
             Report("CT2107", "switch requires an integral or enum expression.", syntax.Expression);
         EmitPrelude(writer, value.Prelude);
         var @break = NewLabel("switch_break");
+        var before = SnapshotAssignments();
+        var breakStates = new List<AssignmentSnapshot>();
+        _breakAssignmentStates.Push(breakStates);
         _breakLabels.Push(@break);
+        var sectionFlows = new List<FlowResult>();
+        var fallthroughStates = new List<AssignmentSnapshot>();
+        var caseValues = new HashSet<string>(StringComparer.Ordinal);
+        var hasDefault = false;
         writer.WriteLine($"switch ({value.Code})");
         using (writer.Block())
         {
-            var hasDefault = false;
             foreach (var section in syntax.Sections)
             {
+                RestoreAssignments(before);
                 foreach (var label in section.Labels)
                 {
                     if (label.Value is null)
@@ -430,21 +513,87 @@ internal sealed class MethodLowerer
                     else
                     {
                         var constant = LowerExpression(label.Value);
-                        if (!constant.IsConstant || constant.Prelude.Count != 0)
+                        if (!constant.IsConstant || constant.Prelude.Count != 0 || !TryConvertCaseConstant(constant, value.Type, out var key, out var code))
+                        {
                             Report("CT2108", "A case label must be an integral constant.", label.Value);
-                        writer.WriteLine($"case {constant.Code}:;");
+                            code = "0";
+                        }
+                        else if (!caseValues.Add(key))
+                            Report("CT3109", "A switch cannot contain duplicate case values after conversion.", label.Value);
+                        writer.WriteLine($"case {code}:;");
                     }
                 }
                 PushScope();
                 var flow = EmitStatements(writer, section.Statements);
+                var sectionState = SnapshotAssignments();
                 PopScope();
-                if (!flow.AlwaysReturns)
+                sectionFlows.Add(flow);
+                if (flow.FallsThrough)
+                    fallthroughStates.Add(sectionState);
+                if (flow.FallsThrough)
                     Report("CT3105", "A switch section must end with break, continue, or return.", section);
             }
         }
         _breakLabels.Pop();
+        _breakAssignmentStates.Pop();
         writer.WriteLine($"{@break}:;");
+        var switchExitStates = new List<AssignmentSnapshot>(breakStates);
+        switchExitStates.AddRange(fallthroughStates);
+        if (!hasDefault)
+            switchExitStates.Add(before);
+        RestoreAssignments(switchExitStates.Count == 0 ? before : MergeAssignments(switchExitStates));
+
+        var exits = sectionFlows.Aggregate(FlowExit.None, (current, flow) => current | (flow.Exits & (FlowExit.Return | FlowExit.Continue)));
+        if (!hasDefault || breakStates.Count > 0 || fallthroughStates.Count > 0)
+            exits |= FlowExit.FallThrough;
+        return new FlowResult(exits);
     }
+
+    private bool TryConvertCaseConstant(LoweredExpression constant, CType governingType, out string key, out string code)
+    {
+        key = string.Empty;
+        code = "0";
+        if (!constant.Type.IsIntegral || constant.Type.Kind == CTypeKind.Enum && constant.Type != governingType)
+            return false;
+        var target = governingType.Kind == CTypeKind.Enum
+            ? governingType.Symbol!.Fields.Single(field => field.Name == "<underlying>").Type
+            : governingType;
+        if (!target.IsIntegral || !TryGetIntegralValue(constant.ConstantValue, out var value) || !FitsIntegralType(value, target))
+            return false;
+        key = value.ToString(CultureInfo.InvariantCulture);
+        var literal = target == CType.Uint
+            ? $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})"
+            : value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture);
+        code = governingType.Kind == CTypeKind.Enum ? $"({_emitter.CTypeName(governingType)})({literal})" : $"({_emitter.CTypeName(target)})({literal})";
+        return true;
+    }
+
+    private static bool TryGetIntegralValue(object? constant, out BigInteger value)
+    {
+        switch (constant)
+        {
+            case byte item: value = item; return true;
+            case sbyte item: value = item; return true;
+            case short item: value = item; return true;
+            case ushort item: value = item; return true;
+            case int item: value = item; return true;
+            case uint item: value = item; return true;
+            case long item: value = item; return true;
+            case ulong item: value = item; return true;
+            default: value = default; return false;
+        }
+    }
+
+    private static bool FitsIntegralType(BigInteger value, CType type) => type.Kind switch
+    {
+        CTypeKind.Byte or CTypeKind.Char => value >= byte.MinValue && value <= byte.MaxValue,
+        CTypeKind.Sbyte => value >= sbyte.MinValue && value <= sbyte.MaxValue,
+        CTypeKind.Short => value >= short.MinValue && value <= short.MaxValue,
+        CTypeKind.Ushort => value >= ushort.MinValue && value <= ushort.MaxValue,
+        CTypeKind.Int => value >= int.MinValue && value <= int.MaxValue,
+        CTypeKind.Uint => value >= uint.MinValue && value <= uint.MaxValue,
+        _ => false,
+    };
 
     private void EmitReturn(CWriter writer, ReturnStatementSyntax syntax)
     {
@@ -523,6 +672,27 @@ internal sealed class MethodLowerer
             field => Math.Max(thenState.FieldCounts.GetValueOrDefault(field), elseState.FieldCounts.GetValueOrDefault(field)));
         return new AssignmentSnapshot(locals, fields, fieldCounts);
     }
+
+    private static AssignmentSnapshot MergeAssignments(IReadOnlyList<AssignmentSnapshot> states)
+    {
+        if (states.Count == 0)
+            throw new ArgumentException("At least one assignment state is required.", nameof(states));
+        if (states.Count == 1)
+            return states[0];
+        var first = states[0];
+        var locals = first.Locals.ToDictionary(
+            pair => pair.Key,
+            pair => (
+                states.All(state => state.Locals.GetValueOrDefault(pair.Key).IsAssigned),
+                states.Max(state => state.Locals.GetValueOrDefault(pair.Key).AssignmentCount)));
+        var fields = new HashSet<FieldSymbol>(first.Fields);
+        foreach (var state in states.Skip(1))
+            fields.IntersectWith(state.Fields);
+        var fieldCounts = states.SelectMany(state => state.FieldCounts.Keys).Distinct().ToDictionary(
+            field => field,
+            field => states.Max(state => state.FieldCounts.GetValueOrDefault(field)));
+        return new AssignmentSnapshot(locals, fields, fieldCounts);
+    }
     private string NewTemp() => $"ct_tmp{_temporaryPrefix}_{_tempId++}";
     private string NewLabel(string prefix) => $"ct_{prefix}_{_labelId++}";
     private SyntaxTree TreeFor(SyntaxNode syntax) => _model.SyntaxTrees.First(tree => ReferenceEquals(tree.Text, syntax.Source));
@@ -533,9 +703,21 @@ internal sealed class MethodLowerer
         _ => false,
     };
 
-    private readonly record struct FlowResult(bool AlwaysReturns)
+    [Flags]
+    private enum FlowExit
     {
-        public static FlowResult None => new(false);
+        None = 0,
+        FallThrough = 1,
+        Return = 2,
+        Break = 4,
+        Continue = 8,
+    }
+
+    private readonly record struct FlowResult(FlowExit Exits)
+    {
+        public static FlowResult None => new(FlowExit.FallThrough);
+        public bool FallsThrough => (Exits & FlowExit.FallThrough) != 0;
+        public bool AlwaysReturns => Exits == FlowExit.Return;
     }
 
     private sealed record AssignmentSnapshot(
@@ -576,7 +758,7 @@ internal sealed class MethodLowerer
         if (syntax.Value is NumericLiteralValue numeric)
         {
             if (numeric.FloatingPoint is float value)
-                return Constant(CType.Float, value, value.ToString("R", CultureInfo.InvariantCulture) + "f");
+                return Constant(CType.Float, value, FormatFloat(value));
             if (numeric.IsUnsigned)
             {
                 if (numeric.Integer > uint.MaxValue)
@@ -605,21 +787,28 @@ internal sealed class MethodLowerer
         var local = FindLocal(syntax.Name);
         if (local is not null)
         {
+            if (local.Type.ContainsPointer)
+                RequireUnsafe(syntax);
             if (!forWrite && !local.IsAssigned)
                 Report("CT3108", $"Local '{syntax.Name}' is read before it is assigned.", syntax);
             return new LoweredExpression
             {
-                Type = local.Type, Code = local.ConstantCode ?? local.CName,
+                Type = local.Type,
+                Code = local.ConstantCode ?? local.CName,
                 LValue = new LoweredLValue { Store = value => $"{local.CName} = {value}", Address = $"&{local.CName}", Local = local },
-                IsConstant = local.IsConst, ConstantValue = local.ConstantValue,
+                IsConstant = local.IsConst,
+                ConstantValue = local.ConstantValue,
             };
         }
         if (_parameters.TryGetValue(syntax.Name, out var parameter))
         {
+            if (parameter.Type.ContainsPointer)
+                RequireUnsafe(syntax);
             var name = NameMangler.Identifier(parameter.Name);
             return new LoweredExpression
             {
-                Type = parameter.Type, Code = name,
+                Type = parameter.Type,
+                Code = name,
                 LValue = new LoweredLValue { Store = value => $"{name} = {value}", Address = $"&{name}" },
             };
         }
@@ -646,7 +835,8 @@ internal sealed class MethodLowerer
         if (_method.ContainingType.Kind == DeclaredTypeKind.Struct)
             return new LoweredExpression
             {
-                Type = _method.ContainingType.Type, Code = "(*ct_self)",
+                Type = _method.ContainingType.Type,
+                Code = "(*ct_self)",
                 LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" },
             };
         return new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
@@ -704,6 +894,8 @@ internal sealed class MethodLowerer
 
     private LoweredExpression LowerField(FieldSymbol field, LoweredExpression? receiver, SyntaxNode syntax, bool forWrite)
     {
+        if (field.Type.ContainsPointer)
+            RequireUnsafe(syntax);
         CheckAccess(field, syntax);
         if (!forWrite && field.IsConst && field.Initializer is not null)
         {
@@ -739,13 +931,18 @@ internal sealed class MethodLowerer
         }
         return new LoweredExpression
         {
-            Type = field.Type, Code = code, Prelude = prelude, IsConstant = field.IsConst,
+            Type = field.Type,
+            Code = code,
+            Prelude = prelude,
+            IsConstant = field.IsConst,
             LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})", Field = field },
         };
     }
 
     private LoweredExpression LowerProperty(PropertySymbol property, LoweredExpression? receiver, SyntaxNode syntax, bool forWrite)
     {
+        if (property.Type.ContainsPointer)
+            RequireUnsafe(syntax);
         CheckAccess(property, syntax);
         CheckAccessibility(forWrite ? property.SetterAccessibility : property.GetterAccessibility, property, syntax);
         var prelude = new List<string>();
@@ -769,7 +966,9 @@ internal sealed class MethodLowerer
         var getterCode = property.Getter is null ? _emitter.DefaultValue(property.Type) : $"{NameMangler.Getter(property)}({receiverArgument})";
         return new LoweredExpression
         {
-            Type = property.Type, Code = getterCode, Prelude = prelude,
+            Type = property.Type,
+            Code = getterCode,
+            Prelude = prelude,
             LValue = property.Setter is null ? null : new LoweredLValue
             {
                 Store = value => $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : receiverArgument + ", ")}{value})",
@@ -791,7 +990,9 @@ internal sealed class MethodLowerer
             var code = $"{receiver.Code}->Data[{index.Code}]";
             return new LoweredExpression
             {
-                Type = receiver.Type.ElementType!, Code = code, Prelude = prelude,
+                Type = receiver.Type.ElementType!,
+                Code = code,
+                Prelude = prelude,
                 LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" },
             };
         }
@@ -814,6 +1015,8 @@ internal sealed class MethodLowerer
     private LoweredExpression LowerNew(NewExpressionSyntax syntax)
     {
         var type = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        if (type.ContainsPointer)
+            RequireUnsafe(syntax);
         if (syntax.ArrayLength is not null)
         {
             if (type.Kind != CTypeKind.Array)
@@ -907,6 +1110,8 @@ internal sealed class MethodLowerer
         var selected = SelectOverload(candidates, methodName, arguments, syntax);
         if (selected is null)
             return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
+        if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer))
+            RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
 
         var prelude = new List<string>();
@@ -974,26 +1179,58 @@ internal sealed class MethodLowerer
     {
         var matches = candidates
             .Where(candidate => candidate.Parameters.Length == arguments.Count)
-            .Select(candidate => new
-            {
-                Method = candidate,
-                Scores = candidate.Parameters.Select((parameter, index) => TypeFacts.ImplicitConversionScore(arguments[index].Type, parameter.Type)).ToArray(),
-            })
-            .Where(match => match.Scores.All(score => score < 100))
-            .Select(match => new { match.Method, Score = match.Scores.Sum() })
-            .OrderBy(match => match.Score)
+            .Where(candidate => candidate.Parameters
+                .Select((parameter, index) => TypeFacts.CanImplicitlyConvert(arguments[index].Type, parameter.Type))
+                .All(valid => valid))
             .ToArray();
         if (matches.Length == 0)
         {
             Report("CT2122", $"No overload of '{name}' accepts the supplied argument types.", syntax);
             return null;
         }
-        if (matches.Length > 1 && matches[0].Score == matches[1].Score)
+        var winners = matches.Where(candidate => matches.All(other =>
+            ReferenceEquals(candidate, other) || IsBetterCandidate(candidate, other, arguments))).ToArray();
+        if (winners.Length != 1)
         {
             Report("CT2123", $"Call to '{name}' is ambiguous.", syntax);
             return null;
         }
-        return matches[0].Method;
+        return winners[0];
+    }
+
+    private static bool IsBetterCandidate(MethodSymbol candidate, MethodSymbol other, IReadOnlyList<LoweredExpression> arguments)
+    {
+        var better = false;
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var comparison = CompareConversion(arguments[index].Type, candidate.Parameters[index].Type, other.Parameters[index].Type);
+            if (comparison > 0)
+                return false;
+            better |= comparison < 0;
+        }
+        return better;
+    }
+
+    private static int CompareConversion(CType source, CType leftTarget, CType rightTarget)
+    {
+        if (leftTarget == rightTarget)
+            return 0;
+        if (source == leftTarget)
+            return -1;
+        if (source == rightTarget)
+            return 1;
+        var leftToRight = TypeFacts.CanImplicitlyConvert(leftTarget, rightTarget);
+        var rightToLeft = TypeFacts.CanImplicitlyConvert(rightTarget, leftTarget);
+        if (leftToRight != rightToLeft)
+            return leftToRight ? -1 : 1;
+        if (source.IsIntegral && leftTarget.IsIntegral && rightTarget.IsIntegral)
+        {
+            var leftSigned = leftTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
+            var rightSigned = rightTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
+            if (leftSigned != rightSigned)
+                return leftSigned ? -1 : 1;
+        }
+        return 0;
     }
 
     private (List<string> Prelude, List<string> Codes) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ExpressionSyntax> syntax)
@@ -1019,7 +1256,10 @@ internal sealed class MethodLowerer
     private LoweredExpression LowerCast(CastExpressionSyntax syntax)
     {
         var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
-        return Convert(LowerExpression(syntax.Expression), target, syntax, true);
+        var expression = LowerExpression(syntax.Expression);
+        if (target.ContainsPointer || expression.Type.ContainsPointer)
+            RequireUnsafe(syntax);
+        return Convert(expression, target, syntax, true);
     }
 
     private LoweredExpression LowerUnary(UnaryExpressionSyntax syntax)
@@ -1049,12 +1289,19 @@ internal sealed class MethodLowerer
             var dereferenceCode = $"*({pointer.Code})";
             return new LoweredExpression
             {
-                Type = pointer.Type.ElementType!, Code = dereferenceCode, Prelude = pointer.Prelude,
+                Type = pointer.Type.ElementType!,
+                Code = dereferenceCode,
+                Prelude = pointer.Prelude,
                 LValue = new LoweredLValue { Store = value => $"{dereferenceCode} = {value}", Address = pointer.Code },
             };
         }
 
         var operandExpression = LowerExpression(syntax.Operand);
+        if (syntax.OperatorKind == SyntaxKind.TildeToken && !operandExpression.Type.IsIntegral && !operandExpression.Type.IsError)
+        {
+            Report("CT2148", "The bitwise complement operator requires an integral operand.", syntax);
+            return ErrorExpression(operandExpression.Prelude);
+        }
         if (operandExpression.IsConstant && TryFoldUnary(syntax, operandExpression, out var foldedUnary))
             return foldedUnary;
         if (syntax.OperatorKind == SyntaxKind.BangToken)
@@ -1112,6 +1359,13 @@ internal sealed class MethodLowerer
             return LowerShortCircuit(syntax);
         var left = LowerExpression(syntax.Left);
         var right = LowerExpression(syntax.Right);
+        if (syntax.OperatorKind == SyntaxKind.PercentToken &&
+            (!left.Type.IsIntegral || !right.Type.IsIntegral) &&
+            !left.Type.IsError && !right.Type.IsError)
+        {
+            Report("CT2149", "The remainder operator requires integral operands.", syntax);
+            return ErrorExpression(left.Prelude.Concat(right.Prelude));
+        }
         if (left.IsConstant && right.IsConstant && TryFoldBinary(syntax, left, right, out var foldedBinary))
             return foldedBinary;
 
@@ -1283,6 +1537,13 @@ internal sealed class MethodLowerer
         var old = NewTemp();
         prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
         var rawRight = LowerExpression(syntax.Right);
+        if (syntax.OperatorKind == SyntaxKind.PercentEqualsToken &&
+            (!target.Type.IsIntegral || !rawRight.Type.IsIntegral) &&
+            !target.Type.IsError && !rawRight.Type.IsError)
+        {
+            Report("CT2149", "The remainder operator requires integral operands.", syntax);
+            return ErrorExpression(prelude.Concat(rawRight.Prelude));
+        }
         var operationType = TypeFacts.PromoteNumeric(target.Type, rawRight.Type);
         var right = Convert(rawRight, operationType, syntax.Right, true);
         prelude.AddRange(right.Prelude);
@@ -1290,9 +1551,12 @@ internal sealed class MethodLowerer
         prelude.Add($"{_emitter.CTypeName(operationType)} {rightTemp} = {right.Code};");
         var operation = syntax.OperatorKind switch
         {
-            SyntaxKind.PlusEqualsToken => SyntaxKind.PlusToken, SyntaxKind.MinusEqualsToken => SyntaxKind.MinusToken,
-            SyntaxKind.StarEqualsToken => SyntaxKind.StarToken, SyntaxKind.SlashEqualsToken => SyntaxKind.SlashToken,
-            SyntaxKind.PercentEqualsToken => SyntaxKind.PercentToken, _ => SyntaxKind.PlusToken,
+            SyntaxKind.PlusEqualsToken => SyntaxKind.PlusToken,
+            SyntaxKind.MinusEqualsToken => SyntaxKind.MinusToken,
+            SyntaxKind.StarEqualsToken => SyntaxKind.StarToken,
+            SyntaxKind.SlashEqualsToken => SyntaxKind.SlashToken,
+            SyntaxKind.PercentEqualsToken => SyntaxKind.PercentToken,
+            _ => SyntaxKind.PlusToken,
         };
         var operationResult = NewTemp();
         prelude.Add($"{_emitter.CTypeName(operationType)} {operationResult} = {NumericOperation(operation, operationType, $"({_emitter.CTypeName(operationType)})({old})", rightTemp, syntax)};");
@@ -1316,13 +1580,15 @@ internal sealed class MethodLowerer
     {
         if (lvalue.Local is { IsConst: true })
             Report("CT2134", $"Const local '{lvalue.Local.Name}' cannot be assigned.", syntax);
-        if (lvalue.Local is { IsReadonly: true, AssignmentCount: > 0 })
+        if (lvalue.Local is { IsReadonly: true } readonlyLocal &&
+            (readonlyLocal.AssignmentCount > 0 || _repeatableLoopDepth > readonlyLocal.LoopDepthAtDeclaration))
             Report("CT3130", $"Readonly local '{lvalue.Local.Name}' can be assigned only once.", syntax);
         if (lvalue.Field is { IsConst: true })
             Report("CT2135", $"Const field '{lvalue.Field.Name}' cannot be assigned.", syntax);
         if (lvalue.Field is { IsReadonly: true } field && (!_method.IsConstructor || field.ContainingType != _method.ContainingType))
             Report("CT2136", $"Readonly field '{field.Name}' can be assigned only by its constructor.", syntax);
-        else if (lvalue.Field is { IsReadonly: true } readonlyField && _fieldAssignmentCounts.GetValueOrDefault(readonlyField) > 0)
+        else if (lvalue.Field is { IsReadonly: true } readonlyField &&
+                 (_fieldAssignmentCounts.GetValueOrDefault(readonlyField) > 0 || _repeatableLoopDepth > 0))
             Report("CT3131", $"Readonly field '{readonlyField.Name}' can be assigned only once.", syntax);
     }
 
@@ -1371,8 +1637,12 @@ internal sealed class MethodLowerer
         if (expression.Type == target || expression.Type.IsError || target.IsError)
             return new LoweredExpression
             {
-                Type = target, Code = expression.Code, Prelude = expression.Prelude, LValue = expression.LValue,
-                IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue,
+                Type = target,
+                Code = expression.Code,
+                Prelude = expression.Prelude,
+                LValue = expression.LValue,
+                IsConstant = expression.IsConstant,
+                ConstantValue = expression.ConstantValue,
             };
         var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(expression.Type, target) : TypeFacts.CanImplicitlyConvert(expression.Type, target);
         if (!valid)
@@ -1402,7 +1672,10 @@ internal sealed class MethodLowerer
         prelude.Add($"{_emitter.CTypeName(expression.Type)} {temp} = {expression.Code};");
         return new LoweredExpression
         {
-            Type = expression.Type, Code = temp, Prelude = prelude, IsConstant = expression.IsConstant,
+            Type = expression.Type,
+            Code = temp,
+            Prelude = prelude,
+            IsConstant = expression.IsConstant,
             ConstantValue = expression.ConstantValue,
         };
     }
@@ -1461,7 +1734,7 @@ internal sealed class MethodLowerer
                     return true;
                 case SyntaxKind.MinusToken when operand.Type == CType.Float:
                     var floating = -(float)operand.ConstantValue!;
-                    result = Constant(CType.Float, floating, floating.ToString("R", CultureInfo.InvariantCulture) + "f");
+                    result = Constant(CType.Float, floating, FormatFloat(floating));
                     return true;
                 case SyntaxKind.BangToken when operand.Type == CType.Bool:
                     var boolean = !(bool)operand.ConstantValue!;
@@ -1499,8 +1772,10 @@ internal sealed class MethodLowerer
             var r = (bool)right.ConstantValue!;
             var value = syntax.OperatorKind switch
             {
-                SyntaxKind.AmpersandAmpersandToken => l && r, SyntaxKind.PipePipeToken => l || r,
-                SyntaxKind.EqualsEqualsToken => l == r, SyntaxKind.BangEqualsToken => l != r,
+                SyntaxKind.AmpersandAmpersandToken => l && r,
+                SyntaxKind.PipePipeToken => l || r,
+                SyntaxKind.EqualsEqualsToken => l == r,
+                SyntaxKind.BangEqualsToken => l != r,
                 _ => false,
             };
             if (syntax.OperatorKind is SyntaxKind.AmpersandAmpersandToken or SyntaxKind.PipePipeToken or SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken)
@@ -1522,20 +1797,22 @@ internal sealed class MethodLowerer
                 var l = (float)left.ConstantValue!; var r = (float)right.ConstantValue!;
                 if (comparison)
                 {
-                    var boolean = Compare(syntax.OperatorKind, l, r);
+                    var boolean = CompareFloat(syntax.OperatorKind, l, r);
                     result = Constant(CType.Bool, boolean, boolean ? "true" : "false");
                     return true;
                 }
+                if (syntax.OperatorKind is not (SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken))
+                    return false;
                 var value = syntax.OperatorKind switch
                 {
-                    SyntaxKind.PlusToken => l + r, SyntaxKind.MinusToken => l - r,
-                    SyntaxKind.StarToken => l * r, SyntaxKind.SlashToken => l / r, SyntaxKind.PercentToken => l % r, _ => float.NaN,
+                    SyntaxKind.PlusToken => l + r,
+                    SyntaxKind.MinusToken => l - r,
+                    SyntaxKind.StarToken => l * r,
+                    SyntaxKind.SlashToken => l / r,
+                    _ => float.NaN,
                 };
-                if (!float.IsNaN(value))
-                {
-                    result = Constant(CType.Float, value, value.ToString("R", CultureInfo.InvariantCulture) + "f");
-                    return true;
-                }
+                result = Constant(CType.Float, value, FormatFloat(value));
+                return true;
             }
             else if (common == CType.Uint)
             {
@@ -1554,10 +1831,17 @@ internal sealed class MethodLowerer
                 }
                 var value = syntax.OperatorKind switch
                 {
-                    SyntaxKind.PlusToken => unchecked(l + r), SyntaxKind.MinusToken => unchecked(l - r), SyntaxKind.StarToken => unchecked(l * r),
-                    SyntaxKind.SlashToken => l / r, SyntaxKind.PercentToken => l % r, SyntaxKind.AmpersandToken => l & r,
-                    SyntaxKind.PipeToken => l | r, SyntaxKind.HatToken => l ^ r, SyntaxKind.LessLessToken => l << ((int)r & 31),
-                    SyntaxKind.GreaterGreaterToken => l >> ((int)r & 31), _ => uint.MaxValue,
+                    SyntaxKind.PlusToken => unchecked(l + r),
+                    SyntaxKind.MinusToken => unchecked(l - r),
+                    SyntaxKind.StarToken => unchecked(l * r),
+                    SyntaxKind.SlashToken => l / r,
+                    SyntaxKind.PercentToken => l % r,
+                    SyntaxKind.AmpersandToken => l & r,
+                    SyntaxKind.PipeToken => l | r,
+                    SyntaxKind.HatToken => l ^ r,
+                    SyntaxKind.LessLessToken => l << ((int)r & 31),
+                    SyntaxKind.GreaterGreaterToken => l >> ((int)r & 31),
+                    _ => uint.MaxValue,
                 };
                 result = Constant(CType.Uint, value, $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})");
                 return true;
@@ -1579,11 +1863,17 @@ internal sealed class MethodLowerer
                 }
                 var value = syntax.OperatorKind switch
                 {
-                    SyntaxKind.PlusToken => unchecked(l + r), SyntaxKind.MinusToken => unchecked(l - r), SyntaxKind.StarToken => unchecked(l * r),
+                    SyntaxKind.PlusToken => unchecked(l + r),
+                    SyntaxKind.MinusToken => unchecked(l - r),
+                    SyntaxKind.StarToken => unchecked(l * r),
                     SyntaxKind.SlashToken => l == int.MinValue && r == -1 ? int.MinValue : l / r,
-                    SyntaxKind.PercentToken => l == int.MinValue && r == -1 ? 0 : l % r, SyntaxKind.AmpersandToken => l & r,
-                    SyntaxKind.PipeToken => l | r, SyntaxKind.HatToken => l ^ r, SyntaxKind.LessLessToken => unchecked(l << (r & 31)),
-                    SyntaxKind.GreaterGreaterToken => l >> (r & 31), _ => int.MinValue,
+                    SyntaxKind.PercentToken => l == int.MinValue && r == -1 ? 0 : l % r,
+                    SyntaxKind.AmpersandToken => l & r,
+                    SyntaxKind.PipeToken => l | r,
+                    SyntaxKind.HatToken => l ^ r,
+                    SyntaxKind.LessLessToken => unchecked(l << (r & 31)),
+                    SyntaxKind.GreaterGreaterToken => l >> (r & 31),
+                    _ => int.MinValue,
                 };
                 result = Constant(CType.Int, value, FormatInt32(value));
                 return true;
@@ -1595,7 +1885,6 @@ internal sealed class MethodLowerer
             result = Constant(common, common == CType.Uint ? 0u : 0, "0");
             return true;
         }
-        return false;
     }
 
     private static bool Compare<T>(SyntaxKind operation, T left, T right) where T : IComparable<T>
@@ -1603,9 +1892,13 @@ internal sealed class MethodLowerer
         var comparison = left.CompareTo(right);
         return operation switch
         {
-            SyntaxKind.EqualsEqualsToken => comparison == 0, SyntaxKind.BangEqualsToken => comparison != 0,
-            SyntaxKind.LessToken => comparison < 0, SyntaxKind.LessEqualsToken => comparison <= 0,
-            SyntaxKind.GreaterToken => comparison > 0, SyntaxKind.GreaterEqualsToken => comparison >= 0, _ => false,
+            SyntaxKind.EqualsEqualsToken => comparison == 0,
+            SyntaxKind.BangEqualsToken => comparison != 0,
+            SyntaxKind.LessToken => comparison < 0,
+            SyntaxKind.LessEqualsToken => comparison <= 0,
+            SyntaxKind.GreaterToken => comparison > 0,
+            SyntaxKind.GreaterEqualsToken => comparison >= 0,
+            _ => false,
         };
     }
 
@@ -1628,14 +1921,16 @@ internal sealed class MethodLowerer
             if (target == CType.Float)
             {
                 var value = System.Convert.ToSingle(expression.ConstantValue, CultureInfo.InvariantCulture);
-                result = Constant(target, value, value.ToString("R", CultureInfo.InvariantCulture) + "f");
+                result = Constant(target, value, FormatFloat(value));
                 return true;
             }
             if (target == CType.Uint)
             {
                 var value = expression.ConstantValue switch
                 {
-                    uint unsigned => unsigned, int signed => unchecked((uint)signed), float floating => unchecked((uint)floating),
+                    uint unsigned => unsigned,
+                    int signed => unchecked((uint)signed),
+                    float floating => unchecked((uint)floating),
                     _ => unchecked((uint)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})");
@@ -1643,7 +1938,9 @@ internal sealed class MethodLowerer
             }
             var signedValue = expression.ConstantValue switch
             {
-                int signed => signed, uint unsigned => unchecked((int)unsigned), float floating => unchecked((int)floating),
+                int signed => signed,
+                uint unsigned => unchecked((int)unsigned),
+                float floating => unchecked((int)floating),
                 _ => unchecked((int)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
             };
             if (target == CType.Int)
@@ -1652,8 +1949,11 @@ internal sealed class MethodLowerer
             {
                 var narrowed = target.Kind switch
                 {
-                    CTypeKind.Byte or CTypeKind.Char => unchecked((byte)signedValue), CTypeKind.Sbyte => unchecked((sbyte)signedValue),
-                    CTypeKind.Short => unchecked((short)signedValue), CTypeKind.Ushort => unchecked((ushort)signedValue), _ => signedValue,
+                    CTypeKind.Byte or CTypeKind.Char => unchecked((byte)signedValue),
+                    CTypeKind.Sbyte => unchecked((sbyte)signedValue),
+                    CTypeKind.Short => unchecked((short)signedValue),
+                    CTypeKind.Ushort => unchecked((ushort)signedValue),
+                    _ => signedValue,
                 };
                 result = Constant(target, narrowed, $"({_emitter.CTypeName(target)}){FormatInt32(signedValue)}");
             }
@@ -1667,15 +1967,53 @@ internal sealed class MethodLowerer
 
     private static string OperatorText(SyntaxKind kind) => kind switch
     {
-        SyntaxKind.PlusToken => "+", SyntaxKind.MinusToken => "-", SyntaxKind.StarToken => "*",
-        SyntaxKind.SlashToken => "/", SyntaxKind.PercentToken => "%", SyntaxKind.AmpersandToken => "&",
-        SyntaxKind.PipeToken => "|", SyntaxKind.HatToken => "^", SyntaxKind.LessToken => "<",
-        SyntaxKind.LessEqualsToken => "<=", SyntaxKind.GreaterToken => ">", SyntaxKind.GreaterEqualsToken => ">=",
-        SyntaxKind.EqualsEqualsToken => "==", SyntaxKind.BangEqualsToken => "!=", SyntaxKind.LessLessToken => "<<",
-        SyntaxKind.GreaterGreaterToken => ">>", _ => "+",
+        SyntaxKind.PlusToken => "+",
+        SyntaxKind.MinusToken => "-",
+        SyntaxKind.StarToken => "*",
+        SyntaxKind.SlashToken => "/",
+        SyntaxKind.PercentToken => "%",
+        SyntaxKind.AmpersandToken => "&",
+        SyntaxKind.PipeToken => "|",
+        SyntaxKind.HatToken => "^",
+        SyntaxKind.LessToken => "<",
+        SyntaxKind.LessEqualsToken => "<=",
+        SyntaxKind.GreaterToken => ">",
+        SyntaxKind.GreaterEqualsToken => ">=",
+        SyntaxKind.EqualsEqualsToken => "==",
+        SyntaxKind.BangEqualsToken => "!=",
+        SyntaxKind.LessLessToken => "<<",
+        SyntaxKind.GreaterGreaterToken => ">>",
+        _ => "+",
     };
 
     private static string FormatInt32(int value) => value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture);
+
+    private static string FormatFloat(float value)
+    {
+        if (float.IsNaN(value))
+            return "NAN";
+        if (float.IsPositiveInfinity(value))
+            return "INFINITY";
+        if (float.IsNegativeInfinity(value))
+            return "(-INFINITY)";
+        var text = value.ToString("R", CultureInfo.InvariantCulture);
+        if (!text.Contains('.') && !text.Contains('E') && !text.Contains('e'))
+            text += ".0";
+        return text + "f";
+    }
+
+    private static bool CompareFloat(SyntaxKind operation, float left, float right) => operation switch
+    {
+        SyntaxKind.EqualsEqualsToken => left == right,
+        SyntaxKind.BangEqualsToken => left != right,
+        SyntaxKind.LessToken => left < right,
+        SyntaxKind.LessEqualsToken => left <= right,
+        SyntaxKind.GreaterToken => left > right,
+        SyntaxKind.GreaterEqualsToken => left >= right,
+        _ => false,
+    };
+
+    private static string FormatCondition(string code) => code.StartsWith('(') && code.EndsWith(')') ? code : $"({code})";
 
     private static LoweredExpression Constant(CType type, object? value, string code) => new() { Type = type, Code = code, IsConstant = true, ConstantValue = value };
     private static LoweredExpression ErrorExpression(IEnumerable<string>? prelude = null) => new() { Type = CType.Error, Code = "0", Prelude = prelude?.ToList() ?? [] };

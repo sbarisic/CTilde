@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using System.Text;
 
@@ -18,28 +17,12 @@ internal sealed class CEmitter
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
 
-    public string Emit()
-    {
-        RegisterDeclaredTypes();
-        var definitions = new List<string>();
-        foreach (var type in Model.UserTypes)
-        {
-            if (type.Kind == DeclaredTypeKind.Enum)
-                continue;
-            foreach (var constructor in type.Constructors)
-                definitions.Add(new MethodLowerer(this, constructor).EmitDefinition());
-            foreach (var method in type.Methods.Where(method => method.ExternName is null))
-                definitions.Add(new MethodLowerer(this, method).EmitDefinition());
-            foreach (var property in type.Properties)
-            {
-                if (property.Getter is not null)
-                    definitions.Add(EmitAccessor(property, true));
-                if (property.Setter is not null)
-                    definitions.Add(EmitAccessor(property, false));
-            }
-        }
+    public IEnumerable<string> DynamicGeneratedSymbols =>
+        _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
+            .Concat(_stringLiterals.Values.Select(id => $"ct_sl_{id}"));
 
-        var moduleInitializer = EmitModuleInitializer();
+    public string Emit(TypedIrProgram program)
+    {
         var writer = new CWriter();
         EmitPreamble(writer);
         EmitStringLiterals(writer);
@@ -49,12 +32,12 @@ internal sealed class CEmitter
         EmitGlobals(writer);
         EmitPrototypes(writer);
         writer.WriteLine();
-        foreach (var definition in definitions)
+        foreach (var definition in program.Functions)
         {
-            writer.WriteBlock(definition.TrimEnd().Split('\n'));
+            writer.WriteBlock(definition.Render().TrimEnd().Split('\n'));
             writer.WriteLine();
         }
-        writer.WriteBlock(moduleInitializer.TrimEnd().Split('\n'));
+        writer.WriteBlock(string.Join('\n', program.ModuleInitializer.Select(instruction => instruction.Text)).TrimEnd().Split('\n'));
         writer.WriteLine();
         EmitKeepSymbols(writer);
         writer.WriteLine();
@@ -64,19 +47,31 @@ internal sealed class CEmitter
 
     public string CTypeName(CType type) => type.Kind switch
     {
-        CTypeKind.Void => "void", CTypeKind.Bool => "bool", CTypeKind.Byte or CTypeKind.Char => "uint8_t",
-        CTypeKind.Sbyte => "int8_t", CTypeKind.Short => "int16_t", CTypeKind.Ushort => "uint16_t",
-        CTypeKind.Int => "int32_t", CTypeKind.Uint => "uint32_t", CTypeKind.Float => "float",
-        CTypeKind.String => "ct_string*", CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
-        CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!), CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
-        CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*", CTypeKind.Null => "void*", _ => "int32_t",
+        CTypeKind.Void => "void",
+        CTypeKind.Bool => "bool",
+        CTypeKind.Byte or CTypeKind.Char => "uint8_t",
+        CTypeKind.Sbyte => "int8_t",
+        CTypeKind.Short => "int16_t",
+        CTypeKind.Ushort => "uint16_t",
+        CTypeKind.Int => "int32_t",
+        CTypeKind.Uint => "uint32_t",
+        CTypeKind.Float => "float",
+        CTypeKind.String => "ct_string*",
+        CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
+        CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
+        CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
+        CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
+        CTypeKind.Null => "void*",
+        _ => "int32_t",
     };
 
     public string DefaultValue(CType type) => type.Kind switch
     {
-        CTypeKind.Bool => "false", CTypeKind.Float => "0.0f",
+        CTypeKind.Bool => "false",
+        CTypeKind.Float => "0.0f",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.Null => "NULL",
-        CTypeKind.Struct => $"({CTypeName(type)}){{0}}", _ => "0",
+        CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
+        _ => "0",
     };
 
     public void RegisterType(CType type)
@@ -131,21 +126,7 @@ internal sealed class CEmitter
         return prototype ? signature + ";" : signature;
     }
 
-    private string EmitAccessor(PropertySymbol property, bool getter)
-    {
-        var syntax = getter ? property.Getter! : property.Setter!;
-        var parameters = getter ? ImmutableArray<ParameterSymbol>.Empty : [new ParameterSymbol { Name = "value", Type = property.Type, Syntax = null }];
-        var method = new MethodSymbol
-        {
-            Name = getter ? $"get_{property.Name}" : $"set_{property.Name}", ContainingType = property.ContainingType,
-            Accessibility = property.Accessibility, IsStatic = property.IsStatic, Syntax = syntax,
-            ReturnType = getter ? property.Type : CType.Void, Parameters = parameters, Body = syntax.Body,
-        };
-        var name = getter ? NameMangler.Getter(property) : NameMangler.Setter(property);
-        return new MethodLowerer(this, method, name, property, getter).EmitDefinition();
-    }
-
-    private void RegisterDeclaredTypes()
+    internal void RegisterDeclaredTypes()
     {
         foreach (var type in Model.UserTypes)
         {
@@ -174,6 +155,7 @@ internal sealed class CEmitter
         writer.WriteLine("#include <string.h>");
         writer.WriteLine("#include <limits.h>");
         writer.WriteLine("#include <float.h>");
+        writer.WriteLine("#include <math.h>");
         writer.WriteLine();
         writer.WriteLine("static_assert(CHAR_BIT == 8, \"C~ requires 8-bit bytes\");");
         writer.WriteLine("static_assert(sizeof(int32_t) == 4 && sizeof(uint32_t) == 4, \"C~ requires exact 32-bit integers\");");
@@ -317,10 +299,7 @@ internal sealed class CEmitter
             if (emitted.Contains(type))
                 yield break;
             if (!visiting.Add(type))
-            {
-                Diagnostics.Add("CT4100", $"Type '{type.FullName}' has a recursive value-type layout.", type.Syntax!.Source, type.Syntax.Span);
                 yield break;
-            }
             foreach (var dependency in type.Fields.Where(field => !field.IsStatic && field.Type.Kind == CTypeKind.Struct).Select(field => field.Type.Symbol!).Distinct())
                 foreach (var result in Visit(dependency))
                     yield return result;
@@ -354,12 +333,17 @@ internal sealed class CEmitter
 
     private void EmitPrototypes(CWriter writer)
     {
+        var emittedExternalSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Model.UserTypes.Where(type => type.Kind != DeclaredTypeKind.Enum))
         {
             foreach (var constructor in type.Constructors)
                 writer.WriteLine(MethodSignature(constructor, prototype: true));
             foreach (var method in type.Methods)
+            {
+                if (method.ExternName is not null && !emittedExternalSymbols.Add(method.ExternName))
+                    continue;
                 writer.WriteLine(MethodSignature(method, prototype: true));
+            }
             foreach (var property in type.Properties)
             {
                 var self = property.IsStatic ? string.Empty : $"{NameMangler.Type(type)}* ct_self";
@@ -369,34 +353,6 @@ internal sealed class CEmitter
                     writer.WriteLine($"static void {NameMangler.Setter(property)}({(self.Length == 0 ? string.Empty : self + ", ")}{CTypeName(property.Type)} {NameMangler.Identifier("value")});");
             }
         }
-    }
-
-    private string EmitModuleInitializer()
-    {
-        var writer = new CWriter();
-        writer.WriteLine("static void ct_module_init(void)");
-        writer.WriteLine("{");
-        var initializerIndex = 0;
-        foreach (var field in Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>"))
-        {
-            var method = new MethodSymbol
-            {
-                Name = "<module_init>", ContainingType = field.ContainingType, Accessibility = Accessibility.Private,
-                IsStatic = true, Syntax = field.Syntax, ReturnType = CType.Void, Parameters = [], Body = null,
-            };
-            var lowerer = new MethodLowerer(this, method, temporaryPrefix: $"_mi_{initializerIndex++}");
-            var expression = lowerer.LowerStandalone(field.Initializer!);
-            foreach (var line in expression.Prelude)
-                writer.WriteLine("    " + line);
-            var value = lowerer.ConvertStandalone(expression, field.Type, field.Initializer!);
-            if (field.IsConst && !value.IsConstant)
-                Diagnostics.Add("CT2140", $"Const field '{field.Name}' does not have a constant initializer.", field.Initializer!.Source, field.Initializer.Span);
-            foreach (var line in value.Prelude.Skip(expression.Prelude.Count))
-                writer.WriteLine("    " + line);
-            writer.WriteLine($"    {field.CName} = {value.Code};");
-        }
-        writer.WriteLine("}");
-        return writer.ToString();
     }
 
     private void EmitMain(CWriter writer)

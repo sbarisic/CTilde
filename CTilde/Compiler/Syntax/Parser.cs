@@ -14,18 +14,25 @@ internal sealed class Parser
     private readonly SourceText _source;
     private readonly ImmutableArray<SyntaxToken> _tokens;
     private readonly DiagnosticBag _diagnostics;
+    private readonly List<SyntaxToken> _missingTokens = [];
+    private readonly List<SyntaxToken> _skippedTokens = [];
     private int _position;
 
     public Parser(SourceText source, ImmutableArray<SyntaxToken> tokens, DiagnosticBag diagnostics)
     {
         _source = source;
         _tokens = [.. tokens.Where(token => token.Kind != SyntaxKind.BadToken)];
+        _skippedTokens.AddRange(tokens.Where(token => token.Kind == SyntaxKind.BadToken));
         _diagnostics = diagnostics;
     }
+
+    public ImmutableArray<SyntaxToken> MissingTokens => [.. _missingTokens];
+    public ImmutableArray<SyntaxToken> SkippedTokens => [.. _skippedTokens];
 
     private SyntaxToken Current => Peek(0);
     private SyntaxToken Peek(int offset) => _tokens[Math.Clamp(_position + offset, 0, _tokens.Length - 1)];
     private SyntaxToken NextToken() { var token = Current; _position = Math.Min(_position + 1, _tokens.Length - 1); return token; }
+    private SyntaxToken SkipToken() { var token = NextToken(); if (token.Kind != SyntaxKind.EndOfFileToken) _skippedTokens.Add(token); return token; }
 
     public CompilationUnitSyntax ParseCompilationUnit()
     {
@@ -88,7 +95,7 @@ internal sealed class Parser
                 Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, terminator);
             }
             if (_position == before)
-                NextToken();
+                SkipToken();
         }
     }
 
@@ -121,7 +128,7 @@ internal sealed class Parser
             else
                 members.Add(ParseMember(name.Text));
             if (_position == before)
-                NextToken();
+                SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
         return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, members.ToImmutable(), underlying, enumMembers.ToImmutable());
@@ -190,7 +197,7 @@ internal sealed class Parser
                 if (accessor.Kind is not SyntaxKind.GetKeyword and not SyntaxKind.SetKeyword)
                 {
                     Report("CT0103", "Expected a get or set accessor.", Current);
-                    NextToken();
+                    SkipToken();
                     continue;
                 }
                 NextToken();
@@ -258,7 +265,7 @@ internal sealed class Parser
             var before = _position;
             statements.Add(ParseStatement());
             if (before == _position)
-                NextToken();
+                SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
         return new BlockStatementSyntax(_source, TextSpan.FromBounds(open.Span.Start, close.Span.End), statements.ToImmutable());
@@ -550,7 +557,7 @@ internal sealed class Parser
             default:
                 Report("CT0105", "Expected an expression.", token);
                 if (token.Kind != SyntaxKind.EndOfFileToken)
-                    NextToken();
+                    SkipToken();
                 return new LiteralExpressionSyntax(_source, token.Span, new NumericLiteralValue(0, false, null), SyntaxKind.NumberToken);
         }
     }
@@ -715,13 +722,15 @@ internal sealed class Parser
         if (Current.Kind == kind)
             return NextToken();
         Report("CT0100", $"Expected {Display(kind)}, but found {Display(Current.Kind)}.", Current);
-        return new SyntaxToken(kind, _source, new TextSpan(Current.Span.Start, 0), string.Empty);
+        var missing = new SyntaxToken(kind, _source, new TextSpan(Current.Span.Start, 0), string.Empty) { IsMissing = true };
+        _missingTokens.Add(missing);
+        return missing;
     }
 
     private void Synchronize(params SyntaxKind[] kinds)
     {
         while (Current.Kind != SyntaxKind.EndOfFileToken && !kinds.Contains(Current.Kind))
-            NextToken();
+            SkipToken();
     }
 
     private void Report(string code, string message, SyntaxToken token) => _diagnostics.Add(code, message, _source, token.Span);

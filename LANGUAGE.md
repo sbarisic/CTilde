@@ -53,6 +53,12 @@ C~ files use the `.ct` extension and UTF-8 text. Invalid UTF-8 is an input error
 
 One compilation can contain multiple files. All files share declarations and `internal` access. File order must not change name binding or generated symbols.
 
+`SyntaxTree.Parse(SourceText)` returns a full-fidelity immutable tree. Tokens retain leading and trailing trivia. Trivia includes whitespace, newlines, and comments. Missing tokens have zero width. Parser recovery attaches skipped tokens to trivia.
+
+`SyntaxTree.ToFullString()` and `SyntaxNode.ToFullString()` reproduce source text exactly. This rule also applies to invalid input. Each node and token exposes `Span` and `FullSpan`. `ChildNodesAndTokens()` returns source-ordered children.
+
+Bundled standard-library trees are internal trusted inputs. `Compilation.SyntaxTrees` contains only trees supplied by the caller.
+
 A file contains:
 
 1. Zero or more `using` directives.
@@ -220,7 +226,9 @@ Draft 0.3 has no multidimensional or jagged arrays.
 
 Pointer arithmetic scales by the pointed element size. Dereference and pointer indexing do not perform managed null or bounds checks.
 
-Safe members must not expose a pointer through a field, property, parameter, or return type.
+Every type that recursively contains a pointer requires an unsafe context. This rule includes arrays such as `T*[]`.
+
+Safe members must not expose a pointer-containing type through a field, property, parameter, or return type.
 
 ### Enumerations
 
@@ -248,7 +256,9 @@ All other numeric conversions require a cast. Explicit numeric conversions trunc
 
 `null` converts implicitly to reference and pointer types.
 
-Classes have no inheritance conversions in draft 0.3.
+An explicit cast can convert between integral and enum types. An unsafe explicit cast can convert one raw pointer type to another.
+
+Draft 0.3 rejects casts between unrelated classes, arrays, and strings. Classes have no inheritance conversions.
 
 ## Declarations and scope
 
@@ -380,7 +390,11 @@ The compiler creates a private backing field. A missing getter makes the propert
 
 A method declares a return type, name, parameters, and body.
 
-Methods can be overloaded by parameter types. Resolution considers accessible static or instance candidates with the correct argument count. Identity conversions are better than widening conversions. No unique best candidate is an error.
+Methods can be overloaded by parameter types. Resolution considers accessible static or instance candidates with the correct argument count.
+
+The compiler compares candidates for each argument. Identity is better than widening. One widening target is better when it converts implicitly to the other target only. If two integral widening targets remain, a signed target is better than an unsigned target.
+
+A candidate must be no worse for every argument. It must also be better for at least one argument. Otherwise, the call reports `CT2123`.
 
 Draft 0.3 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
 
@@ -409,6 +423,8 @@ The C backend generates `int main(void)`, initializes static storage, calls the 
 `[Extern("symbol")]` marks a static bodyless method supplied by native code.
 
 The symbol must be a portable C identifier. Its native signature must use the C~ mappings in [C_ABI.md](C_ABI.md).
+
+The compiler rejects `main`, runtime names, and generated symbol names. Repeated external names require identical complete ABI signatures. Matching declarations produce one C prototype. An incompatible declaration reports `CT4102`. The diagnostic includes the earlier location.
 
 Unknown attributes, invalid targets, duplicate attributes, and non-constant arguments are errors.
 
@@ -454,7 +470,9 @@ A non-void call is a value expression and can appear in any compatible context.
 
 ### Arithmetic
 
-Numeric types support `+`, `-`, `*`, `/`, and `%`. Smaller integers promote to `int` or `uint`. Integer division truncates toward zero.
+Numeric types support `+`, `-`, `*`, and `/`. Integral types also support `%`. Smaller integers promote to `int` or `uint`. Integer division truncates toward zero.
+
+The compiler rejects `float % float`, `float %=`, and `~float` with typing diagnostics.
 
 Signed integer arithmetic wraps in two's-complement form. Division by zero terminates with a runtime failure. `int.MinValue / -1` wraps to `int.MinValue`.
 
@@ -490,7 +508,11 @@ A block creates a lexical scope. A single semicolon is an empty statement.
 
 `if` requires a `bool` condition. Braces are optional for one embedded statement.
 
-`switch` accepts an integral or enum value. Case labels are compile-time constants. One `default` label is permitted. A section must end with `break`, `continue`, or `return`; implicit fallthrough is not permitted.
+`switch` accepts an integral or enum value. The compiler converts each case constant to the governing type. It rejects out-of-range and duplicate converted values.
+
+One `default` label is permitted. A section must end with `break`, `continue`, or `return`. Implicit fallthrough is not permitted.
+
+A switch completes a non-void return only when it has `default` and every reachable section returns.
 
 Draft 0.3 has no pattern cases and no `goto case`.
 
@@ -501,6 +523,8 @@ Draft 0.3 has no pattern cases and no `goto case`.
 `foreach` iterates a one-dimensional array from index zero through `Length - 1` and copies each element into the iteration local.
 
 `break` exits the nearest loop or switch. `continue` starts the next iteration of the nearest loop.
+
+A `do` body executes once for definite assignment. The compiler merges normal condition exits with all early `break` exits.
 
 ### Return
 

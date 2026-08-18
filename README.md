@@ -25,6 +25,8 @@ gcc -std=gnu23 -Wall -Wextra -Werror -o .\bin\hello.exe .\bin\hello.c
 .\bin\hello.exe
 ```
 
+Older GCC and Clang versions can use `-std=gnu2x`. The conformance driver retries after an unsupported `gnu23` option.
+
 MSVC remains supported as a compatibility toolchain through its latest C mode:
 
 ```powershell
@@ -48,11 +50,11 @@ ctilde --compile-directory <directory> [--trace]
 - `-o` selects the generated C file.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
-- `--compile-directory` compiles each top-level `.ct` file in a directory independently and writes a same-named `.c` file beside it.
+- `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
 
 Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
 
-The compiler writes no output file when an error is present.
+The compiler atomically replaces output after successful emission. Directory mode removes stale generated output after an error. It identifies generated files by their banner and preserves handwritten C.
 
 ## Language example
 
@@ -96,6 +98,8 @@ EmitResult result = compilation.EmitC(output);
 
 `Compilation.GetDiagnostics()` returns structured diagnostics without requiring emission. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location.
 
+The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
+
 ## Projects
 
 | Project | Purpose |
@@ -119,7 +123,9 @@ $env:CTILDE_CC = "clang"
 dotnet run --project .\Test\Test.csproj
 ```
 
-GCC and Clang are invoked with `-std=gnu23 -Wall -Wextra -Werror`. GCC versions that predate the finalized flag may use the compatible `-std=gnu2x` spelling. MSVC is invoked with `/std:clatest /W4 /WX` as a secondary compatibility check.
+Use `wsl:gcc` or `wsl:clang` to run the GNU compiler through WSL. Set `CTILDE_C_STANDARD` to force a dialect.
+
+The driver uses `gnu23` first and retries with `gnu2x` only when the compiler rejects the option. MSVC uses `/std:clatest /W4 /WX` as a compatibility check.
 
 ## Documentation
 

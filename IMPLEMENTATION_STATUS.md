@@ -7,7 +7,7 @@ Last reviewed: 2026-08-18
 C~ draft 0.3 has one compiler path:
 
 ```text
-.ct source -> syntax -> semantic analysis -> typed lowering -> GNU C23
+.ct source -> full-fidelity syntax -> binding -> flow -> typed IR -> target validation -> GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET build completes with zero warnings and zero errors. The conformance runner completes all managed and native checks.
+The .NET build completes with zero warnings and zero errors. The conformance runner contains 36 managed and native checks.
 
 Native checks discover Visual Studio 2022 C tools and compile generated files with:
 
@@ -50,13 +50,16 @@ The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. That
 gcc -std=gnu2x -Wall -Wextra -Werror
 ```
 
-It exits successfully and produces the same checked output. Current GCC and Clang releases use the finalized `-std=gnu23` spelling, which is the conformance-runner default. The runner also accepts a native compiler path through `CTILDE_CC` for repeatable GCC or Clang runs.
+It exits successfully and produces the same checked output. The runner tries `gnu23` and retries with `gnu2x` only after an unsupported-option error. `CTILDE_CC` accepts compiler paths, `wsl:gcc`, and `wsl:clang`. `CTILDE_C_STANDARD` forces one dialect.
+
+Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -Wall -Wextra -Werror`.
 
 ## Language support
 
 | Area | Status | Evidence |
 | --- | --- | --- |
 | UTF-8 files and Unicode identifiers | Implemented | Strict UTF-8 decoding and rune-based identifier categories |
+| Full-fidelity tokens and trivia | Implemented | Valid and invalid exact round-trip tests |
 | Comments, escapes, and numeric forms | Implemented | Lexer diagnostics and literal tests |
 | File and block namespaces | Implemented | Parser and multi-file test |
 | Namespace imports | Implemented | Multi-file test with imported type |
@@ -67,22 +70,22 @@ It exits successfully and produces the same checked output. Current GCC and Clan
 | Constructors and `new` | Implemented | Class and structure native tests |
 | Custom and automatic properties | Implemented | Native property tests |
 | Access modifiers | Implemented | Private member and setter diagnostics |
-| Method overloads | Implemented | Feature example and conversion-based selection |
+| Method overloads | Implemented | Pairwise best-candidate and cross-argument ambiguity tests |
 | `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
-| Definite assignment and reachability | Implemented | Structured flow diagnostics |
+| Definite assignment and reachability | Implemented | `do`, switch, read-only, constructor, and reachability tests |
 | Fixed-width numeric types | Implemented | Typed lowering and C static assertions |
 | Checked arrays and `foreach` | Implemented | Native iteration and failure tests |
 | Immutable UTF-8 strings | Implemented | Native concatenation, output, indexing, and length tests |
 | Expression precedence | Implemented | Pratt parser and deterministic emission test |
 | Calls as expressions | Implemented | Nested call and overload tests |
 | Ordered evaluation | Implemented | Native `Pack(Next(), Next()) == 12` test |
-| Arithmetic, logical, bitwise, shift, and comparison operators | Implemented | Typed lowering and constant folding |
+| Arithmetic, logical, bitwise, shift, and comparison operators | Implemented | Integral-only remainder and typed constant folding tests |
 | Assignment and compound assignment | Implemented | Native state and iteration tests |
 | `if`, loops, `switch`, `break`, and `continue` | Implemented | Label lowering and native tests |
-| Numeric casts and conversions | Implemented | Binder conversion rules and typed C casts |
-| Unsafe address, dereference, indexing, and pointer arithmetic | Implemented | Native unsafe example and signature diagnostics |
+| Numeric, enum, null, and pointer conversions | Implemented | Positive and negative conversion tests |
+| Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
-| `[Extern]` | Implemented | Validation and emitted-prototype test |
+| `[Extern]` | Implemented | Reserved-name, collision, alias, ABI, and prototype tests |
 | Bundled `System.Console` and `System.Environment` sources | Implemented | Embedded-source and native output tests |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |
@@ -92,11 +95,17 @@ It exits successfully and produces the same checked output. Current GCC and Clan
 The executable test project checks:
 
 - Byte-identical repeated C emission.
-- Recoverable syntax diagnostics.
+- Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
 - Definite assignment.
 - Multi-file declarations and imports.
 - Accessor access control.
-- Unsafe pointer exposure.
+- Unsafe pointer exposure through recursively pointer-containing types.
+- Unrelated reference-cast and integral-only operator diagnostics.
+- Pairwise overload ambiguity.
+- `do` and switch return-flow analysis.
+- Converted duplicate and out-of-range case labels.
+- Compilation-wide external ABI validation.
+- Atomic and stale-safe directory output.
 - Entry point and extern validation.
 - Readonly branch merging and duplicate assignment.
 - Left-to-right receiver and argument evaluation.
@@ -147,5 +156,6 @@ A draft 0.3 release requires:
 - GNU C23 compilation with warnings as errors.
 - MSVC latest-C compatibility compilation with warnings as errors.
 - Documentation synchronized with measured behavior.
+- No C output for invalid programs, including stale generated directory output.
 
 Draft 0.3 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode is retained as an independent compatibility check.

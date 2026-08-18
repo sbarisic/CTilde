@@ -98,36 +98,156 @@ public enum SyntaxKind
     SetKeyword,
 }
 
-public sealed record SyntaxToken(SyntaxKind Kind, SourceText Source, TextSpan Span, string Text, object? Value = null)
+public enum SyntaxTriviaKind
 {
-    public SourceLocation Location => Source.GetLocation(Span);
+    Whitespace,
+    EndOfLine,
+    SingleLineComment,
+    BlockComment,
+    SkippedTokens,
 }
 
-public abstract record SyntaxNode(SourceText Source, TextSpan Span);
+public sealed record SyntaxTrivia(
+    SyntaxTriviaKind Kind,
+    SourceText Source,
+    TextSpan Span,
+    string Text,
+    ImmutableArray<SyntaxToken> SkippedTokens = default);
+
+public sealed record SyntaxToken(SyntaxKind Kind, SourceText Source, TextSpan Span, string Text, object? Value = null)
+{
+    public ImmutableArray<SyntaxTrivia> LeadingTrivia { get; init; } = [];
+    public ImmutableArray<SyntaxTrivia> TrailingTrivia { get; init; } = [];
+    public bool IsMissing { get; init; }
+    public TextSpan FullSpan
+    {
+        get
+        {
+            var start = LeadingTrivia.IsDefaultOrEmpty ? Span.Start : LeadingTrivia[0].Span.Start;
+            var end = TrailingTrivia.IsDefaultOrEmpty ? Span.End : TrailingTrivia[^1].Span.End;
+            return TextSpan.FromBounds(start, end);
+        }
+    }
+    public SourceLocation Location => Source.GetLocation(Span);
+    public string ToFullString() => string.Concat(LeadingTrivia.Select(trivia => trivia.Text)) + Text + string.Concat(TrailingTrivia.Select(trivia => trivia.Text));
+}
+
+public readonly record struct SyntaxNodeOrToken(SyntaxNode? Node, SyntaxToken? Token)
+{
+    public bool IsNode => Node is not null;
+    public bool IsToken => Token is not null;
+    public TextSpan FullSpan => Node?.FullSpan ?? Token?.FullSpan ?? default;
+}
+
+public abstract record SyntaxNode(SourceText Source, TextSpan Span)
+{
+    private ImmutableArray<SyntaxToken> _tokens = [];
+
+    public TextSpan FullSpan { get; private set; } = Span;
+
+    public IEnumerable<SyntaxNodeOrToken> ChildNodesAndTokens()
+    {
+        var children = DirectChildren().OrderBy(child => child.FullSpan.Start).ThenBy(child => child.FullSpan.Length).ToArray();
+        var items = new List<SyntaxNodeOrToken>();
+        items.AddRange(children.Select(child => new SyntaxNodeOrToken(child, null)));
+        items.AddRange(_tokens
+            .Where(token => !children.Any(child => Contains(child.FullSpan, token.Span)))
+            .Select(token => new SyntaxNodeOrToken(null, token)));
+        return items.OrderBy(item => item.FullSpan.Start).ThenBy(item => item.IsToken ? 0 : 1);
+    }
+
+    public string ToFullString() => Source.Text.Substring(FullSpan.Start, FullSpan.Length);
+
+    internal void AttachTokens(ImmutableArray<SyntaxToken> tokens)
+    {
+        _tokens = [.. tokens.Where(token => Contains(Span, token.Span))];
+        foreach (var child in DirectChildren())
+            child.AttachTokens(tokens);
+        if (!_tokens.IsDefaultOrEmpty)
+            FullSpan = TextSpan.FromBounds(_tokens[0].FullSpan.Start, _tokens[^1].FullSpan.End);
+    }
+
+    private IEnumerable<SyntaxNode> DirectChildren()
+    {
+        foreach (var property in GetType().GetProperties(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public))
+        {
+            if (property.Name is nameof(Source) or nameof(Span) or nameof(FullSpan))
+                continue;
+            var value = property.GetValue(this);
+            if (value is SyntaxNode node)
+                yield return node;
+            else if (value is System.Collections.IEnumerable sequence && value is not string)
+            {
+                foreach (var item in sequence)
+                    if (item is SyntaxNode child)
+                        yield return child;
+            }
+        }
+    }
+
+    private static bool Contains(TextSpan outer, TextSpan inner) =>
+        inner.Length == 0 ? inner.Start >= outer.Start && inner.Start <= outer.End : inner.Start >= outer.Start && inner.End <= outer.End;
+}
 
 public sealed record SyntaxTree
 {
-    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<Diagnostic> diagnostics)
+    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<SyntaxToken> tokens, ImmutableArray<SyntaxToken> skippedTokens, ImmutableArray<Diagnostic> diagnostics)
     {
         Text = text;
         Root = root;
+        Tokens = tokens;
+        SkippedTokens = skippedTokens;
         Diagnostics = diagnostics;
+        Root.AttachTokens(tokens);
     }
 
     public SourceText Text { get; }
     public CompilationUnitSyntax Root { get; }
+    public ImmutableArray<SyntaxToken> Tokens { get; }
+    public ImmutableArray<SyntaxToken> SkippedTokens { get; }
     public ImmutableArray<Diagnostic> Diagnostics { get; }
+    public string ToFullString() => Text.Text;
 
     public static SyntaxTree Parse(SourceText text)
     {
         ArgumentNullException.ThrowIfNull(text);
         var diagnostics = new DiagnosticBag();
-        var tokens = new Lexer(text, diagnostics).Lex();
-        var root = new Parser(text, tokens, diagnostics).ParseCompilationUnit();
-        return new SyntaxTree(text, root, diagnostics.ToImmutable());
+        var lexicalTokens = new Lexer(text, diagnostics).Lex();
+        var parser = new Parser(text, lexicalTokens, diagnostics);
+        var root = parser.ParseCompilationUnit();
+        var tokens = MergeTokens(lexicalTokens, parser.MissingTokens, parser.SkippedTokens);
+        return new SyntaxTree(text, root, tokens, parser.SkippedTokens, diagnostics.ToImmutable());
     }
 
     public static SyntaxTree ParseText(string text, string filePath = "<memory>") => Parse(SourceText.From(text, filePath));
+
+    private static ImmutableArray<SyntaxToken> MergeTokens(ImmutableArray<SyntaxToken> lexicalTokens, ImmutableArray<SyntaxToken> missingTokens, ImmutableArray<SyntaxToken> skippedTokens)
+    {
+        var skipped = skippedTokens.ToHashSet(ReferenceEqualityComparer.Instance);
+        var result = ImmutableArray.CreateBuilder<SyntaxToken>();
+        var pending = ImmutableArray.CreateBuilder<SyntaxToken>();
+        foreach (var token in lexicalTokens)
+        {
+            if (skipped.Contains(token))
+            {
+                pending.Add(token);
+                continue;
+            }
+            var current = token;
+            if (pending.Count > 0)
+            {
+                var start = pending[0].FullSpan.Start;
+                var end = pending[^1].FullSpan.End;
+                var text = string.Concat(pending.Select(item => item.ToFullString()));
+                var trivia = new SyntaxTrivia(SyntaxTriviaKind.SkippedTokens, token.Source, TextSpan.FromBounds(start, end), text, pending.ToImmutable());
+                current = current with { LeadingTrivia = [trivia, .. current.LeadingTrivia] };
+                pending.Clear();
+            }
+            result.Add(current);
+        }
+        result.AddRange(missingTokens);
+        return [.. result.OrderBy(token => token.FullSpan.Start).ThenBy(token => token.IsMissing ? 0 : 1)];
+    }
 }
 
 public sealed record CompilationUnitSyntax(

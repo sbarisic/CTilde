@@ -9,9 +9,11 @@ UTF-8 source files
     -> SourceText and locations
     -> Lexer
     -> Parser and immutable syntax trees
-    -> Declaration and type model
-    -> Semantic and control-flow analysis
-    -> Typed expression and statement lowering
+    -> Declaration binding
+    -> Typed body binding
+    -> Control-flow analysis
+    -> Typed three-address IR lowering
+    -> Target validation
     -> Deterministic GNU C23 emission
     -> External C compiler
     -> Native executable
@@ -26,23 +28,30 @@ The compiler emits no C when any error diagnostic is present. It does not contai
 The `CTilde.Compiler` assembly owns the complete language implementation.
 
 - `SourceText` owns UTF-8-decoded text, line starts, spans, and one-based source locations.
-- `Lexer` owns tokenization, comments, literals, escapes, Unicode identifiers, and lexical diagnostics.
-- `Parser` owns declarations, statements, Pratt expression precedence, recovery, and immutable syntax nodes.
+- `Lexer` owns tokenization, trivia, literals, escapes, Unicode identifiers, and lexical diagnostics.
+- `Parser` owns declarations, statements, Pratt expression precedence, recovery, missing tokens, and skipped-token trivia.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
-- `MethodLowerer` performs method-body binding, definite assignment, access checks, conversions, ordered evaluation, control-flow lowering, and typed C expression construction.
-- `CEmitter` owns the C runtime, layouts, symbol names, declarations, initialization, definitions, and entry wrapper.
+- The body binder resolves names, access, conversions, overloads, lvalues, constants, unsafe contexts, and external symbols.
+- The flow pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
+- `MethodLowerer` converts bound bodies to typed function IR. It creates explicit temporaries, labels, branches, calls, stores, checks, and returns.
+- `TargetValidator` rejects ABI and generated-symbol conflicts before output starts.
+- `CEmitter` consumes typed IR. It owns the runtime, layouts, declarations, initialization, definitions, and entry wrapper.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
 ### CTilde.Cli
 
-The CLI is a thin file-system adapter. It reads one or more `.ct` files, creates syntax trees, creates one `Compilation`, prints diagnostics, and writes the generated translation unit only after successful analysis.
+The CLI is a thin file-system adapter. It reads `.ct` files, creates syntax trees, and prints diagnostics. It writes C only after successful analysis. It atomically replaces the destination through a temporary file.
+
+Directory mode checks the first line before it removes stale output. It removes only files with the C~ generated-file banner. It preserves handwritten C files.
 
 The CLI does not invoke a C compiler. This keeps C emission deterministic and leaves native toolchain selection to the caller.
 
 ### Test
 
-The conformance runner exercises the public API and compiles generated C with a real C compiler. On Windows it discovers Visual Studio with `vswhere`. The `CTILDE_CC` environment variable selects another compiler.
+The conformance runner exercises the public API and compiles generated C. On Windows it finds Visual Studio with `vswhere`. `CTILDE_CC` selects MSVC, GCC, Clang, `wsl:gcc`, or `wsl:clang`.
+
+The GNU adapter tries `gnu23` first. It retries with `gnu2x` only after an unsupported-option error. `CTILDE_C_STANDARD` overrides the dialect.
 
 Native tests use temporary directories and check process output, error text, and exit codes.
 
@@ -57,13 +66,15 @@ ImmutableArray<Diagnostic> diagnostics = compilation.GetDiagnostics();
 EmitResult result = compilation.EmitC(writer);
 ```
 
-`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached syntax trees from the embedded standard library, then builds the program model and generated C once. Its public `SyntaxTrees` collection continues to expose only caller-supplied trees. Subsequent diagnostics and emission requests reuse the immutable result, so repeated emission is byte-identical.
+`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached internal standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees.
+
+`GetDiagnostics()` runs declarations, binding, flow, IR lowering, and target validation. It does not assemble the C translation unit. `EmitC()` consumes cached typed IR after successful analysis. Repeated emission is byte-identical.
 
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
 ## Syntax and recovery
 
-The lexer removes whitespace and comments while preserving token spans. Invalid input produces a token or diagnostic and continues whenever possible.
+The lexer retains whitespace, newlines, comments, and invalid text. Each token has leading trivia, trailing trivia, `Span`, and `FullSpan`.
 
 The parser uses:
 
@@ -72,8 +83,9 @@ The parser uses:
 - Right-recursive parsing for assignment.
 - Token synchronization at type boundaries.
 - Missing zero-width tokens after recoverable expectation failures.
+- Skipped tokens attached to the next token as recovery trivia.
 
-The syntax tree contains source syntax only. It does not contain resolved types or generated C names.
+Valid and invalid trees round-trip exactly through `ToFullString()`. `ChildNodesAndTokens()` returns source-ordered children. Syntax trees do not contain resolved types or generated C names.
 
 ## Symbols and types
 
@@ -88,19 +100,22 @@ The semantic model owns:
 - Fixed-width built-in types, arrays, pointers, and target-width references.
 - Automatically imported declarations from the bundled C~ standard-library sources.
 
-Overload resolution filters by name, static or instance context, argument count, and implicit conversions. Identity conversions score before widening conversions. Equal best scores produce an ambiguity diagnostic.
+Overload resolution filters by name, context, argument count, and implicit conversions. It compares candidates per argument. A winner must be no worse for every argument. It must be better for at least one.
 
 ## Flow and lowering
 
-Method lowering carries explicit lexical scopes and assignment state.
+Control-flow analysis carries explicit lexical scopes and assignment state.
 
 - Branches merge local and required-field assignment state by intersection.
 - Loops do not make body-only assignments definite after the loop.
 - `readonly` assignment counts are merged across branches.
 - Return coverage and unreachable statements are checked before successful emission.
 - Loop and switch exits lower to unique labels, so nested control flow cannot capture the wrong target.
+- A `do` body contributes assignments to its condition path because it executes once.
+- Switch break exits remain separate from return exits.
+- Case constants convert to the governing type before range and duplicate checks.
 
-A lowered expression contains:
+A bound expression contains:
 
 - Its resolved `CType`.
 - Ordered prerequisite statements.
@@ -108,9 +123,9 @@ A lowered expression contains:
 - Optional lvalue store and address operations.
 - Optional constant value information.
 
-Receivers and operands with side effects are placed in generated temporaries. Calls evaluate the receiver first and arguments from left to right. Compound assignments evaluate their target once. Short-circuit operators lower their right operand into a conditional block.
+Generated temporaries hold receivers and operands with side effects. Calls evaluate the receiver first. Arguments evaluate from left to right. Compound assignments evaluate their target once. Short-circuit operators lower the right operand into a conditional block.
 
-This ordered prerequisite list is the compiler's typed intermediate representation between binding and text emission.
+IR lowering spills receivers, arguments, operands, indices, and compound targets in source order. The function IR is immutable. The C emitter does not repeat name lookup, overload selection, type conversion, or flow analysis.
 
 ## C emission
 

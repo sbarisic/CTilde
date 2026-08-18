@@ -13,6 +13,7 @@
   <ItemGroup>
     <Compile Include="Conformance/**/*.cs" />
     <ProjectReference Include="../CTilde/CTilde.csproj" />
+    <ProjectReference Include="../CTilde.Cli/CTilde.Cli.csproj" ReferenceOutputAssembly="false" />
     <Content Include="../examples/*.ct" Link="Examples/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Snapshots/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

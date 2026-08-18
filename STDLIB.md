@@ -30,7 +30,7 @@ public static class Console
 }
 ```
 
-Smaller integer types use the normal widening conversions when selecting an overload. Strings write their exact UTF-8 bytes. A null string writes no bytes. `char` writes one UTF-8 code unit, booleans write `True` or `False`, and floats use nine significant digits.
+Smaller integer types use the language overload rules. A signed widening target is better when other rules do not decide. Strings write their exact UTF-8 bytes. A null string writes no bytes. `char` writes one UTF-8 code unit. Booleans write `True` or `False`. Floats use nine significant digits.
 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
 

@@ -11,40 +11,66 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 {
     private static readonly IReadOnlyDictionary<string, SyntaxKind> Keywords = new Dictionary<string, SyntaxKind>(StringComparer.Ordinal)
     {
-        ["bool"] = SyntaxKind.BoolKeyword, ["break"] = SyntaxKind.BreakKeyword,
-        ["byte"] = SyntaxKind.ByteKeyword, ["case"] = SyntaxKind.CaseKeyword,
-        ["char"] = SyntaxKind.CharKeyword, ["class"] = SyntaxKind.ClassKeyword,
-        ["const"] = SyntaxKind.ConstKeyword, ["continue"] = SyntaxKind.ContinueKeyword,
-        ["default"] = SyntaxKind.DefaultKeyword, ["do"] = SyntaxKind.DoKeyword,
-        ["else"] = SyntaxKind.ElseKeyword, ["enum"] = SyntaxKind.EnumKeyword,
-        ["false"] = SyntaxKind.FalseKeyword, ["float"] = SyntaxKind.FloatKeyword,
-        ["for"] = SyntaxKind.ForKeyword, ["foreach"] = SyntaxKind.ForeachKeyword,
-        ["if"] = SyntaxKind.IfKeyword, ["in"] = SyntaxKind.InKeyword,
-        ["int"] = SyntaxKind.IntKeyword, ["internal"] = SyntaxKind.InternalKeyword,
-        ["namespace"] = SyntaxKind.NamespaceKeyword, ["new"] = SyntaxKind.NewKeyword,
-        ["null"] = SyntaxKind.NullKeyword, ["private"] = SyntaxKind.PrivateKeyword,
-        ["protected"] = SyntaxKind.ProtectedKeyword, ["public"] = SyntaxKind.PublicKeyword,
-        ["readonly"] = SyntaxKind.ReadonlyKeyword, ["return"] = SyntaxKind.ReturnKeyword,
-        ["sbyte"] = SyntaxKind.SbyteKeyword, ["sealed"] = SyntaxKind.SealedKeyword,
-        ["short"] = SyntaxKind.ShortKeyword, ["static"] = SyntaxKind.StaticKeyword,
-        ["string"] = SyntaxKind.StringKeyword, ["struct"] = SyntaxKind.StructKeyword,
-        ["switch"] = SyntaxKind.SwitchKeyword, ["this"] = SyntaxKind.ThisKeyword,
-        ["true"] = SyntaxKind.TrueKeyword, ["uint"] = SyntaxKind.UintKeyword,
-        ["unsafe"] = SyntaxKind.UnsafeKeyword, ["ushort"] = SyntaxKind.UshortKeyword,
-        ["using"] = SyntaxKind.UsingKeyword, ["var"] = SyntaxKind.VarKeyword,
-        ["void"] = SyntaxKind.VoidKeyword, ["while"] = SyntaxKind.WhileKeyword,
-        ["get"] = SyntaxKind.GetKeyword, ["set"] = SyntaxKind.SetKeyword,
+        ["bool"] = SyntaxKind.BoolKeyword,
+        ["break"] = SyntaxKind.BreakKeyword,
+        ["byte"] = SyntaxKind.ByteKeyword,
+        ["case"] = SyntaxKind.CaseKeyword,
+        ["char"] = SyntaxKind.CharKeyword,
+        ["class"] = SyntaxKind.ClassKeyword,
+        ["const"] = SyntaxKind.ConstKeyword,
+        ["continue"] = SyntaxKind.ContinueKeyword,
+        ["default"] = SyntaxKind.DefaultKeyword,
+        ["do"] = SyntaxKind.DoKeyword,
+        ["else"] = SyntaxKind.ElseKeyword,
+        ["enum"] = SyntaxKind.EnumKeyword,
+        ["false"] = SyntaxKind.FalseKeyword,
+        ["float"] = SyntaxKind.FloatKeyword,
+        ["for"] = SyntaxKind.ForKeyword,
+        ["foreach"] = SyntaxKind.ForeachKeyword,
+        ["if"] = SyntaxKind.IfKeyword,
+        ["in"] = SyntaxKind.InKeyword,
+        ["int"] = SyntaxKind.IntKeyword,
+        ["internal"] = SyntaxKind.InternalKeyword,
+        ["namespace"] = SyntaxKind.NamespaceKeyword,
+        ["new"] = SyntaxKind.NewKeyword,
+        ["null"] = SyntaxKind.NullKeyword,
+        ["private"] = SyntaxKind.PrivateKeyword,
+        ["protected"] = SyntaxKind.ProtectedKeyword,
+        ["public"] = SyntaxKind.PublicKeyword,
+        ["readonly"] = SyntaxKind.ReadonlyKeyword,
+        ["return"] = SyntaxKind.ReturnKeyword,
+        ["sbyte"] = SyntaxKind.SbyteKeyword,
+        ["sealed"] = SyntaxKind.SealedKeyword,
+        ["short"] = SyntaxKind.ShortKeyword,
+        ["static"] = SyntaxKind.StaticKeyword,
+        ["string"] = SyntaxKind.StringKeyword,
+        ["struct"] = SyntaxKind.StructKeyword,
+        ["switch"] = SyntaxKind.SwitchKeyword,
+        ["this"] = SyntaxKind.ThisKeyword,
+        ["true"] = SyntaxKind.TrueKeyword,
+        ["uint"] = SyntaxKind.UintKeyword,
+        ["unsafe"] = SyntaxKind.UnsafeKeyword,
+        ["ushort"] = SyntaxKind.UshortKeyword,
+        ["using"] = SyntaxKind.UsingKeyword,
+        ["var"] = SyntaxKind.VarKeyword,
+        ["void"] = SyntaxKind.VoidKeyword,
+        ["while"] = SyntaxKind.WhileKeyword,
+        ["get"] = SyntaxKind.GetKeyword,
+        ["set"] = SyntaxKind.SetKeyword,
     };
 
     private int _position;
+    private ImmutableArray<SyntaxTrivia> _leadingTrivia = [];
 
     public ImmutableArray<SyntaxToken> Lex()
     {
         var tokens = ImmutableArray.CreateBuilder<SyntaxToken>();
         while (true)
         {
-            SkipTrivia();
+            _leadingTrivia = LexTrivia(stopAfterEndOfLine: false);
             var token = LexToken();
+            if (token.Kind != SyntaxKind.EndOfFileToken)
+                token = token with { TrailingTrivia = LexTrivia(stopAfterEndOfLine: true) };
             tokens.Add(token);
             if (token.Kind == SyntaxKind.EndOfFileToken)
                 return tokens.ToImmutable();
@@ -93,18 +119,30 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         _position++;
         var single = current switch
         {
-            '(' => SyntaxKind.OpenParenToken, ')' => SyntaxKind.CloseParenToken,
-            '{' => SyntaxKind.OpenBraceToken, '}' => SyntaxKind.CloseBraceToken,
-            '[' => SyntaxKind.OpenBracketToken, ']' => SyntaxKind.CloseBracketToken,
-            ';' => SyntaxKind.SemicolonToken, ':' => SyntaxKind.ColonToken,
-            ',' => SyntaxKind.CommaToken, '.' => SyntaxKind.DotToken,
-            '+' => SyntaxKind.PlusToken, '-' => SyntaxKind.MinusToken,
-            '*' => SyntaxKind.StarToken, '/' => SyntaxKind.SlashToken,
-            '%' => SyntaxKind.PercentToken, '&' => SyntaxKind.AmpersandToken,
-            '|' => SyntaxKind.PipeToken, '^' => SyntaxKind.HatToken,
-            '~' => SyntaxKind.TildeToken, '!' => SyntaxKind.BangToken,
-            '=' => SyntaxKind.EqualsToken, '<' => SyntaxKind.LessToken,
-            '>' => SyntaxKind.GreaterToken, _ => SyntaxKind.BadToken,
+            '(' => SyntaxKind.OpenParenToken,
+            ')' => SyntaxKind.CloseParenToken,
+            '{' => SyntaxKind.OpenBraceToken,
+            '}' => SyntaxKind.CloseBraceToken,
+            '[' => SyntaxKind.OpenBracketToken,
+            ']' => SyntaxKind.CloseBracketToken,
+            ';' => SyntaxKind.SemicolonToken,
+            ':' => SyntaxKind.ColonToken,
+            ',' => SyntaxKind.CommaToken,
+            '.' => SyntaxKind.DotToken,
+            '+' => SyntaxKind.PlusToken,
+            '-' => SyntaxKind.MinusToken,
+            '*' => SyntaxKind.StarToken,
+            '/' => SyntaxKind.SlashToken,
+            '%' => SyntaxKind.PercentToken,
+            '&' => SyntaxKind.AmpersandToken,
+            '|' => SyntaxKind.PipeToken,
+            '^' => SyntaxKind.HatToken,
+            '~' => SyntaxKind.TildeToken,
+            '!' => SyntaxKind.BangToken,
+            '=' => SyntaxKind.EqualsToken,
+            '<' => SyntaxKind.LessToken,
+            '>' => SyntaxKind.GreaterToken,
+            _ => SyntaxKind.BadToken,
         };
 
         if (single == SyntaxKind.BadToken)
@@ -240,9 +278,18 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             var escape = source[_position++];
             var decoded = escape switch
             {
-                '0' => '\0', 'a' => '\a', 'b' => '\b', 't' => '\t',
-                'n' => '\n', 'v' => '\v', 'f' => '\f', 'r' => '\r',
-                '"' => '"', '\'' => '\'', '\\' => '\\', _ => '\0',
+                '0' => '\0',
+                'a' => '\a',
+                'b' => '\b',
+                't' => '\t',
+                'n' => '\n',
+                'v' => '\v',
+                'f' => '\f',
+                'r' => '\r',
+                '"' => '"',
+                '\'' => '\'',
+                '\\' => '\\',
+                _ => '\0',
             };
             if (escape == 'x')
             {
@@ -278,13 +325,28 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         return Token(kind, start, _position - start, value.ToString());
     }
 
-    private void SkipTrivia()
+    private ImmutableArray<SyntaxTrivia> LexTrivia(bool stopAfterEndOfLine)
     {
+        var trivia = ImmutableArray.CreateBuilder<SyntaxTrivia>();
         while (_position < source.Length)
         {
+            var start = _position;
+            if (source[_position] is '\r' or '\n')
+            {
+                if (source[_position] == '\r' && _position + 1 < source.Length && source[_position + 1] == '\n')
+                    _position += 2;
+                else
+                    _position++;
+                trivia.Add(Trivia(SyntaxTriviaKind.EndOfLine, start));
+                if (stopAfterEndOfLine)
+                    break;
+                continue;
+            }
             if (char.IsWhiteSpace(source[_position]))
             {
-                _position++;
+                while (_position < source.Length && char.IsWhiteSpace(source[_position]) && source[_position] is not '\r' and not '\n')
+                    _position++;
+                trivia.Add(Trivia(SyntaxTriviaKind.Whitespace, start));
                 continue;
             }
             if (Matches("//"))
@@ -292,11 +354,11 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
                 _position += 2;
                 while (_position < source.Length && source[_position] is not '\r' and not '\n')
                     _position++;
+                trivia.Add(Trivia(SyntaxTriviaKind.SingleLineComment, start));
                 continue;
             }
             if (Matches("/*"))
             {
-                var start = _position;
                 _position += 2;
                 while (_position < source.Length && !Matches("*/"))
                     _position++;
@@ -304,11 +366,15 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
                     diagnostics.Add("CT0007", "Unterminated block comment.", source, new TextSpan(start, source.Length - start));
                 else
                     _position += 2;
+                trivia.Add(Trivia(SyntaxTriviaKind.BlockComment, start));
                 continue;
             }
-            return;
+            break;
         }
+        return trivia.ToImmutable();
     }
+
+    private SyntaxTrivia Trivia(SyntaxTriviaKind kind, int start) => new(kind, source, TextSpan.FromBounds(start, _position), source.Text[start.._position]);
 
     private void ReadDigits(int numberBase)
     {
@@ -348,5 +414,5 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
     private static int HexValue(char value) => value <= '9' ? value - '0' : char.ToUpperInvariant(value) - 'A' + 10;
 
     private SyntaxToken Token(SyntaxKind kind, int start, int length, object? value = null) =>
-        new(kind, source, new TextSpan(start, length), source.Text.Substring(start, length), value);
+        new SyntaxToken(kind, source, new TextSpan(start, length), source.Text.Substring(start, length), value) { LeadingTrivia = _leadingTrivia };
 }

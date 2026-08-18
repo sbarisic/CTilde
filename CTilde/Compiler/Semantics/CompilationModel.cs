@@ -6,6 +6,14 @@ namespace CTilde;
 internal sealed class CompilationModel
 {
     private static readonly Regex CIdentifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
+    private static readonly HashSet<string> CKeywords = new(StringComparer.Ordinal)
+    {
+        "alignas", "alignof", "auto", "bool", "break", "case", "char", "const", "constexpr", "continue",
+        "default", "do", "double", "else", "enum", "extern", "false", "float", "for", "goto", "if", "inline",
+        "int", "long", "nullptr", "register", "restrict", "return", "short", "signed", "sizeof", "static",
+        "static_assert", "struct", "switch", "thread_local", "true", "typedef", "typeof", "typeof_unqual", "union",
+        "unsigned", "void", "volatile", "while",
+    };
     private readonly Dictionary<SyntaxTree, string> _namespaces = [];
     private readonly Dictionary<SyntaxTree, ImmutableArray<string>> _usings = [];
 
@@ -18,6 +26,8 @@ internal sealed class CompilationModel
         DeclareTypes();
         ValidateUsings();
         DeclareMembers();
+        ValidateRecursivePointerExposure();
+        ValidateExternalSymbols();
         ValidateEntryPoint();
     }
 
@@ -190,110 +200,137 @@ internal sealed class CompilationModel
         switch (declaration)
         {
             case FieldDeclarationSyntax field:
-            {
-                ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe"], field);
-                ValidateAttributes(field.Attributes, field, []);
-                var symbol = new FieldSymbol
                 {
-                    Name = field.Name, ContainingType = type, Accessibility = accessibility, IsStatic = isStatic,
-                    Syntax = field, Type = ResolveType(field.Type, tree), IsReadonly = field.Modifiers.Contains("readonly", StringComparer.Ordinal),
-                    IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal), Initializer = field.Initializer,
-                };
-                if (symbol.IsConst && field.Initializer is null)
-                    Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
-                if (symbol.IsConst && symbol.IsReadonly)
-                    Diagnostics.Add("CT1220", "A field cannot be both const and readonly.", field.Source, field.Span);
-                ValidatePointerExposure(symbol.Type, field.Modifiers, field);
-                AddUnique(type, symbol);
-                break;
-            }
-            case PropertyDeclarationSyntax property:
-            {
-                ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], property);
-                ValidateAttributes(property.Attributes, property, []);
-                if (property.Getter is null && property.Setter is null)
-                    Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
-                var propertyType = ResolveType(property.Type, tree);
-                ValidatePointerExposure(propertyType, property.Modifiers, property);
-                if (property.Getter is not null)
-                    ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
-                if (property.Setter is not null)
-                    ValidateAllowedModifiers(property.Setter.Modifiers, ["public", "internal", "protected", "private"], property.Setter);
-                FieldSymbol? backing = null;
-                if (property.Getter is { Body: null } || property.Setter is { Body: null })
-                {
-                    backing = new FieldSymbol
+                    ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe"], field);
+                    ValidateAttributes(field.Attributes, field, []);
+                    var symbol = new FieldSymbol
                     {
-                        Name = $"<{property.Name}>k__BackingField", ContainingType = type, Accessibility = Accessibility.Private,
-                        IsStatic = isStatic, Syntax = property, Type = propertyType, IsReadonly = false, IsConst = false,
+                        Name = field.Name,
+                        ContainingType = type,
+                        Accessibility = accessibility,
+                        IsStatic = isStatic,
+                        Syntax = field,
+                        Type = ResolveType(field.Type, tree),
+                        IsReadonly = field.Modifiers.Contains("readonly", StringComparer.Ordinal),
+                        IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
+                        Initializer = field.Initializer,
                     };
-                    type.Fields.Add(backing);
+                    if (symbol.IsConst && field.Initializer is null)
+                        Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
+                    if (symbol.IsConst && symbol.IsReadonly)
+                        Diagnostics.Add("CT1220", "A field cannot be both const and readonly.", field.Source, field.Span);
+                    AddUnique(type, symbol);
+                    break;
                 }
-                var symbol = new PropertySymbol
+            case PropertyDeclarationSyntax property:
                 {
-                    Name = property.Name, ContainingType = type, Accessibility = accessibility, IsStatic = isStatic,
-                    Syntax = property, Type = propertyType, Getter = property.Getter, Setter = property.Setter, BackingField = backing,
-                    GetterAccessibility = property.Getter is null ? Accessibility.Private : GetAccessibility(property.Getter.Modifiers, property.Getter, accessibility),
-                    SetterAccessibility = property.Setter is null ? Accessibility.Private : GetAccessibility(property.Setter.Modifiers, property.Setter, accessibility),
-                };
-                if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
-                    Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
-                AddUnique(type, symbol);
-                break;
-            }
+                    ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], property);
+                    ValidateAttributes(property.Attributes, property, []);
+                    if (property.Getter is null && property.Setter is null)
+                        Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
+                    var propertyType = ResolveType(property.Type, tree);
+                    if (property.Getter is not null)
+                        ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
+                    if (property.Setter is not null)
+                        ValidateAllowedModifiers(property.Setter.Modifiers, ["public", "internal", "protected", "private"], property.Setter);
+                    FieldSymbol? backing = null;
+                    if (property.Getter is { Body: null } || property.Setter is { Body: null })
+                    {
+                        backing = new FieldSymbol
+                        {
+                            Name = $"<{property.Name}>k__BackingField",
+                            ContainingType = type,
+                            Accessibility = Accessibility.Private,
+                            IsStatic = isStatic,
+                            Syntax = property,
+                            Type = propertyType,
+                            IsReadonly = false,
+                            IsConst = false,
+                        };
+                        type.Fields.Add(backing);
+                    }
+                    var symbol = new PropertySymbol
+                    {
+                        Name = property.Name,
+                        ContainingType = type,
+                        Accessibility = accessibility,
+                        IsStatic = isStatic,
+                        Syntax = property,
+                        Type = propertyType,
+                        Getter = property.Getter,
+                        Setter = property.Setter,
+                        BackingField = backing,
+                        GetterAccessibility = property.Getter is null ? Accessibility.Private : GetAccessibility(property.Getter.Modifiers, property.Getter, accessibility),
+                        SetterAccessibility = property.Setter is null ? Accessibility.Private : GetAccessibility(property.Setter.Modifiers, property.Setter, accessibility),
+                    };
+                    if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
+                        Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
+                    AddUnique(type, symbol);
+                    break;
+                }
             case ConstructorDeclarationSyntax constructor:
-            {
-                ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
-                ValidateAttributes(constructor.Attributes, constructor, []);
-                if (isStatic)
-                    Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.3.", constructor.Source, constructor.Span);
-                var parameters = DeclareParameters(constructor.Parameters, tree);
-                foreach (var parameter in parameters)
-                    ValidatePointerExposure(parameter.Type, constructor.Modifiers, constructor);
-                var symbol = new MethodSymbol
                 {
-                    Name = constructor.Name, ContainingType = type, Accessibility = accessibility, IsStatic = false,
-                    Syntax = constructor, ReturnType = type.Type, Parameters = parameters, Body = constructor.Body, IsConstructor = true,
-                };
-                AddMethod(type.Constructors, symbol);
-                break;
-            }
-            case MethodDeclarationSyntax method:
-            {
-                ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], method);
-                ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern"]);
-                var entry = FindAttribute(method.Attributes, "EntryPoint");
-                var external = FindAttribute(method.Attributes, "Extern");
-                if (entry is not null && entry.Arguments.Length != 0)
-                    Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
-                string? externalName = null;
-                if (external is not null)
-                {
-                    if (external.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && CIdentifier.IsMatch(value))
-                        externalName = value;
-                    else
-                        Diagnostics.Add("CT1204", "Extern requires one string containing a portable C identifier.", external.Source, external.Span);
-                    if (!isStatic || method.Body is not null)
-                        Diagnostics.Add("CT1205", "An Extern method must be static and bodyless.", method.Source, method.Span);
+                    ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
+                    ValidateAttributes(constructor.Attributes, constructor, []);
+                    if (isStatic)
+                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.3.", constructor.Source, constructor.Span);
+                    var parameters = DeclareParameters(constructor.Parameters, tree);
+                    var symbol = new MethodSymbol
+                    {
+                        Name = constructor.Name,
+                        ContainingType = type,
+                        Accessibility = accessibility,
+                        IsStatic = false,
+                        Syntax = constructor,
+                        ReturnType = type.Type,
+                        Parameters = parameters,
+                        Body = constructor.Body,
+                        IsConstructor = true,
+                    };
+                    AddMethod(type.Constructors, symbol);
+                    break;
                 }
-                else if (method.Body is null)
-                    Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
-                var returnType = ResolveType(method.ReturnType, tree);
-                var methodParameters = DeclareParameters(method.Parameters, tree);
-                ValidatePointerExposure(returnType, method.Modifiers, method);
-                foreach (var parameter in methodParameters)
-                    ValidatePointerExposure(parameter.Type, method.Modifiers, method);
-                var symbol = new MethodSymbol
+            case MethodDeclarationSyntax method:
                 {
-                    Name = method.Name, ContainingType = type, Accessibility = accessibility, IsStatic = isStatic,
-                    Syntax = method, ReturnType = returnType, Parameters = methodParameters,
-                    Body = method.Body, IsEntryPoint = entry is not null, ExternName = externalName,
-                };
-                if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
-                    Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
-                AddMethod(type.Methods, symbol);
-                break;
-            }
+                    ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], method);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern"]);
+                    var entry = FindAttribute(method.Attributes, "EntryPoint");
+                    var external = FindAttribute(method.Attributes, "Extern");
+                    if (entry is not null && entry.Arguments.Length != 0)
+                        Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
+                    string? externalName = null;
+                    if (external is not null)
+                    {
+                        if (external.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
+                            externalName = value;
+                        else
+                            Diagnostics.Add("CT1204", "Extern requires one string containing a portable C identifier.", external.Source, external.Span);
+                        if (!isStatic || method.Body is not null)
+                            Diagnostics.Add("CT1205", "An Extern method must be static and bodyless.", method.Source, method.Span);
+                    }
+                    else if (method.Body is null)
+                        Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
+                    var returnType = ResolveType(method.ReturnType, tree);
+                    var methodParameters = DeclareParameters(method.Parameters, tree);
+                    var symbol = new MethodSymbol
+                    {
+                        Name = method.Name,
+                        ContainingType = type,
+                        Accessibility = accessibility,
+                        IsStatic = isStatic,
+                        Syntax = method,
+                        ReturnType = returnType,
+                        Parameters = methodParameters,
+                        Body = method.Body,
+                        IsEntryPoint = entry is not null,
+                        ExternName = externalName,
+                        IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
+                    };
+                    if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
+                        Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
+                    AddMethod(type.Methods, symbol);
+                    break;
+                }
         }
     }
 
@@ -335,8 +372,14 @@ internal sealed class CompilationModel
         }
         type.Fields.Add(new FieldSymbol
         {
-            Name = "<underlying>", ContainingType = type, Accessibility = Accessibility.Private, IsStatic = true,
-            Syntax = declaration, Type = underlying, IsReadonly = true, IsConst = true,
+            Name = "<underlying>",
+            ContainingType = type,
+            Accessibility = Accessibility.Private,
+            IsStatic = true,
+            Syntax = declaration,
+            Type = underlying,
+            IsReadonly = true,
+            IsConst = true,
         });
     }
 
@@ -357,6 +400,67 @@ internal sealed class CompilationModel
             EntryPoint = entries[0];
         }
     }
+
+    private void ValidateExternalSymbols()
+    {
+        var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
+            "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
+            "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
+            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint",
+            "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
+            "ct_write_int", "ct_write_uint", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
+            "ct_module_init", "ct_keep_symbols", "ct_string", "NAN", "INFINITY",
+        };
+        var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in Types.Values)
+        {
+            generatedSymbols.Add(NameMangler.Type(type));
+            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>"))
+                generatedSymbols.Add(field.CName);
+            foreach (var value in type.EnumValues)
+                generatedSymbols.Add(NameMangler.Identifier(type.FullName + "." + value.Name));
+            foreach (var constructor in type.Constructors)
+                generatedSymbols.Add(NameMangler.Method(constructor));
+            foreach (var method in type.Methods.Where(method => method.ExternName is null))
+                generatedSymbols.Add(NameMangler.Method(method));
+            foreach (var property in type.Properties)
+            {
+                if (property.Getter is not null)
+                    generatedSymbols.Add(NameMangler.Getter(property));
+                if (property.Setter is not null)
+                    generatedSymbols.Add(NameMangler.Setter(property));
+            }
+        }
+
+        var externs = Types.Values.SelectMany(type => type.Methods)
+            .Where(method => method.ExternName is not null)
+            .OrderBy(method => method.ExternName, StringComparer.Ordinal)
+            .ThenBy(method => method.ContainingType.FullName, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var method in externs.Where(method => !method.IsTrustedExtern))
+        {
+            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!))
+                Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a compiler-owned or generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
+        }
+
+        foreach (var group in externs.GroupBy(method => method.ExternName!, StringComparer.Ordinal))
+        {
+            var first = group.First();
+            foreach (var method in group.Skip(1))
+            {
+                if (HaveSameAbiSignature(first, method))
+                    continue;
+                Diagnostics.Add("CT4102", $"External symbol '{group.Key}' has incompatible ABI signatures.", method.Syntax!.Source, method.Syntax.Span,
+                    first.Syntax?.Source.GetLocation(first.Syntax.Span));
+            }
+        }
+    }
+
+    private static bool HaveSameAbiSignature(MethodSymbol left, MethodSymbol right) =>
+        left.ReturnType == right.ReturnType &&
+        left.Parameters.Select(parameter => parameter.Type).SequenceEqual(right.Parameters.Select(parameter => parameter.Type));
 
     private static bool FitsEnumValue(long value, CType underlying) => underlying.Kind switch
     {
@@ -412,8 +516,11 @@ internal sealed class CompilationModel
             Diagnostics.Add("CT1211", "protected is reserved until inheritance is implemented.", syntax.Source, syntax.Span);
         return values.FirstOrDefault() switch
         {
-            "public" => Accessibility.Public, "internal" => Accessibility.Internal,
-            "protected" => Accessibility.Protected, "private" => Accessibility.Private, _ => fallback,
+            "public" => Accessibility.Public,
+            "internal" => Accessibility.Internal,
+            "protected" => Accessibility.Protected,
+            "private" => Accessibility.Private,
+            _ => fallback,
         };
     }
 
@@ -431,8 +538,26 @@ internal sealed class CompilationModel
 
     private void ValidatePointerExposure(CType type, ImmutableArray<string> modifiers, SyntaxNode syntax)
     {
-        if (type.Kind == CTypeKind.Pointer && !modifiers.Contains("unsafe", StringComparer.Ordinal))
+        if (type.ContainsPointer && !modifiers.Contains("unsafe", StringComparer.Ordinal))
             Diagnostics.Add("CT2141", "A pointer in a member signature requires the unsafe modifier.", syntax.Source, syntax.Span);
+    }
+
+    private void ValidateRecursivePointerExposure()
+    {
+        foreach (var type in Types.Values)
+        {
+            foreach (var field in type.Fields.Where(field => field.Syntax is MemberDeclarationSyntax))
+                ValidatePointerExposure(field.Type, ((MemberDeclarationSyntax)field.Syntax!).Modifiers, field.Syntax!);
+            foreach (var property in type.Properties)
+                ValidatePointerExposure(property.Type, ((MemberDeclarationSyntax)property.Syntax!).Modifiers, property.Syntax!);
+            foreach (var method in type.Constructors.Concat(type.Methods).Where(method => method.Syntax is MemberDeclarationSyntax))
+            {
+                var modifiers = ((MemberDeclarationSyntax)method.Syntax!).Modifiers;
+                ValidatePointerExposure(method.ReturnType, modifiers, method.Syntax!);
+                foreach (var parameter in method.Parameters)
+                    ValidatePointerExposure(parameter.Type, modifiers, method.Syntax!);
+            }
+        }
     }
 
     private void ValidateAttributes(ImmutableArray<AttributeSyntax> attributes, SyntaxNode syntax, string[] allowed)
@@ -447,4 +572,7 @@ internal sealed class CompilationModel
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);
+
+    private static bool IsPortableExternalIdentifier(string value) =>
+        CIdentifier.IsMatch(value) && !value.StartsWith('_') && !CKeywords.Contains(value);
 }

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.3.
+This document defines the generated C contract for C~ draft 0.4. The managed layout is not compatible with draft 0.3.
 
 The output is a single GNU C23 translation unit. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -32,7 +32,7 @@ References and unsafe pointers use native C pointer width. A 64-bit C target the
 | `float` | `float` |
 | `T*` | the mapped C type followed by `*` |
 
-Signed addition, subtraction, multiplication, negation, and shifts use generated helpers to avoid C signed-overflow undefined behavior. Draft 0.3 defines two's-complement wrapping. Integer division and remainder check zero before the C operation.
+Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.4 defines two's-complement wrapping.
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
@@ -63,24 +63,45 @@ Method names append a structural code for every parameter type. Overloads theref
 
 All generated user definitions have translation-unit-local linkage. `public` and `internal` are C~ access rules; they do not export a native symbol. The exceptions are C `main` and declarations created by `[Extern]`.
 
+## Managed object header
+
+Every class, string, array, and box starts with this header:
+
+```c
+typedef struct ct_object {
+    const ct_type_descriptor* Type;
+    uint32_t IdentityHash;
+} ct_object;
+```
+
+The descriptor stores a type name, base descriptor, vtable, type ID, size, and value-type flag.
+
+The vtable contains typed function pointers. A generated thunk converts `ct_object*` to the method's declaring type.
+
 ## Classes and structures
 
 A class lowers to a C structure and is used through a pointer:
 
 ```c
-typedef struct ct_t_... ct_t_...;
-struct ct_t_... {
+struct ct_t_Base {
+    ct_object ct_header;
+};
+
+struct ct_t_Derived {
+    ct_t_Base ct_base;
     int32_t field;
 };
 ```
 
-`new` calls a constructor factory. The factory allocates zeroed storage, runs field initializers and the selected constructor body, and returns the object pointer.
+The base structure is the first member. An upcast uses this prefix and keeps the original managed identity.
+
+`new` calls an allocation factory. The factory installs the most-derived descriptor and calls non-allocating constructor initializers.
 
 A structure lowers to the same C structure form but is passed, returned, assigned, and stored by value. A structure constructor initializes a zeroed local value and returns that value.
 
 Instance methods and property accessors receive a first `ct_self` pointer. Static members do not.
 
-Draft 0.3 has no base-object header, virtual table, interface map, or run-time type information.
+A box stores an object header followed by one copied scalar, enum, structure, or pointer value.
 
 ## Enumerations
 
@@ -94,6 +115,7 @@ Every used element type receives one array structure:
 
 ```c
 typedef struct ct_a_... {
+    ct_object Object;
     int32_t Length;
     element_type* Data;
 } ct_a_...;
@@ -115,6 +137,7 @@ Zero-length arrays have a null `Data` pointer and a non-null array object.
 
 ```c
 typedef struct ct_string {
+    ct_object Object;
     int32_t Length;
     const uint8_t* Data;
 } ct_string;
@@ -158,7 +181,7 @@ int main(void)
 
 The compiler emits an external C prototype using the mappings in this document. The native definition must use exactly that ABI. Arrays, strings, classes, and structures are C~ runtime layouts, not libc substitutes.
 
-External names cannot collide with `main`, a runtime definition, or a generated C symbol. Multiple declarations can use one external name only when their signatures match. The compiler emits one prototype for matching aliases. Diagnostic `CT4102` reports incompatible declarations and identifies the first declaration.
+External names cannot collide with `main`, runtime definitions, or generated symbols. Compiler-owned symbols include descriptors, vtables, thunks, and box helpers.
 
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
 
@@ -176,6 +199,9 @@ The embedded runtime prints one line to standard error and exits with `EXIT_FAIL
 | `CTI0001` | Integer division or remainder by zero |
 | `CTS0001` | String length overflow |
 | `CTS0002` | Native scalar formatting failure |
+| `CTO0001` | Invalid managed reference cast |
+| `CTO0002` | Null unboxing |
+| `CTO0003` | Boxed type mismatch |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 

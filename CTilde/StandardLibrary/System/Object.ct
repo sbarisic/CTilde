@@ -1,0 +1,47 @@
+namespace System;
+
+public class Object
+{
+    public Object()
+    {
+    }
+
+    public virtual string ToString()
+    {
+        return ObjectRuntime.ToString(this);
+    }
+
+    public virtual bool Equals(object value)
+    {
+        return ObjectRuntime.ReferenceEquals(this, value);
+    }
+
+    public virtual int GetHashCode()
+    {
+        return ObjectRuntime.GetHashCode(this);
+    }
+
+    public static bool Equals(object left, object right)
+    {
+        if (left == null)
+            return right == null;
+        return left.Equals(right);
+    }
+
+    public static bool ReferenceEquals(object left, object right)
+    {
+        return ObjectRuntime.ReferenceEquals(left, right);
+    }
+}
+
+internal static class ObjectRuntime
+{
+    [Extern("ct_object_to_string")]
+    internal static string ToString(object value);
+
+    [Extern("ct_object_hash")]
+    internal static int GetHashCode(object value);
+
+    [Extern("ct_object_reference_equals")]
+    internal static bool ReferenceEquals(object left, object right);
+}

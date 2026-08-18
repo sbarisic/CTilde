@@ -13,6 +13,7 @@ internal sealed class LoweredExpression
     public TypeSymbol? TypeReceiver { get; init; }
     public bool IsConstant { get; init; }
     public object? ConstantValue { get; init; }
+    public bool IsBaseReceiver { get; init; }
 }
 
 internal sealed class LoweredLValue
@@ -65,6 +66,8 @@ internal sealed class MethodLowerer
 
     public string EmitDefinition()
     {
+        if (_method.IsConstructor && _method.ContainingType.Kind == DeclaredTypeKind.Class)
+            return EmitClassConstructorDefinition();
         var writer = new CWriter();
         writer.WriteLine(_emitter.MethodSignature(_method, _nameOverride));
         using (writer.Block())
@@ -97,6 +100,67 @@ internal sealed class MethodLowerer
         return writer.ToString();
     }
 
+    private string EmitClassConstructorDefinition()
+    {
+        var writer = new CWriter();
+        var typeName = NameMangler.Type(_method.ContainingType);
+        var parameterNames = _method.Parameters.Select(parameter => NameMangler.Identifier(parameter.Name)).ToArray();
+        writer.WriteLine(_emitter.MethodSignature(_method, _nameOverride));
+        using (writer.Block())
+        {
+            var source = _method.Syntax ?? _method.ContainingType.Syntax!;
+            writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_init_object(ct_self, &{CEmitter.DescriptorName(_method.ContainingType)});");
+            writer.WriteLine($"{CEmitter.ConstructorInitializerName(_method)}(ct_self{(parameterNames.Length == 0 ? string.Empty : ", " + string.Join(", ", parameterNames))});");
+            writer.WriteLine("return ct_self;");
+        }
+        writer.WriteLine();
+        var initializerParameters = new[] { $"{typeName}* ct_self" }
+            .Concat(_method.Parameters.Select(parameter => $"{_emitter.CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}"));
+        writer.WriteLine($"static void {CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})");
+        using (writer.Block())
+        {
+            writer.WriteLine("(void)ct_self;");
+            foreach (var parameter in _method.Parameters)
+                writer.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
+            var delegatesToThis = EmitConstructorInitializer(writer);
+            if (!delegatesToThis)
+                EmitInstanceFieldInitializers(writer);
+            if (_method.Body is not null)
+                _ = EmitStatements(writer, _method.Body.Statements);
+            if (!delegatesToThis)
+                ValidateConstructorAssignments();
+            writer.WriteLine("return;");
+        }
+        return writer.ToString();
+    }
+
+    private bool EmitConstructorInitializer(CWriter writer)
+    {
+        if (_method.ContainingType.IsObject)
+            return false;
+        var syntax = _method.ConstructorInitializer;
+        var targetType = syntax?.Kind == ConstructorInitializerKind.This
+            ? _method.ContainingType
+            : _method.ContainingType.BaseType;
+        if (targetType is null)
+            return false;
+        var argumentSyntax = syntax?.Arguments ?? [];
+        var arguments = argumentSyntax.Select(LowerExpression).ToArray();
+        var target = SelectOverload(targetType.Constructors, targetType.Name, arguments, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
+        if (target is null)
+            return syntax?.Kind == ConstructorInitializerKind.This;
+        CheckAccess(target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
+        _method.ConstructorInitializerTarget = target;
+        var lowered = LowerArguments(arguments, target.Parameters, argumentSyntax);
+        EmitPrelude(writer, lowered.Prelude);
+        var self = syntax?.Kind == ConstructorInitializerKind.This
+            ? "ct_self"
+            : $"({NameMangler.Type(targetType)}*)(void*)ct_self";
+        writer.WriteLine($"{CEmitter.ConstructorInitializerName(target)}({self}{(lowered.Codes.Count == 0 ? string.Empty : ", " + string.Join(", ", lowered.Codes))});");
+        return syntax?.Kind == ConstructorInitializerKind.This;
+    }
+
     public LoweredExpression LowerStandalone(ExpressionSyntax expression) => LowerExpression(expression);
 
     public LoweredExpression ConvertStandalone(LoweredExpression expression, CType target, SyntaxNode syntax) => Convert(expression, target, syntax, false);
@@ -115,6 +179,7 @@ internal sealed class MethodLowerer
         {
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
             writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_init_object(ct_self, &{CEmitter.DescriptorName(_method.ContainingType)});");
         }
     }
 
@@ -599,7 +664,7 @@ internal sealed class MethodLowerer
     {
         if (_method.IsConstructor)
         {
-            Report("CT3106", "A constructor cannot contain a return statement in draft 0.3.", syntax);
+            Report("CT3106", "A constructor cannot contain a return statement in draft 0.4.", syntax);
             return;
         }
         if (_method.ReturnType == CType.Void)
@@ -732,6 +797,7 @@ internal sealed class MethodLowerer
             LiteralExpressionSyntax literal => LowerLiteral(literal),
             NameExpressionSyntax name => LowerName(name, false),
             ThisExpressionSyntax @this => LowerThis(@this),
+            BaseExpressionSyntax @base => LowerBase(@base),
             ParenthesizedExpressionSyntax parenthesized => LowerExpression(parenthesized.Expression),
             UnaryExpressionSyntax unary => LowerUnary(unary),
             BinaryExpressionSyntax binary => LowerBinary(binary),
@@ -741,6 +807,8 @@ internal sealed class MethodLowerer
             IndexExpressionSyntax index => LowerIndex(index, false),
             NewExpressionSyntax @new => LowerNew(@new),
             CastExpressionSyntax cast => LowerCast(cast),
+            TypeTestExpressionSyntax typeTest => LowerTypeTest(typeTest),
+            SafeCastExpressionSyntax safeCast => LowerSafeCast(safeCast),
             _ => ErrorExpression(),
         };
     }
@@ -776,7 +844,7 @@ internal sealed class MethodLowerer
                 var bounded = (uint)numeric.Integer;
                 return Constant(CType.Uint, bounded, $"UINT32_C({bounded.ToString(CultureInfo.InvariantCulture)})");
             }
-            Report("CT2112", "Integer literal does not fit any draft 0.3 integer type.", syntax);
+            Report("CT2112", "Integer literal does not fit any draft 0.4 integer type.", syntax);
             return Constant(CType.Int, 0, "0");
         }
         return ErrorExpression();
@@ -812,10 +880,10 @@ internal sealed class MethodLowerer
                 LValue = new LoweredLValue { Store = value => $"{name} = {value}", Address = $"&{name}" },
             };
         }
-        var field = _method.ContainingType.Fields.FirstOrDefault(candidate => candidate.Name == syntax.Name);
+        var field = Hierarchy(_method.ContainingType).SelectMany(type => type.Fields).FirstOrDefault(candidate => candidate.Name == syntax.Name);
         if (field is not null)
             return LowerField(field, null, syntax, forWrite);
-        var property = _method.ContainingType.Properties.FirstOrDefault(candidate => candidate.Name == syntax.Name);
+        var property = Hierarchy(_method.ContainingType).SelectMany(type => type.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name);
         if (property is not null)
             return LowerProperty(property, null, syntax, forWrite);
         var type = _model.ResolveNamedType(syntax.Name, TreeFor(syntax));
@@ -842,6 +910,22 @@ internal sealed class MethodLowerer
         return new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
     }
 
+    private LoweredExpression LowerBase(BaseExpressionSyntax syntax)
+    {
+        if (_method.IsStatic || _method.ContainingType.Kind != DeclaredTypeKind.Class || _method.ContainingType.BaseType is null)
+        {
+            Report("CT2150", "base is available only in an instance member of a derived class.", syntax);
+            return ErrorExpression();
+        }
+        var baseType = _method.ContainingType.BaseType;
+        return new LoweredExpression
+        {
+            Type = baseType.Type,
+            Code = $"({NameMangler.Type(baseType)}*)(void*)ct_self",
+            IsBaseReceiver = true,
+        };
+    }
+
     private LoweredExpression LowerMember(MemberAccessExpressionSyntax syntax, bool forWrite)
     {
         var staticType = TryResolveTypeExpression(syntax.Receiver);
@@ -853,10 +937,10 @@ internal sealed class MethodLowerer
                 if (enumValue is not null)
                     return Constant(staticType.Type, enumValue.Value, NameMangler.Identifier(staticType.FullName + "." + enumValue.Name));
             }
-            var field = staticType.Fields.FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic);
+            var field = Hierarchy(staticType).SelectMany(type => type.Fields).FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic);
             if (field is not null)
                 return LowerField(field, null, syntax, forWrite);
-            var property = staticType.Properties.FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic);
+            var property = Hierarchy(staticType).SelectMany(type => type.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic);
             if (property is not null)
                 return LowerProperty(property, null, syntax, forWrite);
             Report("CT1108", $"Type '{staticType.FullName}' has no static member named '{syntax.Name}'.", syntax);
@@ -877,15 +961,17 @@ internal sealed class MethodLowerer
             return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         var type = receiver.Type.Symbol;
+        if (type is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
+            type = _model.Types.GetValueOrDefault("System.Object");
         if (type is null)
         {
             Report("CT2114", $"Type '{receiver.Type.DisplayName}' has no members.", syntax);
             return ErrorExpression(receiver.Prelude);
         }
-        var instanceField = type.Fields.FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic);
+        var instanceField = Hierarchy(type).SelectMany(candidateType => candidateType.Fields).FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic);
         if (instanceField is not null)
             return LowerField(instanceField, receiver, syntax, forWrite);
-        var instanceProperty = type.Properties.FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic);
+        var instanceProperty = Hierarchy(type).SelectMany(candidateType => candidateType.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic);
         if (instanceProperty is not null)
             return LowerProperty(instanceProperty, receiver, syntax, forWrite);
         Report("CT1109", $"Type '{type.FullName}' has no instance member named '{syntax.Name}'.", syntax);
@@ -927,7 +1013,7 @@ internal sealed class MethodLowerer
                 : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
             var loweredReceiver = MaterializeReceiver(receiver, syntax);
             prelude.AddRange(loweredReceiver.Prelude);
-            code = loweredReceiver.Type.Kind == CTypeKind.Class ? $"{loweredReceiver.Code}->{field.CName}" : $"{loweredReceiver.Code}->{field.CName}";
+            code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CName}";
         }
         return new LoweredExpression
         {
@@ -947,6 +1033,7 @@ internal sealed class MethodLowerer
         CheckAccessibility(forWrite ? property.SetterAccessibility : property.GetterAccessibility, property, syntax);
         var prelude = new List<string>();
         string receiverArgument = string.Empty;
+        var baseReceiver = receiver?.IsBaseReceiver == true;
         if (!property.IsStatic)
         {
             if (_method.IsStatic && receiver is null)
@@ -963,7 +1050,13 @@ internal sealed class MethodLowerer
         }
         if (!forWrite && property.Getter is null)
             Report("CT2117", $"Property '{property.Name}' has no getter.", syntax);
-        var getterCode = property.Getter is null ? _emitter.DefaultValue(property.Type) : $"{NameMangler.Getter(property)}({receiverArgument})";
+        var typedReceiver = property.IsStatic ? string.Empty : $"({NameMangler.Type(property.ContainingType)}*)(void*){receiverArgument}";
+        var objectReceiver = property.IsStatic ? string.Empty : $"((ct_object*)(void*){receiverArgument})";
+        var getterCode = property.Getter is null
+            ? _emitter.DefaultValue(property.Type)
+            : property.IsVirtual && !baseReceiver
+                ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(property)}({objectReceiver})"
+                : $"{NameMangler.Getter(property)}({typedReceiver})";
         return new LoweredExpression
         {
             Type = property.Type,
@@ -971,7 +1064,9 @@ internal sealed class MethodLowerer
             Prelude = prelude,
             LValue = property.Setter is null ? null : new LoweredLValue
             {
-                Store = value => $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : receiverArgument + ", ")}{value})",
+                Store = value => property.IsVirtual && !baseReceiver
+                    ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(property)}({objectReceiver}, {value})"
+                    : $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : typedReceiver + ", ")}{value})",
                 Field = property.BackingField,
             },
         };
@@ -1083,13 +1178,15 @@ internal sealed class MethodLowerer
                 if (member.Name == "ToString" && SupportsBuiltInToString(receiver.Type))
                     return LowerBuiltInToString(syntax, member, receiver);
                 containingType = receiver.Type.Symbol;
+                if (containingType is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
+                    containingType = _model.Types.GetValueOrDefault("System.Object");
                 methodName = member.Name;
                 requireStatic = false;
             }
         }
         else
         {
-            Report("CT2120", "Only methods can be called in draft 0.3.", syntax.Target);
+            Report("CT2120", "Only methods can be called in draft 0.4.", syntax.Target);
             return ErrorExpression();
         }
 
@@ -1100,10 +1197,17 @@ internal sealed class MethodLowerer
         }
 
         var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
-        var candidates = containingType.Methods.Where(method => method.Name == methodName && method.IsStatic == requireStatic).ToArray();
+        var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => method.Name == methodName && method.IsStatic == requireStatic)
+            .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
+        if (!requireStatic && receiver is not null && receiver.Type.IsValueType)
+            candidates = containingType.Methods.Where(method => method.Name == methodName && !method.IsStatic)
+                .Concat(_model.Types["System.Object"].Methods.Where(method => method.Name == methodName && !method.IsStatic))
+                .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First())
+                .ToArray();
         if (syntax.Target is NameExpressionSyntax && !_method.IsStatic)
         {
-            var allCandidates = containingType.Methods.Where(method => method.Name == methodName).ToArray();
+            var allCandidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => method.Name == methodName)
+                .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
             if (allCandidates.Length > 0)
                 candidates = allCandidates;
         }
@@ -1121,6 +1225,8 @@ internal sealed class MethodLowerer
             receiver ??= _method.ContainingType.Kind == DeclaredTypeKind.Struct
                 ? new LoweredExpression { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
                 : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+            if ((selected.ContainingType.IsObject || selected.IsVirtual && receiver.Type.IsValueType) && receiver.Type != _model.Types["System.Object"].Type)
+                receiver = Convert(receiver, _model.Types["System.Object"].Type, syntax.Target, false);
             var loweredReceiver = MaterializeReceiver(receiver, syntax.Target);
             prelude.AddRange(loweredReceiver.Prelude);
             receiverCode = loweredReceiver.Code;
@@ -1132,7 +1238,21 @@ internal sealed class MethodLowerer
         if (receiverCode is not null)
             callArguments.Add(receiverCode);
         callArguments.AddRange(loweredArguments.Codes);
-        var call = $"{selected.CName}({string.Join(", ", callArguments)})";
+        string call;
+        if (selected.IsVirtual && receiverCode is not null && receiver?.IsBaseReceiver != true)
+        {
+            var objectReceiver = $"((ct_object*)(void*){receiverCode})";
+            callArguments[0] = objectReceiver;
+            if (CEmitter.VirtualSlotName(selected) == "Equals" && callArguments.Count == 2)
+                callArguments[1] = $"(ct_object*)(void*){callArguments[1]}";
+            call = $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSlotName(selected)}({string.Join(", ", callArguments)})";
+        }
+        else
+        {
+            if (receiverCode is not null)
+                callArguments[0] = $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
+            call = $"{selected.CName}({string.Join(", ", callArguments)})";
+        }
         return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
     }
 
@@ -1260,6 +1380,40 @@ internal sealed class MethodLowerer
         if (target.ContainsPointer || expression.Type.ContainsPointer)
             RequireUnsafe(syntax);
         return Convert(expression, target, syntax, true);
+    }
+
+    private LoweredExpression LowerTypeTest(TypeTestExpressionSyntax syntax)
+    {
+        var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        if (target.Kind is CTypeKind.Void or CTypeKind.Null or CTypeKind.Error)
+        {
+            Report("CT2147", $"Type '{target.DisplayName}' is not valid in an is expression.", syntax.Type);
+            return ErrorExpression();
+        }
+        if (target.ContainsPointer)
+            RequireUnsafe(syntax);
+        _emitter.RegisterType(target);
+        if (!target.IsReference)
+            _emitter.RegisterBox(target);
+        var objectType = _model.Types["System.Object"].Type;
+        var value = Materialize(Convert(LowerExpression(syntax.Expression), objectType, syntax.Expression, false), syntax.Expression);
+        var code = $"({value.Code} != NULL && ct_type_is_assignable(((ct_object*)(void*){value.Code})->Type, {_emitter.DescriptorExpression(target)}))";
+        return new LoweredExpression { Type = CType.Bool, Code = code, Prelude = value.Prelude };
+    }
+
+    private LoweredExpression LowerSafeCast(SafeCastExpressionSyntax syntax)
+    {
+        var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        if (!target.IsReference)
+        {
+            Report("CT2147", "The as operator requires a reference target type.", syntax.Type);
+            return ErrorExpression();
+        }
+        _emitter.RegisterType(target);
+        var objectType = _model.Types["System.Object"].Type;
+        var value = Materialize(Convert(LowerExpression(syntax.Expression), objectType, syntax.Expression, false), syntax.Expression);
+        var code = $"({_emitter.CTypeName(target)})(void*)ct_safe_cast((ct_object*)(void*){value.Code}, {_emitter.DescriptorExpression(target)})";
+        return new LoweredExpression { Type = target, Code = code, Prelude = value.Prelude };
     }
 
     private LoweredExpression LowerUnary(UnaryExpressionSyntax syntax)
@@ -1533,7 +1687,7 @@ internal sealed class MethodLowerer
         }
 
         if (!target.Type.IsNumeric)
-            Report("CT2133", "Compound assignment requires a numeric target in draft 0.3.", syntax.Left);
+            Report("CT2133", "Compound assignment requires a numeric target in draft 0.4.", syntax.Left);
         var old = NewTemp();
         prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
         var rawRight = LowerExpression(syntax.Right);
@@ -1644,7 +1798,8 @@ internal sealed class MethodLowerer
                 IsConstant = expression.IsConstant,
                 ConstantValue = expression.ConstantValue,
             };
-        var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(expression.Type, target) : TypeFacts.CanImplicitlyConvert(expression.Type, target);
+        var sourceType = expression.Type;
+        var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(sourceType, target) : TypeFacts.CanImplicitlyConvert(sourceType, target);
         if (!valid)
         {
             Report("CT2137", $"Cannot {(explicitConversion ? "cast" : "implicitly convert")} '{expression.Type.DisplayName}' to '{target.DisplayName}'.", syntax);
@@ -1652,7 +1807,35 @@ internal sealed class MethodLowerer
         }
         if (expression.IsConstant && TryConvertConstant(expression, target, out var constant))
             return constant;
-        var code = expression.Type.Kind == CTypeKind.Null ? $"({_emitter.CTypeName(target)})NULL" : $"({_emitter.CTypeName(target)})({expression.Code})";
+        var objectType = _model.Types.GetValueOrDefault("System.Object")?.Type;
+        if (objectType is not null && target == objectType && !sourceType.IsReference && sourceType.Kind is not CTypeKind.Null)
+        {
+            if (sourceType.ContainsPointer)
+                RequireUnsafe(syntax);
+            _emitter.RegisterBox(sourceType);
+            var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {CEmitter.SourceArgument(syntax)})";
+            return new LoweredExpression { Type = target, Code = boxCode, Prelude = expression.Prelude };
+        }
+        if (objectType is not null && sourceType == objectType && target != objectType && target.Kind is not CTypeKind.Class and not CTypeKind.String and not CTypeKind.Array)
+        {
+            if (target.ContainsPointer)
+                RequireUnsafe(syntax);
+            _emitter.RegisterBox(target);
+            var unboxCode = $"{CEmitter.UnboxFunctionName(target)}({expression.Code}, {CEmitter.SourceArgument(syntax)})";
+            return new LoweredExpression { Type = target, Code = unboxCode, Prelude = expression.Prelude };
+        }
+        if (explicitConversion && sourceType.IsReference && target.IsReference && sourceType != target &&
+            !(sourceType.Kind == CTypeKind.Class && target.Kind == CTypeKind.Class && sourceType.Symbol?.DerivesFrom(target.Symbol!) == true))
+        {
+            _emitter.RegisterType(target);
+            var castCode = $"({_emitter.CTypeName(target)})(void*)ct_checked_cast((ct_object*)(void*){expression.Code}, {_emitter.DescriptorExpression(target)}, {CEmitter.SourceArgument(syntax)})";
+            return new LoweredExpression { Type = target, Code = castCode, Prelude = expression.Prelude };
+        }
+        var code = sourceType.Kind == CTypeKind.Null
+            ? $"({_emitter.CTypeName(target)})NULL"
+            : sourceType.IsPointerLike || target.IsPointerLike
+                ? $"({_emitter.CTypeName(target)})(void*)({expression.Code})"
+                : $"({_emitter.CTypeName(target)})({expression.Code})";
         return new LoweredExpression { Type = target, Code = code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue };
     }
 
@@ -1688,15 +1871,15 @@ internal sealed class MethodLowerer
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(receiver.Type)} {temp} = {receiver.Code};");
             prelude.Add($"(void)ct_require_nonnull({temp}, {CEmitter.SourceArgument(syntax)});");
-            return new LoweredExpression { Type = receiver.Type, Code = temp, Prelude = prelude };
+            return new LoweredExpression { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
         }
         if (receiver.Type.Kind == CTypeKind.Struct)
         {
             if (receiver.LValue?.Address is string address)
-                return new LoweredExpression { Type = receiver.Type, Code = address, Prelude = prelude };
+                return new LoweredExpression { Type = receiver.Type, Code = address, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(receiver.Type)} {temp} = {receiver.Code};");
-            return new LoweredExpression { Type = receiver.Type, Code = $"&{temp}", Prelude = prelude };
+            return new LoweredExpression { Type = receiver.Type, Code = $"&{temp}", Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
         }
         return receiver;
     }
@@ -1716,7 +1899,12 @@ internal sealed class MethodLowerer
     {
         if (accessibility == Accessibility.Private && member.ContainingType != _method.ContainingType)
             Report("CT1110", $"Member '{member.Name}' is private.", syntax);
+        if (accessibility == Accessibility.Protected && member.ContainingType != _method.ContainingType && !_method.ContainingType.DerivesFrom(member.ContainingType))
+            Report("CT1113", $"Member '{member.Name}' is protected.", syntax);
     }
+
+    private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type) => type.BaseTypesAndSelf();
+    private static string MethodSignatureKey(MethodSymbol method) => $"{method.Name}:{string.Join(',', method.Parameters.Select(parameter => NameMangler.TypeCode(parameter.Type)))}:{method.IsStatic}";
 
     private bool TryFoldUnary(UnaryExpressionSyntax syntax, LoweredExpression operand, out LoweredExpression result)
     {

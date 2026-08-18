@@ -49,7 +49,27 @@ internal sealed class TypedIrLowerer(CompilationModel model, CEmitter emitter)
                 }
             }
         }
+        ValidateConstructorCycles();
         return new TypedIrProgram(definitions.ToImmutable(), ToInstructions(LowerModuleInitializer(), CType.Void));
+    }
+
+    private void ValidateConstructorCycles()
+    {
+        foreach (var type in model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class))
+        {
+            foreach (var constructor in type.Constructors)
+            {
+                var active = new HashSet<MethodSymbol>();
+                for (var current = constructor; current is not null && current.ContainingType == type; current = current.ConstructorInitializerTarget)
+                {
+                    if (active.Add(current))
+                        continue;
+                    var syntax = constructor.ConstructorInitializer ?? constructor.Syntax ?? type.Syntax!;
+                    model.Diagnostics.Add("CT1232", $"Constructor chain for '{type.FullName}' contains a cycle.", syntax.Source, syntax.Span);
+                    break;
+                }
+            }
+        }
     }
 
     private string LowerAccessor(PropertySymbol property, MethodSymbol method, bool getter)

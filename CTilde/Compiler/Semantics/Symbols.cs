@@ -63,6 +63,8 @@ internal sealed class TypeSymbol
     public required string Name { get; init; }
     public required DeclaredTypeKind Kind { get; init; }
     public TypeDeclarationSyntax? Syntax { get; init; }
+    public TypeSymbol? BaseType { get; set; }
+    public bool IsSealed { get; init; }
     public string FullName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}.{Name}";
     public CType Type => new(Kind switch
     {
@@ -76,6 +78,16 @@ internal sealed class TypeSymbol
     public List<MethodSymbol> Constructors { get; } = [];
     public List<EnumValueSymbol> EnumValues { get; } = [];
     public bool IsStatic => Kind == DeclaredTypeKind.StaticClass;
+    public bool IsObject => FullName == "System.Object";
+
+    public IEnumerable<TypeSymbol> BaseTypesAndSelf()
+    {
+        var visited = new HashSet<TypeSymbol>();
+        for (var current = this; current is not null && visited.Add(current); current = current.BaseType)
+            yield return current;
+    }
+
+    public bool DerivesFrom(TypeSymbol other) => BaseTypesAndSelf().Skip(1).Contains(other);
 }
 
 internal abstract class MemberSymbol
@@ -104,6 +116,10 @@ internal sealed class PropertySymbol : MemberSymbol
     public required FieldSymbol? BackingField { get; init; }
     public required Accessibility GetterAccessibility { get; init; }
     public required Accessibility SetterAccessibility { get; init; }
+    public bool IsVirtual { get; init; }
+    public bool IsOverride { get; init; }
+    public bool IsSealedOverride { get; init; }
+    public PropertySymbol? OverriddenProperty { get; set; }
 }
 
 internal sealed class ParameterSymbol
@@ -122,6 +138,12 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsEntryPoint { get; init; }
     public string? ExternName { get; init; }
     public bool IsTrustedExtern { get; init; }
+    public bool IsVirtual { get; init; }
+    public bool IsOverride { get; init; }
+    public bool IsSealedOverride { get; init; }
+    public MethodSymbol? OverriddenMethod { get; set; }
+    public ConstructorInitializerSyntax? ConstructorInitializer { get; init; }
+    public MethodSymbol? ConstructorInitializerTarget { get; set; }
     public string CName => ExternName ?? NameMangler.Method(this);
 }
 
@@ -219,6 +241,10 @@ internal static class TypeFacts
             return true;
         if (from.Kind == CTypeKind.Null && to.IsPointerLike)
             return true;
+        if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error)
+            return true;
+        if (from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null && from.Symbol.DerivesFrom(to.Symbol))
+            return true;
         return from.Kind switch
         {
             CTypeKind.Byte => to.Kind is CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float,
@@ -233,7 +259,15 @@ internal static class TypeFacts
     public static bool CanExplicitlyConvert(CType from, CType to) =>
         CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
         from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum ||
-        from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer;
+        from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer ||
+        IsExplicitObjectConversion(from, to) || IsExplicitClassConversion(from, to);
+
+    private static bool IsExplicitObjectConversion(CType from, CType to) =>
+        from.Kind == CTypeKind.Class && from.Symbol?.IsObject == true && to.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error;
+
+    private static bool IsExplicitClassConversion(CType from, CType to) =>
+        from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null &&
+        (from.Symbol.DerivesFrom(to.Symbol) || to.Symbol.DerivesFrom(from.Symbol));
 
     public static CType PromoteNumeric(CType left, CType right)
     {

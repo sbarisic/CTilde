@@ -2,7 +2,33 @@
 
 ## Status
 
-This document is the canonical reference for the standard library bundled with C~ draft 0.3. The library is versioned with the compiler and is included in every compilation. There is currently no option to replace or disable it.
+This document is the canonical standard-library reference for C~ draft 0.4. The compiler includes this library in every compilation.
+
+## Object
+
+`object` is an alias for `System.Object`. Every class derives from this type.
+
+```csharp
+public class Object
+{
+    public Object();
+    public virtual string ToString();
+    public virtual bool Equals(object value);
+    public virtual int GetHashCode();
+    public static bool Equals(object left, object right);
+    public static bool ReferenceEquals(object left, object right);
+}
+```
+
+The default `ToString` result is the fully qualified runtime type name. A class or structure can override the method.
+
+The default instance `Equals` compares reference identity. Strings and boxed values provide value equality.
+
+Static `Equals` handles null values and then calls the virtual instance method. `ReferenceEquals` only compares managed identity.
+
+`GetHashCode` is stable during one process. C~ does not require the same hash across separate executions.
+
+Boxing creates a new managed object. Unboxing requires the exact boxed type. Pointer boxing and unboxing require an unsafe context.
 
 The `System` namespace is imported automatically. Writing `using System;` is allowed but is not required.
 
@@ -19,6 +45,7 @@ public static class Console
     public static void Write(uint value);
     public static void Write(float value);
     public static void Write(bool value);
+    public static void Write(object value);
 
     public static void WriteLine();
     public static void WriteLine(string value);
@@ -27,6 +54,7 @@ public static class Console
     public static void WriteLine(uint value);
     public static void WriteLine(float value);
     public static void WriteLine(bool value);
+    public static void WriteLine(object value);
 }
 ```
 
@@ -68,7 +96,11 @@ Console.WriteLine("value: " + text);
 
 Numeric, Boolean, and character conversions allocate immutable strings. Their descriptors and null-terminated UTF-8 data live until process exit. The terminating zero byte is not included in `Length`; converting the zero `char` still produces a string with `Length == 1`.
 
-`string.ToString()` does not allocate. It checks the receiver for null and returns the same reference. Supplying arguments to any scalar `ToString` is a compile-time overload error (`CT2122`). Classes, structures, enums, arrays, and pointers do not inherit or receive this method.
+`string.ToString()` does not allocate. It checks the receiver for null and returns the same reference.
+
+Classes and arrays inherit the object methods. Enums format the first declared matching name or their underlying numeric value.
+
+Structures receive the object methods through boxing. A structure can override `ToString`, `Equals(object)`, and `GetHashCode`.
 
 ## Strings and arrays
 
@@ -82,10 +114,12 @@ These operations are compiler intrinsics rather than declarations in the bundled
 
 ## Runtime behavior
 
-The standard library is backed by a small GNU C23 runtime embedded in each generated translation unit. Managed strings created by conversions use program-lifetime allocation. Allocation failure reports `CTM0001`, null `string.ToString()` reports `CTN0001`, and an unexpected native formatting failure reports `CTS0002`; runtime failures write to standard error and terminate with `EXIT_FAILURE`.
+The GNU C23 runtime is part of each generated translation unit. Managed allocations live until process exit.
+
+Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
 
 Standard-library declarations use native `[Extern]` bindings internally. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
 ## Non-normative roadmap
 
-Future library work may add `System.Object`, inheritance and boxing, enum formatting, `System.Math`, `System.Convert`, parsing, richer string operations, collections, file and stream I/O, clocks, and date/time APIs. None of those APIs are available in draft 0.3.
+Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.

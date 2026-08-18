@@ -20,6 +20,12 @@ public static class Console
     [Extern("ct_write_bool")]
     public static void Write(bool value);
 
+    public static void Write(object value)
+    {
+        if (value != null)
+            Write(value.ToString());
+    }
+
     [Extern("ct_write_line")]
     public static void WriteLine();
 
@@ -54,6 +60,12 @@ public static class Console
     }
 
     public static void WriteLine(bool value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void WriteLine(object value)
     {
         Write(value);
         WriteLine();

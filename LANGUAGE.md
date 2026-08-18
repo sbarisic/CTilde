@@ -1,12 +1,12 @@
 # C~ language specification
 
-Specification version: draft 0.3
+Specification version: draft 0.4
 
 ## Status
 
-This document is the normative specification for C~ draft 0.3.
+This document is the normative specification for C~ draft 0.4.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.3 compiler emits deterministic GNU C23 and diagnoses invalid programs before writing C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.4 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -101,7 +101,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.3 has no aliases and no `using static`.
+Draft 0.4 has no aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -120,14 +120,16 @@ int @class = 1;
 ### Keywords
 
 ```text
-bool      break      byte       case       char       class
+as        base       bool       break      byte       case
+char      class
 const     continue   default    do         else       enum
 false     float      for        foreach    get        if
-in        int        internal   namespace  new        null
-private   protected  public     readonly   return     sbyte
+in        int        internal   is         namespace  new
+null      object     override   private    protected  public
+readonly  return     sbyte
 sealed    set        short      static     string     struct
 switch    this       true       uint       unsafe     ushort
-using     var        void       while
+using     var        virtual    void       while
 ```
 
 `get` and `set` are meaningful only in property declarations. `default` is a switch label.
@@ -166,7 +168,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.3 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.4 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -194,19 +196,20 @@ Every expression has a compile-time type before C emission.
 | `uint` | Unsigned value | 4 bytes |
 | `float` | IEEE-754 binary32 value | 4 bytes |
 | `string` | Managed reference | Target pointer width |
+| `object` | Managed root reference | Target pointer width |
 | `void` | Return marker | None |
 
 Class, array, string, and unsafe pointer values use the native pointer width of the selected C target.
 
-Draft 0.3 has no `long`, `ulong`, `double`, `decimal`, `nint`, or `nuint`.
+Draft 0.4 has no `long`, `ulong`, `double`, `decimal`, `nint`, or `nuint`.
 
 ### Value and reference types
 
 Numeric types, `bool`, structures, and enums are value types. Assignment copies the complete value.
 
-Classes, arrays, and strings are reference types. Assignment copies object identity. Their default value is `null`.
+Classes, arrays, strings, and `object` are reference types. Assignment copies object identity. Their default value is `null`.
 
-Class and array equality compares identity. String equality compares contents, with two null strings equal.
+Class, array, and `object` equality compares identity. String equality compares contents, with two null strings equal.
 
 ### Arrays
 
@@ -218,7 +221,7 @@ byte[] data = new byte[256];
 
 Every array has a read-only `Length` property of type `int`. Indexing starts at zero and checks the receiver, index, and length.
 
-Draft 0.3 has no multidimensional or jagged arrays.
+Draft 0.4 has no multidimensional or jagged arrays.
 
 ### Unsafe pointers
 
@@ -244,7 +247,7 @@ public enum Direction : byte
 
 The underlying type can be `byte`, `sbyte`, `short`, `ushort`, `int`, or `uint`. The default is `int`.
 
-Draft 0.3 enum initializers are integral literals. An omitted initializer is one greater than the previous value. Every value must fit the underlying type.
+Draft 0.4 enum initializers are integral literals. An omitted initializer is one greater than the previous value. Every value must fit the underlying type.
 
 ### Conversions
 
@@ -254,11 +257,19 @@ An implicit numeric conversion is valid when the target range contains every sou
 
 All other numeric conversions require a cast. Explicit numeric conversions truncate high bits. There is no checked-overflow context.
 
-`null` converts implicitly to reference and pointer types.
+`null` converts implicitly to reference and pointer types. A derived class converts implicitly to each base class.
+
+Every class, array, and string converts implicitly to `object`. A value type converts implicitly to `object` by boxing.
+
+Pointer boxing requires an unsafe context. Boxing creates a new managed object and copies the value.
 
 An explicit cast can convert between integral and enum types. An unsafe explicit cast can convert one raw pointer type to another.
 
-Draft 0.3 rejects casts between unrelated classes, arrays, and strings. Classes have no inheritance conversions.
+An explicit cast can downcast a class reference or unbox an exact value type. A failed cast terminates with a stable runtime error.
+
+`value is T` tests the runtime type. `value as T` returns a compatible reference or `null`. The `as` target must be a reference type.
+
+An explicit class cast requires related source and target types. Code can cast through `object` when it needs a runtime type check.
 
 ## Declarations and scope
 
@@ -320,7 +331,15 @@ public sealed class Counter
 }
 ```
 
-All draft 0.3 classes are sealed. The optional `sealed` modifier documents this rule.
+Each class has one base class. A class with no base clause derives from `System.Object`.
+
+Classes are open for inheritance by default. The `sealed` modifier prevents inheritance.
+
+Instance methods and properties can use `virtual` and `override`. A `sealed override` prevents another override.
+
+An override must keep the base signature, return type, and accessibility. C~ does not support member hiding.
+
+The `base` expression accesses the direct base implementation. Static classes, structures, and enums cannot have a base clause.
 
 There are no finalizers. External resources require an explicit `Dispose()` method; the name has no compiler magic.
 
@@ -354,7 +373,7 @@ Namespace types can be `public` or `internal` and default to `internal`.
 
 Members can be `public`, `internal`, or `private` and default to `private`. `internal` means accessible anywhere in the same compilation.
 
-`protected` is reserved for inheritance and produces a draft 0.3 diagnostic.
+`protected` grants access to the declaring class and its derived classes.
 
 An accessor can be less accessible than its property but cannot be more accessible.
 
@@ -390,13 +409,13 @@ The compiler creates a private backing field. A missing getter makes the propert
 
 A method declares a return type, name, parameters, and body.
 
-Methods can be overloaded by parameter types. Resolution considers accessible static or instance candidates with the correct argument count.
+Methods can be overloaded by parameter types. Resolution includes accessible inherited methods with the correct argument count.
 
 The compiler compares candidates for each argument. Identity is better than widening. One widening target is better when it converts implicitly to the other target only. If two integral widening targets remain, a signed target is better than an unsigned target.
 
 A candidate must be no worse for every argument. It must also be better for at least one argument. Otherwise, the call reports `CT2123`.
 
-Draft 0.3 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
+Draft 0.4 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
 
 ### Evaluation order
 
@@ -430,23 +449,25 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 ## Core library
 
-The automatically imported `System` namespace provides `Console` output and `Environment.Exit`. Built-in scalar values provide intrinsic `ToString()` conversion. The exact API, formatting, allocation, and failure behavior is specified in [STDLIB.md](STDLIB.md).
+The automatically imported `System` namespace provides `Object`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-There is no `System.Object`, boxing, global `ToString`, `System.Convert`, or `System.Math` in draft 0.3.
+Draft 0.4 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
 
 ## Object and array creation
 
-`new Class(args)` allocates a zero-initialized managed object and calls the selected constructor.
+`new Class(args)` allocates one zero-initialized managed object. It then runs the selected base and same-type constructor chain.
 
 `new Struct(args)` creates and returns a structure value.
 
 `new T[length]` checks the length and allocates a zero-initialized managed array.
 
-If a class or structure declares no constructor, it has an implicit public parameterless constructor.
+If a class or structure declares no constructor, it has an implicit public parameterless constructor. A class constructor calls an accessible base constructor.
+
+A constructor can use `: base(args)` or `: this(args)`. The compiler rejects constructor cycles.
 
 ## Expressions
 
-Primary expressions include literals, names, `this`, member access, calls, indexing, construction, and parentheses.
+Primary expressions include literals, names, `this`, `base`, member access, calls, indexing, construction, and parentheses.
 
 A non-void call is a value expression and can appear in any compatible context.
 
@@ -514,7 +535,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, o
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.3 has no pattern cases and no `goto case`.
+Draft 0.4 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -548,15 +569,15 @@ public static unsafe void Clear(byte* address, int length)
 
 Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, and pointer casts. It does not disable normal type checking.
 
-Draft 0.3 has no inline assembly.
+Draft 0.4 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator. Draft 0.3 permits the runtime to retain all managed allocations until process exit.
+C~ source has no `delete` operator. Draft 0.4 permits the runtime to retain all managed allocations until process exit.
 
 External resources require explicit release. There is no language `using` statement for disposal.
 
-Managed null access, invalid array lengths, allocation overflow or failure, bounds access, integer division by zero, and string length overflow terminate the program with `EXIT_FAILURE` and a stable runtime code.
+Managed null access, invalid casts, invalid unboxing, array failures, allocation failures, integer division by zero, and string overflow terminate the program.
 
 ## Diagnostics
 
@@ -573,7 +594,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.3 when:
+A compiler conforms to draft 0.4 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -581,7 +602,7 @@ A compiler conforms to draft 0.3 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. There is no second backend in draft 0.3.
+The canonical backend is GNU C23. Draft 0.4 has no second backend.
 
 ## Deliberate differences from C#
 
@@ -589,8 +610,7 @@ The canonical backend is GNU C23. There is no second backend in draft 0.3.
 - References and pointers use the target C ABI width.
 - Signed integer overflow is always wrapping.
 - `readonly` locals permit one delayed assignment.
-- All classes are sealed.
 - Managed allocations can live until process exit.
 - The core library is intentionally small.
 
-Draft 0.3 defers inheritance, interfaces, generics, exceptions, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional and jagged arrays, string interpolation, and automatic disposal.
+Draft 0.4 defers interfaces, abstract types, generics, exceptions, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, and automatic disposal.

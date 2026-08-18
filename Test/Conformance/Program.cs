@@ -151,6 +151,12 @@ Run("extern ABI validation", () =>
 
     const string dynamicGenerated = "public static class Program { [Extern(\"ct_new_ct_a_i32\")] public static int Native(); [EntryPoint] public static void Main() { int[] values = new int[1]; } }";
     Assert(Compile(dynamicGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated array-allocator collision was not rejected.");
+
+    const string objectGenerated = "public class Value { public virtual int Read() { return 1; } } public static class Program { [Extern(\"ct_vtable_u_5_Value\")] public static int Native(); [EntryPoint] public static void Main() { object value = new Value(); } }";
+    Assert(Compile(objectGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated object-vtable collision was not rejected.");
+
+    const string boxGenerated = "public static class Program { [Extern(\"ct_box_value_i32\")] public static int Native(); [EntryPoint] public static void Main() { object value = 1; } }";
+    Assert(Compile(boxGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated boxing-helper collision was not rejected.");
 });
 
 Run("target validation precedes output", () =>
@@ -485,8 +491,189 @@ Run("ToString diagnostics", () =>
         }
         """;
     var diagnostics = Compile(source).GetDiagnostics();
-    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2122") >= 2, "Expected ToString overload diagnostics for arguments and class receivers.");
-    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2121"), "Expected an unsupported array receiver diagnostic.");
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2122") == 1, "Expected only the invalid ToString argument diagnostic.");
+});
+
+Run("System.Object inheritance dispatch and boxing", () =>
+{
+    const string source = """
+        using System;
+        public class Animal
+        {
+            protected int value;
+            public Animal(int value) { this.value = value; }
+            public virtual string Speak() { return "animal"; }
+            public virtual int Number { get { return value; } }
+            public override string ToString() { return "Animal"; }
+        }
+        public class Dog : Animal
+        {
+            public Dog() : this(7) { }
+            private Dog(int value) : base(value) { }
+            public override string Speak() { return base.Speak() + " dog"; }
+            public override int Number { get { return value + 1; } }
+            public sealed override string ToString() { return "Dog"; }
+        }
+        public class Cat : Animal
+        {
+            public Cat() : base(3) { }
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                Dog dog = new Dog();
+                Animal animal = dog;
+                object value = animal;
+                Console.WriteLine(animal.Speak());
+                Console.WriteLine(animal.Number);
+                Console.WriteLine(value.ToString());
+                Console.WriteLine(animal is Dog);
+                Dog cast = (Dog)animal;
+                Console.WriteLine(cast.Speak());
+                Cat missing = animal as Cat;
+                Console.WriteLine(missing == null);
+                object first = 42;
+                object second = 42;
+                Console.WriteLine(Object.Equals(first, second));
+                Console.WriteLine(Object.ReferenceEquals(first, second));
+                Console.WriteLine((int)first);
+                Console.WriteLine(first.ToString());
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "animal dog\n8\nDog\nTrue\nanimal dog\nTrue\nTrue\nFalse\n42\n42\n", result.StandardOutput);
+});
+
+Run("constructor order and virtual dispatch", () =>
+{
+    const string source = "using System; public class Base { protected int value = 1; public Base() { Console.WriteLine(Read()); Console.WriteLine(value); } public virtual int Read() { return value; } } public class Derived : Base { private int derived = 5; public Derived() : base() { Console.WriteLine(Read()); } public override int Read() { return derived; } } public static class Program { [EntryPoint] public static void Main() { Derived value = new Derived(); } }";
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "0\n1\n5\n", result.StandardOutput);
+});
+
+Run("unsafe pointer object boxing", () =>
+{
+    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { unsafe { int value = 9; int* pointer = &value; object boxed = pointer; Console.WriteLine(boxed is int*); int* copy = (int*)boxed; Console.WriteLine(*copy); } } }";
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n9\n", result.StandardOutput);
+});
+
+Run("inheritance diagnostics", () =>
+{
+    const string source = "public sealed class Closed { } public class Invalid : Closed { } public class Base { public virtual int Value() { return 1; } protected int field; } public class Derived : Base { public int Value() { return 2; } private int field; public sealed override string ToString() { return \"Derived\"; } } public class Further : Derived { public override string ToString() { return \"Further\"; } } public static class Program { [EntryPoint] public static void Main() { } }";
+    var diagnostics = Compile(source).GetDiagnostics();
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1227"), "A sealed base was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1230"), "Inherited member hiding was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1229"), "A sealed virtual slot was overridden.");
+});
+
+Run("object syntax surface", () =>
+{
+    const string source = "public class Base { public Base(int value) { } } public class Derived : Base { public Derived() : this(1) { } private Derived(int value) : base(value) { } public bool Check(object value) { return value is Derived && value as Derived != null; } }";
+    var tree = SyntaxTree.ParseText(source, "object-syntax.ct");
+    Assert(tree.ToFullString() == source, "Draft 0.4 object syntax did not round-trip.");
+    var derived = tree.Root.Types.Single(type => type.Name == "Derived");
+    Assert(derived.BaseType?.Name == "Base", "The class base clause was not retained.");
+    Assert(derived.Members.OfType<ConstructorDeclarationSyntax>().Any(constructor => constructor.Initializer?.Kind == ConstructorInitializerKind.This), "A this constructor initializer was not retained.");
+    Assert(derived.Members.OfType<ConstructorDeclarationSyntax>().Any(constructor => constructor.Initializer?.Kind == ConstructorInitializerKind.Base), "A base constructor initializer was not retained.");
+});
+
+Run("enum and struct object behavior", () =>
+{
+    const string source = """
+        using System;
+        public enum State : int { None = 0, Ready = 2, Alias = 2 }
+        public struct Pair
+        {
+            public int X;
+            public Pair(int value) { X = value; }
+            public override string ToString() { return X.ToString(); }
+            public override bool Equals(object value)
+            {
+                if (!(value is Pair)) return false;
+                Pair other = (Pair)value;
+                return X == other.X;
+            }
+            public override int GetHashCode() { return X; }
+        }
+        public struct Plain
+        {
+            public int X;
+            public string Text;
+            public Plain(int value, string text) { X = value; Text = text; }
+        }
+        public class Key
+        {
+            private int value;
+            public Key(int value) { this.value = value; }
+            public override bool Equals(object other) { return other is Key && ((Key)other).value == value; }
+            public override int GetHashCode() { return value; }
+        }
+        public struct Inner
+        {
+            public Key Key;
+            public Inner(Key key) { Key = key; }
+        }
+        public struct Outer
+        {
+            public Inner Inner;
+            public Outer(Inner inner) { Inner = inner; }
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                Console.WriteLine(State.Ready.ToString());
+                Console.WriteLine(((State)3).ToString());
+                object left = new Pair(5);
+                object right = new Pair(5);
+                Console.WriteLine(left.ToString());
+                Console.WriteLine(Object.Equals(left, right));
+                Console.WriteLine(left.GetHashCode() == right.GetHashCode());
+                object plainLeft = new Plain(4, "same");
+                object plainRight = new Plain(4, "same");
+                Console.WriteLine(Object.Equals(plainLeft, plainRight));
+                Console.WriteLine(plainLeft.GetHashCode() == plainRight.GetHashCode());
+                object outerLeft = new Outer(new Inner(new Key(8)));
+                object outerRight = new Outer(new Inner(new Key(8)));
+                Console.WriteLine(Object.Equals(outerLeft, outerRight));
+                Console.WriteLine(outerLeft.GetHashCode() == outerRight.GetHashCode());
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "Ready\n3\n5\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\n", result.StandardOutput);
+});
+
+Run("object cast runtime failures", () =>
+{
+    const string invalidReference = "public class Base { } public class Left : Base { } public class Right : Base { } public static class Program { [EntryPoint] public static void Main() { Base value = new Left(); Right invalid = (Right)value; } }";
+    var cast = CompileAndRun(invalidReference);
+    Assert(cast.ExitCode != 0 && cast.StandardError.Contains("CTO0001", StringComparison.Ordinal), cast.StandardError);
+
+    const string nullUnbox = "public static class Program { [EntryPoint] public static void Main() { object value = null; int invalid = (int)value; } }";
+    var nullResult = CompileAndRun(nullUnbox);
+    Assert(nullResult.ExitCode != 0 && nullResult.StandardError.Contains("CTO0002", StringComparison.Ordinal), nullResult.StandardError);
+
+    const string wrongUnbox = "public static class Program { [EntryPoint] public static void Main() { object value = 1u; int invalid = (int)value; } }";
+    var wrongResult = CompileAndRun(wrongUnbox);
+    Assert(wrongResult.ExitCode != 0 && wrongResult.StandardError.Contains("CTO0003", StringComparison.Ordinal), wrongResult.StandardError);
+});
+
+Run("constructor and hierarchy cycles", () =>
+{
+    const string inheritance = "public class A : B { } public class B : A { } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(inheritance).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT1226"), "An inheritance cycle was accepted.");
+    const string constructors = "public class Loop { public Loop() : this(1) { } private Loop(int value) : this() { } } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(constructors).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT1232"), "A constructor cycle was accepted.");
 });
 
 Run("null string ToString failure", () =>

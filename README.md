@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained GNU C23 translation unit. GCC-compatible extensions are enabled by default for hosted and embedded toolchains.
 
-The current language is draft 0.3. It includes namespaces, classes, structures, enumerations, properties, overloads, arrays, immutable UTF-8 strings, structured control flow, checked managed access, and explicit unsafe pointers. It does not require a CLR or a C# runtime.
+The current language is draft 0.4. It includes single class inheritance, virtual dispatch, `System.Object`, boxing, checked casts, and all earlier language features. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -107,7 +107,7 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 | `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.3 programs |
+| `examples` | Checked draft 0.4 programs |
 
 ## Validation
 
@@ -129,11 +129,12 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.3 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.4 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records the measured feature and validation status.
+- [TODO.md](TODO.md) defines planned work and acceptance criteria, including ESP-IDF target support.
 
 ## License
 

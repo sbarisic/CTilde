@@ -12,7 +12,7 @@ internal static class StandardLibrary
     private static ImmutableArray<SyntaxTree> LoadSyntaxTrees()
     {
         var assembly = typeof(StandardLibrary).Assembly;
-        var files = new[] { "Console.ct", "Environment.ct" };
+        var files = new[] { "Object.ct", "Console.ct", "Environment.ct" };
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(files.Length);
 
         foreach (var file in files)

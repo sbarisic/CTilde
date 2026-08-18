@@ -25,7 +25,9 @@ internal sealed class CompilationModel
         Types = new Dictionary<string, TypeSymbol>(StringComparer.Ordinal);
         DeclareTypes();
         ValidateUsings();
+        ResolveBaseTypes();
         DeclareMembers();
+        ValidateInheritanceMembers();
         ValidateRecursivePointerExposure();
         ValidateExternalSymbols();
         ValidateEntryPoint();
@@ -40,7 +42,9 @@ internal sealed class CompilationModel
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
-        var baseType = TypeFacts.BuiltIn(syntax.Name);
+        var baseType = syntax.Name == "object" && Types.TryGetValue("System.Object", out var objectType)
+            ? objectType.Type
+            : TypeFacts.BuiltIn(syntax.Name);
         if (baseType is null)
         {
             var candidates = ResolveNamedTypeCandidates(syntax.Name, tree).ToArray();
@@ -145,11 +149,73 @@ internal sealed class CompilationModel
                     Diagnostics.Add("CT1217", "Only a class can be static.", declaration.Source, declaration.Span);
                 if (declaration.Kind != TypeDeclarationKind.Class && declaration.Modifiers.Contains("sealed", StringComparer.Ordinal))
                     Diagnostics.Add("CT1218", "sealed applies only to classes.", declaration.Source, declaration.Span);
-                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "readonly" or "unsafe"))
+                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "readonly" or "unsafe" or "virtual" or "override"))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
                 ValidateAttributes(declaration.Attributes, declaration, []);
-                Types.Add(fullName, new TypeSymbol { Namespace = namespaceName, Name = declaration.Name, Kind = kind, Syntax = declaration });
+                Types.Add(fullName, new TypeSymbol
+                {
+                    Namespace = namespaceName,
+                    Name = declaration.Name,
+                    Kind = kind,
+                    Syntax = declaration,
+                    IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind == DeclaredTypeKind.StaticClass,
+                });
             }
+        }
+    }
+
+    private void ResolveBaseTypes()
+    {
+        Types.TryGetValue("System.Object", out var objectType);
+        foreach (var tree in SyntaxTrees)
+        {
+            foreach (var declaration in tree.Root.Types)
+            {
+                var fullName = string.IsNullOrEmpty(_namespaces[tree]) ? declaration.Name : $"{_namespaces[tree]}.{declaration.Name}";
+                if (!Types.TryGetValue(fullName, out var type) || type.Kind != DeclaredTypeKind.Class)
+                    continue;
+                if (type.IsObject)
+                {
+                    if (declaration.BaseType is not null)
+                        Diagnostics.Add("CT1225", "System.Object cannot declare a base type.", declaration.BaseType.Source, declaration.BaseType.Span);
+                    continue;
+                }
+                if (declaration.BaseType is null)
+                {
+                    type.BaseType = objectType;
+                    continue;
+                }
+                var resolved = ResolveType(declaration.BaseType, tree);
+                if (resolved.Kind != CTypeKind.Class || resolved.Symbol is null || resolved.Symbol.IsStatic)
+                {
+                    Diagnostics.Add("CT1225", $"Class '{type.FullName}' requires a non-static class base type.", declaration.BaseType.Source, declaration.BaseType.Span);
+                    continue;
+                }
+                type.BaseType = resolved.Symbol;
+                if (resolved.Symbol.IsSealed)
+                    Diagnostics.Add("CT1227", $"Class '{type.FullName}' cannot derive from sealed class '{resolved.Symbol.FullName}'.", declaration.BaseType.Source, declaration.BaseType.Span);
+            }
+        }
+
+        var complete = new HashSet<TypeSymbol>();
+        var active = new HashSet<TypeSymbol>();
+        foreach (var type in Types.Values.Where(type => type.Kind == DeclaredTypeKind.Class))
+            Visit(type);
+
+        void Visit(TypeSymbol type)
+        {
+            if (complete.Contains(type))
+                return;
+            if (!active.Add(type))
+            {
+                if (type.Syntax is not null)
+                    Diagnostics.Add("CT1226", $"Class '{type.FullName}' participates in an inheritance cycle.", type.Syntax.Source, type.Syntax.Span);
+                return;
+            }
+            if (type.BaseType is not null)
+                Visit(type.BaseType);
+            active.Remove(type);
+            complete.Add(type);
         }
     }
 
@@ -224,7 +290,7 @@ internal sealed class CompilationModel
                 }
             case PropertyDeclarationSyntax property:
                 {
-                    ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], property);
+                    ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], property);
                     ValidateAttributes(property.Attributes, property, []);
                     if (property.Getter is null && property.Setter is null)
                         Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
@@ -262,6 +328,9 @@ internal sealed class CompilationModel
                         BackingField = backing,
                         GetterAccessibility = property.Getter is null ? Accessibility.Private : GetAccessibility(property.Getter.Modifiers, property.Getter, accessibility),
                         SetterAccessibility = property.Setter is null ? Accessibility.Private : GetAccessibility(property.Setter.Modifiers, property.Setter, accessibility),
+                        IsVirtual = property.Modifiers.Contains("virtual", StringComparer.Ordinal) || property.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsOverride = property.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsSealedOverride = property.Modifiers.Contains("sealed", StringComparer.Ordinal),
                     };
                     if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
                         Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
@@ -273,7 +342,7 @@ internal sealed class CompilationModel
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
                     ValidateAttributes(constructor.Attributes, constructor, []);
                     if (isStatic)
-                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.3.", constructor.Source, constructor.Span);
+                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.4.", constructor.Source, constructor.Span);
                     var parameters = DeclareParameters(constructor.Parameters, tree);
                     var symbol = new MethodSymbol
                     {
@@ -286,13 +355,14 @@ internal sealed class CompilationModel
                         Parameters = parameters,
                         Body = constructor.Body,
                         IsConstructor = true,
+                        ConstructorInitializer = constructor.Initializer,
                     };
                     AddMethod(type.Constructors, symbol);
                     break;
                 }
             case MethodDeclarationSyntax method:
                 {
-                    ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe"], method);
+                    ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
                     ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
@@ -325,6 +395,9 @@ internal sealed class CompilationModel
                         IsEntryPoint = entry is not null,
                         ExternName = externalName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
+                        IsVirtual = method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsSealedOverride = method.Modifiers.Contains("sealed", StringComparer.Ordinal),
                     };
                     if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
                         Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
@@ -364,7 +437,7 @@ internal sealed class CompilationModel
             if (member.Value is LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken } && numeric.FloatingPoint is null && numeric.Integer >= long.MinValue && numeric.Integer <= long.MaxValue)
                 value = (long)numeric.Integer;
             else if (member.Value is not null)
-                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.3.", member.Source, member.Value.Span);
+                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.4.", member.Source, member.Value.Span);
             if (!FitsEnumValue(value, underlying))
                 Diagnostics.Add("CT1215", $"Enum value {value} does not fit underlying type '{underlying.DisplayName}'.", member.Source, member.Span);
             type.EnumValues.Add(new EnumValueSymbol(member.Name, value, member));
@@ -401,6 +474,74 @@ internal sealed class CompilationModel
         }
     }
 
+    private void ValidateInheritanceMembers()
+    {
+        var objectType = Types.GetValueOrDefault("System.Object");
+        foreach (var type in Types.Values.Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct))
+        {
+            var baseTypes = type.Kind == DeclaredTypeKind.Class
+                ? type.BaseTypesAndSelf().Skip(1).ToArray()
+                : Array.Empty<TypeSymbol>();
+            var inheritedMembers = baseTypes.SelectMany(baseType => baseType.Fields.Cast<MemberSymbol>().Concat(baseType.Properties).Concat(baseType.Methods)).ToArray();
+
+            foreach (var member in type.Fields.Cast<MemberSymbol>())
+            {
+                if (inheritedMembers.Any(candidate => candidate.Name == member.Name))
+                    Diagnostics.Add("CT1230", $"Member '{member.Name}' hides an inherited member; member hiding is not supported.", member.Syntax!.Source, member.Syntax.Span);
+            }
+
+            foreach (var property in type.Properties)
+            {
+                ValidateVirtualModifiers(property.IsStatic, property.IsVirtual, property.IsOverride, property.IsSealedOverride, property.Syntax!);
+                var candidate = baseTypes.SelectMany(baseType => baseType.Properties).FirstOrDefault(baseProperty => baseProperty.Name == property.Name);
+                if (property.IsOverride)
+                {
+                    if (candidate is null || !candidate.IsVirtual || candidate.IsSealedOverride || candidate.Type != property.Type ||
+                        (candidate.Getter is null) != (property.Getter is null) || (candidate.Setter is null) != (property.Setter is null) ||
+                        candidate.Accessibility != property.Accessibility)
+                        Diagnostics.Add("CT1229", $"Property '{property.Name}' does not match an accessible unsealed virtual base property.", property.Syntax!.Source, property.Syntax.Span);
+                    else
+                        property.OverriddenProperty = candidate;
+                }
+                else if (candidate is not null)
+                    Diagnostics.Add("CT1230", $"Property '{property.Name}' hides an inherited property; use override for a virtual property.", property.Syntax!.Source, property.Syntax.Span);
+            }
+
+            foreach (var method in type.Methods)
+            {
+                ValidateVirtualModifiers(method.IsStatic, method.IsVirtual, method.IsOverride, method.IsSealedOverride, method.Syntax!);
+                var candidate = baseTypes.SelectMany(baseType => baseType.Methods)
+                    .FirstOrDefault(baseMethod => HaveSameSourceSignature(baseMethod, method));
+                if (type.Kind == DeclaredTypeKind.Struct && method.IsOverride && objectType is not null)
+                    candidate = objectType.Methods.FirstOrDefault(baseMethod => HaveSameSourceSignature(baseMethod, method) && baseMethod.Name is "ToString" or "Equals" or "GetHashCode");
+                if (method.IsOverride)
+                {
+                    if (candidate is null || !candidate.IsVirtual || candidate.IsSealedOverride || candidate.ReturnType != method.ReturnType || candidate.Accessibility != method.Accessibility)
+                        Diagnostics.Add("CT1229", $"Method '{method.Name}' does not match an accessible unsealed virtual base method.", method.Syntax!.Source, method.Syntax.Span);
+                    else
+                        method.OverriddenMethod = candidate;
+                }
+                else if (candidate is not null && type.Kind == DeclaredTypeKind.Class)
+                    Diagnostics.Add("CT1230", $"Method '{method.Name}' hides an inherited method; use override for a virtual method.", method.Syntax!.Source, method.Syntax.Span);
+                if (inheritedMembers.Any(member => member.Name == method.Name && member is not MethodSymbol))
+                    Diagnostics.Add("CT1230", $"Method '{method.Name}' hides an inherited member; member hiding is not supported.", method.Syntax!.Source, method.Syntax.Span);
+            }
+        }
+    }
+
+    private void ValidateVirtualModifiers(bool isStatic, bool isVirtual, bool isOverride, bool isSealedOverride, SyntaxNode syntax)
+    {
+        if (isStatic && isVirtual)
+            Diagnostics.Add("CT1228", "A static member cannot be virtual or override.", syntax.Source, syntax.Span);
+        if (isVirtual && !isOverride && syntax is MemberDeclarationSyntax declaration && declaration.Modifiers.Contains("sealed", StringComparer.Ordinal))
+            Diagnostics.Add("CT1228", "sealed on a member requires override.", syntax.Source, syntax.Span);
+        if (syntax is MemberDeclarationSyntax member && member.Modifiers.Contains("virtual", StringComparer.Ordinal) && member.Modifiers.Contains("override", StringComparer.Ordinal))
+            Diagnostics.Add("CT1228", "A member cannot be both virtual and override.", syntax.Source, syntax.Span);
+    }
+
+    private static bool HaveSameSourceSignature(MethodSymbol left, MethodSymbol right) =>
+        left.Name == right.Name && left.Parameters.Select(parameter => parameter.Type).SequenceEqual(right.Parameters.Select(parameter => parameter.Type));
+
     private void ValidateExternalSymbols()
     {
         var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)
@@ -411,7 +552,12 @@ internal sealed class CompilationModel
             "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint",
             "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
             "ct_write_int", "ct_write_uint", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
-            "ct_module_init", "ct_keep_symbols", "ct_string", "NAN", "INFINITY",
+            "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
+            "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
+            "ct_object_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
+            "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals",
+            "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",
+            "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", "NAN", "INFINITY",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)
@@ -512,8 +658,6 @@ internal sealed class CompilationModel
         var values = modifiers.Where(modifier => modifier is "public" or "internal" or "protected" or "private").ToArray();
         if (values.Length > 1)
             Diagnostics.Add("CT1210", "Only one access modifier is permitted.", syntax.Source, syntax.Span);
-        if (values.Contains("protected", StringComparer.Ordinal))
-            Diagnostics.Add("CT1211", "protected is reserved until inheritance is implemented.", syntax.Source, syntax.Span);
         return values.FirstOrDefault() switch
         {
             "public" => Accessibility.Public,

@@ -95,12 +95,15 @@ The semantic model owns:
 
 - Fully qualified namespace and type names.
 - Class, structure, enum, field, property, constructor, method, parameter, and local symbols.
+- Single-base class hierarchies, virtual slots, exact overrides, sealed slots, and constructor initializer targets.
 - Static and instance membership.
 - Accessibility.
 - Fixed-width built-in types, arrays, pointers, and target-width references.
 - Automatically imported declarations from the bundled C~ standard-library sources.
 
 Overload resolution filters by name, context, argument count, and implicit conversions. It compares candidates per argument. A winner must be no worse for every argument. It must be better for at least one.
+
+Inherited accessible methods join the overload set. An override replaces its base implementation in the same slot. A different signature remains an overload.
 
 ## Flow and lowering
 
@@ -134,14 +137,15 @@ The emitter assembles one translation unit in this order:
 1. Standard headers and runtime support.
 2. String literal data.
 3. User-type forward declarations.
-4. Enum and aggregate layouts.
-5. Array layouts and allocators.
+4. Enum, object, class, and structure layouts.
+5. Array and box layouts and allocators.
 6. Static fields.
-7. Function and accessor prototypes.
-8. Method, constructor, and accessor definitions.
-9. Deterministic static initialization.
-10. Symbol-retention routine.
-11. C `main` wrapper.
+7. Function, constructor-initializer, and accessor prototypes.
+8. Runtime descriptors, vtables, and dispatch thunks.
+9. Method, constructor, and accessor definitions.
+10. Deterministic static initialization.
+11. Symbol-retention routine.
+12. C `main` wrapper.
 
 Emission first lowers all bodies and initializers into memory. This discovers every array specialization and string literal before section ordering begins.
 
@@ -152,6 +156,8 @@ Generated identifiers use deterministic UTF-8 byte encoding. User text is never 
 The generated translation unit embeds a small runtime:
 
 - Zero-initialized program-lifetime allocation.
+- A common managed-object header, deterministic type descriptors, identity hashes, and typed virtual dispatch.
+- Checked reference casts, safe casts, type tests, boxing, and exact unboxing.
 - Array allocation and bounds checks.
 - Null checks.
 - Checked division failure.
@@ -160,6 +166,8 @@ The generated translation unit embeds a small runtime:
 - Console output and process exit.
 
 Managed storage is not reclaimed before process exit. C~ source has no `delete` operation.
+
+A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`. Strings, arrays, and boxes use the same header. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation.
 
 Unsafe pointers lower to native C pointers. Unsafe operations bypass managed null and bounds checks but remain statically typed.
 
@@ -182,3 +190,9 @@ Runtime failures use separate short codes such as `CTN0001` for null access and 
 A new language feature must define syntax, binding, conversions, ordered lowering, diagnostics, generated C, and positive and negative tests together.
 
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
+
+ESP-IDF is a planned target profile, not a separate language backend. It must reuse typed IR and replace only platform runtime and packaging behavior.
+
+ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
+
+See [TODO.md](TODO.md#esp-idf-target-support) for the implementation order and acceptance criteria.

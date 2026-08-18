@@ -51,6 +51,8 @@ public enum SyntaxKind
     GreaterGreaterToken,
 
     BoolKeyword,
+    AsKeyword,
+    BaseKeyword,
     BreakKeyword,
     ByteKeyword,
     CaseKeyword,
@@ -70,9 +72,12 @@ public enum SyntaxKind
     InKeyword,
     IntKeyword,
     InternalKeyword,
+    IsKeyword,
     NamespaceKeyword,
     NewKeyword,
     NullKeyword,
+    ObjectKeyword,
+    OverrideKeyword,
     PrivateKeyword,
     ProtectedKeyword,
     PublicKeyword,
@@ -92,6 +97,7 @@ public enum SyntaxKind
     UshortKeyword,
     UsingKeyword,
     VarKeyword,
+    VirtualKeyword,
     VoidKeyword,
     WhileKeyword,
     GetKeyword,
@@ -270,6 +276,7 @@ public sealed record TypeDeclarationSyntax(
     string Name,
     ImmutableArray<string> Modifiers,
     ImmutableArray<AttributeSyntax> Attributes,
+    TypeSyntax? BaseType,
     ImmutableArray<MemberDeclarationSyntax> Members,
     TypeSyntax? EnumUnderlyingType,
     ImmutableArray<EnumMemberSyntax> EnumMembers) : SyntaxNode(Source, Span);
@@ -313,7 +320,16 @@ public sealed record ConstructorDeclarationSyntax(
     ImmutableArray<AttributeSyntax> Attributes,
     string Name,
     ImmutableArray<ParameterSyntax> Parameters,
+    ConstructorInitializerSyntax? Initializer,
     BlockStatementSyntax Body) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+
+public enum ConstructorInitializerKind { Base, This }
+
+public sealed record ConstructorInitializerSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ConstructorInitializerKind Kind,
+    ImmutableArray<ExpressionSyntax> Arguments) : SyntaxNode(Source, Span);
 
 public sealed record AccessorSyntax(
     SourceText Source,
@@ -355,6 +371,7 @@ public abstract record ExpressionSyntax(SourceText Source, TextSpan Span) : Synt
 public sealed record LiteralExpressionSyntax(SourceText Source, TextSpan Span, object? Value, SyntaxKind LiteralKind) : ExpressionSyntax(Source, Span);
 public sealed record NameExpressionSyntax(SourceText Source, TextSpan Span, string Name) : ExpressionSyntax(Source, Span);
 public sealed record ThisExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
+public sealed record BaseExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
 public sealed record ParenthesizedExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : ExpressionSyntax(Source, Span);
 public sealed record UnaryExpressionSyntax(SourceText Source, TextSpan Span, SyntaxKind OperatorKind, ExpressionSyntax Operand, bool IsPostfix = false) : ExpressionSyntax(Source, Span);
 public sealed record BinaryExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Left, SyntaxKind OperatorKind, ExpressionSyntax Right) : ExpressionSyntax(Source, Span);
@@ -364,3 +381,5 @@ public sealed record CallExpressionSyntax(SourceText Source, TextSpan Span, Expr
 public sealed record IndexExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, ExpressionSyntax Index) : ExpressionSyntax(Source, Span);
 public sealed record NewExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ImmutableArray<ExpressionSyntax> Arguments, ExpressionSyntax? ArrayLength) : ExpressionSyntax(Source, Span);
 public sealed record CastExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ExpressionSyntax Expression) : ExpressionSyntax(Source, Span);
+public sealed record TypeTestExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);
+public sealed record SafeCastExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);

@@ -9,6 +9,7 @@ internal sealed class Parser
         SyntaxKind.PublicKeyword, SyntaxKind.InternalKeyword, SyntaxKind.ProtectedKeyword,
         SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword, SyntaxKind.SealedKeyword,
         SyntaxKind.ReadonlyKeyword, SyntaxKind.ConstKeyword, SyntaxKind.UnsafeKeyword,
+        SyntaxKind.VirtualKeyword, SyntaxKind.OverrideKeyword,
     ];
 
     private readonly SourceText _source;
@@ -111,10 +112,16 @@ internal sealed class Parser
         };
         var name = Match(SyntaxKind.IdentifierToken);
         TypeSyntax? underlying = null;
+        TypeSyntax? baseType = null;
         if (kind == TypeDeclarationKind.Enum && Current.Kind == SyntaxKind.ColonToken)
         {
             NextToken();
             underlying = ParseType();
+        }
+        else if (kind == TypeDeclarationKind.Class && Current.Kind == SyntaxKind.ColonToken)
+        {
+            NextToken();
+            baseType = ParseType();
         }
         Match(SyntaxKind.OpenBraceToken);
 
@@ -131,7 +138,7 @@ internal sealed class Parser
                 SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
-        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, members.ToImmutable(), underlying, enumMembers.ToImmutable());
+        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable());
     }
 
     private EnumMemberSyntax ParseEnumMember()
@@ -161,8 +168,23 @@ internal sealed class Parser
         {
             var name = NextToken();
             var parameters = ParseParameters();
+            ConstructorInitializerSyntax? constructorInitializer = null;
+            if (Current.Kind == SyntaxKind.ColonToken)
+            {
+                var initializerStart = NextToken().Span.Start;
+                var initializerToken = Current;
+                var initializerKind = initializerToken.Kind == SyntaxKind.ThisKeyword
+                    ? ConstructorInitializerKind.This
+                    : ConstructorInitializerKind.Base;
+                if (initializerToken.Kind is SyntaxKind.ThisKeyword or SyntaxKind.BaseKeyword)
+                    NextToken();
+                else
+                    Match(SyntaxKind.BaseKeyword);
+                var initializerArguments = ParseArguments(out var initializerEnd);
+                constructorInitializer = new ConstructorInitializerSyntax(_source, TextSpan.FromBounds(initializerStart, initializerEnd), initializerKind, initializerArguments);
+            }
             var body = ParseBlock();
-            return new ConstructorDeclarationSyntax(_source, TextSpan.FromBounds(start, body.Span.End), modifiers, attributes, name.Text, parameters, body);
+            return new ConstructorDeclarationSyntax(_source, TextSpan.FromBounds(start, body.Span.End), modifiers, attributes, name.Text, parameters, constructorInitializer, body);
         }
 
         var type = ParseType();
@@ -481,6 +503,18 @@ internal sealed class Parser
 
         while (true)
         {
+            if (Current.Kind is SyntaxKind.IsKeyword or SyntaxKind.AsKeyword)
+            {
+                const int typePrecedence = 8;
+                if (typePrecedence <= parentPrecedence)
+                    break;
+                var typeOperator = NextToken();
+                var type = ParseType();
+                left = typeOperator.Kind == SyntaxKind.IsKeyword
+                    ? new TypeTestExpressionSyntax(_source, TextSpan.FromBounds(left.Span.Start, type.Span.End), left, type)
+                    : new SafeCastExpressionSyntax(_source, TextSpan.FromBounds(left.Span.Start, type.Span.End), left, type);
+                continue;
+            }
             var precedence = GetBinaryPrecedence(Current.Kind);
             if (precedence == 0 || precedence <= parentPrecedence)
                 break;
@@ -539,6 +573,9 @@ internal sealed class Parser
             case SyntaxKind.ThisKeyword:
                 NextToken();
                 return new ThisExpressionSyntax(_source, token.Span);
+            case SyntaxKind.BaseKeyword:
+                NextToken();
+                return new BaseExpressionSyntax(_source, token.Span);
             case SyntaxKind.TrueKeyword:
             case SyntaxKind.FalseKeyword:
                 NextToken();
@@ -699,7 +736,7 @@ internal sealed class Parser
         return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.CloseParenToken;
     }
 
-    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.VoidKeyword;
+    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
     private static bool IsAssignment(SyntaxKind kind) => kind is SyntaxKind.EqualsToken or SyntaxKind.PlusEqualsToken or SyntaxKind.MinusEqualsToken or SyntaxKind.StarEqualsToken or SyntaxKind.SlashEqualsToken or SyntaxKind.PercentEqualsToken;
     private static int GetUnaryPrecedence(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.BangToken or SyntaxKind.TildeToken or SyntaxKind.PlusPlusToken or SyntaxKind.MinusMinusToken or SyntaxKind.StarToken or SyntaxKind.AmpersandToken ? 12 : 0;
     private static int GetBinaryPrecedence(SyntaxKind kind) => kind switch

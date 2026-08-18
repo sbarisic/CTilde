@@ -1409,9 +1409,15 @@ internal sealed class MethodLowerer
             Report("CT2147", "The as operator requires a reference target type.", syntax.Type);
             return ErrorExpression();
         }
+        var source = LowerExpression(syntax.Expression);
+        if (!source.Type.IsReference && source.Type.Kind != CTypeKind.Null && !source.Type.IsError)
+        {
+            Report("CT2147", "The as operator requires a reference source expression.", syntax.Expression);
+            return ErrorExpression(source.Prelude);
+        }
         _emitter.RegisterType(target);
         var objectType = _model.Types["System.Object"].Type;
-        var value = Materialize(Convert(LowerExpression(syntax.Expression), objectType, syntax.Expression, false), syntax.Expression);
+        var value = Materialize(Convert(source, objectType, syntax.Expression, false), syntax.Expression);
         var code = $"({_emitter.CTypeName(target)})(void*)ct_safe_cast((ct_object*)(void*){value.Code}, {_emitter.DescriptorExpression(target)})";
         return new LoweredExpression { Type = target, Code = code, Prelude = value.Prelude };
     }

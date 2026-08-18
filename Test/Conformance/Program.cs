@@ -566,11 +566,19 @@ Run("unsafe pointer object boxing", () =>
 
 Run("inheritance diagnostics", () =>
 {
-    const string source = "public sealed class Closed { } public class Invalid : Closed { } public class Base { public virtual int Value() { return 1; } protected int field; } public class Derived : Base { public int Value() { return 2; } private int field; public sealed override string ToString() { return \"Derived\"; } } public class Further : Derived { public override string ToString() { return \"Further\"; } } public static class Program { [EntryPoint] public static void Main() { } }";
+    const string source = "public sealed class Closed { } public class Invalid : Closed { } public class Base { public virtual int Value() { return 1; } protected int field; public virtual int Property { get; protected set; } private virtual int Hidden() { return 0; } } public class Derived : Base { public int Value() { return 2; } private int field; public override int Property { get; set; } public sealed override string ToString() { return \"Derived\"; } } public class Further : Derived { public override string ToString() { return \"Further\"; } } public static class Program { [EntryPoint] public static void Main() { } }";
     var diagnostics = Compile(source).GetDiagnostics();
     Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1227"), "A sealed base was accepted.");
     Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1230"), "Inherited member hiding was accepted.");
     Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1229"), "A sealed virtual slot was overridden.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1228"), "A private virtual member was accepted.");
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT1229") >= 2, "An override changed accessor accessibility.");
+
+    const string invalidAs = "public static class Program { [EntryPoint] public static void Main() { object value = 1 as object; } }";
+    Assert(Compile(invalidAs).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT2147"), "The as operator boxed a value-type source.");
+
+    const string virtualStruct = "public struct Value { public virtual int Read() { return 1; } public virtual int Property { get; } } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(virtualStruct).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1228") >= 2, "A structure declared an ordinary virtual member.");
 });
 
 Run("object syntax surface", () =>
@@ -746,6 +754,14 @@ Run("complete feature example", () =>
     Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\n10\n", $"Unexpected output: {result.StandardOutput}");
 });
 
+Run("object model example", () =>
+{
+    var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "Examples.Pair\n", result.StandardOutput);
+});
+
 Run("feature C symbol snapshot", () =>
 {
     var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
@@ -761,6 +777,14 @@ Run("feature C symbol snapshot", () =>
         line == "int main(void)")) + "\n";
     var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "features.symbols.txt")));
     Assert(projection == expected, "Generated C symbol snapshot changed.");
+});
+
+Run("object ABI snapshot", () =>
+{
+    var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
+    var projection = ProjectObjectAbi(Emit(source));
+    var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt")));
+    Assert(projection == expected, "Generated object ABI snapshot changed.");
 });
 
 Run("bounds failure", () =>
@@ -987,6 +1011,39 @@ static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments)
 }
 
 static string Normalize(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
+
+static string ProjectObjectAbi(string generated)
+{
+    var result = new StringBuilder();
+    var captureBlock = false;
+    foreach (var line in Normalize(generated).Split('\n'))
+    {
+        if (line.StartsWith("struct ct_vtable", StringComparison.Ordinal) ||
+            line.StartsWith("struct ct_t_8_Examples_4_Base", StringComparison.Ordinal) ||
+            line.StartsWith("struct ct_t_8_Examples_7_Derived", StringComparison.Ordinal) ||
+            line.StartsWith("static const ct_vtable ct_vtable_", StringComparison.Ordinal))
+            captureBlock = true;
+
+        var singleLine = line.StartsWith("typedef struct ct_object", StringComparison.Ordinal) ||
+            line.StartsWith("typedef struct ct_box_", StringComparison.Ordinal) ||
+            line.StartsWith("static ct_type_descriptor ct_desc_", StringComparison.Ordinal) ||
+            line.StartsWith("static ct_object* ct_checked_cast", StringComparison.Ordinal) ||
+            line.StartsWith("static ct_object* ct_safe_cast", StringComparison.Ordinal) ||
+            line.Contains("ct_init_ct_ctor_", StringComparison.Ordinal) ||
+            line.Contains("ct_l_", StringComparison.Ordinal) &&
+                (line.Contains("ct_checked_cast", StringComparison.Ordinal) || line.Contains("ct_safe_cast", StringComparison.Ordinal)) ||
+            line.StartsWith("static ", StringComparison.Ordinal) &&
+                (line.Contains(" ct_vthunk_", StringComparison.Ordinal) ||
+                 line.Contains(" ct_box_", StringComparison.Ordinal) ||
+                 line.Contains(" ct_unbox_", StringComparison.Ordinal));
+
+        if (captureBlock || singleLine)
+            result.AppendLine(line);
+        if (captureBlock && line == "};")
+            captureBlock = false;
+    }
+    return Normalize(result.ToString()).Replace("E:/Projects/CTilde/examples/ObjectModel.ct", "test.ct", StringComparison.Ordinal);
+}
 
 static void Assert(bool condition, string message)
 {

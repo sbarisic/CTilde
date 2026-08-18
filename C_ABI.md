@@ -56,6 +56,10 @@ Generated prefixes identify symbol kinds:
 | `ct_f_` | Static field |
 | `ct_get_`, `ct_set_` | Property accessors |
 | `ct_a_` | Specialized array type |
+| `ct_desc_` | Runtime type descriptor |
+| `ct_vtable_`, `ct_vthunk_` | Virtual dispatch table and receiver thunk |
+| `ct_init_` | Non-allocating class constructor initializer |
+| `ct_box_`, `ct_unbox_` | Value box layout and conversion helper |
 | `ct_l_` | User local |
 | `ct_tmp_` | Lowering temporary |
 
@@ -145,7 +149,7 @@ typedef struct ct_string {
 
 `Length` counts UTF-8 code units. `Data` is followed by a zero byte for native boundary convenience, but embedded zero bytes are valid and all C~ operations use `Length`.
 
-String literals use static byte arrays and string descriptors. Concatenation allocates a new descriptor and byte array. A null concatenation operand is treated as an empty string.
+String literals use static byte arrays and string objects. Concatenation allocates a new string object and byte array. A null concatenation operand is treated as an empty string.
 
 String equality compares contents. Other class and array equality compares pointer identity.
 

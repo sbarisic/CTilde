@@ -84,7 +84,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for classes, properties, overloads, structures, enums, loops, strings, and unsafe pointers.
+See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing.
 
 ## Public compiler API
 

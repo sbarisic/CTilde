@@ -246,7 +246,7 @@ internal sealed class CEmitter
         writer.WriteLine("typedef struct ct_vtable ct_vtable;");
         writer.WriteLine("typedef struct ct_type_descriptor ct_type_descriptor;");
         writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; } ct_object;");
-        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; bool IsValue; };");
+        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; };");
         writer.WriteLine("static ct_type_descriptor ct_desc_string;");
         writer.WriteLine("typedef struct ct_string { ct_object Object; int32_t Length; const uint8_t* Data; } ct_string;");
         writer.WriteLine("static const uint8_t ct_empty_bytes[1] = { 0 };");
@@ -512,23 +512,23 @@ internal sealed class CEmitter
         writer.WriteLine("static bool ct_string_v_equals(ct_object* left, ct_object* right) { return right != NULL && right->Type == &ct_desc_string && ct_string_equal((ct_string*)(void*)left, (ct_string*)(void*)right); }");
         writer.WriteLine("static int32_t ct_string_v_hash(ct_object* value) { ct_string* text = (ct_string*)(void*)value; return ct_i32_bits(ct_hash_bytes(text->Data, (size_t)text->Length)); }");
         EmitSpecialVTable(writer, "ct_string_vtable", "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", virtualMethods, virtualProperties);
-        writer.WriteLine("static ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, 1u, sizeof(ct_string), false };");
+        writer.WriteLine("static ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, 1u, sizeof(ct_string), _Alignof(ct_string), false };");
         uint id = 2;
         foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
             var baseDescriptor = type.BaseType is null ? "NULL" : $"&{DescriptorName(type.BaseType)}";
-            writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &ct_vtable_{NameMangler.Identifier(type.FullName)}, {id++}u, sizeof({NameMangler.Type(type)}), false }};");
+            writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &ct_vtable_{NameMangler.Identifier(type.FullName)}, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false }};");
         }
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
         {
             var name = NameMangler.Array(array.ElementType!);
-            writer.WriteLine($"static ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({name}), false }};");
+            writer.WriteLine($"static ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({name}), _Alignof({name}), false }};");
         }
         foreach (var type in BoxedTypes)
         {
             EmitBoxMetadata(writer, type, virtualMethods, virtualProperties);
-            writer.WriteLine($"static ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {id++}u, sizeof({BoxName(type)}), true }};");
+            writer.WriteLine($"static ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {id++}u, sizeof({BoxName(type)}), _Alignof({BoxName(type)}), true }};");
         }
         writer.WriteLine("static ct_string* ct_object_default_to_string(ct_object* value) { if (value == NULL) ct_fail(\"CTN0001\", \"<runtime>\", 0); return ct_string_from_bytes((const uint8_t*)value->Type->Name, (int32_t)strlen(value->Type->Name), \"<runtime>\", 0); }");
         writer.WriteLine("static bool ct_object_default_equals(ct_object* left, ct_object* right) { return left == right; }");

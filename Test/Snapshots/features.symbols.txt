@@ -1,5 +1,5 @@
 typedef struct ct_type_descriptor ct_type_descriptor;
-struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; bool IsValue; };
+struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; };
 typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
 typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
 typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;

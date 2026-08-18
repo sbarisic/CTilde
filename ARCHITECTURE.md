@@ -10,9 +10,8 @@ UTF-8 source files
     -> Lexer
     -> Parser and immutable syntax trees
     -> Declaration binding
-    -> Typed body binding
-    -> Control-flow analysis
-    -> Typed three-address IR lowering
+    -> Combined body binding, flow analysis, and C-fragment lowering
+    -> Transitional typed-line IR adapter
     -> Target validation
     -> Deterministic GNU C23 emission
     -> External C compiler
@@ -31,11 +30,11 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `Lexer` owns tokenization, trivia, literals, escapes, Unicode identifiers, and lexical diagnostics.
 - `Parser` owns declarations, statements, Pratt expression precedence, recovery, missing tokens, and skipped-token trivia.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
-- The body binder resolves names, access, conversions, overloads, lvalues, constants, unsafe contexts, and external symbols.
-- The flow pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
-- `MethodLowerer` converts bound bodies to typed function IR. It creates explicit temporaries, labels, branches, calls, stores, checks, and returns.
+- `MethodLowerer` currently combines name binding, access and conversion checks, overload resolution, flow analysis, and ordered C-fragment lowering.
+- The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
+- `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
 - `TargetValidator` rejects ABI and generated-symbol conflicts before output starts.
-- `CEmitter` consumes typed IR. It owns the runtime, layouts, declarations, initialization, definitions, and entry wrapper.
+- `CEmitter` consumes the transitional IR and owns the runtime, layouts, declarations, initialization, definitions, and entry wrapper.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -68,7 +67,7 @@ EmitResult result = compilation.EmitC(writer);
 
 `SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached internal standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees.
 
-`GetDiagnostics()` runs declarations, binding, flow, IR lowering, and target validation. It does not assemble the C translation unit. `EmitC()` consumes cached typed IR after successful analysis. Repeated emission is byte-identical.
+`GetDiagnostics()` runs declarations, the combined body pass, transitional IR construction, and target validation. It does not assemble the C translation unit. `EmitC()` consumes the cached result after successful analysis. Repeated emission is byte-identical.
 
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
@@ -128,7 +127,9 @@ A bound expression contains:
 
 Generated temporaries hold receivers and operands with side effects. Calls evaluate the receiver first. Arguments evaluate from left to right. Compound assignments evaluate their target once. Short-circuit operators lower the right operand into a conditional block.
 
-IR lowering spills receivers, arguments, operands, indices, and compound targets in source order. The function IR is immutable. The C emitter does not repeat name lookup, overload selection, type conversion, or flow analysis.
+The combined lowering pass spills receivers, arguments, operands, indices, and compound targets in source order. The C emitter does not repeat name lookup, overload selection, type conversion, or flow analysis.
+
+The target architecture replaces the combined pass with immutable bound declarations and bodies, then lowers those bodies to typed operands, locals, blocks, calls, conversions, loads, stores, and branches. That replacement remains implementation work.
 
 ## C emission
 

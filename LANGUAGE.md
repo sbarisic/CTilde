@@ -267,7 +267,7 @@ An explicit cast can convert between integral and enum types. An unsafe explicit
 
 An explicit cast can downcast a class reference or unbox an exact value type. A failed cast terminates with a stable runtime error.
 
-`value is T` tests the runtime type. `value as T` returns a compatible reference or `null`. The `as` target must be a reference type.
+`value is T` tests the runtime type. `value as T` returns a compatible reference or `null`. Both the `as` source and target must be reference types.
 
 An explicit class cast requires related source and target types. Code can cast through `object` when it needs a runtime type check.
 
@@ -381,7 +381,7 @@ An accessor can be less accessible than its property but cannot be more accessib
 
 Fields can be instance or `static`. A `const` field is implicitly static.
 
-Storage starts at the type's default value. Instance field initializers run before each constructor body. Static field initializers run once before the entry method, in ordinal fully qualified type-name order and source declaration order within each type.
+Storage starts at the type's default value. Each class's instance field initializers run once after its base initializer completes and before that class's constructor body. A `this` chain does not run them again. Static field initializers run once before the entry method, in ordinal fully qualified type-name order and source declaration order within each type.
 
 ### Properties
 
@@ -464,6 +464,8 @@ Draft 0.4 does not provide `System.Type`, reflection, `System.Convert`, or `Syst
 If a class or structure declares no constructor, it has an implicit public parameterless constructor. A class constructor calls an accessible base constructor.
 
 A constructor can use `: base(args)` or `: this(args)`. The compiler rejects constructor cycles.
+
+Construction allocates the most-derived object and installs its runtime type before it invokes the initializer chain. Base construction runs before derived field initializers and constructor bodies. A virtual call during construction dispatches to the most-derived runtime type.
 
 ## Expressions
 

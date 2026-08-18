@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET build completes with zero warnings and zero errors. The conformance runner contains 44 managed and native checks.
+The .NET build completes with zero warnings and zero errors. The conformance runner contains 46 managed and native checks.
 
 Native checks discover Visual Studio 2022 C tools and compile generated files with:
 
@@ -123,7 +123,7 @@ The executable test project checks:
 - Native C compilation with warnings treated as errors.
 - Checked standard output and runtime error output.
 
-The full example in [examples/Features.ct](examples/Features.ct) is part of the native suite.
+The full examples in [examples/Features.ct](examples/Features.ct) and [examples/ObjectModel.ct](examples/ObjectModel.ct) are part of the native and ABI snapshot suites.
 
 ## Runtime status
 
@@ -132,6 +132,12 @@ Managed objects currently use program-lifetime allocation. This is conforming dr
 The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, and string overflow.
 
 The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
+
+## Known architecture debt
+
+The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
+
+The draft 0.4 language and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
 
 ## Planned platform work
 

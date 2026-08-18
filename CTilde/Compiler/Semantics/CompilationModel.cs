@@ -334,6 +334,8 @@ internal sealed class CompilationModel
                     };
                     if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
                         Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
+                    if (symbol.IsVirtual && accessibility == Accessibility.Private)
+                        Diagnostics.Add("CT1228", "A virtual or override property cannot be private.", property.Source, property.Span);
                     AddUnique(type, symbol);
                     break;
                 }
@@ -401,6 +403,8 @@ internal sealed class CompilationModel
                     };
                     if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
                         Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
+                    if (symbol.IsVirtual && accessibility == Accessibility.Private)
+                        Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);
                     break;
                 }
@@ -493,12 +497,15 @@ internal sealed class CompilationModel
             foreach (var property in type.Properties)
             {
                 ValidateVirtualModifiers(property.IsStatic, property.IsVirtual, property.IsOverride, property.IsSealedOverride, property.Syntax!);
+                if (type.Kind == DeclaredTypeKind.Struct && property.IsVirtual)
+                    Diagnostics.Add("CT1228", "A structure cannot declare a virtual property.", property.Syntax!.Source, property.Syntax.Span);
                 var candidate = baseTypes.SelectMany(baseType => baseType.Properties).FirstOrDefault(baseProperty => baseProperty.Name == property.Name);
                 if (property.IsOverride)
                 {
                     if (candidate is null || !candidate.IsVirtual || candidate.IsSealedOverride || candidate.Type != property.Type ||
                         (candidate.Getter is null) != (property.Getter is null) || (candidate.Setter is null) != (property.Setter is null) ||
-                        candidate.Accessibility != property.Accessibility)
+                        candidate.Accessibility != property.Accessibility || candidate.GetterAccessibility != property.GetterAccessibility ||
+                        candidate.SetterAccessibility != property.SetterAccessibility)
                         Diagnostics.Add("CT1229", $"Property '{property.Name}' does not match an accessible unsealed virtual base property.", property.Syntax!.Source, property.Syntax.Span);
                     else
                         property.OverriddenProperty = candidate;
@@ -510,6 +517,8 @@ internal sealed class CompilationModel
             foreach (var method in type.Methods)
             {
                 ValidateVirtualModifiers(method.IsStatic, method.IsVirtual, method.IsOverride, method.IsSealedOverride, method.Syntax!);
+                if (type.Kind == DeclaredTypeKind.Struct && method.IsVirtual && !method.IsOverride)
+                    Diagnostics.Add("CT1228", "A structure can override only ToString, Equals(object), and GetHashCode.", method.Syntax!.Source, method.Syntax.Span);
                 var candidate = baseTypes.SelectMany(baseType => baseType.Methods)
                     .FirstOrDefault(baseMethod => HaveSameSourceSignature(baseMethod, method));
                 if (type.Kind == DeclaredTypeKind.Struct && method.IsOverride && objectType is not null)

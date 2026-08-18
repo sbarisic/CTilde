@@ -1,0 +1,65 @@
+using System;
+
+namespace Examples;
+
+public class Base
+{
+    protected int number;
+
+    public Base(int number)
+    {
+        this.number = number;
+    }
+
+    public virtual int Read()
+    {
+        return number;
+    }
+
+    public virtual int Value
+    {
+        get { return number; }
+    }
+}
+
+public class Derived : Base
+{
+    public Derived() : base(4)
+    {
+    }
+
+    public override int Read()
+    {
+        return base.Read() + 1;
+    }
+
+    public override int Value
+    {
+        get { return number + 2; }
+    }
+}
+
+public struct Pair
+{
+    public int X;
+    public int Y;
+
+    public Pair(int x, int y)
+    {
+        X = x;
+        Y = y;
+    }
+}
+
+public static class ObjectProgram
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        Base item = new Derived();
+        Derived cast = (Derived)item;
+        Derived safe = item as Derived;
+        object boxed = new Pair(cast.Read(), safe.Value);
+        Console.WriteLine(boxed);
+    }
+}

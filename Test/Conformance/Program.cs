@@ -28,6 +28,49 @@ Run("deterministic C emission", () =>
     Assert(first.Contains("static_assert(CHAR_BIT == 8", StringComparison.Ordinal), "Generated C does not use the C23 static_assert spelling.");
 });
 
+Run("ESP-IDF target profile", () =>
+{
+    const string source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { int[] values = new int[1]; FreeRtos.DelayMilliseconds(1u); Gpio.ConfigureOutput(2); Gpio.Write(2, true); } }";
+    var options = new CompilationOptions(CompilationTarget.EspIdf);
+    var first = Emit(source, options, @"E:\private\firmware\Program.ct");
+    var second = Emit(source, options, @"E:\private\firmware\Program.ct");
+    Assert(first == second, "Repeated ESP-IDF emission was not byte-identical.");
+    Assert(first.Contains("for ESP-IDF GNU C23", StringComparison.Ordinal), "ESP-IDF banner was not emitted.");
+    Assert(first.Contains("void app_main(void)", StringComparison.Ordinal), "ESP-IDF app_main was not emitted.");
+    Assert(!first.Contains("int main(void)", StringComparison.Ordinal), "Hosted main was emitted for ESP-IDF.");
+    Assert(!first.Contains("ct_keep_symbols", StringComparison.Ordinal), "ESP-IDF output retained ct_keep_symbols.");
+    Assert(!first.Contains("ct_environment_exit", StringComparison.Ordinal), "Hosted Environment.Exit runtime was emitted for ESP-IDF.");
+    Assert(first.Contains("static_assert(sizeof(void*) == 4", StringComparison.Ordinal), "ESP-IDF pointer-width assertion was not emitted.");
+    Assert(first.Contains("\"ctilde_esp_shim.h\"", StringComparison.Ordinal), "ESP-IDF shim header was not included.");
+    Assert(first.Contains("\"Program.ct\"", StringComparison.Ordinal) && !first.Contains("E:/private", StringComparison.Ordinal), "ESP-IDF source locations were not compacted.");
+    Assert(first.Contains("CT_UNUSED", StringComparison.Ordinal), "ESP-IDF unused-definition marker was not emitted.");
+
+    var hostedDiagnostics = Compile(source).GetDiagnostics();
+    Assert(hostedDiagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "ESP-IDF declarations were available to the hosted target.");
+});
+
+Run("ESP-IDF target diagnostics", () =>
+{
+    var exit = Compile("public static class Program { [EntryPoint] public static void Main() { System.Environment.Exit(1); } }", new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(exit.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4105"), "Environment.Exit was not rejected for ESP-IDF.");
+
+    var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 2, "ESP-IDF target symbols were not reserved.");
+
+    var invalid = Compile("public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions((CompilationTarget)99));
+    using var writer = new StringWriter(CultureInfo.InvariantCulture);
+    var result = invalid.EmitC(writer);
+    Assert(!result.Success && result.Diagnostics.Any(diagnostic => diagnostic.Code == "CT4104"), "Invalid API target did not produce CT4104.");
+    Assert(writer.GetStringBuilder().Length == 0, "Invalid target emitted C output.");
+});
+
+Run("ESP GCC exception formatting", () =>
+{
+    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { throw new Exception(\"failure\"); } }";
+    var generated = Emit(source, new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(generated.Contains("%.*s\", (int)message->Length", StringComparison.Ordinal), "Exception message precision was not converted to int for ESP GCC.");
+});
+
 Run("structured syntax diagnostic", () =>
 {
     var tree = SyntaxTree.ParseText("public class Broken {", "broken.ct");
@@ -1115,11 +1158,11 @@ void Run(string name, Action test)
     }
 }
 
-static Compilation Compile(string source) => Compilation.Create([SyntaxTree.ParseText(source, "test.ct")]);
+static Compilation Compile(string source, CompilationOptions? options = null, string path = "test.ct") => Compilation.Create([SyntaxTree.ParseText(source, path)], options);
 
-static string Emit(string source)
+static string Emit(string source, CompilationOptions? options = null, string path = "test.ct")
 {
-    var compilation = Compile(source);
+    var compilation = Compile(source, options, path);
     using var writer = new StringWriter(CultureInfo.InvariantCulture);
     var result = compilation.EmitC(writer);
     Assert(result.Success, string.Join(Environment.NewLine, result.Diagnostics));

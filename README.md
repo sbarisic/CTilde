@@ -1,6 +1,6 @@
 # C~
 
-C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained GNU C23 translation unit. GCC-compatible extensions are enabled by default for hosted and embedded toolchains.
+C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
 The current language is draft 0.5. It adds unchecked exceptions, typed and catch-all handlers, rethrow, and finally cleanup to the draft 0.4 object model. It does not require a CLR or C# runtime.
 
@@ -43,13 +43,14 @@ The program prints:
 The CLI accepts multiple input files as one compilation:
 
 ```text
-ctilde <input.ct>... -o <program.c> [--check] [--trace]
-ctilde --compile-directory <directory> [--trace]
+ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]
+ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 ```
 
 - `-o` selects the generated C file.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
+- `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
 - `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
 
 Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
@@ -90,7 +91,9 @@ See [examples/Features.ct](examples/Features.ct) for the general language surfac
 
 ```csharp
 var tree = SyntaxTree.Parse(SourceText.From(source, "program.ct"));
-var compilation = Compilation.Create(new[] { tree });
+var compilation = Compilation.Create(
+    new[] { tree },
+    new CompilationOptions(CompilationTarget.EspIdf));
 
 using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
@@ -100,6 +103,20 @@ EmitResult result = compilation.EmitC(output);
 
 The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
 
+Omit `CompilationOptions` to retain hosted output.
+
+## ESP-IDF quick start
+
+ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. The compiler does not select a chip, link, flash, or monitor; `idf.py` owns those operations.
+
+```powershell
+cd .\examples\Esp32Blink
+.\Build.ps1 -Target esp32
+.\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
+```
+
+The checked project includes the fixed-width `Esp.Idf` shim, UART0 configuration, an 8 KiB main-task stack, GPIO2 blink, heap and stack reporting, and an object/exception self-test. See [the ESP32 example](examples/Esp32Blink/README.md) for the failure test and current runtime limits.
+
 ## Projects
 
 | Project | Purpose |
@@ -108,12 +125,14 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.5 programs |
+| `examples/Esp32Blink` | ESP-IDF hardware project and native API shim |
 
 ## Validation
 
 ```powershell
 dotnet build .\CTilde.sln
 dotnet run --project .\Test\Test.csproj --no-build
+.\Test\Test-EspIdf.ps1
 ```
 
 The native tests discover Visual Studio C tools on Windows. Set `CTILDE_CC` to test another compiler:

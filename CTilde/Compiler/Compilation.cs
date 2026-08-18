@@ -11,20 +11,22 @@ public sealed class Compilation
     private TypedIrProgram? _ir;
     private bool _analyzed;
 
-    private Compilation(ImmutableArray<SyntaxTree> syntaxTrees)
+    private Compilation(ImmutableArray<SyntaxTree> syntaxTrees, CompilationOptions options)
     {
         SyntaxTrees = syntaxTrees;
+        Options = options;
     }
 
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
+    public CompilationOptions Options { get; }
 
-    public static Compilation Create(IEnumerable<SyntaxTree> syntaxTrees)
+    public static Compilation Create(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(syntaxTrees);
         var trees = syntaxTrees.ToImmutableArray();
         if (trees.Any(tree => tree is null))
             throw new ArgumentException("A compilation cannot contain a null syntax tree.", nameof(syntaxTrees));
-        return new Compilation(trees);
+        return new Compilation(trees, options ?? new CompilationOptions());
     }
 
     public ImmutableArray<Diagnostic> GetDiagnostics()
@@ -56,15 +58,16 @@ public sealed class Compilation
             if (_analyzed)
                 return;
             var diagnostics = new DiagnosticBag();
-            var allSyntaxTrees = StandardLibrary.SyntaxTrees.AddRange(SyntaxTrees);
+            var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
+            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics);
-            _emitter = new CEmitter(model);
+            _emitter = new CEmitter(model, Options.Target);
             _ir = new TypedIrLowerer(model, _emitter).Lower();
-            TargetValidator.Validate(model, _emitter);
+            TargetValidator.Validate(model, _emitter, Options.Target);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
         }

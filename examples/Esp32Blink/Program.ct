@@ -1,0 +1,79 @@
+using System;
+using Esp.Idf;
+
+namespace Examples.Esp32Blink;
+
+public class Probe
+{
+    public virtual int Value()
+    {
+        return 1;
+    }
+}
+
+public sealed class DerivedProbe : Probe
+{
+    public override int Value()
+    {
+        return 42;
+    }
+}
+
+public static class Program
+{
+    private const int BlinkPin = 2;
+
+    [EntryPoint]
+    public static void Main()
+    {
+        Console.WriteLine("C~ ESP-IDF hardware test");
+
+        Probe probe = new DerivedProbe();
+        Console.Write("virtual: ");
+        Console.WriteLine(probe.Value());
+
+        object boxed = 7;
+        Console.Write("boxed: ");
+        Console.WriteLine((int)boxed);
+
+        try
+        {
+            throw new Exception("caught on ESP32");
+        }
+        catch (Exception exception)
+        {
+            Console.Write("exception: ");
+            Console.WriteLine(exception.Message);
+        }
+
+        Console.Write("free heap: ");
+        Console.WriteLine(EspSystem.GetFreeHeapSize());
+        Console.Write("minimum free heap: ");
+        Console.WriteLine(EspSystem.GetMinimumFreeHeapSize());
+        Console.Write("stack high water: ");
+        Console.WriteLine(FreeRtos.GetStackHighWaterMark());
+        Console.Write("tick: ");
+        Console.WriteLine(FreeRtos.GetTickCount());
+
+        if (!Gpio.ConfigureOutput(BlinkPin))
+        {
+            Console.WriteLine("GPIO_CONFIG_FAILED");
+            return;
+        }
+
+        Console.WriteLine("CTILDE_ESP_OK");
+        bool high = false;
+        while (true)
+        {
+            high = !high;
+            if (!Gpio.Write(BlinkPin, high))
+            {
+                Console.WriteLine("GPIO_WRITE_FAILED");
+                return;
+            }
+            Console.Write("gpio2: ");
+            Console.WriteLine(Gpio.Read(BlinkPin));
+            FreeRtos.DelayMilliseconds(500u);
+        }
+    }
+}

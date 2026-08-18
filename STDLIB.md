@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.5. The compiler includes this library in every compilation.
+This document is the canonical standard-library reference for C~ draft 0.5. Object, exception, and console declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 ## Object
 
@@ -93,6 +93,42 @@ public static class Environment
 
 `Exit` terminates the process immediately with the supplied native exit code. It does not run pending finally blocks.
 
+`Environment.Exit` is hosted-only. An ESP-IDF compilation that calls it reports `CT4105`. Firmware that intentionally needs a reset must call `Esp.Idf.EspSystem.Restart`.
+
+## ESP-IDF
+
+The ESP-IDF target adds fixed-width wrappers around FreeRTOS, system, heap, and GPIO operations:
+
+```csharp
+namespace Esp.Idf;
+
+public static class FreeRtos
+{
+    public static void DelayMilliseconds(uint milliseconds);
+    public static uint GetTickCount();
+    public static uint GetStackHighWaterMark();
+}
+
+public static class EspSystem
+{
+    public static void Restart();
+    public static uint GetFreeHeapSize();
+    public static uint GetMinimumFreeHeapSize();
+}
+
+public static class Gpio
+{
+    public static bool ConfigureInput(int pin);
+    public static bool ConfigureOutput(int pin);
+    public static bool Write(int pin, bool high);
+    public static bool Read(int pin);
+}
+```
+
+Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. GPIO configuration and writes return `false` when ESP-IDF rejects the pin or operation. `Read` requires a valid pin that the program configured first.
+
+These APIs are synchronous and are intended for the C~ entry task. They do not define callback, multi-task, or interrupt-safe C~ execution.
+
 ## Scalar ToString
 
 The following built-in values provide an intrinsic, zero-argument `ToString()` method:
@@ -132,11 +168,11 @@ These operations are compiler intrinsics rather than declarations in the bundled
 
 ## Runtime behavior
 
-The GNU C23 runtime is part of each generated translation unit. Managed allocations live until process exit.
+The GNU C23 runtime is part of each generated translation unit. Managed allocations have program lifetime. On ESP-IDF they remain allocated until reset or power loss.
 
 Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
 
-An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. Both failures exit with `EXIT_FAILURE`.
+An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
 Other runtime failures remain fatal and are not catchable in draft 0.5.
 

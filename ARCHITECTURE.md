@@ -2,7 +2,7 @@
 
 ## Overview
 
-The C~ compiler is a .NET 10 library with one output format: deterministic GNU C23.
+The C~ compiler is a .NET 10 library with one output format, deterministic GNU C23, and two target profiles: hosted and ESP-IDF.
 
 ```text
 UTF-8 source files
@@ -35,8 +35,8 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
 - Exception lowering owns lexical handler frames, durable local slots, catch dispatch, rethrow, and pending finally actions.
 - `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
-- `TargetValidator` rejects ABI and generated-symbol conflicts before output starts.
-- `CEmitter` consumes the transitional IR and owns the runtime, layouts, declarations, initialization, definitions, and entry wrapper.
+- `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
+- `CEmitter` consumes the transitional IR and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -61,13 +61,15 @@ Native tests use temporary directories and check process output, error text, and
 ```csharp
 SourceText text = SourceText.From(source, path);
 SyntaxTree tree = SyntaxTree.Parse(text);
-Compilation compilation = Compilation.Create(new[] { tree });
+Compilation compilation = Compilation.Create(
+    new[] { tree },
+    new CompilationOptions(CompilationTarget.Hosted));
 
 ImmutableArray<Diagnostic> diagnostics = compilation.GetDiagnostics();
 EmitResult result = compilation.EmitC(writer);
 ```
 
-`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached internal standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees.
+`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached common and target-specific standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees. `CompilationOptions` is immutable and defaults to `Hosted`.
 
 `GetDiagnostics()` runs declarations, the combined body pass, transitional IR construction, and target validation. It does not assemble the C translation unit. `EmitC()` consumes the cached result after successful analysis. Repeated emission is byte-identical.
 
@@ -151,7 +153,7 @@ The emitter assembles one translation unit in this order:
 9. Method, constructor, and accessor definitions.
 10. Deterministic static initialization.
 11. Symbol-retention routine.
-12. C `main` wrapper.
+12. Hosted C `main` or ESP-IDF `app_main` wrapper.
 
 Emission first lowers all bodies and initializers into memory. This discovers every array specialization and string literal before section ordering begins.
 
@@ -201,7 +203,7 @@ A new language feature must define syntax, binding, conversions, ordered lowerin
 
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
 
-ESP-IDF is a planned target profile, not a separate language backend. It must reuse typed IR and replace only platform runtime and packaging behavior.
+ESP-IDF is a target profile, not a separate language backend. It reuses the parser, semantic model, transitional IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 

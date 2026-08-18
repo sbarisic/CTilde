@@ -16,6 +16,7 @@ static int Run(string[] args)
     string? inputDirectory = null;
     var checkOnly = false;
     var trace = false;
+    var target = CompilationTarget.Hosted;
     for (var index = 0; index < args.Length; index++)
     {
         switch (args[index])
@@ -36,6 +37,18 @@ static int Run(string[] args)
             case "--trace":
                 trace = true;
                 break;
+            case "--target":
+                if (++index >= args.Length)
+                    return UsageError("--target requires hosted or esp-idf.");
+                target = args[index] switch
+                {
+                    "hosted" => CompilationTarget.Hosted,
+                    "esp-idf" => CompilationTarget.EspIdf,
+                    _ => (CompilationTarget)(-1),
+                };
+                if (!Enum.IsDefined(target))
+                    return UsageError($"Unknown target '{args[index]}'; expected hosted or esp-idf.");
+                break;
             default:
                 if (args[index].StartsWith("-", StringComparison.Ordinal))
                     return UsageError($"Unknown option '{args[index]}'.");
@@ -49,7 +62,7 @@ static int Run(string[] args)
         if (inputs.Count != 0 || output is not null || checkOnly)
             return UsageError("--compile-directory cannot be combined with input files, -o, or --check.");
 
-        return CompileDirectory(inputDirectory, trace);
+        return CompileDirectory(inputDirectory, trace, target);
     }
 
     if (inputs.Count == 0)
@@ -57,10 +70,10 @@ static int Run(string[] args)
     if (!checkOnly && string.IsNullOrWhiteSpace(output))
         return UsageError("-o is required unless --check is used.");
 
-    return Compile(inputs, output, checkOnly, trace);
+    return Compile(inputs, output, checkOnly, trace, target);
 }
 
-static int CompileDirectory(string inputDirectory, bool trace)
+static int CompileDirectory(string inputDirectory, bool trace, CompilationTarget target)
 {
     try
     {
@@ -81,7 +94,7 @@ static int CompileDirectory(string inputDirectory, bool trace)
         foreach (var input in inputs)
         {
             var output = Path.ChangeExtension(input, ".c");
-            if (Compile([input], output, checkOnly: false, trace, removeStaleGeneratedOutput: true) != 0)
+            if (Compile([input], output, checkOnly: false, trace, target, removeStaleGeneratedOutput: true) != 0)
                 exitCode = 1;
         }
 
@@ -118,16 +131,19 @@ static string ResolveDirectory(string path)
     return resolvedPath ?? workingDirectoryPath;
 }
 
-static int Compile(IReadOnlyCollection<string> inputs, string? output, bool checkOnly, bool trace, bool removeStaleGeneratedOutput = false)
+static int Compile(IReadOnlyCollection<string> inputs, string? output, bool checkOnly, bool trace, CompilationTarget target, bool removeStaleGeneratedOutput = false)
 {
     try
     {
         if (trace)
+        {
+            Console.Error.WriteLine($"trace: target {(target == CompilationTarget.EspIdf ? "esp-idf" : "hosted")}");
             Console.Error.WriteLine($"trace: reading {inputs.Count} source file(s)");
+        }
         var trees = inputs.Select(path => SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
         if (trace)
             Console.Error.WriteLine("trace: parsing complete; declaring and binding symbols");
-        var compilation = Compilation.Create(trees);
+        var compilation = Compilation.Create(trees, new CompilationOptions(target));
         using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
         var diagnostics = checkOnly ? compilation.GetDiagnostics() : compilation.EmitC(generated).Diagnostics;
         foreach (var diagnostic in diagnostics)
@@ -197,6 +213,6 @@ static int UsageError(string message)
 
 static void PrintUsage()
 {
-    Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--check] [--trace]");
-    Console.Error.WriteLine("       ctilde --compile-directory <directory> [--trace]");
+    Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]");
+    Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]");
 }

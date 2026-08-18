@@ -7,12 +7,12 @@ Last reviewed: 2026-08-18
 C~ draft 0.5 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> combined binding and flow -> transitional typed-line IR -> target validation -> GNU C23
+.ct source -> full-fidelity syntax -> combined binding and flow -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one self-contained C file. It does not invoke a native compiler.
+The compiler emits one C file. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The compiler does not invoke a native compiler.
 
 ## Measured baseline
 
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 53 managed and native checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 56 managed and native checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -157,13 +157,22 @@ The body pipeline does not yet satisfy the final bound-tree and typed-IR design.
 
 The draft 0.5 exception surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
 
-## Planned platform work
+## ESP-IDF target
 
-ESP-IDF is a planned target. It is not implemented or part of the measured baseline.
+The hardware MVP compiler and project support are implemented. `CompilationOptions` and `--target esp-idf` select one chip-independent profile. It emits `app_main`, compact source locations, unbuffered console startup, four-byte pointer assertions, abort-based fatal failures, and no `ct_keep_symbols` retention routine.
 
-The target will reuse the GNU C23 pipeline. It needs an `app_main` wrapper, an embedded runtime policy, ESP-IDF project files, and native API shims.
+`Esp.Idf` provides FreeRTOS delay and counters, restart and heap counters, and basic GPIO through a fixed-width handwritten shim. `System.Environment.Exit` is rejected with `CT4105`.
 
-The first hardware target is the connected ESP32-D0WDQ6-V3 on `COM4`. The roadmap and acceptance criteria are in [TODO.md](TODO.md#esp-idf-target-support).
+ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello and Exceptions output also passes both cross-compilers in GNU C23 syntax checks.
+
+Measured self-test firmware sizes are:
+
+| Target | Image | Flash code | Flash data | IRAM/DRAM |
+| --- | ---: | ---: | ---: | ---: |
+| `esp32` | 127,413 bytes | 47,278 bytes | 27,524 bytes | 41,951 bytes IRAM; 12,996 bytes DRAM |
+| `esp32c3` | 126,444 bytes | 59,650 bytes | 24,160 bytes | 46,634 bytes DRAM, including 36,378 bytes executable text |
+
+The first physical target remains ESP32-D0WDQ6-V3. It was previously detected on `COM4`, but the port was absent during the 2026-08-18 flash gate. Hardware console, GPIO, failure, heap, and stack measurements therefore remain unverified and must not be treated as release evidence.
 
 ## Deliberately deferred
 

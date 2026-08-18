@@ -4,7 +4,7 @@
 
 This document defines the generated C contract for C~ draft 0.5. The managed layout is not compatible with draft 0.4. `System.Exception`, exception metadata, and compiler-owned unwind state change standard-library type IDs and generated symbols.
 
-The output is a single GNU C23 translation unit. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
+The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
 ## Target requirements
 
@@ -17,6 +17,8 @@ The generated file includes only C standard-library headers. Compile-time assert
 - C23 language support. The native test driver first uses `-std=gnu23`. It retries with `-std=gnu2x` only after an option error. `CTILDE_C_STANDARD` selects an explicit dialect and disables this retry.
 
 References and unsafe pointers use native C pointer width. A 64-bit C target therefore uses 64-bit references and pointers. C~ scalar integer sizes do not change with the target.
+
+The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde_esp_shim.h`. ESP-IDF selects the concrete Xtensa or RISC-V compiler; C~ has no per-chip backend.
 
 ## Scalar mapping
 
@@ -160,7 +162,7 @@ String equality compares contents. Other class and array equality compares point
 
 Static storage is emitted with a C zero initializer. The generated `ct_module_init` function then evaluates explicit field initializers.
 
-Types are initialized in ordinal fully qualified name order. Fields within one type use source declaration order. The generated C `main` calls `ct_module_init` exactly once before the C~ entry method.
+Types are initialized in ordinal fully qualified name order. Fields within one type use source declaration order. The selected entry wrapper calls `ct_module_init` exactly once before the C~ entry method.
 
 The language does not expose the generated initialization function.
 
@@ -168,7 +170,7 @@ The language does not expose the generated initialization function.
 
 Exactly one method must have `[EntryPoint]`. It must be a body-bearing `static void` method with no parameters.
 
-The generated wrapper is:
+The hosted wrapper is:
 
 ```c
 int main(void)
@@ -182,6 +184,20 @@ int main(void)
 
 `ct_keep_symbols` references translation-unit-local functions and fields. It has no observable behavior. Its purpose is to keep strict GCC and Clang unused-symbol warnings from rejecting valid C~ programs.
 
+ESP-IDF output omits `main` and `ct_keep_symbols`. Translation-unit-local definitions use a GCC-compatible unused attribute, allowing ESP-IDF linker garbage collection to discard unreachable sections. Its wrapper disables buffering for `stdout` and `stderr`, initializes the module, and calls the C~ entry method:
+
+```c
+void app_main(void)
+{
+    setvbuf(stdout, NULL, _IONBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+    ct_module_init();
+    mangled_entry_method();
+}
+```
+
+Returning from the C~ entry method returns from `app_main`; it does not stop the FreeRTOS scheduler.
+
 ## Extern methods
 
 `[Extern("symbol")]` applies to a static, bodyless method. The symbol string must be a portable C identifier. It cannot be a C23 keyword. It cannot start with an underscore.
@@ -193,6 +209,8 @@ External names cannot collide with `main`, runtime definitions, or generated sym
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
 
 An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.5 does not support exceptions across native callbacks or other native boundaries.
+
+ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, and `void`; ESP-IDF structures and typedef layouts do not cross the C~ boundary.
 
 ## Exceptions
 
@@ -220,7 +238,7 @@ Finally lowering stores one pending action: normal completion, return, break, co
 
 ## Runtime failures
 
-The embedded runtime prints one line to standard error and exits with `EXIT_FAILURE`.
+The runtime prints one line to standard error. Hosted output exits with `EXIT_FAILURE`; ESP-IDF output uses compact source filenames and calls `abort()`.
 
 | Code | Failure |
 | --- | --- |
@@ -244,6 +262,6 @@ The existing null, array, allocation, division, string, cast, and unboxing failu
 
 ## Lifetime
 
-Class instances, arrays, concatenated or scalar-formatted strings, exception objects, durable method slots, handler frames, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them.
+Class instances, arrays, concatenated or scalar-formatted strings, exception objects, durable method slots, handler frames, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them. On ESP-IDF, permanent loops must keep allocation bounded.
 
 This preserves managed reference identity and removes use-after-free from safe C~ code. A future collector can replace the allocator without changing source semantics or object layouts described here.

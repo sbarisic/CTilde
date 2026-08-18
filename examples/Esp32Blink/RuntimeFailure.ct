@@ -1,0 +1,19 @@
+using System;
+
+namespace Examples.Esp32Failure;
+
+public sealed class Box
+{
+    public int Value;
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        Console.WriteLine("CTILDE_ESP_FAILURE_TEST");
+        Box box = null;
+        Console.WriteLine(box.Value);
+    }
+}

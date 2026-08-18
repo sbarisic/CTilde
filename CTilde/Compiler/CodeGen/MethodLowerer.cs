@@ -126,7 +126,7 @@ internal sealed class MethodLowerer
         using (writer.Block())
         {
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
-            writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {_emitter.SourceArgument(source)});");
             writer.WriteLine($"ct_init_object(ct_self, &{CEmitter.DescriptorName(_method.ContainingType)});");
             writer.WriteLine($"{CEmitter.ConstructorInitializerName(_method)}(ct_self{(parameterNames.Length == 0 ? string.Empty : ", " + string.Join(", ", parameterNames))});");
             writer.WriteLine("return ct_self;");
@@ -197,7 +197,7 @@ internal sealed class MethodLowerer
         else
         {
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
-            writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {_emitter.SourceArgument(source)});");
             writer.WriteLine($"ct_init_object(ct_self, &{CEmitter.DescriptorName(_method.ContainingType)});");
         }
     }
@@ -377,7 +377,7 @@ internal sealed class MethodLowerer
         var qualifier = syntax.IsConst && !symbol.IsHeapBacked ? "const " : string.Empty;
         if (symbol.IsHeapBacked)
         {
-            writer.WriteLine($"{_emitter.CTypeName(type)}* {symbol.StorageName} = ({_emitter.CTypeName(type)}*)ct_alloc(sizeof({_emitter.CTypeName(type)}), {CEmitter.SourceArgument(syntax)});");
+            writer.WriteLine($"{_emitter.CTypeName(type)}* {symbol.StorageName} = ({_emitter.CTypeName(type)}*)ct_alloc(sizeof({_emitter.CTypeName(type)}), {_emitter.SourceArgument(syntax)});");
             if (initializer is not null)
                 writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
@@ -750,7 +750,7 @@ internal sealed class MethodLowerer
             EmitPrelude(writer, expression.Prelude);
             exceptionCode = expression.Code;
         }
-        writer.WriteLine($"ct_throw((ct_object*)(void*){exceptionCode}, {CEmitter.SourceArgument(syntax)});");
+        writer.WriteLine($"ct_throw((ct_object*)(void*){exceptionCode}, {_emitter.SourceArgument(syntax)});");
     }
 
     private FlowResult EmitTry(CWriter writer, TryStatementSyntax syntax)
@@ -814,7 +814,7 @@ internal sealed class MethodLowerer
 
         if (finallyFlow.FallsThrough)
         {
-            writer.WriteLine($"if (*ct_ep_{id} == 4) ct_throw(*ct_ex_{id}, {CEmitter.SourceArgument(syntax)});");
+            writer.WriteLine($"if (*ct_ep_{id} == 4) ct_throw(*ct_ex_{id}, {_emitter.SourceArgument(syntax)});");
             if (!_method.IsConstructor && _method.ReturnType != CType.Void)
             {
                 writer.WriteLine($"if (*ct_ep_{id} == 1)");
@@ -912,7 +912,7 @@ internal sealed class MethodLowerer
                 }
             }
             if (!catches.Any(boundCatch => boundCatch.Type is null))
-                writer.WriteLine($"ct_throw(ct_caught_{id}, {CEmitter.SourceArgument(syntax)});");
+                writer.WriteLine($"ct_throw(ct_caught_{id}, {_emitter.SourceArgument(syntax)});");
         }
         if (fallthroughStates.Count != 0)
             writer.WriteLine($"{done}:;");
@@ -976,7 +976,7 @@ internal sealed class MethodLowerer
             IsHeapBacked = true,
         };
         _scopes.Peek()[symbol.Name] = symbol;
-        writer.WriteLine($"{_emitter.CTypeName(symbol.Type)}* {symbol.StorageName} = ({_emitter.CTypeName(symbol.Type)}*)ct_alloc(sizeof({_emitter.CTypeName(symbol.Type)}), {CEmitter.SourceArgument(boundCatch.Syntax)});");
+        writer.WriteLine($"{_emitter.CTypeName(symbol.Type)}* {symbol.StorageName} = ({_emitter.CTypeName(symbol.Type)}*)ct_alloc(sizeof({_emitter.CTypeName(symbol.Type)}), {_emitter.SourceArgument(boundCatch.Syntax)});");
         writer.WriteLine($"{symbol.CName} = ({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode};");
     }
 
@@ -1105,17 +1105,17 @@ internal sealed class MethodLowerer
         var source = _method.Syntax ?? _method.ContainingType.Syntax!;
         for (var index = 0; index < _tryCount; index++)
         {
-            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {CEmitter.SourceArgument(source)});");
-            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {CEmitter.SourceArgument(source)});");
-            writer.WriteLine($"int32_t* ct_ep_{index} = (int32_t*)ct_alloc(sizeof(int32_t), {CEmitter.SourceArgument(source)});");
-            writer.WriteLine($"ct_object** ct_ex_{index} = (ct_object**)ct_alloc(sizeof(ct_object*), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {_emitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {_emitter.SourceArgument(source)});");
+            writer.WriteLine($"int32_t* ct_ep_{index} = (int32_t*)ct_alloc(sizeof(int32_t), {_emitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_object** ct_ex_{index} = (ct_object**)ct_alloc(sizeof(ct_object*), {_emitter.SourceArgument(source)});");
             writer.WriteLine($"(void)ct_eh_{index}_catch;");
             writer.WriteLine($"(void)ct_eh_{index}_finally;");
             writer.WriteLine($"(void)ct_ep_{index};");
             writer.WriteLine($"(void)ct_ex_{index};");
             if (!_method.IsConstructor && _method.ReturnType != CType.Void)
             {
-                writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)}* ct_er_{index} = ({_emitter.CTypeName(_method.ReturnType)}*)ct_alloc(sizeof({_emitter.CTypeName(_method.ReturnType)}), {CEmitter.SourceArgument(source)});");
+                writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)}* ct_er_{index} = ({_emitter.CTypeName(_method.ReturnType)}*)ct_alloc(sizeof({_emitter.CTypeName(_method.ReturnType)}), {_emitter.SourceArgument(source)});");
                 writer.WriteLine($"(void)ct_er_{index};");
             }
         }
@@ -1131,7 +1131,7 @@ internal sealed class MethodLowerer
             var storage = _heapParameters[parameter];
             var typeName = _emitter.CTypeName(parameter.Type);
             var parameterName = NameMangler.Identifier(parameter.Name);
-            writer.WriteLine($"{typeName}* {storage} = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"{typeName}* {storage} = ({typeName}*)ct_alloc(sizeof({typeName}), {_emitter.SourceArgument(source)});");
             writer.WriteLine($"*{storage} = {parameterName};");
         }
     }
@@ -1425,13 +1425,13 @@ internal sealed class MethodLowerer
         if (receiver.Type.Kind == CTypeKind.String && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
-            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(syntax)});");
+            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.Kind == CTypeKind.Array && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
-            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(syntax)});");
+            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         var type = receiver.Type.Symbol;
@@ -1554,8 +1554,8 @@ internal sealed class MethodLowerer
         prelude.AddRange(index.Prelude);
         if (receiver.Type.Kind == CTypeKind.Array)
         {
-            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(syntax)});");
-            prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {CEmitter.SourceArgument(syntax)});");
+            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             var code = $"{receiver.Code}->Data[{index.Code}]";
             return new LoweredExpression
             {
@@ -1567,8 +1567,8 @@ internal sealed class MethodLowerer
         }
         if (receiver.Type.Kind == CTypeKind.String)
         {
-            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(syntax)});");
-            prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {CEmitter.SourceArgument(syntax)});");
+            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
         }
         if (receiver.Type.Kind == CTypeKind.Pointer)
@@ -1592,7 +1592,7 @@ internal sealed class MethodLowerer
                 return ErrorExpression();
             _emitter.RegisterType(type);
             var length = Materialize(Convert(LowerExpression(syntax.ArrayLength), CType.Int, syntax.ArrayLength, false), syntax.ArrayLength);
-            var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {CEmitter.SourceArgument(syntax)})";
+            var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = type, Code = code, Prelude = length.Prelude };
         }
         if (type.Kind is not CTypeKind.Class and not CTypeKind.Struct)
@@ -1691,6 +1691,7 @@ internal sealed class MethodLowerer
         if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer))
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
+        _emitter.RegisterExternUse(selected, syntax);
 
         var prelude = new List<string>();
         string? receiverCode = null;
@@ -1746,7 +1747,7 @@ internal sealed class MethodLowerer
         receiver = Materialize(receiver, member.Receiver);
         if (receiver.Type.Kind == CTypeKind.String)
         {
-            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(member)});");
+            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)});");
             return new LoweredExpression { Type = CType.String, Code = receiver.Code, Prelude = receiver.Prelude };
         }
 
@@ -1765,7 +1766,7 @@ internal sealed class MethodLowerer
             CTypeKind.Sbyte or CTypeKind.Short => $"(int32_t){receiver.Code}",
             _ => receiver.Code,
         };
-        var code = $"{function}({argument}, {CEmitter.SourceArgument(member)})";
+        var code = $"{function}({argument}, {_emitter.SourceArgument(member)})";
         return new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude };
     }
 
@@ -2011,7 +2012,7 @@ internal sealed class MethodLowerer
             left = Materialize(left, syntax.Left);
             right = Materialize(right, syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
-            return new LoweredExpression { Type = CType.String, Code = $"ct_string_concat({left.Code}, {right.Code}, {CEmitter.SourceArgument(syntax)})", Prelude = prelude };
+            return new LoweredExpression { Type = CType.String, Code = $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", Prelude = prelude };
         }
 
         if (syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken)
@@ -2249,8 +2250,8 @@ internal sealed class MethodLowerer
                 SyntaxKind.PlusToken => $"ct_i32_add({left}, {right})",
                 SyntaxKind.MinusToken => $"ct_i32_sub({left}, {right})",
                 SyntaxKind.StarToken => $"ct_i32_mul({left}, {right})",
-                SyntaxKind.SlashToken => $"ct_i32_div({left}, {right}, {CEmitter.SourceArgument(syntax)})",
-                SyntaxKind.PercentToken => $"ct_i32_mod({left}, {right}, {CEmitter.SourceArgument(syntax)})",
+                SyntaxKind.SlashToken => $"ct_i32_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_i32_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
                 _ => $"({left} {OperatorText(operation)} {right})",
             };
         }
@@ -2258,8 +2259,8 @@ internal sealed class MethodLowerer
         {
             return operation switch
             {
-                SyntaxKind.SlashToken => $"ct_u32_div({left}, {right}, {CEmitter.SourceArgument(syntax)})",
-                SyntaxKind.PercentToken => $"ct_u32_mod({left}, {right}, {CEmitter.SourceArgument(syntax)})",
+                SyntaxKind.SlashToken => $"ct_u32_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_u32_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
                 _ => $"({left} {OperatorText(operation)} {right})",
             };
         }
@@ -2293,7 +2294,7 @@ internal sealed class MethodLowerer
             if (sourceType.ContainsPointer)
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(sourceType);
-            var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {CEmitter.SourceArgument(syntax)})";
+            var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = target, Code = boxCode, Prelude = expression.Prelude };
         }
         if (objectType is not null && sourceType == objectType && target != objectType && target.Kind is not CTypeKind.Class and not CTypeKind.String and not CTypeKind.Array)
@@ -2301,14 +2302,14 @@ internal sealed class MethodLowerer
             if (target.ContainsPointer)
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(target);
-            var unboxCode = $"{CEmitter.UnboxFunctionName(target)}({expression.Code}, {CEmitter.SourceArgument(syntax)})";
+            var unboxCode = $"{CEmitter.UnboxFunctionName(target)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = target, Code = unboxCode, Prelude = expression.Prelude };
         }
         if (explicitConversion && sourceType.IsReference && target.IsReference && sourceType != target &&
             !(sourceType.Kind == CTypeKind.Class && target.Kind == CTypeKind.Class && sourceType.Symbol?.DerivesFrom(target.Symbol!) == true))
         {
             _emitter.RegisterType(target);
-            var castCode = $"({_emitter.CTypeName(target)})(void*)ct_checked_cast((ct_object*)(void*){expression.Code}, {_emitter.DescriptorExpression(target)}, {CEmitter.SourceArgument(syntax)})";
+            var castCode = $"({_emitter.CTypeName(target)})(void*)ct_checked_cast((ct_object*)(void*){expression.Code}, {_emitter.DescriptorExpression(target)}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = target, Code = castCode, Prelude = expression.Prelude };
         }
         var code = sourceType.Kind == CTypeKind.Null
@@ -2350,7 +2351,7 @@ internal sealed class MethodLowerer
         {
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(receiver.Type)} {temp} = {receiver.Code};");
-            prelude.Add($"(void)ct_require_nonnull({temp}, {CEmitter.SourceArgument(syntax)});");
+            prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
         }
         if (receiver.Type.Kind == CTypeKind.Struct)

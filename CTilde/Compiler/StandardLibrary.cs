@@ -5,15 +5,17 @@ namespace CTilde;
 
 internal static class StandardLibrary
 {
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazySyntaxTrees = new(LoadSyntaxTrees);
+    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyCommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct"]));
+    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyEspIdfSyntaxTrees = new(() => LoadSyntaxTrees(["EspIdf.ct"]));
 
-    public static ImmutableArray<SyntaxTree> SyntaxTrees => LazySyntaxTrees.Value;
+    public static ImmutableArray<SyntaxTree> GetSyntaxTrees(CompilationTarget target) => target == CompilationTarget.EspIdf
+        ? LazyCommonSyntaxTrees.Value.AddRange(LazyEspIdfSyntaxTrees.Value)
+        : LazyCommonSyntaxTrees.Value;
 
-    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees()
+    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(IReadOnlyList<string> files)
     {
         var assembly = typeof(StandardLibrary).Assembly;
-        var files = new[] { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct" };
-        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(files.Length);
+        var trees = ImmutableArray.CreateBuilder<SyntaxTree>(files.Count);
 
         foreach (var file in files)
         {

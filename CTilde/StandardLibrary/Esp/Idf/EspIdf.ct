@@ -1,0 +1,40 @@
+namespace Esp.Idf;
+
+public static class FreeRtos
+{
+    [Extern("ct_esp_delay_ms")]
+    public static void DelayMilliseconds(uint milliseconds);
+
+    [Extern("ct_esp_tick_count")]
+    public static uint GetTickCount();
+
+    [Extern("ct_esp_stack_high_water_mark")]
+    public static uint GetStackHighWaterMark();
+}
+
+public static class EspSystem
+{
+    [Extern("ct_esp_restart")]
+    public static void Restart();
+
+    [Extern("ct_esp_free_heap_size")]
+    public static uint GetFreeHeapSize();
+
+    [Extern("ct_esp_minimum_free_heap_size")]
+    public static uint GetMinimumFreeHeapSize();
+}
+
+public static class Gpio
+{
+    [Extern("ct_esp_gpio_configure_input")]
+    public static bool ConfigureInput(int pin);
+
+    [Extern("ct_esp_gpio_configure_output")]
+    public static bool ConfigureOutput(int pin);
+
+    [Extern("ct_esp_gpio_write")]
+    public static bool Write(int pin, bool high);
+
+    [Extern("ct_esp_gpio_read")]
+    public static bool Read(int pin);
+}

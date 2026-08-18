@@ -51,7 +51,7 @@ public sealed class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
-    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "return", "throw", "try", "catch", "finally", "unsafe", "new", "this", "base", "true", "false", "null", "var"];
+    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;

@@ -23,6 +23,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["const"] = SyntaxKind.ConstKeyword,
         ["continue"] = SyntaxKind.ContinueKeyword,
         ["default"] = SyntaxKind.DefaultKeyword,
+        ["defer"] = SyntaxKind.DeferKeyword,
         ["do"] = SyntaxKind.DoKeyword,
         ["else"] = SyntaxKind.ElseKeyword,
         ["enum"] = SyntaxKind.EnumKeyword,

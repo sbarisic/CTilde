@@ -62,6 +62,7 @@ public enum SyntaxKind
     ConstKeyword,
     ContinueKeyword,
     DefaultKeyword,
+    DeferKeyword,
     DoKeyword,
     ElseKeyword,
     EnumKeyword,
@@ -365,6 +366,7 @@ public sealed record ForStatementSyntax(SourceText Source, TextSpan Span, Statem
 public sealed record ForeachStatementSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string Name, ExpressionSyntax Collection, StatementSyntax Body) : StatementSyntax(Source, Span);
 public sealed record BreakStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record ContinueStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
+public sealed record DeferStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : StatementSyntax(Source, Span);
 public sealed record ReturnStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
 public sealed record ThrowStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
 public sealed record TryStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body, ImmutableArray<CatchClauseSyntax> Catches, FinallyClauseSyntax? Finally) : StatementSyntax(Source, Span);

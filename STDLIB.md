@@ -91,7 +91,7 @@ public static class Environment
 }
 ```
 
-`Exit` terminates the process immediately with the supplied native exit code. It does not run pending finally blocks.
+`Exit` terminates the process immediately with the supplied native exit code. It does not run pending finally blocks or defers.
 
 `Environment.Exit` is hosted-only. An ESP-IDF compilation that calls it reports `CT4105`. Firmware that intentionally needs a reset must call `Esp.Idf.EspSystem.Restart`.
 
@@ -186,7 +186,7 @@ An unhandled exception reports `CTE0001`, its fully qualified runtime type, and 
 
 Other runtime failures remain fatal and are not catchable in draft 0.5.
 
-Standard-library declarations use native `[Extern]` bindings internally. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
+Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
 ## Non-normative roadmap
 

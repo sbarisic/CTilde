@@ -3,21 +3,27 @@ namespace System;
 public static class Console
 {
     [Extern("ct_write_string")]
+    [NoAlloc]
     public static void Write(string value);
 
     [Extern("ct_write_char")]
+    [NoAlloc]
     public static void Write(char value);
 
     [Extern("ct_write_int")]
+    [NoAlloc]
     public static void Write(int value);
 
     [Extern("ct_write_uint")]
+    [NoAlloc]
     public static void Write(uint value);
 
     [Extern("ct_write_float")]
+    [NoAlloc]
     public static void Write(float value);
 
     [Extern("ct_write_bool")]
+    [NoAlloc]
     public static void Write(bool value);
 
     public static void Write(object value)
@@ -27,6 +33,7 @@ public static class Console
     }
 
     [Extern("ct_write_line")]
+    [NoAlloc]
     public static void WriteLine();
 
     public static void WriteLine(string value)

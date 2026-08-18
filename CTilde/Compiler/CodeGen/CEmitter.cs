@@ -10,6 +10,7 @@ internal sealed class CEmitter
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
+    private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private bool _usesExceptions;
 
@@ -22,6 +23,7 @@ internal sealed class CEmitter
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
+    public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
 
@@ -56,6 +58,31 @@ internal sealed class CEmitter
     public IEnumerable<CType> BoxedTypes => _boxedTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal);
 
     public void RegisterExceptions() => _usesExceptions = true;
+
+    public MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter)
+    {
+        if (_accessorMethods.TryGetValue((property, getter), out var method))
+            return method;
+        var syntax = getter ? property.Getter! : property.Setter!;
+        var parameters = getter ? Array.Empty<ParameterSymbol>() : [new ParameterSymbol { Name = "value", Type = property.Type, Syntax = null }];
+        method = new MethodSymbol
+        {
+            Name = getter ? $"get_{property.Name}" : $"set_{property.Name}",
+            ContainingType = property.ContainingType,
+            Accessibility = property.Accessibility,
+            IsStatic = property.IsStatic,
+            Syntax = syntax,
+            ReturnType = getter ? property.Type : CType.Void,
+            Parameters = [.. parameters],
+            Body = syntax.Body,
+            IsNoAlloc = property.IsNoAlloc,
+            IsVirtual = property.IsVirtual,
+            IsOverride = property.IsOverride,
+            IsSealedOverride = property.IsSealedOverride,
+        };
+        _accessorMethods.Add((property, getter), method);
+        return method;
+    }
 
     public void RegisterExternUse(MethodSymbol method, SyntaxNode syntax)
     {
@@ -294,8 +321,9 @@ internal sealed class CEmitter
         writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; } ct_object;");
         if (_usesExceptions)
         {
-            writer.WriteLine("typedef struct ct_exception_frame { jmp_buf Target; struct ct_exception_frame* Previous; ct_object* Exception; } ct_exception_frame;");
+            writer.WriteLine("typedef struct ct_exception_frame { jmp_buf* Target; struct ct_exception_frame* Previous; } ct_exception_frame;");
             writer.WriteLine("static ct_exception_frame* ct_exception_top = NULL;");
+            writer.WriteLine("static ct_object* ct_current_exception = NULL;");
             writer.WriteLine("CT_NORETURN static void ct_unhandled_exception(ct_object* exception);");
         }
         writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; };");
@@ -315,8 +343,8 @@ internal sealed class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    if (exception == NULL) ct_fail(\"CTE0002\", file, line);");
             writer.WriteLine("    if (ct_exception_top == NULL) ct_unhandled_exception(exception);");
-            writer.WriteLine("    ct_exception_top->Exception = exception;");
-            writer.WriteLine("    longjmp(ct_exception_top->Target, 1);");
+            writer.WriteLine("    ct_current_exception = exception;");
+            writer.WriteLine("    longjmp(*ct_exception_top->Target, 1);");
             writer.WriteLine("}");
         }
         writer.WriteLine("static void* ct_require_nonnull(void* value, const char* file, int line) { if (value == NULL) ct_fail(\"CTN0001\", file, line); return value; }");

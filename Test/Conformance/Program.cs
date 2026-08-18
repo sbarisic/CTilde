@@ -96,6 +96,11 @@ Run("language service completion and navigation", () =>
     Assert(completions.Any(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method), "Console member completion did not include WriteLine.");
     Assert(completions.All(item => item.ReplacementSpan.Start == completionPosition), "Empty member completion used the wrong replacement span.");
 
+    const string deferSource = "public static class Program { [EntryPoint] public static void Main() { de } }";
+    var deferService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(deferSource, "defer-completion.ct")]);
+    var deferPosition = deferSource.IndexOf("de }", StringComparison.Ordinal) + 2;
+    Assert(deferService.GetCompletions("defer-completion.ct", deferPosition).Any(item => item.Label == "defer" && item.Kind == LanguageCompletionKind.Keyword), "Statement completion did not include defer.");
+
     var consolePosition = source.IndexOf("Console", StringComparison.Ordinal) + 1;
     var hover = service.GetHover("editor.ct", consolePosition);
     Assert(hover?.Contents.Contains("System.Console", StringComparison.Ordinal) == true, "Hover did not resolve System.Console.");
@@ -289,6 +294,9 @@ Run("extern ABI validation", () =>
 
     const string exceptionGenerated = "public static class Program { [Extern(\"ct_eh_0_catch\")] public static int Native(); [EntryPoint] public static void Main() { } }";
     Assert(Compile(exceptionGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "An exception-lowering symbol collision was not rejected.");
+
+    const string currentException = "public static class Program { [Extern(\"ct_current_exception\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(currentException).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "The current-exception runtime symbol was accepted as an extern name.");
 });
 
 Run("target validation precedes output", () =>
@@ -930,12 +938,14 @@ Run("exception C lowering snapshot", () =>
     Assert(first == second, "Exception lowering was not byte-identical across repeated emission.");
     Assert(first.Contains("#include <setjmp.h>", StringComparison.Ordinal), "Exception lowering did not include setjmp support.");
     Assert(first.Contains("typedef struct ct_exception_frame", StringComparison.Ordinal), "The exception frame ABI was not emitted.");
-    Assert(first.Contains("if (setjmp(ct_eh_0_finally->Target) == 0)", StringComparison.Ordinal), "The lexical finally handler was not emitted in controlling-expression form.");
+    Assert(first.Contains("if (setjmp(*ct_eh_0_finally->Target) == 0)", StringComparison.Ordinal), "The lexical finally handler was not emitted in controlling-expression form.");
     Assert(first.Contains("ct_exception_top = ct_eh_0_finally->Previous;", StringComparison.Ordinal), "A handler-pop path was not emitted.");
-    Assert(first.Contains("*ct_ep_0 = 1;", StringComparison.Ordinal), "The pending return cleanup action was not emitted.");
+    Assert(first.Contains("ct_state.ct_ep_0 = 1;", StringComparison.Ordinal), "The pending return cleanup action was not emitted.");
     Assert(!Emit("public static class Program { [EntryPoint] public static void Main() { } }").Contains("#include <setjmp.h>", StringComparison.Ordinal), "A program without exception syntax included setjmp support.");
     var durable = Emit("using System; public static class Program { private static void M(int value) { int local = value; try { local = 2; throw new Exception(); } catch { Console.WriteLine(local); } } [EntryPoint] public static void Main() { M(1); } }");
-    Assert(durable.Contains("int32_t* ct_pp_0", StringComparison.Ordinal) && durable.Contains("int32_t* ct_lp_0", StringComparison.Ordinal), "Exception methods did not use durable parameter and local slots.");
+    Assert(durable.Contains("int32_t ct_pp_0;", StringComparison.Ordinal) && durable.Contains("int32_t ct_lp_0;", StringComparison.Ordinal), "Exception methods did not use durable parameter and local slots.");
+    Assert(durable.Contains("volatile struct", StringComparison.Ordinal), "Exception methods did not place durable state in an automatic volatile aggregate.");
+    Assert(!durable.Contains("ct_alloc(sizeof(int32_t)", StringComparison.Ordinal), "Exception lowering allocated a durable scalar on the heap.");
     Assert(!durable.Contains("int32_t ct_l_0", StringComparison.Ordinal), "An ordinary C automatic represented a C~ local across setjmp.");
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) == "handled\ncleanup\n5\n", result.StandardOutput + result.StandardError);
@@ -985,6 +995,233 @@ Run("exception catches rethrow and finally", () =>
     Assert(Normalize(result.StandardOutput) == "derived\nderived\nTrue\nfinally\n", result.StandardOutput);
 });
 
+Run("defer capture order and transfers", () =>
+{
+    const string source = """
+        using System;
+        public static class Program
+        {
+            private static void Record(int value) { Console.Write(value); }
+            private static int ReturnValue()
+            {
+                int value = 1;
+                defer Record(value);
+                value = 9;
+                defer Record(2);
+                return 7;
+            }
+            private static int NestedFinally()
+            {
+                try
+                {
+                    defer Record(3);
+                    return 8;
+                }
+                finally { Record(4); }
+            }
+            [EntryPoint]
+            public static void Main()
+            {
+                Console.Write(ReturnValue());
+                Console.Write(NestedFinally());
+                if (true)
+                {
+                    defer Record(5);
+                    Record(6);
+                }
+                int index = 0;
+                while (index < 2)
+                {
+                    defer Record(index);
+                    index++;
+                    if (index == 1) continue;
+                    break;
+                }
+                Console.WriteLine();
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "2173486501\n", result.StandardOutput);
+    var generated = Emit(source);
+    Assert(!generated.Contains("ct_alloc(sizeof(ct_exception_frame)", StringComparison.Ordinal), "defer allocated an exception frame on the heap.");
+});
+
+Run("defer syntax diagnostics and cleanup exceptions", () =>
+{
+    const string syntaxSource = "public static class Program { private static void F() { } [EntryPoint] public static void Main() { defer F(); } }";
+    var tree = SyntaxTree.ParseText(syntaxSource, "defer.ct");
+    Assert(tree.ToFullString() == syntaxSource, "defer syntax did not round-trip exactly.");
+    Assert(tree.Tokens.Any(token => token.Kind == SyntaxKind.DeferKeyword), "defer was not classified as a keyword.");
+    const string recoveredSource = "public static class Program { private static void F() { } [EntryPoint] public static void Main() { defer F() } }";
+    var recovered = SyntaxTree.ParseText(recoveredSource, "recovered-defer.ct");
+    Assert(recovered.ToFullString() == recoveredSource, "Recovered defer syntax did not round-trip exactly.");
+    Assert(recovered.Tokens.Any(token => token.Kind == SyntaxKind.SemicolonToken && token.IsMissing), "A missing defer semicolon was not retained.");
+
+    const string invalid = "public static class Program { private static void F() { } [EntryPoint] public static void Main() { defer 1; if (true) defer F(); switch (1) { case 1: defer F(); break; } } }";
+    var diagnostics = Compile(invalid).GetDiagnostics();
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2156"), "A non-invocation defer was accepted.");
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT3111") == 2, "An unbraced branch or switch-section defer was accepted.");
+
+    const string source = """
+        using System;
+        public sealed class Recorder
+        {
+            private int prefix;
+            public Recorder(int value) { prefix = value; }
+            public int Write(int value) { Console.Write(prefix); Console.Write(value); return value; }
+        }
+        public static class Program
+        {
+            private static void Record(int value) { Console.Write(value); }
+            private static void CleanupFailure() { throw new Exception("cleanup"); }
+            private static void Run()
+            {
+                Recorder current = new Recorder(4);
+                defer current.Write(2);
+                current = new Recorder(8);
+                defer Record(9);
+                defer CleanupFailure();
+                defer Record(1);
+                throw new Exception("body");
+            }
+            [EntryPoint]
+            public static void Main()
+            {
+                try { Run(); }
+                catch (Exception value) { Console.WriteLine(value.Message); }
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "1942cleanup\n", result.StandardOutput);
+});
+
+Run("NoAlloc effects and contracts", () =>
+{
+    const string valid = """
+        public struct Pair
+        {
+            public int Value;
+            public Pair(int value) { Value = value; }
+        }
+        public static class Native
+        {
+            [Extern("native_noop")]
+            [NoAlloc]
+            public static void Noop(int value);
+        }
+        public class Base
+        {
+            [NoAlloc]
+            public virtual int Read() { return 1; }
+        }
+        public class Derived : Base
+        {
+            public override int Read() { return 2; }
+        }
+        public class PropertyBase
+        {
+            [NoAlloc]
+            public virtual int Number { get { return 4; } }
+        }
+        public class PropertyDerived : PropertyBase
+        {
+            public override int Number { get { return 5; } }
+        }
+        public static class Program
+        {
+            [NoAlloc]
+            public static int Number { get { return 3; } }
+            private static int Pure(int value) { return value + 1; }
+            [NoAlloc]
+            private static int CastAndUnbox(object value)
+            {
+                int number = (int)value;
+                Base typed = value as Base;
+                object same = typed;
+                return number;
+            }
+            [NoAlloc]
+            private static int Recursive(int value)
+            {
+                if (value == 0) return 0;
+                return Recursive(value - 1);
+            }
+            [NoAlloc]
+            private static int Handle(Exception error)
+            {
+                try { throw error; }
+                catch { return 1; }
+            }
+            [NoAlloc]
+            private static int Work(Base value, PropertyBase property)
+            {
+                string constant = "a" + "b";
+                string same = constant.ToString();
+                Pair pair = new Pair(Pure(Number));
+                defer Native.Noop(pair.Value);
+                try { return value.Read() + property.Number + Recursive(2); }
+                finally { Native.Noop(0); }
+            }
+            [EntryPoint]
+            public static void Main() { }
+        }
+        """;
+    var validDiagnostics = Compile(valid).GetDiagnostics();
+    Assert(!validDiagnostics.Any(diagnostic => diagnostic.Code is "CT1233" or "CT2155"), string.Join(Environment.NewLine, validDiagnostics));
+
+    const string invalid = """
+        public class Box { }
+        public class VirtualBase { public virtual int Read() { return 1; } public virtual int Number { get { return 2; } } }
+        public class ContractBase { [NoAlloc] public virtual string Text() { return "ok"; } }
+        public class BadOverride : ContractBase { public override string Text() { return 1.ToString(); } }
+        public class ContractPropertyBase { [NoAlloc] public virtual string Text { get { return "ok"; } } }
+        public class BadPropertyOverride : ContractPropertyBase { public override string Text { get { return 3.ToString(); } } }
+        public sealed class AccessorBox { public int Number { get { string text = 4.ToString(); return 4; } set { } } }
+        public static class Native { [Extern("native_unknown")] public static void Unknown(); }
+        public static class Program
+        {
+            private static Box Allocate() { return new Box(); }
+            private static void AllocatingSink(string value) { string copy = value + "!"; }
+            [NoAlloc] private static Box ClassAllocation() { return new Box(); }
+            [NoAlloc] private static int[] ArrayAllocation() { return new int[1]; }
+            [NoAlloc] private static string Concatenate(string value) { return value + "!"; }
+            [NoAlloc] private static string Format() { return 1.ToString(); }
+            [NoAlloc] private static object BoxValue() { return 1; }
+            [NoAlloc] private static Box Transitive() { return Allocate(); }
+            [NoAlloc] private static void NativeBoundary() { Native.Unknown(); }
+            [NoAlloc] private static int VirtualBoundary(VirtualBase value) { return value.Read(); }
+            [NoAlloc] private static int VirtualPropertyBoundary(VirtualBase value) { return value.Number; }
+            [NoAlloc] private static void IncrementProperty(AccessorBox value) { value.Number++; }
+            [NoAlloc] private static void Deferred() { defer AllocatingSink(1.ToString()); }
+            [NoAlloc] public static string Property { get { return 2.ToString(); } }
+            [NoAlloc] public static int SetterProperty { set { string text = value.ToString(); } }
+            [NoAlloc(1)] public static int BadPropertyArguments { get { return 0; } }
+            [NoAlloc(1)] private static void BadArguments() { }
+            [EntryPoint] public static void Main() { }
+        }
+        """;
+    var invalidDiagnostics = Compile(invalid).GetDiagnostics();
+    var repeatedEffects = Compile(invalid).GetDiagnostics().Where(diagnostic => diagnostic.Code == "CT2155").Select(diagnostic => (diagnostic.Message, diagnostic.Location)).ToArray();
+    Assert(invalidDiagnostics.Where(diagnostic => diagnostic.Code == "CT2155").Select(diagnostic => (diagnostic.Message, diagnostic.Location)).SequenceEqual(repeatedEffects), "NoAlloc witnesses were not deterministic.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Code == "CT1233"), "NoAlloc arguments were accepted.");
+    Assert(invalidDiagnostics.Count(diagnostic => diagnostic.Code == "CT2155") >= 12, string.Join(Environment.NewLine, invalidDiagnostics));
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("Transitive", StringComparison.Ordinal) && diagnostic.Message.Contains("Allocate", StringComparison.Ordinal)), "The transitive allocation witness was not reported.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("extern call", StringComparison.Ordinal)), "An uncontracted extern boundary was accepted.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("virtual call", StringComparison.Ordinal)), "An uncontracted virtual boundary was accepted.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("BadOverride", StringComparison.Ordinal)), "An allocating override did not inherit the NoAlloc contract.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("BadPropertyOverride", StringComparison.Ordinal)), "An allocating property override did not inherit the NoAlloc contract.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("Property", StringComparison.Ordinal)), "An allocating contracted property accessor was accepted.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("IncrementProperty", StringComparison.Ordinal) && diagnostic.Message.Contains("get_Number", StringComparison.Ordinal)), "A transitive property getter allocation was not reported.");
+    Assert(invalidDiagnostics.Count(diagnostic => diagnostic.Code == "CT2155" && diagnostic.Message.Contains("Deferred", StringComparison.Ordinal)) >= 2, "defer capture and deferred-call effects were not both analyzed.");
+
+    const string invalidTargets = "[NoAlloc] public class Value { [NoAlloc] public int Field; [NoAlloc] public Value() { } } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(invalidTargets).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1213") == 3, "NoAlloc was accepted on a type, field, or constructor.");
+});
+
 Run("exception unhandled and null failures", () =>
 {
     const string formattingSource = "using System; public class NamedException : Exception { public NamedException(string message) : base(message) { } } public static class Program { [EntryPoint] public static void Main() { Exception empty = new Exception(); Console.WriteLine(empty.Message.Length); Console.WriteLine(new Exception(null)); Console.WriteLine(new NamedException(\"detail\")); } }";
@@ -998,7 +1235,7 @@ Run("exception unhandled and null failures", () =>
     Assert(nullThrow.ExitCode != 0 && nullThrow.StandardError.Contains("CTE0002", StringComparison.Ordinal), nullThrow.StandardError);
 });
 
-Run("exception cleanup transfers and heap state", () =>
+Run("exception cleanup transfers and stack state", () =>
 {
     const string source = """
         using System;
@@ -1028,6 +1265,19 @@ Run("exception cleanup transfers and heap state", () =>
                     Console.WriteLine(pair.Value);
                 }
             }
+            private static void PreserveForeachState()
+            {
+                int[] values = new int[1];
+                foreach (int value in values)
+                {
+                    try
+                    {
+                        value = 11;
+                        throw new Exception("foreach");
+                    }
+                    catch { Console.WriteLine(value); }
+                }
+            }
             [EntryPoint]
             public static void Main()
             {
@@ -1049,12 +1299,13 @@ Run("exception cleanup transfers and heap state", () =>
                     }
                 }
                 PreserveState(1);
+                PreserveForeachState();
             }
         }
         """;
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
-    Assert(Normalize(result.StandardOutput) == "return cleanup\n5\n1\n2\nbreak cleanup\n7\nafter\n9\n", result.StandardOutput);
+    Assert(Normalize(result.StandardOutput) == "return cleanup\n5\n1\n2\nbreak cleanup\n7\nafter\n9\n11\n", result.StandardOutput);
 });
 
 Run("exceptions across constructors virtual calls and catches", () =>
@@ -1289,7 +1540,7 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
         }
         var compilerName = Path.GetFileNameWithoutExtension(configured);
         var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "/nologo", "/std:clatest", "/W4", "/WX", $"/Fe:{executablePath}", cPath }
+            ? new[] { "/nologo", "/std:clatest", "/O2", "/W4", "/WX", "/wd4702", $"/Fe:{executablePath}", cPath }
             : null;
         return arguments is not null
             ? RunProcess(configured, arguments)
@@ -1306,7 +1557,7 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     var installation = discovery.StandardOutput.Trim();
     var vcVars = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
     var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
-    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /W4 /WX /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
+    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702 /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
     return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
 }
 
@@ -1314,10 +1565,10 @@ static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix
 {
     var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
     var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
-    var result = RunProcess(command, [.. prefix, $"-std={standard}", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+    var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
     if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
         return result;
-    return RunProcess(command, [.. prefix, "-std=gnu2x", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+    return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
 }
 
 static bool RejectedCStandard(ProcessResult result)

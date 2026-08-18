@@ -381,7 +381,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:break|case|catch|continue|default|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
     },
     "other-keywords": {
       "patterns": [

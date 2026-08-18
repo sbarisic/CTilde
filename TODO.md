@@ -53,6 +53,8 @@ These limits remain:
 - `[Extern]` supports simple C ABI calls but not callbacks or exported C~ methods.
 - Managed allocation has program lifetime.
 - Exception-handler state supports one C~ execution task.
+- `defer` provides deterministic block cleanup without heap registration.
+- `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
 The draft 0.5 object and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
 
@@ -140,6 +142,9 @@ A microcontroller firmware image has no portable process exit code. The compiler
 - [x] Keep zeroed program-lifetime allocation for the first release.
 - [x] Route allocation through one target hook.
 - [x] Start with normal `calloc` or `heap_caps_calloc` using byte-addressable memory.
+- [x] Move exception handlers, durable locals, pending actions, and defer captures to automatic method storage.
+- [x] Add `[NoAlloc]` fixed-point effect inference for bounded permanent-loop paths.
+- [x] Add allocation-free LIFO `defer` lowering for explicit native resource cleanup.
 - [ ] Add allocation-failure tests on hardware.
 - [x] Document that allocated C~ objects do not return memory to the heap.
 - [ ] Add optional heap counters for development builds.

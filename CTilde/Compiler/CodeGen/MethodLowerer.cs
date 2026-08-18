@@ -22,6 +22,8 @@ internal sealed class LoweredLValue
     public string? Address { get; init; }
     public LocalSymbol? Local { get; init; }
     public FieldSymbol? Field { get; init; }
+    public PropertySymbol? Property { get; init; }
+    public bool IsBaseReceiver { get; init; }
 }
 
 internal sealed class MethodLowerer
@@ -36,7 +38,8 @@ internal sealed class MethodLowerer
     private readonly string _temporaryPrefix;
     private readonly Stack<Dictionary<string, LocalSymbol>> _scopes = [];
     private readonly Dictionary<string, ParameterSymbol> _parameters;
-    private readonly Dictionary<ParameterSymbol, string> _heapParameters = [];
+    private readonly Dictionary<ParameterSymbol, string> _durableParameters = [];
+    private readonly Dictionary<string, CType> _durableSlots = new(StringComparer.Ordinal);
     private readonly Stack<string> _breakLabels = [];
     private readonly Stack<string> _continueLabels = [];
     private readonly Stack<List<AssignmentSnapshot>> _breakAssignmentStates = [];
@@ -45,6 +48,7 @@ internal sealed class MethodLowerer
     private readonly List<ActiveHandler> _activeExceptionFrames = [];
     private readonly Stack<FinallyContext> _finallyContexts = [];
     private readonly Stack<(int BreakDepth, int ContinueDepth)> _finallyBarriers = [];
+    private readonly Dictionary<DeferStatementSyntax, LoweredExpression> _deferredCalls = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
     private readonly Dictionary<FieldSymbol, int> _fieldAssignmentCounts = [];
     private readonly HashSet<FieldSymbol> _constantFieldsBeingEvaluated = [];
@@ -54,6 +58,7 @@ internal sealed class MethodLowerer
     private int _unsafeDepth;
     private int _repeatableLoopDepth;
     private int _tryId;
+    private int _deferId;
     private readonly int _tryCount;
 
     public MethodLowerer(CEmitter emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "")
@@ -69,11 +74,11 @@ internal sealed class MethodLowerer
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
-        _tryCount = CountTryStatements(method.Body);
+        _tryCount = CountTryStatements(method.Body) + CountDeferStatements(method.Body);
         if (_tryCount != 0)
         {
             for (var index = 0; index < method.Parameters.Length; index++)
-                _heapParameters[method.Parameters[index]] = $"ct_pp_{index}";
+                _durableParameters[method.Parameters[index]] = $"ct_pp_{index}";
         }
         if (_tryCount != 0 || ContainsThrow(method.Body))
             _emitter.RegisterExceptions();
@@ -83,23 +88,21 @@ internal sealed class MethodLowerer
     {
         if (_method.IsConstructor && _method.ContainingType.Kind == DeclaredTypeKind.Class)
             return EmitClassConstructorDefinition();
-        var writer = new CWriter();
-        writer.WriteLine(_emitter.MethodSignature(_method, _nameOverride));
-        using (writer.Block())
+        var body = new CWriter();
         {
-            EmitConstructorPrologue(writer);
-            EmitExceptionFrameStorage(writer);
-            EmitHeapParameterStorage(writer);
+            EmitConstructorPrologue(body);
+            EmitExceptionFrameStorage(body);
+            EmitDurableParameterStorage(body);
             if (!_method.IsStatic && !_method.IsConstructor)
-                writer.WriteLine("(void)ct_self;");
+                body.WriteLine("(void)ct_self;");
             foreach (var parameter in _method.Parameters)
-                writer.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
-            EmitInstanceFieldInitializers(writer);
+                body.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
+            EmitInstanceFieldInitializers(body);
             if (_property is not null && _method.Body is null)
-                EmitAutomaticAccessor(writer);
+                EmitAutomaticAccessor(body);
             else if (_method.Body is not null)
             {
-                var flow = EmitStatements(writer, _method.Body.Statements);
+                var flow = EmitStatements(body, _method.Body.Statements);
                 if (!_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
                     Report("CT3100", $"Not every reachable path returns a value from '{_method.Name}'.", _method.Syntax ?? _method.Body);
             }
@@ -107,14 +110,14 @@ internal sealed class MethodLowerer
             if (_method.IsConstructor)
             {
                 ValidateConstructorAssignments();
-                writer.WriteLine(_method.ContainingType.Kind == DeclaredTypeKind.Struct ? "return ct_value;" : "return ct_self;");
+                body.WriteLine(_method.ContainingType.Kind == DeclaredTypeKind.Struct ? "return ct_value;" : "return ct_self;");
             }
             else if (_method.ReturnType == CType.Void && (_property is null || !_isGetter))
             {
-                writer.WriteLine("return;");
+                body.WriteLine("return;");
             }
         }
-        return writer.ToString();
+        return RenderFunction(_emitter.MethodSignature(_method, _nameOverride), body);
     }
 
     private string EmitClassConstructorDefinition()
@@ -134,25 +137,51 @@ internal sealed class MethodLowerer
         writer.WriteLine();
         var initializerParameters = new[] { $"{typeName}* ct_self" }
             .Concat(_method.Parameters.Select(parameter => $"{_emitter.CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}"));
-        writer.WriteLine($"static void {CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})");
-        using (writer.Block())
+        var body = new CWriter();
         {
-            writer.WriteLine("(void)ct_self;");
-            EmitExceptionFrameStorage(writer);
-            EmitHeapParameterStorage(writer);
+            body.WriteLine("(void)ct_self;");
+            EmitExceptionFrameStorage(body);
+            EmitDurableParameterStorage(body);
             foreach (var parameter in _method.Parameters)
-                writer.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
-            var delegatesToThis = EmitConstructorInitializer(writer);
+                body.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
+            var delegatesToThis = EmitConstructorInitializer(body);
             if (!delegatesToThis)
-                EmitInstanceFieldInitializers(writer);
+                EmitInstanceFieldInitializers(body);
             if (_method.Body is not null)
-                _ = EmitStatements(writer, _method.Body.Statements);
+                _ = EmitStatements(body, _method.Body.Statements);
             if (!delegatesToThis)
                 ValidateConstructorAssignments();
-            writer.WriteLine("return;");
+            body.WriteLine("return;");
         }
+        writer.WriteBlock(RenderFunction($"static void {CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})", body).TrimEnd().Split('\n'));
         return writer.ToString();
     }
+
+    private string RenderFunction(string signature, CWriter body)
+    {
+        var writer = new CWriter();
+        writer.WriteLine(signature);
+        using (writer.Block())
+        {
+            if (_durableSlots.Count != 0)
+            {
+                writer.WriteLine("volatile struct");
+                using (writer.Block())
+                {
+                    foreach (var slot in _durableSlots)
+                        writer.WriteLine($"{_emitter.CTypeName(slot.Value)} {slot.Key};");
+                }
+                writer.WriteLine("ct_state = {0};");
+                writer.WriteLine("(void)ct_state;");
+            }
+            writer.WriteBlock(body.ToString().TrimEnd().Split('\n'));
+        }
+        writer.WriteLine();
+        return writer.ToString();
+    }
+
+    private void RegisterDurableSlot(string name, CType type) => _durableSlots.TryAdd(name, type);
+    private static string Durable(string name) => $"ct_state.{name}";
 
     private bool EmitConstructorInitializer(CWriter writer)
     {
@@ -171,6 +200,7 @@ internal sealed class MethodLowerer
             return syntax?.Kind == ConstructorInitializerKind.This;
         CheckAccess(target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
         _method.ConstructorInitializerTarget = target;
+        _emitter.AllocationEffects.RecordCall(_method, target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!, requiresContract: false);
         var lowered = LowerArguments(arguments, target.Parameters, argumentSyntax);
         EmitPrelude(writer, lowered.Prelude);
         var self = syntax?.Kind == ConstructorInitializerKind.This
@@ -226,15 +256,49 @@ internal sealed class MethodLowerer
         }
     }
 
-    private FlowResult EmitStatements(CWriter writer, ImmutableArray<StatementSyntax> statements)
+    private FlowResult EmitStatements(CWriter writer, ImmutableArray<StatementSyntax> statements, bool allowDefer = true)
     {
         var exits = FlowExit.None;
         var reachable = true;
-        foreach (var statement in statements)
+        for (var index = 0; index < statements.Length; index++)
         {
+            var statement = statements[index];
             if (!reachable)
                 Report("CT3101", "Unreachable statement.", statement);
             var before = reachable ? null : SnapshotAssignments();
+            if (statement is DeferStatementSyntax defer && !_deferredCalls.ContainsKey(defer))
+            {
+                if (!allowDefer)
+                {
+                    Report("CT3111", "defer must be a direct member of a braced block.", defer);
+                    continue;
+                }
+                if (defer.Expression is not CallExpressionSyntax call)
+                {
+                    Report("CT2156", "defer requires a method invocation.", defer.Expression);
+                    _ = LowerExpression(defer.Expression);
+                    continue;
+                }
+                var lowered = LowerCall(call, captureForDefer: true);
+                EmitPrelude(writer, lowered.Prelude);
+                _deferredCalls[defer] = lowered;
+                var tailStatements = statements[(index + 1)..];
+                var tailEnd = tailStatements.IsDefaultOrEmpty ? defer.Span.End : tailStatements[^1].Span.End;
+                var tail = new BlockStatementSyntax(defer.Source, TextSpan.FromBounds(defer.Span.End, tailEnd), tailStatements);
+                var cleanupBody = new BlockStatementSyntax(defer.Source, defer.Span, [defer]);
+                var finallyClause = new FinallyClauseSyntax(defer.Source, defer.Span, cleanupBody);
+                var synthetic = new TryStatementSyntax(defer.Source, TextSpan.FromBounds(defer.Span.Start, tailEnd), tail, [], finallyClause);
+                var deferFlow = EmitTry(writer, synthetic);
+                _deferredCalls.Remove(defer);
+                if (!reachable)
+                    RestoreAssignments(before!);
+                else
+                {
+                    exits |= deferFlow.Exits & ~FlowExit.FallThrough;
+                    reachable = deferFlow.FallsThrough;
+                }
+                break;
+            }
             var flow = EmitStatement(writer, statement);
             if (!reachable)
             {
@@ -309,6 +373,14 @@ internal sealed class MethodLowerer
                     EmitBreakOrContinue(writer, true);
                 }
                 return new FlowResult(FlowExit.Continue);
+            case DeferStatementSyntax defer:
+                if (_deferredCalls.TryGetValue(defer, out var deferred))
+                {
+                    writer.WriteLine($"(void)({deferred.Code});");
+                    return FlowResult.None;
+                }
+                Report("CT3111", "defer must be a direct member of a braced block.", defer);
+                return FlowResult.None;
             case ReturnStatementSyntax @return:
                 EmitReturn(writer, @return);
                 return new FlowResult(FlowExit.Return);
@@ -369,15 +441,15 @@ internal sealed class MethodLowerer
             AssignmentCount = initializer is null ? 0 : 1,
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
-            IsHeapBacked = _tryCount != 0,
+            IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = symbol;
         if (initializer is not null)
             EmitPrelude(writer, initializer.Prelude);
-        var qualifier = syntax.IsConst && !symbol.IsHeapBacked ? "const " : string.Empty;
-        if (symbol.IsHeapBacked)
+        var qualifier = syntax.IsConst && !symbol.IsDurable ? "const " : string.Empty;
+        if (symbol.IsDurable)
         {
-            writer.WriteLine($"{_emitter.CTypeName(type)}* {symbol.StorageName} = ({_emitter.CTypeName(type)}*)ct_alloc(sizeof({_emitter.CTypeName(type)}), {_emitter.SourceArgument(syntax)});");
+            RegisterDurableSlot(symbol.StorageName, type);
             if (initializer is not null)
                 writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
@@ -554,6 +626,7 @@ internal sealed class MethodLowerer
             IsAssigned = true,
             AssignmentCount = 1,
             LoopDepthAtDeclaration = _repeatableLoopDepth + 1,
+            IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = local;
         var index = NewTemp();
@@ -564,7 +637,13 @@ internal sealed class MethodLowerer
         var before = SnapshotAssignments();
         writer.WriteLine($"{start}:;");
         writer.WriteLine($"if ({index} >= {collection.Code}->Length) goto {@break};");
-        writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {collection.Code}->Data[{index}];");
+        if (local.IsDurable)
+        {
+            RegisterDurableSlot(local.StorageName, declaredType);
+            writer.WriteLine($"{local.CName} = {collection.Code}->Data[{index}];");
+        }
+        else
+            writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {collection.Code}->Data[{index}];");
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
         _repeatableLoopDepth++;
@@ -625,7 +704,7 @@ internal sealed class MethodLowerer
                     }
                 }
                 PushScope();
-                var flow = EmitStatements(writer, section.Statements);
+                var flow = EmitStatements(writer, section.Statements, allowDefer: false);
                 var sectionState = SnapshotAssignments();
                 PopScope();
                 sectionFlows.Add(flow);
@@ -776,7 +855,7 @@ internal sealed class MethodLowerer
         writer.WriteLine($"{frame}->Previous = ct_exception_top;");
         writer.WriteLine($"ct_exception_top = {frame};");
         _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
-        writer.WriteLine($"if (setjmp({frame}->Target) == 0)");
+        writer.WriteLine($"if (setjmp(*{frame}->Target) == 0)");
         FlowResult protectedFlow;
         using (writer.Block())
         {
@@ -786,16 +865,16 @@ internal sealed class MethodLowerer
             if (protectedFlow.FallsThrough)
             {
                 writer.WriteLine($"ct_exception_top = {frame}->Previous;");
-                writer.WriteLine($"*ct_ep_{id} = 0;");
+                writer.WriteLine($"{Durable($"ct_ep_{id}")} = 0;");
                 writer.WriteLine($"goto {cleanup};");
             }
         }
         writer.WriteLine("else");
         using (writer.Block())
         {
-            writer.WriteLine($"*ct_ex_{id} = {frame}->Exception;");
+            writer.WriteLine($"{Durable($"ct_ex_{id}")} = ({_emitter.CTypeName(_model.Types["System.Object"].Type)})(void*)ct_current_exception;");
             writer.WriteLine($"ct_exception_top = {frame}->Previous;");
-            writer.WriteLine($"*ct_ep_{id} = 4;");
+            writer.WriteLine($"{Durable($"ct_ep_{id}")} = 4;");
             writer.WriteLine($"goto {cleanup};");
         }
         _activeExceptionFrames.RemoveAt(_activeExceptionFrames.Count - 1);
@@ -814,28 +893,28 @@ internal sealed class MethodLowerer
 
         if (finallyFlow.FallsThrough)
         {
-            writer.WriteLine($"if (*ct_ep_{id} == 4) ct_throw(*ct_ex_{id}, {_emitter.SourceArgument(syntax)});");
+            writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 4) ct_throw((ct_object*)(void*){Durable($"ct_ex_{id}")}, {_emitter.SourceArgument(syntax)});");
             if (!_method.IsConstructor && _method.ReturnType != CType.Void)
             {
-                writer.WriteLine($"if (*ct_ep_{id} == 1)");
+                writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 1)");
                 using (writer.Block())
-                    EmitReturnTransfer(writer, $"*ct_er_{id}");
+                    EmitReturnTransfer(writer, Durable($"ct_er_{id}"));
             }
             else
             {
-                writer.WriteLine($"if (*ct_ep_{id} == 1)");
+                writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 1)");
                 using (writer.Block())
                     EmitReturnTransfer(writer, null);
             }
             if (context.BreakTarget is not null)
             {
-                writer.WriteLine($"if (*ct_ep_{id} == 2)");
+                writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 2)");
                 using (writer.Block())
                     EmitResumedBranch(writer, false, context.BreakTarget);
             }
             if (context.ContinueTarget is not null)
             {
-                writer.WriteLine($"if (*ct_ep_{id} == 3)");
+                writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 3)");
                 using (writer.Block())
                     EmitResumedBranch(writer, true, context.ContinueTarget);
             }
@@ -866,7 +945,7 @@ internal sealed class MethodLowerer
         writer.WriteLine($"{frame}->Previous = ct_exception_top;");
         writer.WriteLine($"ct_exception_top = {frame};");
         _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
-        writer.WriteLine($"if (setjmp({frame}->Target) == 0)");
+        writer.WriteLine($"if (setjmp(*{frame}->Target) == 0)");
         FlowResult tryFlow;
         var fallthroughStates = new List<AssignmentSnapshot>();
         using (writer.Block())
@@ -884,7 +963,7 @@ internal sealed class MethodLowerer
         var catchExits = FlowExit.None;
         using (writer.Block())
         {
-            writer.WriteLine($"ct_object* ct_caught_{id} = {frame}->Exception;");
+            writer.WriteLine($"ct_object* ct_caught_{id} = ct_current_exception;");
             writer.WriteLine($"(void)ct_caught_{id};");
             writer.WriteLine($"ct_exception_top = {frame}->Previous;");
             foreach (var boundCatch in catches)
@@ -973,10 +1052,10 @@ internal sealed class MethodLowerer
             Syntax = boundCatch.Syntax,
             IsAssigned = true,
             AssignmentCount = 1,
-            IsHeapBacked = true,
+            IsDurable = true,
         };
         _scopes.Peek()[symbol.Name] = symbol;
-        writer.WriteLine($"{_emitter.CTypeName(symbol.Type)}* {symbol.StorageName} = ({_emitter.CTypeName(symbol.Type)}*)ct_alloc(sizeof({_emitter.CTypeName(symbol.Type)}), {_emitter.SourceArgument(boundCatch.Syntax)});");
+        RegisterDurableSlot(symbol.StorageName, symbol.Type);
         writer.WriteLine($"{symbol.CName} = ({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode};");
     }
 
@@ -987,8 +1066,8 @@ internal sealed class MethodLowerer
             var context = _finallyContexts.Peek();
             EmitPopHandlersTo(writer, context.HandlerDepth);
             if (value is not null)
-                writer.WriteLine($"*ct_er_{context.TryId} = {value};");
-            writer.WriteLine($"*ct_ep_{context.TryId} = 1;");
+                writer.WriteLine($"{Durable($"ct_er_{context.TryId}")} = {value};");
+            writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = 1;");
             writer.WriteLine($"goto {context.CleanupLabel};");
             return;
         }
@@ -1003,7 +1082,7 @@ internal sealed class MethodLowerer
         if (context is not null)
         {
             EmitPopHandlersTo(writer, context.HandlerDepth);
-            writer.WriteLine($"*ct_ep_{context.TryId} = {(isContinue ? 3 : 2)};");
+            writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = {(isContinue ? 3 : 2)};");
             writer.WriteLine($"goto {context.CleanupLabel};");
             return;
         }
@@ -1018,7 +1097,7 @@ internal sealed class MethodLowerer
         if (context is not null)
         {
             EmitPopHandlersTo(writer, context.HandlerDepth);
-            writer.WriteLine($"*ct_ep_{context.TryId} = {(isContinue ? 3 : 2)};");
+            writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = {(isContinue ? 3 : 2)};");
             writer.WriteLine($"goto {context.CleanupLabel};");
         }
         else
@@ -1102,41 +1181,56 @@ internal sealed class MethodLowerer
     {
         if (_tryCount == 0)
             return;
-        var source = _method.Syntax ?? _method.ContainingType.Syntax!;
         for (var index = 0; index < _tryCount; index++)
         {
-            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {_emitter.SourceArgument(source)});");
-            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {_emitter.SourceArgument(source)});");
-            writer.WriteLine($"int32_t* ct_ep_{index} = (int32_t*)ct_alloc(sizeof(int32_t), {_emitter.SourceArgument(source)});");
-            writer.WriteLine($"ct_object** ct_ex_{index} = (ct_object**)ct_alloc(sizeof(ct_object*), {_emitter.SourceArgument(source)});");
+            writer.WriteLine($"jmp_buf ct_ej_{index}_catch;");
+            writer.WriteLine($"jmp_buf ct_ej_{index}_finally;");
+            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_catch = {{ &ct_ej_{index}_catch, NULL }};");
+            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_finally = {{ &ct_ej_{index}_finally, NULL }};");
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = &ct_ehs_{index}_catch;");
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = &ct_ehs_{index}_finally;");
+            RegisterDurableSlot($"ct_ep_{index}", CType.Int);
+            RegisterDurableSlot($"ct_ex_{index}", _model.Types["System.Object"].Type);
             writer.WriteLine($"(void)ct_eh_{index}_catch;");
             writer.WriteLine($"(void)ct_eh_{index}_finally;");
-            writer.WriteLine($"(void)ct_ep_{index};");
-            writer.WriteLine($"(void)ct_ex_{index};");
             if (!_method.IsConstructor && _method.ReturnType != CType.Void)
             {
-                writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)}* ct_er_{index} = ({_emitter.CTypeName(_method.ReturnType)}*)ct_alloc(sizeof({_emitter.CTypeName(_method.ReturnType)}), {_emitter.SourceArgument(source)});");
-                writer.WriteLine($"(void)ct_er_{index};");
+                RegisterDurableSlot($"ct_er_{index}", _method.ReturnType);
             }
         }
     }
 
-    private void EmitHeapParameterStorage(CWriter writer)
+    private void EmitDurableParameterStorage(CWriter writer)
     {
-        if (_heapParameters.Count == 0)
+        if (_durableParameters.Count == 0)
             return;
-        var source = _method.Syntax ?? _method.ContainingType.Syntax!;
         foreach (var parameter in _method.Parameters)
         {
-            var storage = _heapParameters[parameter];
-            var typeName = _emitter.CTypeName(parameter.Type);
+            var storage = _durableParameters[parameter];
             var parameterName = NameMangler.Identifier(parameter.Name);
-            writer.WriteLine($"{typeName}* {storage} = ({typeName}*)ct_alloc(sizeof({typeName}), {_emitter.SourceArgument(source)});");
-            writer.WriteLine($"*{storage} = {parameterName};");
+            RegisterDurableSlot(storage, parameter.Type);
+            writer.WriteLine($"{Durable(storage)} = {parameterName};");
         }
     }
 
     private static int CountTryStatements(BlockStatementSyntax? body) => body is null ? 0 : CountTry(body);
+
+    private static int CountDeferStatements(BlockStatementSyntax? body) => body is null ? 0 : CountDefer(body);
+
+    private static int CountDefer(StatementSyntax statement) => statement switch
+    {
+        DeferStatementSyntax => 1,
+        TryStatementSyntax @try => CountDefer(@try.Body) + @try.Catches.Sum(catchClause => CountDefer(catchClause.Body)) + (@try.Finally is null ? 0 : CountDefer(@try.Finally.Body)),
+        BlockStatementSyntax block => block.Statements.Sum(CountDefer),
+        IfStatementSyntax @if => CountDefer(@if.Then) + (@if.Else is null ? 0 : CountDefer(@if.Else)),
+        WhileStatementSyntax @while => CountDefer(@while.Body),
+        DoStatementSyntax @do => CountDefer(@do.Body),
+        ForStatementSyntax @for => CountDefer(@for.Body) + (@for.Initializer is null ? 0 : CountDefer(@for.Initializer)),
+        ForeachStatementSyntax @foreach => CountDefer(@foreach.Body),
+        SwitchStatementSyntax @switch => @switch.Sections.Sum(section => section.Statements.Sum(CountDefer)),
+        UnsafeStatementSyntax unsafeStatement => CountDefer(unsafeStatement.Body),
+        _ => 0,
+    };
 
     private static int CountTry(StatementSyntax statement) => statement switch
     {
@@ -1344,8 +1438,8 @@ internal sealed class MethodLowerer
         {
             if (parameter.Type.ContainsPointer)
                 RequireUnsafe(syntax);
-            var name = _heapParameters.TryGetValue(parameter, out var storage)
-                ? $"(*{storage})"
+            var name = _durableParameters.TryGetValue(parameter, out var storage)
+                ? Durable(storage)
                 : NameMangler.Identifier(parameter.Name);
             return new LoweredExpression
             {
@@ -1524,6 +1618,11 @@ internal sealed class MethodLowerer
         }
         if (!forWrite && property.Getter is null)
             Report("CT2117", $"Property '{property.Name}' has no getter.", syntax);
+        var selectedAccessor = forWrite
+            ? property.Setter is null ? null : _emitter.GetAccessorMethod(property, getter: false)
+            : property.Getter is null ? null : _emitter.GetAccessorMethod(property, getter: true);
+        if (selectedAccessor is not null)
+            _emitter.AllocationEffects.RecordCall(_method, selectedAccessor, syntax, property.IsVirtual && !baseReceiver);
         var typedReceiver = property.IsStatic ? string.Empty : $"({NameMangler.Type(property.ContainingType)}*)(void*){receiverArgument}";
         var objectReceiver = property.IsStatic ? string.Empty : $"((ct_object*)(void*){receiverArgument})";
         var getterCode = property.Getter is null
@@ -1542,6 +1641,8 @@ internal sealed class MethodLowerer
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(property)}({objectReceiver}, {value})"
                     : $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : typedReceiver + ", ")}{value})",
                 Field = property.BackingField,
+                Property = property,
+                IsBaseReceiver = baseReceiver,
             },
         };
     }
@@ -1591,6 +1692,7 @@ internal sealed class MethodLowerer
             if (type.Kind != CTypeKind.Array)
                 return ErrorExpression();
             _emitter.RegisterType(type);
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, "array construction");
             var length = Materialize(Convert(LowerExpression(syntax.ArrayLength), CType.Int, syntax.ArrayLength, false), syntax.ArrayLength);
             var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = type, Code = code, Prelude = length.Prelude };
@@ -1605,6 +1707,9 @@ internal sealed class MethodLowerer
         if (constructor is null)
             return ErrorExpression(arguments.SelectMany(argument => argument.Prelude));
         CheckAccess(constructor, syntax);
+        _emitter.AllocationEffects.RecordCall(_method, constructor, syntax, requiresContract: false);
+        if (type.Kind == CTypeKind.Class)
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"construction of class '{type.DisplayName}'");
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
         return new LoweredExpression { Type = type, Code = $"{constructor.CName}({string.Join(", ", lowered.Codes)})", Prelude = lowered.Prelude };
     }
@@ -1625,7 +1730,7 @@ internal sealed class MethodLowerer
         return _model.ResolveNamedType(qualified, TreeFor(expression));
     }
 
-    private LoweredExpression LowerCall(CallExpressionSyntax syntax)
+    private LoweredExpression LowerCall(CallExpressionSyntax syntax, bool captureForDefer = false)
     {
         TypeSymbol? containingType = null;
         LoweredExpression? receiver = null;
@@ -1650,7 +1755,7 @@ internal sealed class MethodLowerer
             {
                 receiver = LowerExpression(member.Receiver);
                 if (member.Name == "ToString" && SupportsBuiltInToString(receiver.Type))
-                    return LowerBuiltInToString(syntax, member, receiver);
+                    return LowerBuiltInToString(syntax, member, receiver, captureForDefer);
                 containingType = receiver.Type.Symbol;
                 if (containingType is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
                     containingType = _model.Types.GetValueOrDefault("System.Object");
@@ -1692,6 +1797,7 @@ internal sealed class MethodLowerer
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
+        _emitter.AllocationEffects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
 
         var prelude = new List<string>();
         string? receiverCode = null;
@@ -1702,11 +1808,26 @@ internal sealed class MethodLowerer
                 : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
             if ((selected.ContainingType.IsObject || selected.IsVirtual && receiver.Type.IsValueType) && receiver.Type != _model.Types["System.Object"].Type)
                 receiver = Convert(receiver, _model.Types["System.Object"].Type, syntax.Target, false);
-            var loweredReceiver = MaterializeReceiver(receiver, syntax.Target);
-            prelude.AddRange(loweredReceiver.Prelude);
-            receiverCode = loweredReceiver.Code;
+            if (captureForDefer)
+            {
+                prelude.AddRange(receiver.Prelude);
+                var slot = $"ct_df_{_deferId}_receiver";
+                RegisterDurableSlot(slot, receiver.Type);
+                prelude.Add($"{Durable(slot)} = {receiver.Code};");
+                receiverCode = receiver.Type.Kind == CTypeKind.Struct
+                    ? $"({_emitter.CTypeName(receiver.Type)}*)(void*)&{Durable(slot)}"
+                    : $"({_emitter.CTypeName(receiver.Type)})ct_require_nonnull({Durable(slot)}, {_emitter.SourceArgument(syntax.Target)})";
+            }
+            else
+            {
+                var loweredReceiver = MaterializeReceiver(receiver, syntax.Target);
+                prelude.AddRange(loweredReceiver.Prelude);
+                receiverCode = loweredReceiver.Code;
+            }
         }
-        var loweredArguments = LowerArguments(arguments, selected.Parameters, syntax.Arguments);
+        var loweredArguments = captureForDefer
+            ? CaptureDeferredArguments(arguments, selected.Parameters, syntax.Arguments)
+            : LowerArguments(arguments, selected.Parameters, syntax.Arguments);
         prelude.AddRange(loweredArguments.Prelude);
 
         var callArguments = new List<string>();
@@ -1728,6 +1849,8 @@ internal sealed class MethodLowerer
                 callArguments[0] = $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
             call = $"{selected.CName}({string.Join(", ", callArguments)})";
         }
+        if (captureForDefer)
+            _deferId++;
         return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
     }
 
@@ -1735,7 +1858,7 @@ internal sealed class MethodLowerer
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
         CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.String;
 
-    private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver)
+    private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver, bool captureForDefer = false)
     {
         var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
         if (arguments.Length != 0)
@@ -1744,9 +1867,21 @@ internal sealed class MethodLowerer
             return ErrorExpression(receiver.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
         }
 
-        receiver = Materialize(receiver, member.Receiver);
+        if (captureForDefer)
+        {
+            var prelude = new List<string>(receiver.Prelude);
+            var slot = $"ct_df_{_deferId}_receiver";
+            RegisterDurableSlot(slot, receiver.Type);
+            prelude.Add($"{Durable(slot)} = {receiver.Code};");
+            receiver = new LoweredExpression { Type = receiver.Type, Code = Durable(slot), Prelude = prelude };
+            _deferId++;
+        }
+        else
+            receiver = Materialize(receiver, member.Receiver);
         if (receiver.Type.Kind == CTypeKind.String)
         {
+            if (captureForDefer)
+                return new LoweredExpression { Type = CType.String, Code = $"(ct_string*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)})", Prelude = receiver.Prelude };
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)});");
             return new LoweredExpression { Type = CType.String, Code = receiver.Code, Prelude = receiver.Prelude };
         }
@@ -1767,6 +1902,7 @@ internal sealed class MethodLowerer
             _ => receiver.Code,
         };
         var code = $"{function}({argument}, {_emitter.SourceArgument(member)})";
+        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"conversion of '{receiver.Type.DisplayName}' to string");
         return new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude };
     }
 
@@ -1844,6 +1980,22 @@ internal sealed class MethodLowerer
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(converted.Type)} {temp} = {converted.Code};");
             codes.Add(temp);
+        }
+        return (prelude, codes);
+    }
+
+    private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ExpressionSyntax> syntax)
+    {
+        var prelude = new List<string>();
+        var codes = new List<string>();
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var converted = Convert(arguments[index], parameters[index].Type, syntax[index], false);
+            prelude.AddRange(converted.Prelude);
+            var slot = $"ct_df_{_deferId}_arg_{index}";
+            RegisterDurableSlot(slot, converted.Type);
+            prelude.Add($"{Durable(slot)} = {converted.Code};");
+            codes.Add(Durable(slot));
         }
         return (prelude, codes);
     }
@@ -1976,6 +2128,11 @@ internal sealed class MethodLowerer
             return ErrorExpression(target.Prelude);
         }
         ValidateAssignmentTarget(target.LValue, syntax);
+        if (target.LValue.Property is { Getter: not null } property)
+        {
+            var getter = _emitter.GetAccessorMethod(property, getter: true);
+            _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Operand, property.IsVirtual && !target.LValue.IsBaseReceiver);
+        }
         var prelude = new List<string>(target.Prelude);
         var old = NewTemp();
         prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
@@ -2012,6 +2169,7 @@ internal sealed class MethodLowerer
             left = Materialize(left, syntax.Left);
             right = Materialize(right, syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, "nonconstant string concatenation");
             return new LoweredExpression { Type = CType.String, Code = $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", Prelude = prelude };
         }
 
@@ -2179,6 +2337,12 @@ internal sealed class MethodLowerer
             Report("CT2149", "The remainder operator requires integral operands.", syntax);
             return ErrorExpression(prelude.Concat(rawRight.Prelude));
         }
+
+        if (target.LValue.Property is { Getter: not null } property)
+        {
+            var getter = _emitter.GetAccessorMethod(property, getter: true);
+            _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Left, property.IsVirtual && !target.LValue.IsBaseReceiver);
+        }
         var operationType = TypeFacts.PromoteNumeric(target.Type, rawRight.Type);
         var right = Convert(rawRight, operationType, syntax.Right, true);
         prelude.AddRange(right.Prelude);
@@ -2294,6 +2458,7 @@ internal sealed class MethodLowerer
             if (sourceType.ContainsPointer)
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(sourceType);
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
             var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return new LoweredExpression { Type = target, Code = boxCode, Prelude = expression.Prelude };
         }

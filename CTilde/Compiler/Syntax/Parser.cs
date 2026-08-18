@@ -307,6 +307,7 @@ internal sealed class Parser
             SyntaxKind.SwitchKeyword => ParseSwitch(),
             SyntaxKind.BreakKeyword => ParseSimpleJump(true),
             SyntaxKind.ContinueKeyword => ParseSimpleJump(false),
+            SyntaxKind.DeferKeyword => ParseDefer(),
             SyntaxKind.ReturnKeyword => ParseReturn(),
             SyntaxKind.ThrowKeyword => ParseThrow(),
             SyntaxKind.TryKeyword => ParseTry(),
@@ -459,6 +460,14 @@ internal sealed class Parser
         var expression = Current.Kind == SyntaxKind.SemicolonToken ? null : ParseExpression();
         var end = Match(SyntaxKind.SemicolonToken).Span.End;
         return new ReturnStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
+    }
+
+    private DeferStatementSyntax ParseDefer()
+    {
+        var start = NextToken().Span.Start;
+        var expression = ParseExpression();
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new DeferStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
     }
 
     private ThrowStatementSyntax ParseThrow()

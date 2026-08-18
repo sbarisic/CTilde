@@ -67,6 +67,7 @@ public sealed class Compilation
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics);
             _emitter = new CEmitter(model, Options.Target);
             _ir = new TypedIrLowerer(model, _emitter).Lower();
+            _emitter.AllocationEffects.Validate(diagnostics);
             TargetValidator.Validate(model, _emitter, Options.Target);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;

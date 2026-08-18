@@ -202,6 +202,8 @@ Returning from the C~ entry method returns from `app_main`; it does not stop the
 
 `[Extern("symbol")]` applies to a static, bodyless method. The symbol string must be a portable C identifier. It cannot be a C23 keyword. It cannot start with an underscore.
 
+`[NoAlloc]` on an extern is a trusted assertion that its native implementation does not allocate through the C~ heap. The compiler cannot inspect native code. An unannotated extern is therefore an allocation boundary for a contracted caller.
+
 The compiler emits an external C prototype using the mappings in this document. The native definition must use exactly that ABI. Arrays, strings, classes, and structures are C~ runtime layouts, not libc substitutes.
 
 External names cannot collide with `main`, runtime definitions, or generated symbols. Compiler-owned symbols include descriptors, vtables, thunks, box helpers, exception handlers, cleanup state, and durable local-storage prefixes.
@@ -214,27 +216,26 @@ ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked 
 
 ## Exceptions
 
-The compiler includes `<setjmp.h>` only when the program uses exception syntax. The generated runtime then defines:
+The compiler includes `<setjmp.h>` only when the program uses exception or `defer` syntax. The generated runtime then defines:
 
 ```c
 typedef struct ct_exception_frame {
-    jmp_buf Target;
+    jmp_buf* Target;
     struct ct_exception_frame* Previous;
-    ct_object* Exception;
 } ct_exception_frame;
 ```
 
-One process-global pointer identifies the active handler. Draft 0.5 handler state is single-threaded.
+One process-global pointer identifies the active handler, and one process-global `ct_object*` holds the currently thrown exception. Draft 0.5 handler state is single-threaded.
 
-Each invocation of a method that contains a try statement allocates durable handler and cleanup storage with program lifetime. Parameters and C~ locals in that method use heap-backed slots. This prevents a read of a C automatic object that became indeterminate because it changed after `setjmp` and before `longjmp`.
+Each invocation of a method that contains `try` or `defer` creates its `jmp_buf` values and handler frames on the C stack. Parameters, C~ locals, caught exceptions, pending actions, return payloads, and defer captures that can survive `longjmp` are fields in one compiler-generated `volatile` automatic method-state aggregate. This avoids indeterminate modified C automatic values without calling `ct_alloc` for control state.
 
-Each lexical try statement owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
+Each lexical try statement or lowered defer cleanup region owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
 
 The generated `setjmp` call is the controlling expression of an `if`. Normal and exceptional paths pop the active frame before a catch starts. Catch matching follows the runtime descriptor base chain. Rethrow passes the same `ct_object*` to the next active frame.
 
-Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it.
+Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it. `defer` captures its bound receiver and converted arguments before the protected remainder, then uses nested finally lowering to produce allocation-free LIFO cleanup without a runtime registration list.
 
-`Environment.Exit` calls native process termination directly. It does not unwind C~ handlers and does not run finally blocks.
+`Environment.Exit` calls native process termination directly. It does not unwind C~ handlers and does not run finally blocks or defers.
 
 ## Runtime failures
 
@@ -262,6 +263,6 @@ The existing null, array, allocation, division, string, cast, and unboxing failu
 
 ## Lifetime
 
-Class instances, arrays, concatenated or scalar-formatted strings, exception objects, durable method slots, handler frames, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them. On ESP-IDF, permanent loops must keep allocation bounded.
+Class instances, arrays, concatenated or scalar-formatted strings, exception objects, and their managed data use zero-initialized program-lifetime allocation. Exception frames, cleanup state, and defer captures use automatic storage and do not call `ct_alloc`. The generated runtime does not free managed objects. On ESP-IDF, permanent loops must keep allocation bounded or stay within compiler-verified `[NoAlloc]` paths.
 
 This preserves managed reference identity and removes use-after-free from safe C~ code. A future collector can replace the allocator without changing source semantics or object layouts described here.

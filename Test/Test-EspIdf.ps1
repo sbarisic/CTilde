@@ -42,7 +42,7 @@ try {
         $riscv = Find-Compiler (Join-Path $ToolsPath "riscv32-esp-elf") "riscv32-esp-elf-gcc.exe"
         foreach ($compiler in @($xtensa, $riscv)) {
             foreach ($source in @($hello, $exceptions)) {
-                Invoke-Checked $compiler @("-std=gnu23", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-I", (Join-Path $exampleDirectory "main"), $source)
+                Invoke-Checked $compiler @("-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-I", (Join-Path $exampleDirectory "main"), $source)
                 Write-Host "PASS $([IO.Path]::GetFileName($compiler)) $([IO.Path]::GetFileName($source))"
             }
         }

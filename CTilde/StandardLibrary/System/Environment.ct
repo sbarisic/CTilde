@@ -3,5 +3,6 @@ namespace System;
 public static class Environment
 {
     [Extern("ct_environment_exit")]
+    [NoAlloc]
     public static void Exit(int code);
 }

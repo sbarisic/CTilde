@@ -1,13 +1,13 @@
 # Implementation status
 
-Last reviewed: 2026-08-18
+Last reviewed: 2026-08-19
 
 ## Current state
 
 C~ draft 0.5 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> combined binding and flow -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> combined binding, flow, and allocation effects -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -23,12 +23,12 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 59 managed and native checks, plus an end-to-end LSP protocol check in the VS Code package.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 62 managed and native checks, plus an end-to-end LSP protocol check in the VS Code package.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
 ```text
-cl /std:clatest /W4 /WX
+cl /std:clatest /O2 /W4 /WX /wd4702
 ```
 
 The checked feature example prints:
@@ -55,12 +55,12 @@ cleanup
 The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. That compiler uses the draft compatibility spelling for the C23 dialect:
 
 ```text
-gcc -std=gnu2x -Wall -Wextra -Werror
+gcc -std=gnu2x -O2 -Wall -Wextra -Werror
 ```
 
 It exits successfully and produces the same checked output. The runner tries `gnu23` and retries with `gnu2x` only after an unsupported-option error. `CTILDE_CC` accepts compiler paths, `wsl:gcc`, and `wsl:clang`. `CTILDE_C_STANDARD` forces one dialect.
 
-Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -Wall -Wextra -Werror`.
+Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O2 -Wall -Wextra -Werror`.
 
 ## Language support
 
@@ -80,6 +80,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -W
 | `throw` and rethrow | Implemented | Cross-call throw, null throw, rethrow identity, and replacement tests |
 | Typed and catch-all handlers | Implemented | Source-order matching, reachability diagnostics, and native dispatch tests |
 | `finally` cleanup | Implemented | Normal, return, break, continue, and exception cleanup tests |
+| `defer` cleanup | Implemented | Immediate capture, receiver capture, LIFO, block, loop, transfer, and cleanup-exception tests |
 | Boxing and exact unboxing | Implemented | Scalar, enum, structure, and unsafe pointer tests |
 | Checked casts, `is`, and `as` | Implemented | Positive, null, mismatch, and runtime-failure tests |
 | Structures | Implemented | Native feature example |
@@ -104,6 +105,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -W
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
 | `[Extern]` | Implemented | Reserved-name, collision, alias, ABI, and prototype tests |
+| `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
 | Bundled `System.Object`, `System.Console`, and `System.Environment` sources | Implemented | Embedded-source and native output tests |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |
@@ -138,16 +140,18 @@ The executable test project checks:
 - Deterministic handler, `setjmp`, catch-dispatch, pending-action, and finally lowering.
 - Durable integer, string, structure, parameter, and return state across `longjmp`.
 - Handler cleanup on normal completion, return, loop transfer, catch, rethrow, and finally paths.
+- Stack-backed exception and defer state with no control-flow `ct_alloc` calls.
+- `[NoAlloc]` direct allocation categories, recursive inference, transitive witnesses, and trusted boundary contracts.
 
 The full examples in [examples/Features.ct](examples/Features.ct), [examples/ObjectModel.ct](examples/ObjectModel.ct), and [examples/Exceptions.ct](examples/Exceptions.ct) are part of the native and ABI checks.
 
 ## Runtime status
 
-Managed objects and exception-method durable slots currently use program-lifetime allocation. This is conforming draft 0.5 behavior.
+Managed objects currently use program-lifetime allocation. Exception frames, pending cleanup actions, durable locals, and defer captures use automatic method storage and do not consume the managed heap.
 
 The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
 
-Exception handlers use one process-global `setjmp` and `longjmp` stack. The implementation is single-threaded. Methods with try statements store parameters and C~ locals in durable heap slots.
+Exception handlers use one process-global `setjmp` and `longjmp` stack plus one current-exception pointer. The implementation is single-threaded. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate.
 
 The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
 

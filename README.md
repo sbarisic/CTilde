@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.5. It adds unchecked exceptions, typed and catch-all handlers, rethrow, and finally cleanup to the draft 0.4 object model. It does not require a CLR or C# runtime.
+The current language is draft 0.5. It includes unchecked exceptions, deterministic `finally` and `defer` cleanup, and compiler-verified `[NoAlloc]` contracts. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -87,7 +87,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing. [examples/Exceptions.ct](examples/Exceptions.ct) covers typed catch and finally cleanup.
+See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing. [examples/Exceptions.ct](examples/Exceptions.ct) covers typed catch and finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer` capture and `[NoAlloc]` allocation rules.
 
 ## Public compiler API
 

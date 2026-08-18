@@ -39,12 +39,12 @@ internal sealed class TypedIrLowerer(CompilationModel model, CEmitter emitter)
             {
                 if (property.Getter is not null)
                 {
-                    var method = AccessorMethod(property, true);
+                    var method = emitter.GetAccessorMethod(property, true);
                     definitions.Add(ToIr(method, LowerAccessor(property, method, true)));
                 }
                 if (property.Setter is not null)
                 {
-                    var method = AccessorMethod(property, false);
+                    var method = emitter.GetAccessorMethod(property, false);
                     definitions.Add(ToIr(method, LowerAccessor(property, method, false)));
                 }
             }
@@ -76,23 +76,6 @@ internal sealed class TypedIrLowerer(CompilationModel model, CEmitter emitter)
     {
         var name = getter ? NameMangler.Getter(property) : NameMangler.Setter(property);
         return new MethodLowerer(emitter, method, name, property, getter).EmitDefinition();
-    }
-
-    private static MethodSymbol AccessorMethod(PropertySymbol property, bool getter)
-    {
-        var syntax = getter ? property.Getter! : property.Setter!;
-        var parameters = getter ? ImmutableArray<ParameterSymbol>.Empty : [new ParameterSymbol { Name = "value", Type = property.Type, Syntax = null }];
-        return new MethodSymbol
-        {
-            Name = getter ? $"get_{property.Name}" : $"set_{property.Name}",
-            ContainingType = property.ContainingType,
-            Accessibility = property.Accessibility,
-            IsStatic = property.IsStatic,
-            Syntax = syntax,
-            ReturnType = getter ? property.Type : CType.Void,
-            Parameters = parameters,
-            Body = syntax.Body,
-        };
     }
 
     private string LowerModuleInitializer()

@@ -119,6 +119,7 @@ internal sealed class PropertySymbol : MemberSymbol
     public bool IsVirtual { get; init; }
     public bool IsOverride { get; init; }
     public bool IsSealedOverride { get; init; }
+    public bool IsNoAlloc { get; set; }
     public PropertySymbol? OverriddenProperty { get; set; }
 }
 
@@ -136,6 +137,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public required BlockStatementSyntax? Body { get; init; }
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
+    public bool IsNoAlloc { get; set; }
     public string? ExternName { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }
@@ -162,9 +164,9 @@ internal sealed class LocalSymbol
     public int AssignmentCount { get; set; }
     public string? ConstantCode { get; set; }
     public object? ConstantValue { get; set; }
-    public bool IsHeapBacked { get; init; }
-    public string StorageName => IsHeapBacked ? $"ct_lp_{Id}" : $"ct_l_{Id}";
-    public string CName => IsHeapBacked ? $"(*{StorageName})" : StorageName;
+    public bool IsDurable { get; init; }
+    public string StorageName => IsDurable ? $"ct_lp_{Id}" : $"ct_l_{Id}";
+    public string CName => IsDurable ? $"ct_state.{StorageName}" : StorageName;
 }
 
 internal static class NameMangler

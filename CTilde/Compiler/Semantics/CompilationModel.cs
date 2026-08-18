@@ -291,7 +291,10 @@ internal sealed class CompilationModel
             case PropertyDeclarationSyntax property:
                 {
                     ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], property);
-                    ValidateAttributes(property.Attributes, property, []);
+                    ValidateAttributes(property.Attributes, property, ["NoAlloc"]);
+                    var noAlloc = FindAttribute(property.Attributes, "NoAlloc");
+                    if (noAlloc is not null && noAlloc.Arguments.Length != 0)
+                        Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     if (property.Getter is null && property.Setter is null)
                         Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
                     var propertyType = ResolveType(property.Type, tree);
@@ -331,6 +334,7 @@ internal sealed class CompilationModel
                         IsVirtual = property.Modifiers.Contains("virtual", StringComparer.Ordinal) || property.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsOverride = property.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = property.Modifiers.Contains("sealed", StringComparer.Ordinal),
+                        IsNoAlloc = noAlloc is not null,
                     };
                     if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
                         Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
@@ -365,11 +369,14 @@ internal sealed class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NoAlloc"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
+                    var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
+                    if (noAlloc is not null && noAlloc.Arguments.Length != 0)
+                        Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     string? externalName = null;
                     if (external is not null)
                     {
@@ -395,6 +402,7 @@ internal sealed class CompilationModel
                         Parameters = methodParameters,
                         Body = method.Body,
                         IsEntryPoint = entry is not null,
+                        IsNoAlloc = noAlloc is not null,
                         ExternName = externalName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
                         IsVirtual = method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
@@ -508,7 +516,10 @@ internal sealed class CompilationModel
                         candidate.SetterAccessibility != property.SetterAccessibility)
                         Diagnostics.Add("CT1229", $"Property '{property.Name}' does not match an accessible unsealed virtual base property.", property.Syntax!.Source, property.Syntax.Span);
                     else
+                    {
                         property.OverriddenProperty = candidate;
+                        property.IsNoAlloc |= candidate.IsNoAlloc;
+                    }
                 }
                 else if (candidate is not null)
                     Diagnostics.Add("CT1230", $"Property '{property.Name}' hides an inherited property; use override for a virtual property.", property.Syntax!.Source, property.Syntax.Span);
@@ -528,7 +539,10 @@ internal sealed class CompilationModel
                     if (candidate is null || !candidate.IsVirtual || candidate.IsSealedOverride || candidate.ReturnType != method.ReturnType || candidate.Accessibility != method.Accessibility)
                         Diagnostics.Add("CT1229", $"Method '{method.Name}' does not match an accessible unsealed virtual base method.", method.Syntax!.Source, method.Syntax.Span);
                     else
+                    {
                         method.OverriddenMethod = candidate;
+                        method.IsNoAlloc |= candidate.IsNoAlloc;
+                    }
                 }
                 else if (candidate is not null && type.Kind == DeclaredTypeKind.Class)
                     Diagnostics.Add("CT1230", $"Method '{method.Name}' hides an inherited method; use override for a virtual method.", method.Syntax!.Source, method.Syntax.Span);
@@ -567,7 +581,7 @@ internal sealed class CompilationModel
             "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals",
             "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",
             "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", "NAN", "INFINITY",
-            "ct_exception_frame", "ct_exception_top", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
+            "ct_exception_frame", "ct_exception_top", "ct_current_exception", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)

@@ -122,14 +122,14 @@ int @class = 1;
 ```text
 as        base       bool       break      byte       case
 catch     char       class      const      continue   default
-do        else       enum       false      finally    float
-for       foreach    get        if         in         int
-internal  is         namespace  new        null       object
-override  private    protected  public     readonly   return
-sbyte     sealed     set        short      static     string
-struct    switch     this       throw      true       try
-uint      unsafe     ushort     using      var        virtual
-void      while
+defer     do         else       enum       false      finally
+float     for        foreach    get        if         in
+int       internal   is         namespace  new        null
+object    override   private    protected  public     readonly
+return    sbyte      sealed     set        short      static
+string    struct     switch     this       throw      true
+try       uint       unsafe     ushort     using      var
+virtual   void       while
 ```
 
 `get` and `set` are meaningful only in property declarations. `default` is a switch label.
@@ -447,6 +447,14 @@ The compiler rejects `main`, runtime names, and generated symbol names. Repeated
 
 Unknown attributes, invalid targets, duplicate attributes, and non-constant arguments are errors.
 
+### NoAlloc
+
+`[NoAlloc]` accepts no arguments. It can annotate a method, extern method, or property. A property contract applies to every accessor it declares. A virtual contract is inherited by overrides. Arguments report `CT1233`; a contract that may allocate reports `CT2155`.
+
+The compiler rejects a contracted member when any reachable generated code can call `ct_alloc`. It infers body-bearing, statically dispatched helper effects to a fixed point, including recursive calls. An annotated extern is a trusted native assertion. An extern or virtual dispatch boundary without an effective `[NoAlloc]` contract is rejected from contracted code.
+
+Allocating operations are class and array construction, boxing, nonconstant string concatenation, scalar, Boolean, and character `ToString()`, and calls whose inferred effects allocate. String literals, folded constant concatenation, `string.ToString()`, unboxing, casts, allocation-free structure construction, and exception/defer control state do not allocate. Diagnostics include a deterministic call-chain witness.
+
 ## Core library
 
 The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
@@ -555,6 +563,14 @@ A `do` body executes once for definite assignment. The compiler merges normal co
 
 Constructors do not use a C~ return statement.
 
+### Defer
+
+`defer Call(args);` schedules one method invocation for the end of the containing braced block. The receiver and converted arguments are evaluated in source order and copied into hidden durable automatic storage when execution reaches the statement. A returned value is discarded. A non-call expression reports `CT2156`.
+
+Deferred calls run in reverse registration order on fallthrough, `return`, `break`, `continue`, and C~ exception propagation. A defer in a loop block registers once for each executed iteration. `defer` must be a direct member of a braced block; an `if`, loop, or switch section must add braces around it. Invalid placement reports `CT3111`.
+
+If cleanup throws, older enclosing defers still run. The final cleanup exception replaces an earlier exception or pending return, matching nested `finally` behavior. Fatal runtime failures, `Environment.Exit`, native `abort`, reset, and power loss do not run deferred calls.
+
 ### Exceptions
 
 `throw expression;` throws a non-null reference whose runtime type derives from `System.Exception`. The conversion to `System.Exception` is implicit. Throwing `null` terminates the process with `CTE0002`.
@@ -590,7 +606,7 @@ Catch clauses run in source order. A typed catch accepts the declared type and i
 
 Exceptions are unchecked. Every call can complete by throwing. A throw from a catch propagates to an enclosing handler and cannot enter a sibling catch.
 
-A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks.
+A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
 Exception filters, inner exceptions, stack traces, specialized exception subclasses, automatic disposal, and exceptions across native callback boundaries are not part of draft 0.5.
 
@@ -614,9 +630,9 @@ Draft 0.5 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator. Draft 0.5 permits the runtime to retain all managed allocations until process exit.
+C~ source has no `delete` operator. Draft 0.5 permits the runtime to retain all managed allocations until process exit. `[NoAlloc]` can prove that selected call paths do not add managed allocations.
 
-External resources require explicit release. There is no language `using` statement for disposal.
+External resources require explicit release. `defer` provides deterministic block cleanup for user-defined native release calls; there is no language `using` statement or automatic `Dispose` convention.
 
 Managed null access, invalid casts, invalid unboxing, array failures, allocation failures, integer division by zero, and string overflow terminate the program. These runtime failures are not catchable.
 
@@ -653,7 +669,7 @@ The canonical backend is GNU C23. Draft 0.5 has no second backend.
 - References and pointers use the target C ABI width.
 - Signed integer overflow is always wrapping.
 - `readonly` locals permit one delayed assignment.
-- Managed allocations can live until process exit.
+- Managed allocations can live until process exit; `[NoAlloc]` is the opt-in compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.5 defers interfaces, abstract types, generics, exception filters, inner exceptions, stack traces, specialized exception subclasses, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal, native-boundary unwinding, and thread-safe exception handlers.
+Draft 0.5 defers interfaces, abstract types, generics, exception filters, inner exceptions, stack traces, specialized exception subclasses, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, native-boundary unwinding, and thread-safe exception handlers.

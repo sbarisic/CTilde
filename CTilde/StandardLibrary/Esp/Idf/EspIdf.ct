@@ -3,39 +3,49 @@ namespace Esp.Idf;
 public static class FreeRtos
 {
     [Extern("ct_esp_delay_ms")]
+    [NoAlloc]
     public static void DelayMilliseconds(uint milliseconds);
 
     [Extern("ct_esp_tick_count")]
+    [NoAlloc]
     public static uint GetTickCount();
 
     [Extern("ct_esp_stack_high_water_mark")]
+    [NoAlloc]
     public static uint GetStackHighWaterMark();
 }
 
 public static class EspSystem
 {
     [Extern("ct_esp_restart")]
+    [NoAlloc]
     public static void Restart();
 
     [Extern("ct_esp_free_heap_size")]
+    [NoAlloc]
     public static uint GetFreeHeapSize();
 
     [Extern("ct_esp_minimum_free_heap_size")]
+    [NoAlloc]
     public static uint GetMinimumFreeHeapSize();
 }
 
 public static class Gpio
 {
     [Extern("ct_esp_gpio_configure_input")]
+    [NoAlloc]
     public static bool ConfigureInput(int pin);
 
     [Extern("ct_esp_gpio_configure_output")]
+    [NoAlloc]
     public static bool ConfigureOutput(int pin);
 
     [Extern("ct_esp_gpio_write")]
+    [NoAlloc]
     public static bool Write(int pin, bool high);
 
     [Extern("ct_esp_gpio_read")]
+    [NoAlloc]
     public static bool Read(int pin);
 }
 
@@ -45,11 +55,14 @@ public static class Ws2812
     public static bool Configure(int pin, uint ledCount);
 
     [Extern("ct_esp_ws2812_set_pixel")]
+    [NoAlloc]
     public static bool SetPixel(uint index, uint red, uint green, uint blue);
 
     [Extern("ct_esp_ws2812_refresh")]
+    [NoAlloc]
     public static bool Refresh();
 
     [Extern("ct_esp_ws2812_clear")]
+    [NoAlloc]
     public static bool Clear();
 }

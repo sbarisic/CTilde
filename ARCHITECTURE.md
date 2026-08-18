@@ -33,7 +33,8 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
 - `MethodLowerer` currently combines name binding, access and conversion checks, overload resolution, flow analysis, and ordered C-fragment lowering.
 - The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
-- Exception lowering owns lexical handler frames, durable local slots, catch dispatch, rethrow, and pending finally actions.
+- Exception lowering owns automatic lexical handler frames, volatile durable method state, catch dispatch, rethrow, and pending finally/defer actions.
+- `AllocationEffectRegistry` records direct allocation reasons and exact or virtual call edges during lowering, computes recursive effects to a fixed point, and verifies `[NoAlloc]` contracts with deterministic witnesses.
 - `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
 - `CEmitter` consumes the transitional IR and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy.
@@ -135,6 +136,7 @@ Control-flow analysis carries explicit lexical scopes and assignment state.
 - A throw is a non-fallthrough exit. Catch bodies start with the assignment state from before the try.
 - A finally body also starts with the pre-try assignment state because any call can throw. Normal try, catch, and finally assignments merge for subsequent code.
 - Return, break, continue, and exception exits that cross finally lower to an explicit pending action and one cleanup label.
+- A direct block `defer` captures its receiver and converted arguments before the remaining statements. Nested finally regions provide LIFO cleanup and reuse the same pending-action transfers.
 
 A bound expression contains:
 
@@ -185,9 +187,9 @@ The generated translation unit embeds a small runtime:
 - Immutable UTF-8 strings and concatenation.
 - Console output and process exit.
 - A single-thread `setjmp` and `longjmp` handler stack for C~ exceptions.
-- Heap-backed parameters and locals in methods with try statements, so modified C automatic storage is not read after `longjmp`.
+- One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
 
-Managed storage is not reclaimed before process exit. C~ source has no `delete` operation.
+Managed storage is not reclaimed before process exit. Exception/defer control state is stack-backed. C~ source has no `delete` operation.
 
 Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
 

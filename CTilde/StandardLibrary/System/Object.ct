@@ -40,8 +40,10 @@ internal static class ObjectRuntime
     internal static string ToString(object value);
 
     [Extern("ct_object_hash")]
+    [NoAlloc]
     internal static int GetHashCode(object value);
 
     [Extern("ct_object_reference_equals")]
+    [NoAlloc]
     internal static bool ReferenceEquals(object left, object right);
 }

@@ -59,7 +59,7 @@ test("every draft 0.5 keyword receives its intended scope", () => {
       scope: "storage.modifier.ctilde"
     },
     {
-      words: ["break", "case", "catch", "continue", "default", "do", "else", "finally", "for", "foreach", "if", "in", "return", "switch", "throw", "try", "while"],
+      words: ["break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "return", "switch", "throw", "try", "while"],
       scope: "keyword.control.ctilde"
     },
     {

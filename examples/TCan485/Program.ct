@@ -61,7 +61,6 @@ public static class Program
         Console.Write("tick: ");
         Console.WriteLine(FreeRtos.GetTickCount());
 
-
         Console.WriteLine("CTILDE_ESP_OK");
         bool high = false;
         while (true)
@@ -72,6 +71,7 @@ public static class Program
                 updated = Ws2812.SetPixel(0u, 0u, 16u, 0u) && Ws2812.Refresh();
             else
                 updated = Ws2812.Clear();
+                
             if (!updated)
             {
                 Console.WriteLine("WS2812_UPDATE_FAILED");
@@ -81,6 +81,7 @@ public static class Program
                 Console.WriteLine("ws2812: on");
             else
                 Console.WriteLine("ws2812: off");
+
             FreeRtos.DelayMilliseconds(500u);
         }
     }

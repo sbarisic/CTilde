@@ -13,4 +13,9 @@
   <ItemGroup>
     <ProjectReference Include="../CTilde/CTilde.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="data\programs\sample1.ct">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
 </Project>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The C~ compiler is a .NET 10 library with one output format: portable C11.
+The C~ compiler is a .NET 10 library with one output format: deterministic GNU C23.
 
 ```text
 UTF-8 source files
@@ -12,7 +12,7 @@ UTF-8 source files
     -> Declaration and type model
     -> Semantic and control-flow analysis
     -> Typed expression and statement lowering
-    -> Deterministic C11 emission
+    -> Deterministic GNU C23 emission
     -> External C compiler
     -> Native executable
 ```
@@ -28,7 +28,7 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `SourceText` owns UTF-8-decoded text, line starts, spans, and one-based source locations.
 - `Lexer` owns tokenization, comments, literals, escapes, Unicode identifiers, and lexical diagnostics.
 - `Parser` owns declarations, statements, Pratt expression precedence, recovery, and immutable syntax nodes.
-- `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the built-in `System` surface.
+- `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
 - `MethodLowerer` performs method-body binding, definite assignment, access checks, conversions, ordered evaluation, control-flow lowering, and typed C expression construction.
 - `CEmitter` owns the C runtime, layouts, symbol names, declarations, initialization, definitions, and entry wrapper.
 
@@ -57,7 +57,7 @@ ImmutableArray<Diagnostic> diagnostics = compilation.GetDiagnostics();
 EmitResult result = compilation.EmitC(writer);
 ```
 
-`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily builds the program model and generated C once. Subsequent diagnostics and emission requests reuse that immutable result, so repeated emission is byte-identical.
+`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached syntax trees from the embedded standard library, then builds the program model and generated C once. Its public `SyntaxTrees` collection continues to expose only caller-supplied trees. Subsequent diagnostics and emission requests reuse the immutable result, so repeated emission is byte-identical.
 
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
@@ -86,7 +86,7 @@ The semantic model owns:
 - Static and instance membership.
 - Accessibility.
 - Fixed-width built-in types, arrays, pointers, and target-width references.
-- The automatically imported `System.Console` and `System.Environment` declarations.
+- Automatically imported declarations from the bundled C~ standard-library sources.
 
 Overload resolution filters by name, static or instance context, argument count, and implicit conversions. Identity conversions score before widening conversions. Equal best scores produce an ambiguity diagnostic.
 

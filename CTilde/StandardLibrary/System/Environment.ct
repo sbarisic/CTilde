@@ -1,0 +1,7 @@
+namespace System;
+
+public static class Environment
+{
+    [Extern("ct_environment_exit")]
+    public static void Exit(int code);
+}

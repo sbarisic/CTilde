@@ -4,7 +4,7 @@
 
 This document defines the generated C contract for C~ draft 0.3.
 
-The output is a single C11 translation unit. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
+The output is a single GNU C23 translation unit. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
 ## Target requirements
 
@@ -14,7 +14,7 @@ The generated file includes only C standard-library headers. Compile-time assert
 - Exact `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int32_t`, and `uint32_t` types when used.
 - Two's-complement `int32_t`.
 - A four-byte IEEE-754 binary32 `float`.
-- C11 language support.
+- C23 language support. The canonical GCC and Clang mode is `-std=gnu23`; `-std=gnu2x` is accepted as a compatibility spelling on older toolchains.
 
 References and unsafe pointers use native C pointer width. A 64-bit C target therefore uses 64-bit references and pointers. C~ scalar integer sizes do not change with the target.
 
@@ -171,11 +171,12 @@ The embedded runtime prints one line to standard error and exits with `EXIT_FAIL
 | `CTM0001` | Allocation failure |
 | `CTI0001` | Integer division or remainder by zero |
 | `CTS0001` | String length overflow |
+| `CTS0002` | Native scalar formatting failure |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 
 ## Lifetime
 
-Class instances, arrays, concatenated strings, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them.
+Class instances, arrays, concatenated or scalar-formatted strings, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them.
 
 This preserves managed reference identity and removes use-after-free from safe C~ code. A future collector can replace the allocator without changing source semantics or object layouts described here.

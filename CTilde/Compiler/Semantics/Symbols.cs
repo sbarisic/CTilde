@@ -41,9 +41,8 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     };
 }
 
-internal enum DeclaredTypeKind { Class, Struct, Enum, StaticClass, SyntheticStaticClass }
+internal enum DeclaredTypeKind { Class, Struct, Enum, StaticClass }
 internal enum Accessibility { Private, Internal, Protected, Public }
-internal enum RuntimeMethod { None, ConsoleWrite, ConsoleWriteLine, EnvironmentExit }
 
 internal sealed class TypeSymbol
 {
@@ -63,7 +62,7 @@ internal sealed class TypeSymbol
     public List<MethodSymbol> Methods { get; } = [];
     public List<MethodSymbol> Constructors { get; } = [];
     public List<EnumValueSymbol> EnumValues { get; } = [];
-    public bool IsStatic => Kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.SyntheticStaticClass;
+    public bool IsStatic => Kind == DeclaredTypeKind.StaticClass;
 }
 
 internal abstract class MemberSymbol
@@ -109,7 +108,6 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
     public string? ExternName { get; init; }
-    public RuntimeMethod RuntimeMethod { get; init; }
     public string CName => ExternName ?? NameMangler.Method(this);
 }
 

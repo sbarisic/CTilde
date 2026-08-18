@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "CTilde.Cli": {
+      "commandName": "Project",
+      "commandLineArgs": "--compile-directory data/programs --trace"
+    }
+  }
+}

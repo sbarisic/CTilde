@@ -6,7 +6,7 @@ Specification version: draft 0.3
 
 This document is the normative specification for C~ draft 0.3.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.3 compiler emits portable C11 and diagnoses invalid programs before writing C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.3 compiler emits deterministic GNU C23 and diagnoses invalid programs before writing C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -14,13 +14,19 @@ The words **must**, **must not**, **should**, and **may** define language requir
 
 - Use familiar C# declaration, type, member, expression, and statement syntax.
 - Keep scalar sizes and safe-code behavior deterministic.
-- Use portable C11 as the compilation boundary.
+- Use GNU C23 as the compilation boundary for hosted and GCC-family embedded targets.
 - Separate managed references from explicit unsafe pointers.
 - Preserve receiver-first and left-to-right expression evaluation.
 - Report structured source diagnostics before emission.
 - Support useful classes without a CLR.
 
 C~ is not C#, C++/CLI, or a CLR language.
+
+### C backend dialect
+
+The canonical backend dialect is C23 with GCC-compatible extensions enabled. Generated files are compiled with `-std=gnu23` on current GCC and Clang toolchains. Older toolchains that implemented C23 under its draft name may use `-std=gnu2x` as a compatibility spelling.
+
+A conforming compiler may emit GCC extensions and is not required to provide an ISO-only fallback. Extensions are backend implementation details and do not add syntax or implementation-defined behavior to C~ source programs. Implementations may additionally offer stricter ISO C23 or vendor-specific compatibility modes.
 
 ## Example
 
@@ -408,29 +414,9 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 ## Core library
 
-The automatically imported `System` namespace contains:
+The automatically imported `System` namespace provides `Console` output and `Environment.Exit`. Built-in scalar values provide intrinsic `ToString()` conversion. The exact API, formatting, allocation, and failure behavior is specified in [STDLIB.md](STDLIB.md).
 
-```csharp
-public static class Console
-{
-    public static void Write(string value);
-    public static void Write(char value);
-    public static void Write(int value);
-    public static void Write(uint value);
-    public static void Write(float value);
-    public static void Write(bool value);
-
-    public static void WriteLine();
-    // The same value overloads are available for WriteLine.
-}
-
-public static class Environment
-{
-    public static void Exit(int code);
-}
-```
-
-String output writes its exact UTF-8 bytes. Boolean output is `True` or `False`. Float output uses enough significant digits for a binary32 round trip.
+There is no `System.Object`, boxing, global `ToString`, `System.Convert`, or `System.Math` in draft 0.3.
 
 ## Object and array creation
 
@@ -568,10 +554,10 @@ A compiler conforms to draft 0.3 when:
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
 3. Repeated compilation produces byte-identical C.
-4. Generated C compiles as strict C11 without warnings.
+4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is C11. There is no second backend in draft 0.3.
+The canonical backend is GNU C23. There is no second backend in draft 0.3.
 
 ## Deliberate differences from C#
 

@@ -1,6 +1,6 @@
 # C~
 
-C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained, portable C11 translation unit.
+C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained GNU C23 translation unit. GCC-compatible extensions are enabled by default for hosted and embedded toolchains.
 
 The current language is draft 0.3. It includes namespaces, classes, structures, enumerations, properties, overloads, arrays, immutable UTF-8 strings, structured control flow, checked managed access, and explicit unsafe pointers. It does not require a CLR or a C# runtime.
 
@@ -18,10 +18,17 @@ Compile the example to C:
 dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\bin\hello.c
 ```
 
-Compile the generated file with a C11 compiler. For MSVC:
+Compile the generated file with GCC or Clang:
 
 ```powershell
-cl /std:c11 /W4 /WX /Fe:.\bin\hello.exe .\bin\hello.c
+gcc -std=gnu23 -Wall -Wextra -Werror -o .\bin\hello.exe .\bin\hello.c
+.\bin\hello.exe
+```
+
+MSVC remains supported as a compatibility toolchain through its latest C mode:
+
+```powershell
+cl /std:clatest /W4 /WX /Fe:.\bin\hello.exe .\bin\hello.c
 .\bin\hello.exe
 ```
 
@@ -35,11 +42,15 @@ The CLI accepts multiple input files as one compilation:
 
 ```text
 ctilde <input.ct>... -o <program.c> [--check] [--trace]
+ctilde --compile-directory <directory> [--trace]
 ```
 
 - `-o` selects the generated C file.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
+- `--compile-directory` compiles each top-level `.ct` file in a directory independently and writes a same-named `.c` file beside it.
+
+Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
 
 The compiler writes no output file when an error is present.
 
@@ -89,7 +100,7 @@ EmitResult result = compilation.EmitC(output);
 
 | Project | Purpose |
 | --- | --- |
-| `CTilde` | Lexer, parser, semantic analysis, lowering, and C11 emission |
+| `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.3 programs |
@@ -108,11 +119,12 @@ $env:CTILDE_CC = "clang"
 dotnet run --project .\Test\Test.csproj
 ```
 
-GCC and Clang are invoked with `-std=c11 -Wall -Wextra -Werror -pedantic`. MSVC is invoked with `/std:c11 /W4 /WX`.
+GCC and Clang are invoked with `-std=gnu23 -Wall -Wextra -Werror`. GCC versions that predate the finalized flag may use the compatible `-std=gnu2x` spelling. MSVC is invoked with `/std:clatest /W4 /WX` as a secondary compatibility check.
 
 ## Documentation
 
 - [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.3 language specification.
+- [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records the measured feature and validation status.

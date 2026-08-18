@@ -587,7 +587,7 @@ internal sealed class MethodLowerer
             if (numeric.Integer <= int.MaxValue)
             {
                 var bounded = (int)numeric.Integer;
-                return Constant(CType.Int, bounded, bounded.ToString(CultureInfo.InvariantCulture));
+                return Constant(CType.Int, bounded, FormatInt32(bounded));
             }
             if (numeric.Integer <= uint.MaxValue)
             {
@@ -877,6 +877,8 @@ internal sealed class MethodLowerer
             else
             {
                 receiver = LowerExpression(member.Receiver);
+                if (member.Name == "ToString" && SupportsBuiltInToString(receiver.Type))
+                    return LowerBuiltInToString(syntax, member, receiver);
                 containingType = receiver.Type.Symbol;
                 methodName = member.Name;
                 requireStatic = false;
@@ -925,26 +927,47 @@ internal sealed class MethodLowerer
         if (receiverCode is not null)
             callArguments.Add(receiverCode);
         callArguments.AddRange(loweredArguments.Codes);
-        var call = selected.RuntimeMethod == RuntimeMethod.None
-            ? $"{selected.CName}({string.Join(", ", callArguments)})"
-            : RuntimeCall(selected, loweredArguments.Codes);
+        var call = $"{selected.CName}({string.Join(", ", callArguments)})";
         return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
     }
 
-    private string RuntimeCall(MethodSymbol method, IReadOnlyList<string> arguments)
+    private static bool SupportsBuiltInToString(CType type) => type.Kind is
+        CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
+        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.String;
+
+    private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver)
     {
-        if (method.RuntimeMethod == RuntimeMethod.EnvironmentExit)
-            return $"ct_environment_exit({arguments[0]})";
-        if (method.RuntimeMethod == RuntimeMethod.ConsoleWriteLine && arguments.Count == 0)
-            return "((void)fputc('\\n', stdout))";
-        var parameterType = method.Parameters[0].Type;
-        var function = parameterType.Kind switch
+        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        if (arguments.Length != 0)
         {
-            CTypeKind.String => "ct_write_string", CTypeKind.Char => "ct_write_char", CTypeKind.Int => "ct_write_int",
-            CTypeKind.Uint => "ct_write_uint", CTypeKind.Float => "ct_write_float", CTypeKind.Bool => "ct_write_bool", _ => "ct_write_int",
+            Report("CT2122", "No overload of 'ToString' accepts the supplied argument types.", syntax);
+            return ErrorExpression(receiver.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
+        }
+
+        receiver = Materialize(receiver, member.Receiver);
+        if (receiver.Type.Kind == CTypeKind.String)
+        {
+            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {CEmitter.SourceArgument(member)});");
+            return new LoweredExpression { Type = CType.String, Code = receiver.Code, Prelude = receiver.Prelude };
+        }
+
+        var function = receiver.Type.Kind switch
+        {
+            CTypeKind.Bool => "ct_to_string_bool",
+            CTypeKind.Char => "ct_to_string_char",
+            CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint",
+            CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int",
+            CTypeKind.Float => "ct_to_string_float",
+            _ => throw new InvalidOperationException($"Unsupported ToString receiver '{receiver.Type.DisplayName}'."),
         };
-        var write = $"{function}({arguments[0]})";
-        return method.RuntimeMethod == RuntimeMethod.ConsoleWriteLine ? $"({write}, (void)fputc('\\n', stdout))" : write;
+        var argument = receiver.Type.Kind switch
+        {
+            CTypeKind.Byte or CTypeKind.Ushort => $"(uint32_t){receiver.Code}",
+            CTypeKind.Sbyte or CTypeKind.Short => $"(int32_t){receiver.Code}",
+            _ => receiver.Code,
+        };
+        var code = $"{function}({argument}, {CEmitter.SourceArgument(member)})";
+        return new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude };
     }
 
     private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, SyntaxNode syntax)
@@ -1434,7 +1457,7 @@ internal sealed class MethodLowerer
                     return true;
                 case SyntaxKind.MinusToken when operand.Type == CType.Int:
                     var signed = unchecked(-(int)operand.ConstantValue!);
-                    result = Constant(CType.Int, signed, signed.ToString(CultureInfo.InvariantCulture));
+                    result = Constant(CType.Int, signed, FormatInt32(signed));
                     return true;
                 case SyntaxKind.MinusToken when operand.Type == CType.Float:
                     var floating = -(float)operand.ConstantValue!;
@@ -1446,7 +1469,7 @@ internal sealed class MethodLowerer
                     return true;
                 case SyntaxKind.TildeToken when operand.Type == CType.Int:
                     var complemented = ~(int)operand.ConstantValue!;
-                    result = Constant(CType.Int, complemented, complemented.ToString(CultureInfo.InvariantCulture));
+                    result = Constant(CType.Int, complemented, FormatInt32(complemented));
                     return true;
                 case SyntaxKind.TildeToken when operand.Type == CType.Uint:
                     var unsigned = ~(uint)operand.ConstantValue!;
@@ -1562,7 +1585,7 @@ internal sealed class MethodLowerer
                     SyntaxKind.PipeToken => l | r, SyntaxKind.HatToken => l ^ r, SyntaxKind.LessLessToken => unchecked(l << (r & 31)),
                     SyntaxKind.GreaterGreaterToken => l >> (r & 31), _ => int.MinValue,
                 };
-                result = Constant(CType.Int, value, value.ToString(CultureInfo.InvariantCulture));
+                result = Constant(CType.Int, value, FormatInt32(value));
                 return true;
             }
         }
@@ -1624,7 +1647,7 @@ internal sealed class MethodLowerer
                 _ => unchecked((int)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
             };
             if (target == CType.Int)
-                result = Constant(target, signedValue, signedValue.ToString(CultureInfo.InvariantCulture));
+                result = Constant(target, signedValue, FormatInt32(signedValue));
             else
             {
                 var narrowed = target.Kind switch
@@ -1632,7 +1655,7 @@ internal sealed class MethodLowerer
                     CTypeKind.Byte or CTypeKind.Char => unchecked((byte)signedValue), CTypeKind.Sbyte => unchecked((sbyte)signedValue),
                     CTypeKind.Short => unchecked((short)signedValue), CTypeKind.Ushort => unchecked((ushort)signedValue), _ => signedValue,
                 };
-                result = Constant(target, narrowed, $"({_emitter.CTypeName(target)}){signedValue.ToString(CultureInfo.InvariantCulture)}");
+                result = Constant(target, narrowed, $"({_emitter.CTypeName(target)}){FormatInt32(signedValue)}");
             }
             return true;
         }
@@ -1651,6 +1674,8 @@ internal sealed class MethodLowerer
         SyntaxKind.EqualsEqualsToken => "==", SyntaxKind.BangEqualsToken => "!=", SyntaxKind.LessLessToken => "<<",
         SyntaxKind.GreaterGreaterToken => ">>", _ => "+",
     };
+
+    private static string FormatInt32(int value) => value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture);
 
     private static LoweredExpression Constant(CType type, object? value, string code) => new() { Type = type, Code = code, IsConstant = true, ConstantValue = value };
     private static LoweredExpression ErrorExpression(IEnumerable<string>? prelude = null) => new() { Type = CType.Error, Code = "0", Prelude = prelude?.ToList() ?? [] };

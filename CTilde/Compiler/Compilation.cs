@@ -50,11 +50,12 @@ public sealed class Compilation
             if (_analyzed)
                 return;
             var diagnostics = new DiagnosticBag();
-            foreach (var tree in SyntaxTrees)
+            var allSyntaxTrees = StandardLibrary.SyntaxTrees.AddRange(SyntaxTrees);
+            foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
-            var model = new CompilationModel(SyntaxTrees, diagnostics);
+            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics);
             _generatedC = new CEmitter(model).Emit();
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;

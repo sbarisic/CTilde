@@ -1,11 +1,15 @@
 typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
 typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
 typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
+typedef struct ct_t_6_System_7_Console ct_t_6_System_7_Console;
+typedef struct ct_t_6_System_11_Environment ct_t_6_System_11_Environment;
 typedef struct ct_a_i32 ct_a_i32;
 typedef uint8_t ct_t_8_Examples_9_Direction;
 struct ct_t_8_Examples_7_Counter
 struct ct_t_8_Examples_5_Point
 struct ct_t_8_Examples_7_Program
+struct ct_t_6_System_7_Console
+struct ct_t_6_System_11_Environment
 struct ct_a_i32 { int32_t Length; int32_t* Data; };
 static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue);
 static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self);
@@ -16,6 +20,12 @@ static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
 static void ct_m__16_Examples_2EProgram_4_Main(void);
+static void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_c8(uint8_t u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_i32(int32_t u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_u32(uint32_t u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_f32(float u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value);
 static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue)
 static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self)
 static int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self)
@@ -25,4 +35,10 @@ static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
 static void ct_m__16_Examples_2EProgram_4_Main(void)
+static void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_c8(uint8_t u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_i32(int32_t u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_u32(uint32_t u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_f32(float u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value)
 int main(void)

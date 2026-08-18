@@ -7,7 +7,7 @@ Last reviewed: 2026-08-18
 C~ draft 0.3 has one compiler path:
 
 ```text
-.ct source -> syntax -> semantic analysis -> typed lowering -> C11
+.ct source -> syntax -> semantic analysis -> typed lowering -> GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -28,7 +28,7 @@ The .NET build completes with zero warnings and zero errors. The conformance run
 Native checks discover Visual Studio 2022 C tools and compile generated files with:
 
 ```text
-cl /std:c11 /W4 /WX
+cl /std:clatest /W4 /WX
 ```
 
 The checked feature example prints:
@@ -44,13 +44,13 @@ A
 10
 ```
 
-The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. The generated feature example compiles with:
+The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. That compiler uses the draft compatibility spelling for the C23 dialect:
 
 ```text
-gcc -std=c11 -Wall -Wextra -Werror -pedantic
+gcc -std=gnu2x -Wall -Wextra -Werror
 ```
 
-It exits successfully and produces the same checked output. The runner also accepts a native compiler path through `CTILDE_CC` for repeatable GCC or Clang runs.
+It exits successfully and produces the same checked output. Current GCC and Clang releases use the finalized `-std=gnu23` spelling, which is the conformance-runner default. The runner also accepts a native compiler path through `CTILDE_CC` for repeatable GCC or Clang runs.
 
 ## Language support
 
@@ -83,7 +83,8 @@ It exits successfully and produces the same checked output. The runner also acce
 | Unsafe address, dereference, indexing, and pointer arithmetic | Implemented | Native unsafe example and signature diagnostics |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
 | `[Extern]` | Implemented | Validation and emitted-prototype test |
-| `System.Console` and `System.Environment` | Implemented | Native output tests |
+| Bundled `System.Console` and `System.Environment` sources | Implemented | Embedded-source and native output tests |
+| Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |
 
 ## Conformance coverage
@@ -101,7 +102,7 @@ The executable test project checks:
 - Left-to-right receiver and argument evaluation.
 - Constant folding into C case labels.
 - Classes, structures, enums, constructors, methods, and properties.
-- Arrays, loops, strings, and the core library.
+- Arrays, loops, strings, and the bundled standard library.
 - Managed null, bounds, negative-length, division-by-zero, and allocation-overflow paths.
 - Native C compilation with warnings treated as errors.
 - Checked standard output and runtime error output.
@@ -143,8 +144,8 @@ A draft 0.3 release requires:
 - A zero-warning .NET build.
 - All managed and native conformance checks.
 - Byte-identical repeated output.
-- MSVC C11 compilation with warnings as errors.
-- GCC or Clang C11 compilation with strict warnings as errors.
+- GNU C23 compilation with warnings as errors.
+- MSVC latest-C compatibility compilation with warnings as errors.
 - Documentation synchronized with measured behavior.
 
-All draft 0.3 release gates are measured in this workspace with MSVC and GCC as the two independent C11 compilers.
+Draft 0.3 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode is retained as an independent compatibility check.

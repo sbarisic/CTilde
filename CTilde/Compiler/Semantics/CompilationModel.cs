@@ -9,12 +9,12 @@ internal sealed class CompilationModel
     private readonly Dictionary<SyntaxTree, string> _namespaces = [];
     private readonly Dictionary<SyntaxTree, ImmutableArray<string>> _usings = [];
 
-    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, DiagnosticBag diagnostics)
+    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics)
     {
         SyntaxTrees = syntaxTrees;
+        UserSyntaxTrees = userSyntaxTrees;
         Diagnostics = diagnostics;
         Types = new Dictionary<string, TypeSymbol>(StringComparer.Ordinal);
-        AddCoreLibrary();
         DeclareTypes();
         ValidateUsings();
         DeclareMembers();
@@ -22,6 +22,7 @@ internal sealed class CompilationModel
     }
 
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
+    public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
     public DiagnosticBag Diagnostics { get; }
     public Dictionary<string, TypeSymbol> Types { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null).OrderBy(type => type.FullName, StringComparer.Ordinal);
@@ -346,7 +347,7 @@ internal sealed class CompilationModel
             EntryPoint = entries[0];
         else if (entries.Length == 0)
         {
-            var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
+            var source = UserSyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
             Diagnostics.Add("CT1300", "The program must declare exactly one EntryPoint.", source, new TextSpan(0, 0));
         }
         else
@@ -375,29 +376,6 @@ internal sealed class CompilationModel
         Accessibility.Internal => 2,
         Accessibility.Public => 3,
         _ => 0,
-    };
-
-    private void AddCoreLibrary()
-    {
-        var console = new TypeSymbol { Namespace = "System", Name = "Console", Kind = DeclaredTypeKind.SyntheticStaticClass };
-        var environment = new TypeSymbol { Namespace = "System", Name = "Environment", Kind = DeclaredTypeKind.SyntheticStaticClass };
-        Types.Add(console.FullName, console);
-        Types.Add(environment.FullName, environment);
-        var supported = new[] { CType.String, CType.Char, CType.Int, CType.Uint, CType.Float, CType.Bool };
-        foreach (var type in supported)
-        {
-            console.Methods.Add(CoreMethod(console, "Write", CType.Void, [type], RuntimeMethod.ConsoleWrite));
-            console.Methods.Add(CoreMethod(console, "WriteLine", CType.Void, [type], RuntimeMethod.ConsoleWriteLine));
-        }
-        console.Methods.Add(CoreMethod(console, "WriteLine", CType.Void, [], RuntimeMethod.ConsoleWriteLine));
-        environment.Methods.Add(CoreMethod(environment, "Exit", CType.Void, [CType.Int], RuntimeMethod.EnvironmentExit));
-    }
-
-    private static MethodSymbol CoreMethod(TypeSymbol type, string name, CType returnType, CType[] parameterTypes, RuntimeMethod runtimeMethod) => new()
-    {
-        Name = name, ContainingType = type, Accessibility = Accessibility.Public, IsStatic = true, Syntax = null,
-        ReturnType = returnType, Parameters = [.. parameterTypes.Select((parameterType, index) => new ParameterSymbol { Name = $"arg{index}", Type = parameterType, Syntax = null })],
-        Body = null, RuntimeMethod = runtimeMethod,
     };
 
     private void AddUnique(TypeSymbol type, MemberSymbol member)

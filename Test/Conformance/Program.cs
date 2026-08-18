@@ -24,6 +24,8 @@ Run("deterministic C emission", () =>
     var second = Emit(source);
     Assert(first == second, "Repeated compilation did not produce byte-identical C.");
     Assert(first.Contains("int main(void)", StringComparison.Ordinal), "C entry point was not emitted.");
+    Assert(first.Contains("for GNU C23", StringComparison.Ordinal), "Generated C does not identify the default GNU C23 dialect.");
+    Assert(first.Contains("static_assert(CHAR_BIT == 8", StringComparison.Ordinal), "Generated C does not use the C23 static_assert spelling.");
 });
 
 Run("structured syntax diagnostic", () =>
@@ -215,7 +217,7 @@ Run("short circuit and string equality", () =>
     Assert(Normalize(result.StandardOutput) == "0\nTrue\n", result.StandardOutput);
 });
 
-Run("lexical forms and core library overloads", () =>
+Run("lexical forms and standard library overloads", () =>
 {
     const string source = """
         using System;
@@ -241,6 +243,94 @@ Run("lexical forms and core library overloads", () =>
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
     Assert(Normalize(result.StandardOutput) == "1000000\n255\n166\nA\n42\n1.5\nTrue\n\n", result.StandardOutput);
+});
+
+Run("bundled standard library", () =>
+{
+    var tree = SyntaxTree.ParseText("public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(1); } }", "program.ct");
+    var compilation = Compilation.Create([tree]);
+    using var writer = new StringWriter(CultureInfo.InvariantCulture);
+    var result = compilation.EmitC(writer);
+    Assert(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
+    Assert(compilation.SyntaxTrees.Length == 1 && ReferenceEquals(compilation.SyntaxTrees[0], tree), "Bundled library trees leaked into Compilation.SyntaxTrees.");
+    Assert(writer.ToString().Contains("extern void ct_write_int", StringComparison.Ordinal), "The Console extern declaration was not loaded from the bundled library.");
+});
+
+Run("scalar ToString", () =>
+{
+    const string source = """
+        using System;
+        public static class Program
+        {
+            private static int calls = 0;
+            private static int Next() { calls++; return 7; }
+
+            [EntryPoint]
+            public static void Main()
+            {
+                byte unsignedByte = (byte)255;
+                sbyte signedByte = (sbyte)(-128);
+                short signedShort = (short)(-32768);
+                ushort unsignedShort = (ushort)65535;
+                int signedInt = -2147483647 - 1;
+                uint unsignedInt = 4294967295u;
+                int zero = 0;
+                float number = 1.5f;
+                bool flag = true;
+                char character = 'A';
+                string text = "text";
+
+                Console.WriteLine(unsignedByte.ToString());
+                Console.WriteLine(signedByte.ToString());
+                Console.WriteLine(signedShort.ToString());
+                Console.WriteLine(unsignedShort.ToString());
+                Console.WriteLine(signedInt.ToString());
+                Console.WriteLine(unsignedInt.ToString());
+                Console.WriteLine(zero.ToString());
+                Console.WriteLine(number.ToString());
+                Console.WriteLine(flag.ToString());
+                Console.WriteLine(character.ToString());
+                Console.WriteLine(text.ToString());
+                Console.WriteLine(text.ToString() == text);
+                Console.WriteLine(Next().ToString());
+                Console.WriteLine(calls);
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "255\n-128\n-32768\n65535\n-2147483648\n4294967295\n0\n1.5\nTrue\nA\ntext\nTrue\n7\n1\n", result.StandardOutput);
+});
+
+Run("ToString diagnostics", () =>
+{
+    const string source = """
+        public sealed class Box { }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                int value = 1;
+                string invalidArguments = value.ToString(2);
+                Box box = new Box();
+                string unsupportedObject = box.ToString();
+                int[] values = new int[0];
+                string unsupportedArray = values.ToString();
+            }
+        }
+        """;
+    var diagnostics = Compile(source).GetDiagnostics();
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2122") >= 2, "Expected ToString overload diagnostics for arguments and class receivers.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2121"), "Expected an unsupported array receiver diagnostic.");
+});
+
+Run("null string ToString failure", () =>
+{
+    const string source = "public static class Program { [EntryPoint] public static void Main() { string text = null; string copy = text.ToString(); } }";
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode != 0, "Null string ToString returned success.");
+    Assert(result.StandardError.Contains("CTN0001", StringComparison.Ordinal), result.StandardError);
 });
 
 Run("Environment Exit", () =>
@@ -462,13 +552,13 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     {
         var compilerName = Path.GetFileNameWithoutExtension(configured);
         var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "/nologo", "/std:c11", "/W4", "/WX", $"/Fe:{executablePath}", cPath }
-            : new[] { "-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-o", executablePath, cPath };
+            ? new[] { "/nologo", "/std:clatest", "/W4", "/WX", $"/Fe:{executablePath}", cPath }
+            : new[] { "-std=gnu23", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath };
         return RunProcess(configured, arguments);
     }
 
     if (!OperatingSystem.IsWindows())
-        return RunProcess("cc", ["-std=c11", "-Wall", "-Wextra", "-Werror", "-pedantic", "-o", executablePath, cPath]);
+        return RunProcess("cc", ["-std=gnu23", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
 
     var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
     Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -477,7 +567,7 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     var installation = discovery.StandardOutput.Trim();
     var vcVars = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
     var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
-    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:c11 /W4 /WX /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
+    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /W4 /WX /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
     return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
 }
 

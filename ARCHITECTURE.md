@@ -48,6 +48,18 @@ Directory mode checks the first line before it removes stale output. It removes 
 
 The CLI does not invoke a C compiler. This keeps C emission deterministic and leaves native toolchain selection to the caller.
 
+`CTildeProjectFile` is shared with editor tooling. A `ctilde.json` manifest supplies source and exclusion globs plus one compilation target. Paths are confined to the manifest directory, deduplicated, and sorted before parsing.
+
+### CTilde.LanguageServer
+
+The .NET 10 language server runs out of process over LSP 3.17 and header-delimited UTF-8 JSON-RPC. Standard output contains protocol frames only; logs use standard error.
+
+`LanguageServiceSnapshot` is an immutable editor-facing view over syntax, declarations, compiler diagnostics, target-specific standard-library sources, and source positions. It answers completion, hover, signature, definition, and symbol queries without emitting a C translation unit. Completion-specific inference tolerates missing tokens and incomplete member or call expressions.
+
+The server applies versioned incremental document changes to in-memory text. Open buffers override disk sources. A 150 ms cancellable debounce publishes diagnostics from the newest project snapshot. File and manifest changes invalidate cached snapshots. One process owns all workspace folders and manifest-defined projects.
+
+The VS Code client starts `dotnet CTilde.LanguageServer.dll`, synchronizes `.ct` and `ctilde.json` changes, maps embedded declarations to the read-only `ctilde-stdlib:` scheme, and contributes the project schema. The packaged extension includes a bundled JavaScript client and framework-dependent server assemblies; the .NET 10 runtime remains an external requirement.
+
 ### Test
 
 The conformance runner exercises the public API and compiles generated C. On Windows it finds Visual Studio with `vswhere`. `CTILDE_CC` selects MSVC, GCC, Clang, `wsl:gcc`, or `wsl:clang`.

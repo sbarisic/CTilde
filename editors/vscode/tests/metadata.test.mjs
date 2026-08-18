@@ -16,12 +16,15 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.1.0");
+  assert.equal(manifest.version, "0.2.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "Unlicense");
   assert.equal(manifest.repository.directory, "editors/vscode");
-  assert.equal(manifest.main, undefined);
-  assert.equal(manifest.activationEvents, undefined);
+  assert.equal(manifest.main, "./out/extension.js");
+  assert.deepEqual(manifest.activationEvents, ["onLanguage:ctilde", "onUri:ctilde-stdlib"]);
+  assert.equal(manifest.dependencies["vscode-languageclient"], "9.0.1");
+  assert.equal(manifest.contributes.configuration.properties["ctilde.languageServer.dotnetPath"].default, "dotnet");
+  assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   assert.deepEqual(language, {
     id: "ctilde",
     aliases: ["C~", "CTilde"],
@@ -36,6 +39,7 @@ test("manifest registers the C~ language and grammar", async () => {
 
   await access(path.resolve(extensionRoot, language.configuration));
   await access(path.resolve(extensionRoot, grammar.path));
+  await access(path.resolve(extensionRoot, "schemas/ctilde.schema.json"));
 });
 
 test("grammar exposes the expected root scope and repositories", async () => {

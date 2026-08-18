@@ -44,6 +44,7 @@ The CLI accepts multiple input files as one compilation:
 
 ```text
 ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]
+ctilde --project <ctilde.json> -o <program.c> [--check] [--trace]
 ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 ```
 
@@ -51,6 +52,7 @@ ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
 - `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
+- `--project` loads deterministic source globs and the target from `ctilde.json`. It cannot be combined with direct inputs or `--target`.
 - `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
 
 Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
@@ -105,6 +107,24 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 
 Omit `CompilationOptions` to retain hosted output.
 
+`LanguageServiceSnapshot` provides editor-neutral completion, hover, signature, definition, diagnostic, and symbol queries using UTF-16 source offsets. It includes the same target-specific standard library as `Compilation`.
+
+## Visual Studio Code
+
+The extension in [`editors/vscode`](editors/vscode) adds semantic completion, live compiler diagnostics, hover, signature help, go-to-definition, document/workspace symbols, and the existing TextMate highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
+
+Use `ctilde.json` when several files form one compilation:
+
+```json
+{
+  "target": "hosted",
+  "sources": ["src/**/*.ct"],
+  "exclude": ["src/generated/**"]
+}
+```
+
+Patterns are relative to the manifest and cannot leave its directory. Without a manifest, each `.ct` file is analyzed as a standalone hosted program. See the [extension documentation](editors/vscode/README.md) for building, tracing, and packaging.
+
 ## ESP-IDF quick start
 
 ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. The compiler does not select a chip, link, flash, or monitor; `idf.py` owns those operations.
@@ -123,16 +143,18 @@ The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 conf
 | --- | --- |
 | `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
 | `CTilde.Cli` | The `ctilde` command-line compiler |
+| `CTilde.LanguageServer` | LSP 3.17 server for completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.5 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
-| [`editors/vscode`](editors/vscode) | Visual Studio Code syntax highlighting and editor configuration |
+| [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
 ## Validation
 
 ```powershell
 dotnet build .\CTilde.sln
 dotnet run --project .\Test\Test.csproj --no-build
+Push-Location .\editors\vscode; npm test; npm run test:extension; Pop-Location
 .\Test\Test-EspIdf.ps1
 ```
 

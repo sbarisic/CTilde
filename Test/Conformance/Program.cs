@@ -86,6 +86,83 @@ Run("structured syntax diagnostic", () =>
     Assert(tree.Diagnostics.Any(diagnostic => diagnostic.Code.StartsWith("CT0", StringComparison.Ordinal)), "Expected a syntax diagnostic.");
 });
 
+Run("language service completion and navigation", () =>
+{
+    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { Console. } }";
+    var tree = SyntaxTree.ParseText(source, "editor.ct");
+    var service = LanguageServiceSnapshot.Create([tree]);
+    var completionPosition = source.IndexOf("Console.", StringComparison.Ordinal) + "Console.".Length;
+    var completions = service.GetCompletions("editor.ct", completionPosition);
+    Assert(completions.Any(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method), "Console member completion did not include WriteLine.");
+    Assert(completions.All(item => item.ReplacementSpan.Start == completionPosition), "Empty member completion used the wrong replacement span.");
+
+    var consolePosition = source.IndexOf("Console", StringComparison.Ordinal) + 1;
+    var hover = service.GetHover("editor.ct", consolePosition);
+    Assert(hover?.Contents.Contains("System.Console", StringComparison.Ordinal) == true, "Hover did not resolve System.Console.");
+    var definition = service.GetDefinition("editor.ct", consolePosition);
+    Assert(definition?.FilePath == "stdlib/System/Console.ct", "Definition did not resolve the embedded Console declaration.");
+    Assert(service.GetDocumentSymbols("editor.ct").Single().Name == "Program", "Document symbols did not include Program.");
+    Assert(service.GetWorkspaceSymbols("Prog").Any(symbol => symbol.Name == "Program"), "Workspace symbols did not include Program.");
+
+    var library = SyntaxTree.ParseText("namespace Demo; public class Widget { public int Value; }", "library.ct");
+    const string programSource = "using Demo; public static class Program { [EntryPoint] public static void Main() { Widget value = new Widget(); } }";
+    var program = SyntaxTree.ParseText(programSource, "program.ct");
+    var multiFile = LanguageServiceSnapshot.Create([library, program]);
+    var widgetDefinition = multiFile.GetDefinition("program.ct", programSource.IndexOf("Widget", StringComparison.Ordinal) + 1);
+    Assert(widgetDefinition?.FilePath == "library.ct", "Cross-file type definition did not resolve to its declaration.");
+
+    var unicode = SourceText.From("α\r\nβ", "unicode.ct");
+    var unicodePosition = unicode.GetPosition(1, 1);
+    var unicodeLocation = unicode.GetLocation(new TextSpan(unicodePosition, 0));
+    Assert(unicodePosition == 4 && unicodeLocation.Line == 2 && unicodeLocation.Column == 2, "UTF-16 CRLF position conversion was incorrect.");
+});
+
+Run("language service scopes and targets", () =>
+{
+    const string source = "public class Device { public int Value; private int Secret; public void Run(int count) { } } public static class Program { [EntryPoint] public static void Main() { Device device = new Device(); device. } }";
+    var service = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(source, "scopes.ct")]);
+    var position = source.LastIndexOf("device.", StringComparison.Ordinal) + "device.".Length;
+    var completions = service.GetCompletions("scopes.ct", position);
+    Assert(completions.Any(item => item.Label == "Value"), "Instance completion did not include an accessible field.");
+    Assert(completions.Any(item => item.Label == "Run"), "Instance completion did not include an accessible method.");
+    Assert(completions.All(item => item.Label != "Secret"), "Instance completion exposed an inaccessible private field.");
+
+    const string targetSource = "using Esp.Idf;\n\npublic static class Program { [EntryPoint] public static void Main() { } }";
+    var targetPosition = targetSource.IndexOf("\n\n", StringComparison.Ordinal) + 1;
+    var hosted = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(targetSource, "hosted.ct")]);
+    var esp = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(targetSource, "esp.ct")], new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(hosted.GetCompletions("hosted.ct", targetPosition).All(item => item.Label != "Ws2812"), "ESP type leaked into the hosted language service.");
+    Assert(esp.GetCompletions("esp.ct", targetPosition).Any(item => item.Label == "Ws2812"), "ESP target completion did not include Ws2812.");
+});
+
+Run("project manifest and CLI", () =>
+{
+    var directory = Path.Combine(Path.GetTempPath(), "ctilde-project-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+    Directory.CreateDirectory(Path.Combine(directory, "src", "generated"));
+    try
+    {
+        File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"]}");
+        File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+        File.WriteAllText(Path.Combine(directory, "src", "Library.ct"), "public class Library { }");
+        File.WriteAllText(Path.Combine(directory, "src", "generated", "Ignored.ct"), "public class Ignored { }");
+        var project = CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json"));
+        Assert(project.SourceFiles.Length == 2, "Project source globs or exclusions were not applied.");
+        Assert(project.SourceFiles.SequenceEqual(project.SourceFiles.OrderBy(path => path, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)), "Project sources were not deterministic.");
+        Assert(CTildeProjectFile.FindNearest(Path.Combine(directory, "src", "Program.ct")) == project.ManifestPath, "Nearest project discovery failed.");
+
+        var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+        var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+        var check = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--check"]);
+        Assert(check.ExitCode == 0, $"Project CLI check failed: {check.StandardError}");
+        var conflict = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--target", "hosted", "--check"]);
+        Assert(conflict.ExitCode == 2, "Project and target were not rejected as conflicting CLI inputs.");
+    }
+    finally
+    {
+        Directory.Delete(directory, recursive: true);
+    }
+});
+
 Run("full fidelity syntax round trip", () =>
 {
     const string valid = "// lead\r\npublic static class Program { /* body */ [EntryPoint] public static void Main() { } }\r\n";

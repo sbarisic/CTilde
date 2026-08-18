@@ -14,9 +14,11 @@ static int Run(string[] args)
     var inputs = new List<string>();
     string? output = null;
     string? inputDirectory = null;
+    string? projectManifest = null;
     var checkOnly = false;
     var trace = false;
     var target = CompilationTarget.Hosted;
+    var targetSpecified = false;
     for (var index = 0; index < args.Length; index++)
     {
         switch (args[index])
@@ -34,10 +36,16 @@ static int Run(string[] args)
                     return UsageError("--compile-directory requires a directory path.");
                 inputDirectory = args[index];
                 break;
+            case "--project":
+                if (++index >= args.Length)
+                    return UsageError("--project requires a ctilde.json path.");
+                projectManifest = args[index];
+                break;
             case "--trace":
                 trace = true;
                 break;
             case "--target":
+                targetSpecified = true;
                 if (++index >= args.Length)
                     return UsageError("--target requires hosted or esp-idf.");
                 target = args[index] switch
@@ -59,10 +67,19 @@ static int Run(string[] args)
 
     if (inputDirectory is not null)
     {
-        if (inputs.Count != 0 || output is not null || checkOnly)
-            return UsageError("--compile-directory cannot be combined with input files, -o, or --check.");
+        if (inputs.Count != 0 || output is not null || checkOnly || projectManifest is not null)
+            return UsageError("--compile-directory cannot be combined with input files, --project, -o, or --check.");
 
         return CompileDirectory(inputDirectory, trace, target);
+    }
+
+    if (projectManifest is not null)
+    {
+        if (inputs.Count != 0 || inputDirectory is not null || targetSpecified)
+            return UsageError("--project cannot be combined with input files, --compile-directory, or --target.");
+        if (!checkOnly && string.IsNullOrWhiteSpace(output))
+            return UsageError("-o is required unless --check is used.");
+        return CompileProject(projectManifest, output, checkOnly, trace);
     }
 
     if (inputs.Count == 0)
@@ -71,6 +88,22 @@ static int Run(string[] args)
         return UsageError("-o is required unless --check is used.");
 
     return Compile(inputs, output, checkOnly, trace, target);
+}
+
+static int CompileProject(string manifestPath, string? output, bool checkOnly, bool trace)
+{
+    try
+    {
+        var project = CTildeProjectFile.Load(manifestPath);
+        if (trace)
+            Console.Error.WriteLine($"trace: loaded {project.SourceFiles.Length} source file(s) from {project.ManifestPath}");
+        return Compile(project.SourceFiles, output, checkOnly, trace, project.Configuration.Target);
+    }
+    catch (CTildeProjectException exception)
+    {
+        Console.Error.WriteLine($"ctilde: {exception.Message}");
+        return 2;
+    }
 }
 
 static int CompileDirectory(string inputDirectory, bool trace, CompilationTarget target)
@@ -214,5 +247,6 @@ static int UsageError(string message)
 static void PrintUsage()
 {
     Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]");
+    Console.Error.WriteLine("       ctilde --project <ctilde.json> -o <program.c> [--check] [--trace]");
     Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]");
 }

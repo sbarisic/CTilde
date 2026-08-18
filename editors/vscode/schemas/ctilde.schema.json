@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C~ project",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "sources"
+  ],
+  "properties": {
+    "target": {
+      "type": "string",
+      "enum": [
+        "hosted",
+        "esp-idf"
+      ],
+      "default": "hosted",
+      "description": "Compiler target and target-specific standard library."
+    },
+    "sources": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Source globs relative to this manifest."
+    },
+    "exclude": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Source globs removed after the sources patterns are evaluated."
+    }
+  }
+}

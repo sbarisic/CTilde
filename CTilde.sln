@@ -8,6 +8,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.Cli", "CTilde.Cli\CT
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.Tests", "Test\Test.csproj", "{121C0936-74FD-45EE-9CC0-F012F010FD6C}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.LanguageServer", "CTilde.LanguageServer\CTilde.LanguageServer.csproj", "{D43C18AC-F04D-4B9D-A277-CFA4EEA8130E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -26,5 +28,9 @@ Global
 		{121C0936-74FD-45EE-9CC0-F012F010FD6C}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{121C0936-74FD-45EE-9CC0-F012F010FD6C}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{121C0936-74FD-45EE-9CC0-F012F010FD6C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D43C18AC-F04D-4B9D-A277-CFA4EEA8130E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D43C18AC-F04D-4B9D-A277-CFA4EEA8130E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D43C18AC-F04D-4B9D-A277-CFA4EEA8130E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D43C18AC-F04D-4B9D-A277-CFA4EEA8130E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

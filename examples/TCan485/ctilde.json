@@ -1,0 +1,6 @@
+{
+  "target": "esp-idf",
+  "sources": [
+    "Program.ct"
+  ]
+}

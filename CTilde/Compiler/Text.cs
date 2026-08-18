@@ -43,6 +43,8 @@ public sealed class SourceText
 
     public int Length => Text.Length;
 
+    public int LineCount => _lineStarts.Length;
+
     public char this[int index] => Text[index];
 
     public static SourceText From(string text, string filePath = "<memory>") => new(text ?? string.Empty, filePath);
@@ -62,6 +64,16 @@ public sealed class SourceText
             lineIndex = ~lineIndex - 1;
         lineIndex = Math.Max(0, lineIndex);
         return new SourceLocation(FilePath, span, lineIndex + 1, position - _lineStarts[lineIndex] + 1);
+    }
+
+    public int GetPosition(int zeroBasedLine, int zeroBasedColumn)
+    {
+        var line = Math.Clamp(zeroBasedLine, 0, _lineStarts.Length - 1);
+        var start = _lineStarts[line];
+        var end = line + 1 < _lineStarts.Length ? _lineStarts[line + 1] : Text.Length;
+        while (end > start && Text[end - 1] is '\r' or '\n')
+            end--;
+        return Math.Clamp(start + Math.Max(0, zeroBasedColumn), start, end);
     }
 
     public string Slice(TextSpan span) => Text.Substring(span.Start, span.Length);

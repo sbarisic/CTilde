@@ -1,5 +1,18 @@
 # C~ TODO
 
+## Language server and editor support
+
+- [x] Add a shared `ctilde.json` project loader and CLI `--project` mode.
+- [x] Add an immutable, target-aware language-service query snapshot.
+- [x] Add LSP 3.17 incremental synchronization and compiler diagnostics.
+- [x] Add completion, hover, signature help, definitions, and document/workspace symbols.
+- [x] Expose embedded standard-library sources through a read-only URI.
+- [x] Convert the VS Code package to a bundled TypeScript language client.
+- [x] Package the framework-dependent .NET 10 server and project schema.
+- [x] Add compiler, manifest, CLI, and end-to-end protocol checks.
+- [ ] Add references, rename, semantic highlighting, formatting, code actions, and auto-import completion edits.
+- [ ] Publish self-contained server binaries when release distribution requires clients without .NET 10.
+
 ## Compiler architecture completion
 
 Draft 0.5 exception behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
@@ -10,7 +23,7 @@ Draft 0.5 exception behavior is implemented, but the body pipeline remains trans
 4. Make `GetDiagnostics()` stop after declaration, binding, flow, and target validation. It must not construct rendered C fragments.
 5. Make the C emitter consume structured IR only.
 
-Retain the 53 conformance checks and byte-identical C output while this work proceeds.
+Retain the 59 conformance checks and byte-identical C output while this work proceeds.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 

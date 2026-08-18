@@ -1,6 +1,6 @@
 # C~ Language Support for Visual Studio Code
 
-This extension adds syntax highlighting and basic editor behavior for C~ (`.ct`) source files. Its grammar follows the implemented draft 0.5 language in the CTilde compiler repository.
+This extension adds C~ (`.ct`) IntelliSense and syntax highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
 
 ## Features
 
@@ -8,19 +8,45 @@ This extension adds syntax highlighting and basic editor behavior for C~ (`.ct`)
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
+- Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
+- Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
+- Live compiler diagnostics with related locations.
+- Hover, signature help, go-to-definition, document symbols, and workspace symbols.
+- Read-only navigation into embedded `System` and `Esp.Idf` sources.
+- JSON validation for `ctilde.json` project manifests.
 
-The extension is intentionally declarative. It does not provide completion, compiler diagnostics, navigation, formatting, debugging, snippets, or semantic highlighting.
+Rename, references, formatting, debugging, semantic highlighting, code actions, and auto-import edits are not implemented.
+
+## Projects
+
+Put `ctilde.json` at a project root to select the target and source set:
+
+```json
+{
+  "target": "esp-idf",
+  "sources": ["Program.ct"]
+}
+```
+
+The nearest ancestor manifest owns a file. Source and exclusion globs are relative to the manifest and cannot escape its directory. A file excluded from that source set is analyzed independently with the manifest target. Without a manifest, the extension treats each file as a standalone hosted program.
+
+The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `target` defaults to `hosted`; `sources` is required.
 
 ## Development
 
-Install the test dependencies and run the grammar tests:
+Install dependencies, build the TypeScript client and .NET server, and run the grammar and protocol tests:
 
 ```powershell
 cd .\editors\vscode
 npm install
 npm test
+npm run test:extension
+npm run build
+npm run package
 ```
 
-To try the extension, open `editors/vscode` as a folder in Visual Studio Code and press F5. In the Extension Development Host window, open any `.ct` file and use **Developer: Inspect Editor Tokens and Scopes** to inspect its TextMate scopes.
+The extension requires an installed .NET 10 runtime. Set `ctilde.languageServer.dotnetPath` when `dotnet` is not on `PATH`. Use **C~: Show Language Server Output**, **C~: Restart Language Server**, or `ctilde.trace.server` when troubleshooting.
+
+To try the extension, run `npm run build`, open `editors/vscode` in Visual Studio Code, and press F5. In the Extension Development Host, open a `.ct` file and request completion after `Console.`.
 
 The extension uses the same Unlicense terms as the repository root.

@@ -1,8 +1,8 @@
 {
   "name": "ctilde-language",
   "displayName": "C~ Language Support",
-  "description": "Syntax highlighting and editor support for the C~ programming language.",
-  "version": "0.1.0",
+  "description": "C~ syntax highlighting, diagnostics, completion, and navigation.",
+  "version": "0.2.0",
   "publisher": "ctilde",
   "license": "Unlicense",
   "repository": {
@@ -13,6 +13,11 @@
   "engines": {
     "vscode": "^1.85.0"
   },
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:ctilde",
+    "onUri:ctilde-stdlib"
+  ],
   "categories": [
     "Programming Languages"
   ],
@@ -25,20 +30,78 @@
   "files": [
     "LICENSE",
     "language-configuration.json",
-    "syntaxes/ctilde.tmLanguage.json"
+    "syntaxes/ctilde.tmLanguage.json",
+    "schemas/ctilde.schema.json",
+    "out/extension.js",
+    "server/**"
   ],
   "scripts": {
-    "test": "npm run test:metadata && npm run test:grammar && npm run test:sources",
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true});require('fs').rmSync('server',{recursive:true,force:true})\"",
+    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
+    "build:server": "dotnet publish ../../CTilde.LanguageServer/CTilde.LanguageServer.csproj -c Release --no-self-contained -o ./server",
+    "build": "npm run compile && npm run build:server",
+    "vscode:prepublish": "npm run build",
+    "package": "vsce package --no-dependencies",
+    "test": "npm run compile && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run test:server",
     "test:metadata": "node --test ./tests/metadata.test.mjs",
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
-    "test:sources": "node --test ./tests/source-tokenization.test.mjs"
+    "test:sources": "node --test ./tests/source-tokenization.test.mjs",
+    "test:server": "node --test ./tests/language-server.test.mjs",
+    "test:extension": "npm run build && node ./out/test/runTest.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
   },
   "devDependencies": {
+    "@types/node": "22.15.3",
+    "@types/vscode": "1.85.0",
+    "@vscode/test-electron": "3.1.0",
+    "@vscode/vsce": "3.6.0",
+    "esbuild": "0.25.3",
+    "typescript": "5.8.3",
     "vscode-oniguruma": "2.0.1",
     "vscode-textmate": "9.3.2",
     "vscode-tmgrammar-test": "0.1.3"
   },
   "contributes": {
+    "commands": [
+      {
+        "command": "ctilde.languageServer.restart",
+        "title": "C~: Restart Language Server"
+      },
+      {
+        "command": "ctilde.languageServer.showOutput",
+        "title": "C~: Show Language Server Output"
+      }
+    ],
+    "configuration": {
+      "title": "C~",
+      "properties": {
+        "ctilde.languageServer.dotnetPath": {
+          "type": "string",
+          "default": "dotnet",
+          "scope": "machine",
+          "description": "Path to the .NET 10 host used to run the C~ language server."
+        },
+        "ctilde.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "description": "Trace communication with the C~ language server."
+        }
+      }
+    },
+    "jsonValidation": [
+      {
+        "fileMatch": "**/ctilde.json",
+        "url": "./schemas/ctilde.schema.json"
+      }
+    ],
     "languages": [
       {
         "id": "ctilde",

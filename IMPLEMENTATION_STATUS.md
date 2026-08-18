@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 56 managed and native checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 59 managed and native checks, plus an end-to-end LSP protocol check in the VS Code package.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -156,6 +156,16 @@ The C ABI uses native target-width pointers. The reviewed native run used a 64-b
 The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
 
 The draft 0.5 exception surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
+
+## Language server and VS Code
+
+The repository includes an LSP 3.17 server and VS Code client. The server supports incremental document synchronization, cancellable diagnostic publication, semantic completion, hover, signature help, go-to-definition, document symbols, workspace symbols, and read-only embedded standard-library navigation.
+
+`ctilde.json` defines deterministic source globs, exclusions, and a hosted or ESP-IDF target. The CLI and language server share the loader. Files without a manifest are analyzed as standalone hosted programs; files outside a manifest source set retain that manifest's target but do not join its compilation.
+
+The extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol integration checks exercise initialization, incremental edits, diagnostics, completion, hover, signature help, definitions, symbols, embedded sources, shutdown, and exit.
+
+The language-service query snapshot is immutable and does not call `EmitC`. The broader compiler architecture debt above remains: compiler diagnostics still pass through the transitional combined body lowering path until immutable bound bodies replace it.
 
 ## ESP-IDF target
 

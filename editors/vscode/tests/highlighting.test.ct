@@ -1,0 +1,73 @@
+// SYNTAX TEST "source.ctilde" "C~ draft 0.5 highlighting"
+
+using System;
+// <--- keyword.control.import.ctilde
+//    ^^^^^^ entity.name.namespace.ctilde
+
+namespace Examples;
+// <------- keyword.declaration.namespace.ctilde
+//        ^^^^^^^^ entity.name.namespace.ctilde
+
+public sealed class Demo
+// <---- storage.modifier.ctilde
+//     ^^^^^^ storage.modifier.ctilde
+//            ^^^^^ storage.type.class.ctilde
+//                  ^^^^ entity.name.type.class.ctilde
+{
+    private const int value = 42;
+//  ^^^^^^^^^^^^^^ storage.modifier.ctilde
+//                ^^^ storage.type.ctilde
+//                    ^^^^^ variable.other.member.declaration.ctilde
+//                            ^^ constant.numeric.integer.decimal.ctilde
+
+    [Extern("native_call")]
+//  ^ punctuation.definition.attribute.begin.ctilde
+//   ^^^^^^ entity.name.type.attribute.ctilde
+//          ^^^^^^^^^^^^^ string.quoted.double.ctilde
+
+    public static void Invoke();
+//  ^^^^^^^^^^^^^ storage.modifier.ctilde
+//                ^^^^ storage.type.ctilde
+//                     ^^^^^^ entity.name.function.member.ctilde
+
+    public Demo(int initial)
+//  ^^^^^^^ storage.modifier.ctilde
+//         ^^^^ entity.name.function.constructor.ctilde
+    {
+        int @class = 0xFFu;
+//          ^ punctuation.definition.identifier.ctilde
+//           ^^^^^ variable.other.readwrite.ctilde
+//                   ^^^^^ constant.numeric.integer.hexadecimal.ctilde
+        uint bits = 0b1010_0110U;
+//                  ^^^^^^^^^^^^ constant.numeric.integer.binary.ctilde
+        float ratio = 3.5f;
+//                    ^^^^ constant.numeric.float.ctilde
+        string text = "line\nhex\x41bad\q";
+//                    ^^^^^^^^^^^^^^^^^^^^ string.quoted.double.ctilde
+//                         ^^ constant.character.escape.ctilde
+//                              ^^^^ constant.character.escape.ctilde
+//                                     ^^ invalid.illegal.escape.ctilde
+        char quote = '\'';
+//                   ^^^^ string.quoted.single.ctilde
+        int količina = initial + value;
+//          ^^^^^^^^ variable.other.readwrite.ctilde
+//                             ^ keyword.operator.arithmetic.ctilde
+        if (količina >= 1 && this.value != 0)
+//      ^^ keyword.control.ctilde
+//                   ^^ keyword.operator.comparison.ctilde
+//                        ^^ keyword.operator.logical.ctilde
+//                           ^^^^ variable.language.ctilde
+//                                      ^^ keyword.operator.comparison.ctilde
+            Console.WriteLine(text);
+//                  ^^^^^^^^^ entity.name.function.call.ctilde
+    }
+}
+
+string broken = "unterminated
+//              ^^^^^^^^^^^^^ string.quoted.double.ctilde
+int recovered = 1;
+// <--- storage.type.builtin.ctilde
+
+/* block
+ * comment */
+// <---------- comment.block.ctilde

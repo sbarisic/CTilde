@@ -7,7 +7,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $repositoryDirectory = Split-Path -Parent $PSScriptRoot
-$exampleDirectory = Join-Path $repositoryDirectory "examples\Esp32Blink"
+$exampleDirectory = Join-Path $repositoryDirectory "examples\TCan485"
 $temporaryDirectory = Join-Path ([IO.Path]::GetTempPath()) ("ctilde-esp-tests-" + [guid]::NewGuid().ToString("N"))
 
 function Find-Compiler([string]$root, [string]$name) {
@@ -48,8 +48,11 @@ try {
         }
 
         if (-not $SkipFirmwareBuild) {
-            Invoke-Checked (Join-Path $exampleDirectory "Build.ps1") @("-IdfPath", $IdfPath, "-Target", "esp32")
-            Invoke-Checked (Join-Path $exampleDirectory "Build.ps1") @("-IdfPath", $IdfPath, "-Target", "esp32c3")
+            $buildScript = Join-Path $exampleDirectory "Build.ps1"
+            & $buildScript -IdfPath $IdfPath -Target esp32
+            if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for esp32 with exit code $LASTEXITCODE." }
+            & $buildScript -IdfPath $IdfPath -Target esp32c3
+            if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for esp32c3 with exit code $LASTEXITCODE." }
         }
     }
     finally {

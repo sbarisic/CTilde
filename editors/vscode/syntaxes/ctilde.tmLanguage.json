@@ -1,0 +1,483 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "C~",
+  "scopeName": "source.ctilde",
+  "patterns": [
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#characters"
+    },
+    {
+      "include": "#attributes"
+    },
+    {
+      "include": "#declarations"
+    },
+    {
+      "include": "#declaration-keywords"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#language-constants"
+    },
+    {
+      "include": "#language-variables"
+    },
+    {
+      "include": "#built-in-types"
+    },
+    {
+      "include": "#modifiers"
+    },
+    {
+      "include": "#control-keywords"
+    },
+    {
+      "include": "#other-keywords"
+    },
+    {
+      "include": "#method-calls"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#punctuation"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.ctilde",
+          "begin": "//",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.ctilde"
+            }
+          },
+          "end": "(?=$)",
+          "patterns": [
+            {
+              "include": "#region-markers"
+            }
+          ]
+        },
+        {
+          "name": "comment.block.ctilde",
+          "begin": "/\\*",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.begin.ctilde"
+            }
+          },
+          "end": "\\*/",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.end.ctilde"
+            }
+          }
+        }
+      ]
+    },
+    "region-markers": {
+      "patterns": [
+        {
+          "name": "meta.region.ctilde",
+          "match": "(?i:#?(?:region|endregion))\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.ctilde",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.ctilde"
+        }
+      },
+      "end": "\"|(?=\\r?$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.ctilde"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#escapes"
+        }
+      ]
+    },
+    "characters": {
+      "name": "string.quoted.single.ctilde",
+      "begin": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.ctilde"
+        }
+      },
+      "end": "'|(?=\\r?$)",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.ctilde"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#escapes"
+        }
+      ]
+    },
+    "escapes": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.ctilde",
+          "match": "\\\\(?:[0abtnvfr\"'\\\\]|x[0-9A-Fa-f]{2})"
+        },
+        {
+          "name": "invalid.illegal.escape.ctilde",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "attributes": {
+      "name": "meta.attribute.ctilde",
+      "begin": "(?<![_\\p{L}\\p{Nd}\\]])(\\[)(?=\\s*@?[_\\p{L}][ _\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\(|\\s*\\]))",
+      "beginCaptures": {
+        "1": {
+          "name": "punctuation.definition.attribute.begin.ctilde"
+        }
+      },
+      "end": "\\]",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.attribute.end.ctilde"
+        }
+      },
+      "patterns": [
+        {
+          "name": "entity.name.type.attribute.ctilde",
+          "match": "@?[_\\p{L}][_\\p{L}\\p{Nd}]*"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#characters"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#language-constants"
+        },
+        {
+          "include": "#operators"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "declarations": {
+      "patterns": [
+        {
+          "name": "meta.declaration.namespace.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(namespace)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.declaration.namespace.ctilde"
+            },
+            "2": {
+              "name": "entity.name.namespace.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.import.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(using)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*)",
+          "captures": {
+            "1": {
+              "name": "keyword.control.import.ctilde"
+            },
+            "2": {
+              "name": "entity.name.namespace.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.declaration.class.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(class)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.class.ctilde"
+            },
+            "2": {
+              "name": "entity.name.type.class.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.declaration.struct.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(struct)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.struct.ctilde"
+            },
+            "2": {
+              "name": "entity.name.type.struct.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.declaration.enum.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(enum)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.enum.ctilde"
+            },
+            "2": {
+              "name": "entity.name.type.enum.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.method.declaration.ctilde",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)*)((?!(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\b)@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ctilde"
+            },
+            "2": {
+              "name": "storage.type.ctilde"
+            },
+            "3": {
+              "name": "entity.name.function.member.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.constructor.declaration.ctilde",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ctilde"
+            },
+            "2": {
+              "name": "entity.name.function.constructor.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.property.declaration.ctilde",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)*)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\{)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ctilde"
+            },
+            "2": {
+              "name": "storage.type.ctilde"
+            },
+            "3": {
+              "name": "variable.other.property.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.field.declaration.ctilde",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*(?:=|;))",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ctilde"
+            },
+            "2": {
+              "name": "storage.type.ctilde"
+            },
+            "3": {
+              "name": "variable.other.member.declaration.ctilde"
+            }
+          }
+        },
+        {
+          "name": "meta.enum-member.declaration.ctilde",
+          "match": "(?x)^\\s*(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)\\s*(?=(?:(?:=\\s*(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|[0-9][0-9_]*))?\\s*,|=\\s*(?:0[xX][0-9A-Fa-f_]+|0[bB][01_]+|[0-9][0-9_]*))\\s*(?://.*)?$)",
+          "captures": {
+            "1": {
+              "name": "variable.other.enummember.ctilde"
+            }
+          }
+        }
+      ]
+    },
+    "declaration-keywords": {
+      "patterns": [
+        {
+          "name": "storage.type.declaration.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|struct|enum)(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.declaration.namespace.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])namespace(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.control.import.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])using(?![_\\p{L}\\p{Nd}])"
+        }
+      ]
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.hexadecimal.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "constant.numeric.integer.binary.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])0[bB][01](?:_?[01])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "constant.numeric.float.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])(?:[0-9](?:_?[0-9])*\\.[0-9](?:_?[0-9])*(?:[fF])?|[0-9](?:_?[0-9])*[fF])(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "constant.numeric.integer.decimal.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])[0-9](?:_?[0-9])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+        }
+      ]
+    },
+    "language-constants": {
+      "name": "constant.language.ctilde",
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:true|false|null)(?![_\\p{L}\\p{Nd}])"
+    },
+    "language-variables": {
+      "name": "variable.language.ctilde",
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:this|base)(?![_\\p{L}\\p{Nd}])"
+    },
+    "built-in-types": {
+      "patterns": [
+        {
+          "name": "storage.type.inferred.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])var(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "storage.type.builtin.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
+        }
+      ]
+    },
+    "modifiers": {
+      "name": "storage.modifier.ctilde",
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)(?![_\\p{L}\\p{Nd}])"
+    },
+    "control-keywords": {
+      "name": "keyword.control.ctilde",
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:break|case|catch|continue|default|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
+    },
+    "other-keywords": {
+      "patterns": [
+        {
+          "name": "keyword.operator.type.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:as|is)(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.operator.new.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])new(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.other.accessor.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:get|set)(?![_\\p{L}\\p{Nd}])"
+        }
+      ]
+    },
+    "method-calls": {
+      "name": "entity.name.function.call.ctilde",
+      "match": "@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?=\\s*\\()"
+    },
+    "operators": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.ctilde",
+          "match": "(?:&&|\\|\\||!(?!=))"
+        },
+        {
+          "name": "keyword.operator.bitwise.ctilde",
+          "match": "(?:<<|>>|&(?!&)|\\|(?!\\|)|\\^|~)"
+        },
+        {
+          "name": "keyword.operator.comparison.ctilde",
+          "match": "(?:==|!=|<=|>=|<|>)"
+        },
+        {
+          "name": "keyword.operator.assignment.ctilde",
+          "match": "(?:\\+=|-=|\\*=|/=|%=|=)"
+        },
+        {
+          "name": "keyword.operator.arithmetic.ctilde",
+          "match": "(?:\\+\\+|--|\\+|-|\\*|/|%)"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.section.block.begin.ctilde",
+          "match": "\\{"
+        },
+        {
+          "name": "punctuation.section.block.end.ctilde",
+          "match": "\\}"
+        },
+        {
+          "name": "punctuation.section.group.begin.ctilde",
+          "match": "\\("
+        },
+        {
+          "name": "punctuation.section.group.end.ctilde",
+          "match": "\\)"
+        },
+        {
+          "name": "punctuation.section.brackets.begin.ctilde",
+          "match": "\\["
+        },
+        {
+          "name": "punctuation.section.brackets.end.ctilde",
+          "match": "\\]"
+        },
+        {
+          "name": "punctuation.separator.ctilde",
+          "match": "[;:,.]"
+        }
+      ]
+    },
+    "identifiers": {
+      "patterns": [
+        {
+          "name": "variable.other.readwrite.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])(@)([_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.identifier.ctilde"
+            },
+            "2": {
+              "name": "variable.other.readwrite.ctilde"
+            }
+          }
+        },
+        {
+          "name": "variable.other.readwrite.ctilde",
+          "match": "(?<![_\\p{L}\\p{Nd}])[_\\p{L}][_\\p{L}\\p{Nd}]*(?![_\\p{L}\\p{Nd}])"
+        }
+      ]
+    }
+  }
+}

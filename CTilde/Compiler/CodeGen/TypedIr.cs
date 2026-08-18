@@ -172,6 +172,10 @@ internal static class TargetValidator
         "ct_esp_gpio_configure_output",
         "ct_esp_gpio_write",
         "ct_esp_gpio_read",
+        "ct_esp_ws2812_configure",
+        "ct_esp_ws2812_set_pixel",
+        "ct_esp_ws2812_refresh",
+        "ct_esp_ws2812_clear",
     };
 
     public static void Validate(CompilationModel model, CEmitter emitter, CompilationTarget target)

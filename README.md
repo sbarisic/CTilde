@@ -110,12 +110,12 @@ Omit `CompilationOptions` to retain hosted output.
 ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. The compiler does not select a chip, link, flash, or monitor; `idf.py` owns those operations.
 
 ```powershell
-cd .\examples\Esp32Blink
+cd .\examples\TCan485
 .\Build.ps1 -Target esp32
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The checked project includes the fixed-width `Esp.Idf` shim, UART0 configuration, an 8 KiB main-task stack, GPIO2 blink, heap and stack reporting, and an object/exception self-test. See [the ESP32 example](examples/Esp32Blink/README.md) for the failure test and current runtime limits.
+The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and an object/exception self-test. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
 
 ## Projects
 
@@ -125,7 +125,8 @@ The checked project includes the fixed-width `Esp.Idf` shim, UART0 configuration
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.5 programs |
-| `examples/Esp32Blink` | ESP-IDF hardware project and native API shim |
+| `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
+| [`editors/vscode`](editors/vscode) | Visual Studio Code syntax highlighting and editor configuration |
 
 ## Validation
 

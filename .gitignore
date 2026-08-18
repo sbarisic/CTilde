@@ -194,6 +194,11 @@ orleans.codegen.cs
 /examples/Esp32Blink/sdkconfig
 /examples/Esp32Blink/sdkconfig.old
 /examples/Esp32Blink/main/generated/*.c
+/examples/TCan485/build/
+/examples/TCan485/managed_components/
+/examples/TCan485/sdkconfig
+/examples/TCan485/sdkconfig.old
+/examples/TCan485/main/generated/*.c
 
 # RIA/Silverlight projects
 Generated_Code/

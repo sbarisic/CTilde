@@ -38,3 +38,18 @@ public static class Gpio
     [Extern("ct_esp_gpio_read")]
     public static bool Read(int pin);
 }
+
+public static class Ws2812
+{
+    [Extern("ct_esp_ws2812_configure")]
+    public static bool Configure(int pin, uint ledCount);
+
+    [Extern("ct_esp_ws2812_set_pixel")]
+    public static bool SetPixel(uint index, uint red, uint green, uint blue);
+
+    [Extern("ct_esp_ws2812_refresh")]
+    public static bool Refresh();
+
+    [Extern("ct_esp_ws2812_clear")]
+    public static bool Clear();
+}

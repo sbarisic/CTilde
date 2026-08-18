@@ -1,6 +1,6 @@
 using System;
 
-namespace Examples.Esp32Failure;
+namespace Examples.TCan485Failure;
 
 public sealed class Box
 {

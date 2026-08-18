@@ -32,15 +32,14 @@ C~ already emits one GNU C23 translation unit. ESP-IDF 6 also uses GNU C23 as it
 
 The parser, binder, flow analysis, typed IR, and most C emission can stay shared. ESP support needs a platform runtime and an ESP-IDF project layer.
 
-The current compiler has these hosted assumptions:
+The hardware MVP has removed the entry-point, failure, process-exit, and symbol-retention assumptions from ESP output. `CompilationOptions` and the CLI now select `hosted` or `esp-idf`, and the checked example supplies the ESP-IDF project and fixed-width shim.
 
-- `Compilation` has no target options.
-- `CEmitter` always emits `int main(void)`.
-- Runtime failures write to `stderr` and call `exit(EXIT_FAILURE)`.
-- `System.Environment.Exit` assumes that the program is a process.
-- `ct_keep_symbols()` retains all generated and runtime symbols.
-- The CLI emits C but does not create ESP-IDF project files.
+These limits remain:
+
+- The CLI emits C but does not duplicate ESP-IDF linking, flashing, or monitoring.
 - `[Extern]` supports simple C ABI calls but not callbacks or exported C~ methods.
+- Managed allocation has program lifetime.
+- Exception-handler state supports one C~ execution task.
 
 The draft 0.5 object and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
 
@@ -66,7 +65,7 @@ The draft 0.5 object and exception runtime is complete at the language-behavior 
 - [x] Pass the target to `TargetValidator` and `CEmitter`.
 - [x] Reserve `app_main` and all ESP runtime symbols for the ESP-IDF target.
 - [x] Add a diagnostic for an unknown or unsupported target.
-- [ ] Keep all current hosted tests unchanged and passing.
+- [x] Keep all current hosted tests unchanged and passing.
 
 Do not add one target value for each ESP32 chip. Generated C must stay independent from the selected ESP32 instruction set.
 
@@ -109,7 +108,7 @@ ESP-IDF maps `stdout` and `stderr` to its configured console. The target must al
 - [x] Replace `exit(EXIT_FAILURE)` in the ESP runtime.
 - [x] Print the C~ runtime code and compact source location.
 - [x] Use `abort()` as the first default failure policy.
-- [ ] Document reset and panic behavior from the selected ESP-IDF configuration.
+- [x] Document reset and panic behavior from the selected ESP-IDF configuration.
 - [ ] Consider configurable `abort`, `restart`, and `halt` policies after the first release.
 - [x] Mark failure functions as functions that do not return.
 
@@ -137,8 +136,8 @@ Programs must not allocate strings, arrays, boxes, or objects without a bound in
 #### Stack and watchdogs
 
 - [x] Provide an ESP `sdkconfig.defaults` value for the main task stack.
-- [ ] Start with an 8 KiB main task stack and replace this value with measured data.
-- [ ] Measure the stack high-water mark in hardware tests.
+- [x] Start with an 8 KiB main task stack and validate the value with measured data.
+- [x] Measure the stack high-water mark in hardware tests.
 - [x] Add a delay API that yields to FreeRTOS.
 - [x] Document that a busy permanent loop can trigger a watchdog.
 
@@ -147,7 +146,7 @@ Programs must not allocate strings, arrays, boxes, or objects without a bound in
 - [x] Do not call `ct_keep_symbols()` from `app_main`.
 - [x] Mark intentionally unused internal definitions with a GCC-compatible attribute.
 - [x] Verify that ESP-IDF removes unused function and data sections.
-- [ ] Record flash and DRAM size for each conformance firmware.
+- [x] Record flash and DRAM size for each conformance firmware.
 - [ ] Add whole-program reachability analysis if attributes do not give acceptable size.
 
 `ct_keep_symbols()` currently takes the address of all generated functions and runtime helpers. A reachable call can prevent linker garbage collection.
@@ -205,6 +204,7 @@ Use a handwritten C shim for APIs that use ESP-IDF types, macros, opaque handles
 - [x] Add GPIO read and write methods.
 - [x] Add a 32-bit tick-count method.
 - [x] Add basic heap diagnostics.
+- [x] Add a singleton RMT-backed WS2812 API with fixed-width calls.
 - [ ] Add simple ESP log-level methods if `System.Console` is insufficient.
 - [x] Load ESP declarations only for the ESP-IDF target.
 - [x] Declare each required ESP-IDF component in `main/CMakeLists.txt`.
@@ -255,14 +255,16 @@ The stale `bin/hello.c` artifact currently fails both installed cross-compilers 
 
 #### Hardware tests
 
-- [ ] Flash the detected ESP32-D0WDQ6-V3 on `COM4`.
-- [ ] Verify startup and exact console output.
-- [ ] Verify GPIO output with a blink example.
-- [ ] Verify that the delay API yields without a watchdog reset.
-- [ ] Verify one null or bounds failure and its reported C~ runtime code.
-- [ ] Verify the configured failure reset or halt behavior.
-- [ ] Record minimum free heap and main task stack high-water mark.
-- [ ] Run the object construction, virtual dispatch, boxing, and string conformance cases on the target.
+- [x] Flash the detected ESP32-D0WDQ6-V3 on `COM4`.
+- [x] Verify startup and exact console output.
+- [x] Obtain human confirmation that the onboard GPIO4 WS2812 visibly follows the UART blink commands.
+- [x] Verify that the delay API yields without a watchdog reset.
+- [x] Verify one null or bounds failure and its reported C~ runtime code.
+- [x] Verify the configured failure reset or halt behavior.
+- [x] Record minimum free heap and main task stack high-water mark.
+- [x] Run the object construction, virtual dispatch, boxing, and string conformance cases on the target.
+
+The corrected 2026-08-18 T-CAN485 run reported 298,172 bytes of free and minimum free heap and 7,744 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812. UART alternated `ws2812: on/off` on GPIO4 for several cycles without a watchdog reset, and the onboard LED was confirmed to blink green in step with it. The null-failure image printed `CTN0001`, aborted, and restarted with `SW_CPU_RESET`; the WS2812 image was restored afterward. The earlier GPIO2 run was command-level validation only because GPIO2 is microSD MISO, not a visible LED.
 
 ### First-release acceptance criteria
 
@@ -271,11 +273,11 @@ ESP-IDF support is ready for its first release only when all these conditions ar
 - [x] One C~ source compilation produces deterministic ESP-IDF-ready GNU C23.
 - [x] The same generated C builds for one Xtensa and one RISC-V ESP32 target.
 - [x] The firmware builds with warnings treated as errors.
-- [ ] A real ESP32 on `COM4` prints the expected C~ console output.
-- [ ] A real ESP32 runs the GPIO and delay example without a watchdog reset.
-- [ ] Runtime failures produce a C~ code before the configured abort or restart.
-- [ ] Hosted C output and the complete hosted conformance suite still pass.
-- [ ] Flash, static DRAM, heap, and stack measurements are recorded. Flash and static DRAM are recorded; live heap and stack await hardware reconnection.
+- [x] A real ESP32 on `COM4` prints the expected C~ console output.
+- [x] A real T-CAN485 runs the WS2812 and delay example without a watchdog reset, with the visible LED result confirmed by a person.
+- [x] Runtime failures produce a C~ code before the configured abort or restart.
+- [x] Hosted C output and the complete hosted conformance suite still pass.
+- [x] Flash, static DRAM, heap, and stack measurements are recorded.
 - [x] The documentation states the permanent-allocation and single-C~-task limits.
 
 ### References

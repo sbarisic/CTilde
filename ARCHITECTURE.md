@@ -203,7 +203,7 @@ A new language feature must define syntax, binding, conversions, ordered lowerin
 
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
 
-ESP-IDF is a target profile, not a separate language backend. It reuses the parser, semantic model, transitional IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
+ESP-IDF is a target profile, not a separate language backend. It reuses the parser, semantic model, transitional IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. Native GPIO and the singleton WS2812/RMT handle stay behind that shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 

@@ -30,7 +30,7 @@ Run("deterministic C emission", () =>
 
 Run("ESP-IDF target profile", () =>
 {
-    const string source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { int[] values = new int[1]; FreeRtos.DelayMilliseconds(1u); Gpio.ConfigureOutput(2); Gpio.Write(2, true); } }";
+    const string source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { int[] values = new int[1]; FreeRtos.DelayMilliseconds(1u); Gpio.ConfigureOutput(32); Gpio.Write(32, true); Ws2812.Configure(4, 1u); Ws2812.SetPixel(0u, 0u, 16u, 0u); Ws2812.Refresh(); Ws2812.Clear(); } }";
     var options = new CompilationOptions(CompilationTarget.EspIdf);
     var first = Emit(source, options, @"E:\private\firmware\Program.ct");
     var second = Emit(source, options, @"E:\private\firmware\Program.ct");
@@ -44,6 +44,10 @@ Run("ESP-IDF target profile", () =>
     Assert(first.Contains("\"ctilde_esp_shim.h\"", StringComparison.Ordinal), "ESP-IDF shim header was not included.");
     Assert(first.Contains("\"Program.ct\"", StringComparison.Ordinal) && !first.Contains("E:/private", StringComparison.Ordinal), "ESP-IDF source locations were not compacted.");
     Assert(first.Contains("CT_UNUSED", StringComparison.Ordinal), "ESP-IDF unused-definition marker was not emitted.");
+    Assert(first.Contains("extern bool ct_esp_ws2812_configure(int32_t", StringComparison.Ordinal), "WS2812 configure ABI was not emitted.");
+    Assert(first.Contains("extern bool ct_esp_ws2812_set_pixel(uint32_t", StringComparison.Ordinal), "WS2812 pixel ABI was not emitted.");
+    Assert(first.Contains("extern bool ct_esp_ws2812_refresh(void);", StringComparison.Ordinal), "WS2812 refresh ABI was not emitted.");
+    Assert(first.Contains("extern bool ct_esp_ws2812_clear(void);", StringComparison.Ordinal), "WS2812 clear ABI was not emitted.");
 
     var hostedDiagnostics = Compile(source).GetDiagnostics();
     Assert(hostedDiagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "ESP-IDF declarations were available to the hosted target.");
@@ -54,14 +58,19 @@ Run("ESP-IDF target diagnostics", () =>
     var exit = Compile("public static class Program { [EntryPoint] public static void Main() { System.Environment.Exit(1); } }", new CompilationOptions(CompilationTarget.EspIdf));
     Assert(exit.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4105"), "Environment.Exit was not rejected for ESP-IDF.");
 
-    var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
-    Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 2, "ESP-IDF target symbols were not reserved.");
+    var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); [Extern(\"ct_esp_ws2812_configure\")] public static bool Configure(int pin, uint count); [Extern(\"ct_esp_ws2812_set_pixel\")] public static bool SetPixel(uint index, uint red, uint green, uint blue); [Extern(\"ct_esp_ws2812_refresh\")] public static bool Refresh(); [Extern(\"ct_esp_ws2812_clear\")] public static bool Clear(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 6, "ESP-IDF target symbols were not reserved.");
 
     var invalid = Compile("public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions((CompilationTarget)99));
     using var writer = new StringWriter(CultureInfo.InvariantCulture);
     var result = invalid.EmitC(writer);
     Assert(!result.Success && result.Diagnostics.Any(diagnostic => diagnostic.Code == "CT4104"), "Invalid API target did not produce CT4104.");
     Assert(writer.GetStringBuilder().Length == 0, "Invalid target emitted C output.");
+
+    var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+    var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+    var cli = RunProcess("dotnet", [cliDll, "--target", "unknown"]);
+    Assert(cli.ExitCode == 2 && cli.StandardError.Contains("Unknown target 'unknown'", StringComparison.Ordinal), "Unknown CLI target was not a usage error.");
 });
 
 Run("ESP GCC exception formatting", () =>

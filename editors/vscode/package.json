@@ -1,0 +1,63 @@
+{
+  "name": "ctilde-language",
+  "displayName": "C~ Language Support",
+  "description": "Syntax highlighting and editor support for the C~ programming language.",
+  "version": "0.1.0",
+  "publisher": "ctilde",
+  "license": "Unlicense",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sbarisic/CTilde.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "C~",
+    "CTilde",
+    "language",
+    "syntax highlighting"
+  ],
+  "files": [
+    "LICENSE",
+    "language-configuration.json",
+    "syntaxes/ctilde.tmLanguage.json"
+  ],
+  "scripts": {
+    "test": "npm run test:metadata && npm run test:grammar && npm run test:sources",
+    "test:metadata": "node --test ./tests/metadata.test.mjs",
+    "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
+    "test:sources": "node --test ./tests/source-tokenization.test.mjs"
+  },
+  "devDependencies": {
+    "vscode-oniguruma": "2.0.1",
+    "vscode-textmate": "9.3.2",
+    "vscode-tmgrammar-test": "0.1.3"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "ctilde",
+        "aliases": [
+          "C~",
+          "CTilde"
+        ],
+        "extensions": [
+          ".ct"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "ctilde",
+        "scopeName": "source.ctilde",
+        "path": "./syntaxes/ctilde.tmLanguage.json"
+      }
+    ]
+  }
+}

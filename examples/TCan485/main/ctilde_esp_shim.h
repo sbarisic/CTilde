@@ -17,4 +17,9 @@ bool ct_esp_gpio_configure_output(int32_t pin);
 bool ct_esp_gpio_write(int32_t pin, bool high);
 bool ct_esp_gpio_read(int32_t pin);
 
+bool ct_esp_ws2812_configure(int32_t pin, uint32_t led_count);
+bool ct_esp_ws2812_set_pixel(uint32_t index, uint32_t red, uint32_t green, uint32_t blue);
+bool ct_esp_ws2812_refresh(void);
+bool ct_esp_ws2812_clear(void);
+
 #endif

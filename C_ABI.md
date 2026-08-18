@@ -210,7 +210,7 @@ An extern declaration is linked only when generated code calls it. The compiler 
 
 An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.5 does not support exceptions across native callbacks or other native boundaries.
 
-ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, and `void`; ESP-IDF structures and typedef layouts do not cross the C~ boundary.
+ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, and `void`; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
 
 ## Exceptions
 

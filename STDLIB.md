@@ -97,7 +97,7 @@ public static class Environment
 
 ## ESP-IDF
 
-The ESP-IDF target adds fixed-width wrappers around FreeRTOS, system, heap, and GPIO operations:
+The ESP-IDF target adds fixed-width wrappers around FreeRTOS, system, heap, GPIO, and WS2812 operations:
 
 ```csharp
 namespace Esp.Idf;
@@ -123,9 +123,19 @@ public static class Gpio
     public static bool Write(int pin, bool high);
     public static bool Read(int pin);
 }
+
+public static class Ws2812
+{
+    public static bool Configure(int pin, uint ledCount);
+    public static bool SetPixel(uint index, uint red, uint green, uint blue);
+    public static bool Refresh();
+    public static bool Clear();
+}
 ```
 
 Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. GPIO configuration and writes return `false` when ESP-IDF rejects the pin or operation. `Read` requires a valid pin that the program configured first.
+
+`Ws2812` owns one firmware-lifetime RMT strip. The first successful `Configure` fixes its output pin and positive LED count; the same configuration is idempotent, while a different configuration returns `false`. `SetPixel` accepts indexes below that count and RGB components from 0 through 255, updates the native pixel buffer, and requires `Refresh` to transmit it. `Clear` turns off every pixel immediately. All methods return `false` when the strip is unavailable or ESP-IDF rejects an operation.
 
 These APIs are synchronous and are intended for the C~ entry task. They do not define callback, multi-task, or interrupt-safe C~ execution.
 

@@ -161,7 +161,7 @@ The draft 0.5 exception surface and ABI checks pass, but the compiler architectu
 
 The hardware MVP compiler and project support are implemented. `CompilationOptions` and `--target esp-idf` select one chip-independent profile. It emits `app_main`, compact source locations, unbuffered console startup, four-byte pointer assertions, abort-based fatal failures, and no `ct_keep_symbols` retention routine.
 
-`Esp.Idf` provides FreeRTOS delay and counters, restart and heap counters, and basic GPIO through a fixed-width handwritten shim. `System.Environment.Exit` is rejected with `CT4105`.
+`Esp.Idf` provides FreeRTOS delay and counters, restart and heap counters, basic GPIO, and one RMT-backed WS2812 strip through a fixed-width handwritten shim. `System.Environment.Exit` is rejected with `CT4105`.
 
 ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello and Exceptions output also passes both cross-compilers in GNU C23 syntax checks.
 
@@ -169,10 +169,12 @@ Measured self-test firmware sizes are:
 
 | Target | Image | Flash code | Flash data | IRAM/DRAM |
 | --- | ---: | ---: | ---: | ---: |
-| `esp32` | 127,413 bytes | 47,278 bytes | 27,524 bytes | 41,951 bytes IRAM; 12,996 bytes DRAM |
-| `esp32c3` | 126,444 bytes | 59,650 bytes | 24,160 bytes | 46,634 bytes DRAM, including 36,378 bytes executable text |
+| `esp32` | 145,417 bytes | 57,666 bytes | 31,904 bytes | 45,003 bytes IRAM; 13,260 bytes DRAM |
+| `esp32c3` | 148,070 bytes | 72,462 bytes | 29,228 bytes | 50,428 bytes DRAM, including 39,876 bytes executable text |
 
-The first physical target remains ESP32-D0WDQ6-V3. It was previously detected on `COM4`, but the port was absent during the 2026-08-18 flash gate. Hardware console, GPIO, failure, heap, and stack measurements therefore remain unverified and must not be treated as release evidence.
+The corrected self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `boxed: 7`, `exception: caught on ESP32`, and `CTILDE_ESP_OK`; the RMT-backed GPIO4 WS2812 commands alternated every 500 ms without a watchdog reset, and the onboard LED was confirmed to blink green in step with them. After the strip was configured and cleared, the board reported 298,172 bytes of free and minimum free heap and 7,744 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
+
+The separate failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `SW_CPU_RESET`. The WS2812 self-test image was reflashed and verified by UART as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
 
 ## Deliberately deferred
 

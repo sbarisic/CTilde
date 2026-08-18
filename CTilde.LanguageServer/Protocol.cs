@@ -26,12 +26,17 @@ internal sealed record ServerCapabilities(
     bool DefinitionProvider,
     bool DocumentSymbolProvider,
     bool WorkspaceSymbolProvider,
-    WorkspaceCapabilities Workspace);
+    WorkspaceCapabilities Workspace,
+    SemanticTokensOptions SemanticTokensProvider);
 internal sealed record TextDocumentSyncOptions(bool OpenClose, int Change, bool Save);
 internal sealed record CompletionOptions(bool ResolveProvider, string[] TriggerCharacters);
 internal sealed record SignatureHelpOptions(string[] TriggerCharacters, string[] RetriggerCharacters);
 internal sealed record WorkspaceCapabilities(WorkspaceFoldersCapabilities WorkspaceFolders);
 internal sealed record WorkspaceFoldersCapabilities(bool Supported, bool ChangeNotifications);
+internal sealed record SemanticTokensOptions(SemanticTokensLegend Legend, bool Full, bool Range);
+internal sealed record SemanticTokensLegend(string[] TokenTypes, string[] TokenModifiers);
+internal sealed record SemanticTokensParams(TextDocumentIdentifier TextDocument);
+internal sealed record SemanticTokens(int[] Data);
 internal sealed record CompletionParams(TextDocumentIdentifier TextDocument, Position Position);
 internal sealed record CompletionList(bool IsIncomplete, CompletionItem[] Items);
 internal sealed record CompletionItem(

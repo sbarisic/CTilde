@@ -17,7 +17,7 @@ async function extensionSmokeTest(): Promise<void> {
     await extension.activate();
     const directory = await mkdtemp(path.join(os.tmpdir(), 'ctilde-vscode-'));
     const filePath = path.join(directory, 'Program.ct');
-    const source = 'using System; public static class Program { [EntryPoint] public static void Main() { Console. } }';
+    const source = '// TextMate fallback\nusing System; public static class Program { [EntryPoint] public static void Main() { string text = "hello"; Console. } }';
     await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['*.ct'] }));
     await writeFile(filePath, source);
     try {
@@ -36,38 +36,90 @@ async function extensionSmokeTest(): Promise<void> {
             'vscode.executeDefinitionProvider', document.uri, definitionPosition);
         assert.ok(definitions.some(definition => ('uri' in definition ? definition.uri : definition.targetUri).scheme === 'ctilde-stdlib'));
 
+        const semantic = await waitFor(
+            async () => semanticTokens(document),
+            value => value.some(token => token.text === 'Console' && token.type === 'class'),
+            value => value.map(token => `${token.text}:${token.type}`).join(', '));
+        assert.ok(semantic.some(token => token.text === 'Program' && token.type === 'class' && token.modifiers.includes('declaration')));
+        assert.ok(semantic.some(token => token.text === 'Main' && token.type === 'method' && token.modifiers.includes('static')));
+        assert.ok(semantic.some(token => token.text === 'Console' && token.type === 'class' && token.modifiers.includes('defaultLibrary')));
+        assert.ok(!semantic.some(token => token.text === 'public' || token.text === '"hello"' || token.text.includes('TextMate')));
+
         await editor.edit(builder => builder.insert(new vscode.Position(0, 0), 'public class UnsavedMarker { }\n'));
         const symbols = await waitFor(
             async () => vscode.commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeWorkspaceSymbolProvider', 'UnsavedMarker'),
             value => value.some(symbol => symbol.name === 'UnsavedMarker'),
             value => value.map(symbol => symbol.name).join(', '));
         assert.ok(symbols.some(symbol => symbol.name === 'UnsavedMarker'));
+        const changedSemantic = await waitFor(
+            async () => semanticTokens(document),
+            value => value.some(token => token.text === 'UnsavedMarker' && token.type === 'class'),
+            value => value.map(token => `${token.text}:${token.type}`).join(', '));
+        assert.ok(changedSemantic.some(token => token.text === 'UnsavedMarker' && token.modifiers.includes('declaration')));
 
-        const hostedLabels = await targetCompletionLabels(directory, 'hosted');
-        const espLabels = await targetCompletionLabels(directory, 'esp-idf');
-        assert.ok(!hostedLabels.includes('Ws2812'));
-        assert.ok(espLabels.includes('Ws2812'));
+        const hosted = await targetFeatures(directory, 'hosted');
+        const esp = await targetFeatures(directory, 'esp-idf');
+        assert.ok(!hosted.labels.includes('Ws2812'));
+        assert.ok(esp.labels.includes('Ws2812'));
+        assert.ok(!hosted.semantic.some(token => token.text === 'Ws2812'));
+        assert.ok(esp.semantic.some(token => token.text === 'Ws2812' && token.type === 'class' && token.modifiers.includes('defaultLibrary')));
     } finally {
-        await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+        await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+        await new Promise(resolve => setTimeout(resolve, 200));
         await rm(directory, { recursive: true, force: true });
     }
 }
 
-async function targetCompletionLabels(root: string, target: 'hosted' | 'esp-idf'): Promise<string[]> {
+async function targetFeatures(root: string, target: 'hosted' | 'esp-idf'): Promise<{ labels: string[]; semantic: DecodedSemanticToken[] }> {
     const directory = path.join(root, target);
     const filePath = path.join(directory, 'Program.ct');
-    const source = 'using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { Ws } }';
+    const source = 'using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { Ws2812 } }';
     await mkdir(directory);
     await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target, sources: ['Program.ct'] }));
     await writeFile(filePath, source);
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    const position = document.positionAt(source.indexOf('Ws }') + 2);
+    const position = document.positionAt(source.indexOf('Ws2812') + 'Ws2812'.length);
     const completions = await waitFor(
         async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, position),
         value => target === 'hosted' || value.items.some(item => item.label === 'Ws2812'),
         value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
-    return completions.items.map(item => typeof item.label === 'string' ? item.label : item.label.label);
+    const semantic = await waitFor(
+        async () => semanticTokens(document),
+        value => target === 'hosted' || value.some(token => token.text === 'Ws2812'),
+        value => value.map(token => `${token.text}:${token.type}`).join(', '));
+    return {
+        labels: completions.items.map(item => typeof item.label === 'string' ? item.label : item.label.label),
+        semantic,
+    };
+}
+
+interface DecodedSemanticToken {
+    text: string;
+    type: string;
+    modifiers: string[];
+}
+
+async function semanticTokens(document: vscode.TextDocument): Promise<DecodedSemanticToken[]> {
+    const legend = await vscode.commands.executeCommand<vscode.SemanticTokensLegend>('vscode.provideDocumentSemanticTokensLegend', document.uri);
+    const tokens = await vscode.commands.executeCommand<vscode.SemanticTokens>('vscode.provideDocumentSemanticTokens', document.uri);
+    if (legend === undefined || tokens === undefined)
+        return [];
+    const result: DecodedSemanticToken[] = [];
+    let line = 0;
+    let character = 0;
+    for (let index = 0; index < tokens.data.length; index += 5) {
+        line += tokens.data[index];
+        character = tokens.data[index] === 0 ? character + tokens.data[index + 1] : tokens.data[index + 1];
+        const length = tokens.data[index + 2];
+        const modifierBits = tokens.data[index + 4];
+        result.push({
+            text: document.getText(new vscode.Range(line, character, line, character + length)),
+            type: legend.tokenTypes[tokens.data[index + 3]],
+            modifiers: legend.tokenModifiers.filter((_, modifier) => (modifierBits & (1 << modifier)) !== 0),
+        });
+    }
+    return result;
 }
 
 async function waitFor<T>(action: () => Thenable<T | undefined>, isReady: (value: T) => boolean, describe: (value: T) => string): Promise<T> {

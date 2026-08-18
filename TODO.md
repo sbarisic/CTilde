@@ -10,7 +10,9 @@
 - [x] Convert the VS Code package to a bundled TypeScript language client.
 - [x] Package the framework-dependent .NET 10 server and project schema.
 - [x] Add compiler, manifest, CLI, and end-to-end protocol checks.
-- [ ] Add references, rename, semantic highlighting, formatting, code actions, and auto-import completion edits.
+- [x] Add full-document compiler-aware semantic highlighting with TextMate fallback.
+- [ ] Add references, rename, formatting, code actions, and auto-import completion edits.
+- [ ] Add semantic-token range requests, delta results, and result-ID caching if project sizes require them.
 - [ ] Publish self-contained server binaries when release distribution requires clients without .NET 10.
 
 ## Compiler architecture completion
@@ -23,7 +25,7 @@ Draft 0.5 exception behavior is implemented, but the body pipeline remains trans
 4. Make `GetDiagnostics()` stop after declaration, binding, flow, and target validation. It must not construct rendered C fragments.
 5. Make the C emitter consume structured IR only.
 
-Retain the 59 conformance checks and byte-identical C output while this work proceeds.
+Retain the 63 conformance checks and byte-identical C output while this work proceeds.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 

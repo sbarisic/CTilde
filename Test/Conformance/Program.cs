@@ -140,6 +140,92 @@ Run("language service scopes and targets", () =>
     Assert(esp.GetCompletions("esp.ct", targetPosition).Any(item => item.Label == "Ws2812"), "ESP target completion did not include Ws2812.");
 });
 
+Run("language service semantic tokens", () =>
+{
+    const string source = """
+        using System;
+        namespace Demo;
+        public enum Mode { Off, On }
+        public class Device
+        {
+            public static readonly int Count;
+            public int Value;
+            public void Run(int parameter)
+            {
+                readonly int local = parameter;
+                foreach (int item in new int[1]) { Value = item; }
+                try { Console.WriteLine(local); }
+                catch (Exception error) { Console.WriteLine(error); }
+                Unknown;
+            }
+        }
+        """;
+    var service = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(source, "semantic.ct")]);
+    var tokens = service.GetSemanticTokens("semantic.ct");
+
+    LanguageSemanticToken TokenAt(string text, int occurrence = 0)
+    {
+        var position = -1;
+        for (var index = 0; index <= occurrence; index++)
+            position = source.IndexOf(text, position + 1, StringComparison.Ordinal);
+        Assert(position >= 0, $"Semantic-token fixture did not contain '{text}'.");
+        return tokens.Single(token => token.Span.Start == position);
+    }
+
+    Assert(TokenAt("System").Kind == LanguageSemanticTokenKind.Namespace && TokenAt("System").Modifiers.HasFlag(LanguageSemanticTokenModifiers.DefaultLibrary), "System namespace was not classified as default-library namespace.");
+    Assert(TokenAt("Demo").Kind == LanguageSemanticTokenKind.Namespace, "Namespace declaration was not classified.");
+    Assert(TokenAt("Mode").Kind == LanguageSemanticTokenKind.Enum && TokenAt("Mode").Modifiers.HasFlag(LanguageSemanticTokenModifiers.Declaration), "Enum declaration was not classified.");
+    Assert(TokenAt("Off").Kind == LanguageSemanticTokenKind.EnumMember && TokenAt("Off").Modifiers.HasFlag(LanguageSemanticTokenModifiers.Readonly), "Enum member modifiers were not classified.");
+    Assert(TokenAt("Device").Kind == LanguageSemanticTokenKind.Class && TokenAt("Device").Modifiers.HasFlag(LanguageSemanticTokenModifiers.Declaration), "Class declaration was not classified.");
+    Assert(TokenAt("Count").Kind == LanguageSemanticTokenKind.Property && TokenAt("Count").Modifiers.HasFlag(LanguageSemanticTokenModifiers.Static | LanguageSemanticTokenModifiers.Readonly), "Static readonly field modifiers were not classified.");
+    Assert(TokenAt("Run").Kind == LanguageSemanticTokenKind.Method, "Method declaration was not classified.");
+    Assert(TokenAt("parameter").Kind == LanguageSemanticTokenKind.Parameter && TokenAt("parameter", 1).Kind == LanguageSemanticTokenKind.Parameter, "Parameter declaration or reference was not classified.");
+    Assert(TokenAt("local").Kind == LanguageSemanticTokenKind.Variable && TokenAt("local").Modifiers.HasFlag(LanguageSemanticTokenModifiers.Readonly), "Readonly local declaration was not classified.");
+    Assert(TokenAt("item").Kind == LanguageSemanticTokenKind.Variable && TokenAt("item", 1).Kind == LanguageSemanticTokenKind.Variable, "Foreach variable declaration or reference was not classified.");
+    Assert(TokenAt("error").Kind == LanguageSemanticTokenKind.Variable && TokenAt("error", 1).Kind == LanguageSemanticTokenKind.Variable, "Catch variable declaration or reference was not classified.");
+    Assert(TokenAt("Value", 1).Kind == LanguageSemanticTokenKind.Property && !TokenAt("Value", 1).Modifiers.HasFlag(LanguageSemanticTokenModifiers.Declaration), "Field reference was not classified separately from its declaration.");
+    Assert(TokenAt("Console").Kind == LanguageSemanticTokenKind.Class && TokenAt("Console").Modifiers.HasFlag(LanguageSemanticTokenModifiers.DefaultLibrary), "Standard-library type reference was not classified.");
+    Assert(TokenAt("WriteLine").Kind == LanguageSemanticTokenKind.Method && TokenAt("WriteLine").Modifiers.HasFlag(LanguageSemanticTokenModifiers.DefaultLibrary | LanguageSemanticTokenModifiers.Static), "Standard-library method reference was not classified.");
+    Assert(tokens.All(token => source.AsSpan(token.Span.Start, token.Span.Length).IndexOfAny('\r', '\n') < 0), "A semantic token crossed a line boundary.");
+    Assert(tokens.Zip(tokens.Skip(1)).All(pair => pair.First.Span.End <= pair.Second.Span.Start), "Semantic tokens were not sorted or overlapped.");
+    Assert(!tokens.Any(token => token.Span.Start == source.IndexOf("Unknown", StringComparison.Ordinal)), "Unresolved identifier received a semantic token.");
+
+    const string accessSource = "public class Base { protected int State; private int Secret; public static int Count; public void Run(int value) { } public void Run(string value) { } } public class Derived : Base { public void Test() { State = 1; Run(1); Base item = new Base(); item.Secret = 1; item.Count = 1; Base.Count = 1; } }";
+    var accessTokens = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(accessSource, "semantic-access.ct")]).GetSemanticTokens("semantic-access.ct");
+    int AccessPosition(string text, int occurrence)
+    {
+        var position = -1;
+        for (var index = 0; index <= occurrence; index++)
+            position = accessSource.IndexOf(text, position + 1, StringComparison.Ordinal);
+        return position;
+    }
+    Assert(accessTokens.Any(token => token.Span.Start == AccessPosition("State", 1) && token.Kind == LanguageSemanticTokenKind.Property), "Accessible inherited field was not classified.");
+    Assert(accessTokens.Any(token => token.Span.Start == AccessPosition("Run", 2) && token.Kind == LanguageSemanticTokenKind.Method), "Overloaded method reference was not classified.");
+    Assert(!accessTokens.Any(token => token.Span.Start == AccessPosition("Secret", 1)), "Inaccessible private member received a semantic token.");
+    Assert(!accessTokens.Any(token => token.Span.Start == AccessPosition("Count", 1)), "Static member accessed through an instance received a semantic token.");
+    Assert(accessTokens.Any(token => token.Span.Start == AccessPosition("Count", 2) && token.Kind == LanguageSemanticTokenKind.Property && token.Modifiers.HasFlag(LanguageSemanticTokenModifiers.Static)), "Static member accessed through its type was not classified.");
+
+    const string escaped = "public class @class { public int π; public void M() { @class value = new @class(); value.π = 1; } }";
+    var escapedTokens = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(escaped, "escaped-semantic.ct")]).GetSemanticTokens("escaped-semantic.ct");
+    var escapedDeclaration = escapedTokens.Single(token => token.Span.Start == escaped.IndexOf("@class", StringComparison.Ordinal));
+    Assert(escapedDeclaration.Kind == LanguageSemanticTokenKind.Class && escapedDeclaration.Span.Length == "@class".Length, "Escaped declaration did not retain its full source span.");
+    Assert(escapedTokens.Count(token => token.Kind == LanguageSemanticTokenKind.Property && escaped.AsSpan(token.Span.Start, token.Span.Length).SequenceEqual("π")) == 2, "Unicode field declaration and reference were not classified.");
+
+    const string targetSource = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { Ws2812.Configure(4, 1u); } }";
+    var hosted = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(targetSource, "semantic-hosted.ct")]);
+    var esp = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(targetSource, "semantic-esp.ct")], new CompilationOptions(CompilationTarget.EspIdf));
+    var wsPosition = targetSource.IndexOf("Ws2812", StringComparison.Ordinal);
+    Assert(!hosted.GetSemanticTokens("semantic-hosted.ct").Any(token => token.Span.Start == wsPosition), "ESP semantic type leaked into hosted analysis.");
+    Assert(esp.GetSemanticTokens("semantic-esp.ct").Any(token => token.Span.Start == wsPosition && token.Kind == LanguageSemanticTokenKind.Class && token.Modifiers.HasFlag(LanguageSemanticTokenModifiers.DefaultLibrary)), "ESP semantic type was not classified.");
+
+    using var cancellation = new CancellationTokenSource();
+    cancellation.Cancel();
+    var canceled = false;
+    try { _ = service.GetSemanticTokens("semantic.ct", cancellation.Token); }
+    catch (OperationCanceledException) { canceled = true; }
+    Assert(canceled, "Semantic token classification ignored cancellation.");
+});
+
 Run("project manifest and CLI", () =>
 {
     var directory = Path.Combine(Path.GetTempPath(), "ctilde-project-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
@@ -891,7 +977,7 @@ Run("complete feature example", () =>
     var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
-    Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\n10\n", $"Unexpected output: {result.StandardOutput}");
+    Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
 });
 
 Run("object model example", () =>

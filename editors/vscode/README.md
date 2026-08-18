@@ -1,10 +1,12 @@
 # C~ Language Support for Visual Studio Code
 
-This extension adds C~ (`.ct`) IntelliSense and syntax highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
+This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
 
 ## Features
 
 - Syntax highlighting for declarations, keywords, literals, attributes, comments, operators, and punctuation.
+- Compiler-aware highlighting for resolved namespaces, classes, structs, enums, enum members, parameters, locals, properties, fields, methods, and constructors.
+- Semantic modifiers for declarations, static and readonly symbols, and embedded standard-library references.
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
@@ -15,7 +17,7 @@ This extension adds C~ (`.ct`) IntelliSense and syntax highlighting. It launches
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` project manifests.
 
-Rename, references, formatting, debugging, semantic highlighting, code actions, and auto-import edits are not implemented.
+Rename, references, formatting, debugging, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
 
 ## Projects
 
@@ -45,7 +47,7 @@ npm run build
 npm run package
 ```
 
-The extension requires an installed .NET 10 runtime. Set `ctilde.languageServer.dotnetPath` when `dotnet` is not on `PATH`. Use **C~: Show Language Server Output**, **C~: Restart Language Server**, or `ctilde.trace.server` when troubleshooting.
+The extension requires an installed .NET 10 runtime. Set `ctilde.languageServer.dotnetPath` when `dotnet` is not on `PATH`. Semantic highlighting follows VS Code's `editor.semanticHighlighting.enabled` setting and the active theme; TextMate highlighting remains available for lexical and unresolved syntax. Use **C~: Show Language Server Output**, **C~: Restart Language Server**, or `ctilde.trace.server` when troubleshooting.
 
 To try the extension, run `npm run build`, open `editors/vscode` in Visual Studio Code, and press F5. In the Extension Development Host, open a `.ct` file and request completion after `Console.`.
 

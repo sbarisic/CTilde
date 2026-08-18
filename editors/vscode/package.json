@@ -1,7 +1,7 @@
 {
   "name": "ctilde-language",
   "displayName": "C~ Language Support",
-  "description": "C~ syntax highlighting, diagnostics, completion, and navigation.",
+  "description": "C~ syntax and semantic highlighting, diagnostics, completion, and navigation.",
   "version": "0.2.0",
   "publisher": "ctilde",
   "license": "Unlicense",
@@ -120,6 +120,28 @@
         "language": "ctilde",
         "scopeName": "source.ctilde",
         "path": "./syntaxes/ctilde.tmLanguage.json"
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "ctilde",
+        "scopes": {
+          "namespace": ["entity.name.namespace.ctilde"],
+          "namespace.defaultLibrary": ["support.type.namespace.ctilde"],
+          "class": ["entity.name.type.class.ctilde"],
+          "class.defaultLibrary": ["support.class.ctilde"],
+          "struct": ["entity.name.type.struct.ctilde"],
+          "enum": ["entity.name.type.enum.ctilde"],
+          "enumMember": ["variable.other.enummember.ctilde"],
+          "parameter": ["variable.parameter.ctilde"],
+          "variable": ["variable.other.readwrite.ctilde"],
+          "variable.readonly": ["variable.other.constant.ctilde"],
+          "property": ["variable.other.property.ctilde"],
+          "property.readonly": ["variable.other.constant.property.ctilde"],
+          "property.defaultLibrary": ["support.variable.ctilde"],
+          "method": ["entity.name.function.member.ctilde"],
+          "method.defaultLibrary": ["support.function.ctilde"]
+        }
       }
     ]
   }

@@ -107,11 +107,11 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 
 Omit `CompilationOptions` to retain hosted output.
 
-`LanguageServiceSnapshot` provides editor-neutral completion, hover, signature, definition, diagnostic, and symbol queries using UTF-16 source offsets. It includes the same target-specific standard library as `Compilation`.
+`LanguageServiceSnapshot` provides editor-neutral completion, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same target-specific standard library as `Compilation`.
 
 ## Visual Studio Code
 
-The extension in [`editors/vscode`](editors/vscode) adds semantic completion, live compiler diagnostics, hover, signature help, go-to-definition, document/workspace symbols, and the existing TextMate highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
+The extension in [`editors/vscode`](editors/vscode) adds compiler-aware semantic highlighting, semantic completion, live compiler diagnostics, hover, signature help, go-to-definition, document/workspace symbols, and TextMate fallback highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
 
 Use `ctilde.json` when several files form one compilation:
 
@@ -143,7 +143,7 @@ The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 conf
 | --- | --- |
 | `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
 | `CTilde.Cli` | The `ctilde` command-line compiler |
-| `CTilde.LanguageServer` | LSP 3.17 server for completion, diagnostics, and navigation |
+| `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.5 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |

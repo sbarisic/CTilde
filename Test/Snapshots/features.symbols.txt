@@ -27,6 +27,7 @@ static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int3
 static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self);
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
+static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void);
 static void ct_m__16_Examples_2EProgram_4_Main(void);
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
 static void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value);
@@ -55,6 +56,7 @@ static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int3
 static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
+static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void)
 static void ct_m__16_Examples_2EProgram_4_Main(void)
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
 static void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value)

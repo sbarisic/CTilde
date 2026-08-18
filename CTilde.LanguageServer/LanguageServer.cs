@@ -5,10 +5,13 @@ namespace CTilde.LanguageServer;
 
 internal sealed class LanguageServer
 {
+    private static readonly string[] SemanticTokenTypes = ["namespace", "class", "struct", "enum", "enumMember", "parameter", "variable", "property", "method"];
+    private static readonly string[] SemanticTokenModifiers = ["declaration", "static", "readonly", "defaultLibrary"];
     private readonly WorkspaceState _workspace = new();
     private JsonRpc? _rpc;
     private CancellationTokenSource? _diagnosticDelay;
     private bool _shutdown;
+    private bool _semanticRefreshSupported;
 
     public LanguageServer() => _workspace.AnalysisChanged += ScheduleDiagnosticsAsync;
 
@@ -18,14 +21,16 @@ internal sealed class LanguageServer
     public InitializeResult Initialize(InitializeParams parameters)
     {
         _workspace.Initialize(parameters.RootUri, parameters.WorkspaceFolders);
+        _semanticRefreshSupported = SupportsSemanticTokenRefresh(parameters.Capabilities);
         return new InitializeResult(
             new ServerCapabilities(
                 new TextDocumentSyncOptions(true, 2, true),
                 new CompletionOptions(false, ["."]),
                 new SignatureHelpOptions(["(", ","], [","]),
                 true, true, true, true,
-                new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true))),
-            new ServerInfo("C~ Language Server", "0.1.0"));
+                new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true)),
+                new SemanticTokensOptions(new SemanticTokensLegend(SemanticTokenTypes, SemanticTokenModifiers), true, false)),
+            new ServerInfo("C~ Language Server", "0.2.0"));
     }
 
     [JsonRpcMethod("initialized", UseSingleObjectParameterDeserialization = true)]
@@ -136,6 +141,39 @@ internal sealed class LanguageServer
         return [.. results.GroupBy(symbol => (symbol.Name, symbol.ContainerName, symbol.Location.Uri, symbol.Location.Range.Start.Line, symbol.Location.Range.Start.Character)).Select(group => group.First())];
     }
 
+    [JsonRpcMethod("textDocument/semanticTokens/full", UseSingleObjectParameterDeserialization = true)]
+    public SemanticTokens SemanticTokens(SemanticTokensParams parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var project = _workspace.GetProject(parameters.TextDocument.Uri);
+        var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
+        if (!project.LanguageService.TryGetSourceText(path, out var source))
+            return new SemanticTokens([]);
+        var tokens = project.LanguageService.GetSemanticTokens(path, cancellationToken);
+        var data = new List<int>(tokens.Length * 5);
+        var previousLine = 0;
+        var previousCharacter = 0;
+        var first = true;
+        foreach (var token in tokens)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var location = source.GetLocation(new TextSpan(token.Span.Start, 0));
+            var line = location.Line - 1;
+            var character = location.Column - 1;
+            var deltaLine = first ? line : line - previousLine;
+            var deltaCharacter = first || deltaLine != 0 ? character : character - previousCharacter;
+            data.Add(deltaLine);
+            data.Add(deltaCharacter);
+            data.Add(token.Span.Length);
+            data.Add((int)token.Kind);
+            data.Add((int)token.Modifiers);
+            previousLine = line;
+            previousCharacter = character;
+            first = false;
+        }
+        return new SemanticTokens([.. data]);
+    }
+
     [JsonRpcMethod("ctilde/standardLibraryText", UseSingleObjectParameterDeserialization = true)]
     public string? StandardLibraryText(StandardLibraryTextParams parameters) => _workspace.GetStandardLibraryText(UriHelpers.StandardLibraryPath(parameters.Uri));
 
@@ -149,6 +187,8 @@ internal sealed class LanguageServer
         {
             await Task.Delay(150, next.Token).ConfigureAwait(false);
             await PublishDiagnosticsAsync(next.Token).ConfigureAwait(false);
+            if (_semanticRefreshSupported && _rpc is { } rpc)
+                await rpc.InvokeAsync("workspace/semanticTokens/refresh", Array.Empty<object>()).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (next.IsCancellationRequested) { }
         catch (Exception exception)
@@ -235,4 +275,14 @@ internal sealed class LanguageServer
     };
 
     private static bool PathEquals(string left, string right) => (OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).Equals(Path.GetFullPath(left), Path.GetFullPath(right));
+
+    private static bool SupportsSemanticTokenRefresh(System.Text.Json.JsonElement? capabilities)
+    {
+        if (capabilities is not { ValueKind: System.Text.Json.JsonValueKind.Object } root ||
+            !root.TryGetProperty("workspace", out var workspace) || workspace.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            !workspace.TryGetProperty("semanticTokens", out var semanticTokens) || semanticTokens.ValueKind != System.Text.Json.JsonValueKind.Object ||
+            !semanticTokens.TryGetProperty("refreshSupport", out var refreshSupport))
+            return false;
+        return refreshSupport.ValueKind == System.Text.Json.JsonValueKind.True;
+    }
 }

@@ -9,11 +9,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const extensionRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const serverDll = path.join(extensionRoot, "server", "CTilde.LanguageServer.dll");
 
-test("language server provides diagnostics, completion, hover, signatures, definitions, and symbols", async () => {
+test("language server provides diagnostics, semantic tokens, completion, hover, signatures, definitions, and symbols", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-"));
   const programPath = path.join(directory, "Program.ct");
   const uri = pathToFileURL(programPath).href;
-  const source = "using System; public static class Program { [EntryPoint] public static void Main() { Console. } }";
+  const source = "using System;\r\n// 😀 UTF-16 prefix\r\npublic static class Program { [EntryPoint] public static void Main() { Console. } }";
   await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
   await writeFile(programPath, source);
 
@@ -23,20 +23,34 @@ test("language server provides diagnostics, completion, hover, signatures, defin
       processId: process.pid,
       rootUri: pathToFileURL(directory).href,
       workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "fixture" }],
-      capabilities: {}
+      capabilities: { workspace: { semanticTokens: { refreshSupport: true } } }
     });
     assert.equal(initialized.capabilities.completionProvider.triggerCharacters[0], ".");
+    assert.deepEqual(initialized.capabilities.semanticTokensProvider.legend.tokenTypes,
+      ["namespace", "class", "struct", "enum", "enumMember", "parameter", "variable", "property", "method"]);
+    assert.deepEqual(initialized.capabilities.semanticTokensProvider.legend.tokenModifiers,
+      ["declaration", "static", "readonly", "defaultLibrary"]);
+    assert.equal(initialized.capabilities.semanticTokensProvider.full, true);
+    assert.equal(initialized.capabilities.semanticTokensProvider.range, false);
     client.notify("initialized", {});
     client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
 
-    const dotPosition = source.indexOf("Console.") + "Console.".length;
-    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: { line: 0, character: dotPosition } });
+    const dotOffset = source.indexOf("Console.") + "Console.".length;
+    const dotPosition = positionAt(source, dotOffset);
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: dotPosition });
     assert.ok(completion.items.some(item => item.label === "WriteLine"));
 
-    const consolePosition = source.indexOf("Console") + 1;
-    const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: { line: 0, character: consolePosition } });
+    const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
+    const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, source);
+    const consoleToken = decoded.find(token => token.text === "Console");
+    assert.deepEqual(consoleToken, { line: 2, character: source.split(/\r?\n/)[2].indexOf("Console"), length: 7, type: "class", modifiers: ["static", "defaultLibrary"], text: "Console" });
+    assert.ok(decoded.some(token => token.text === "Program" && token.type === "class" && token.modifiers.includes("declaration")));
+    await client.waitForNotification("workspace/semanticTokens/refresh", () => true);
+
+    const consolePosition = positionAt(source, source.indexOf("Console") + 1);
+    const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: consolePosition });
     assert.match(hover.contents.value, /System\.Console/);
-    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: { line: 0, character: consolePosition } });
+    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: consolePosition });
     assert.match(definition.uri, /^ctilde-stdlib:\/\/\/System\/Console\.ct$/);
     const standardLibraryText = await client.request("ctilde/standardLibraryText", { uri: definition.uri });
     assert.match(standardLibraryText, /static class Console/);
@@ -49,7 +63,7 @@ test("language server provides diagnostics, completion, hover, signatures, defin
     client.notify("textDocument/didChange", {
       textDocument: { uri, version: 2 },
       contentChanges: [{
-        range: { start: { line: 0, character: dotPosition }, end: { line: 0, character: dotPosition } },
+        range: { start: dotPosition, end: dotPosition },
         rangeLength: 0,
         text: "WriteLine("
       }]
@@ -58,10 +72,25 @@ test("language server provides diagnostics, completion, hover, signatures, defin
       textDocument: { uri, version: 1 },
       contentChanges: [{ text: source }]
     });
-    const signature = await client.request("textDocument/signatureHelp", { textDocument: { uri }, position: { line: 0, character: dotPosition + "WriteLine(".length } });
+    const signature = await client.request("textDocument/signatureHelp", { textDocument: { uri }, position: { line: dotPosition.line, character: dotPosition.character + "WriteLine(".length } });
     assert.ok(signature.signatures.some(item => item.label.includes("WriteLine")));
+    const changedSource = source.slice(0, dotOffset) + "WriteLine(" + source.slice(dotOffset);
+    const changedSemantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
+    const changedDecoded = decodeSemanticTokens(changedSemantic.data, initialized.capabilities.semanticTokensProvider.legend, changedSource);
+    assert.ok(changedDecoded.some(token => token.text === "WriteLine" && token.type === "method" && token.modifiers.includes("static") && token.modifiers.includes("defaultLibrary")));
     const diagnostics = await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === uri && value.version === 2);
     assert.ok(diagnostics.diagnostics.some(item => item.code.startsWith("CT0")));
+    await client.waitForNotification("workspace/semanticTokens/refresh", () => true);
+
+    client.notify("workspace/didChangeWatchedFiles", { changes: [{ uri: pathToFileURL(path.join(directory, "ctilde.json")).href, type: 2 }] });
+    await client.waitForNotification("workspace/semanticTokens/refresh", () => true);
+
+    const cancellationSource = `public static class Program { [EntryPoint] public static void Main() { int value = 0; ${"value;".repeat(2000)} } }`;
+    client.notify("textDocument/didChange", { textDocument: { uri, version: 3 }, contentChanges: [{ text: cancellationSource }] });
+    await client.request("workspace/symbol", { query: "Program" });
+    const canceledRequest = client.requestCancelable("textDocument/semanticTokens/full", { textDocument: { uri } });
+    client.notify("$/cancelRequest", { id: canceledRequest.id });
+    await assert.rejects(canceledRequest.promise);
 
     await client.request("shutdown");
     client.notify("exit");
@@ -71,6 +100,34 @@ test("language server provides diagnostics, completion, hover, signatures, defin
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+function decodeSemanticTokens(data, legend, source) {
+  const lines = source.split(/\r?\n/);
+  const result = [];
+  let line = 0;
+  let character = 0;
+  for (let index = 0; index < data.length; index += 5) {
+    line += data[index];
+    character = data[index] === 0 ? character + data[index + 1] : data[index + 1];
+    const length = data[index + 2];
+    const modifierBits = data[index + 4];
+    result.push({
+      line,
+      character,
+      length,
+      type: legend.tokenTypes[data[index + 3]],
+      modifiers: legend.tokenModifiers.filter((_, modifier) => (modifierBits & (1 << modifier)) !== 0),
+      text: lines[line].slice(character, character + length)
+    });
+  }
+  return result;
+}
+
+function positionAt(source, offset) {
+  const before = source.slice(0, offset);
+  const lines = before.split(/\r?\n/);
+  return { line: lines.length - 1, character: lines.at(-1).length };
+}
 
 class LspClient {
   #process;
@@ -88,10 +145,14 @@ class LspClient {
   }
 
   request(method, params) {
+    return this.requestCancelable(method, params).promise;
+  }
+
+  requestCancelable(method, params) {
     const id = this.#nextId++;
     const promise = new Promise((resolve, reject) => this.#requests.set(id, { resolve, reject }));
     this.#send({ jsonrpc: "2.0", id, method, ...(params === undefined ? {} : { params }) });
-    return promise;
+    return { id, promise };
   }
 
   notify(method, params) {
@@ -99,9 +160,9 @@ class LspClient {
   }
 
   waitForNotification(method, predicate) {
-    const existing = this.#notifications.find(item => item.method === method && predicate(item.params));
-    if (existing !== undefined)
-      return Promise.resolve(existing.params);
+    const existingIndex = this.#notifications.findIndex(item => item.method === method && predicate(item.params));
+    if (existingIndex >= 0)
+      return Promise.resolve(this.#notifications.splice(existingIndex, 1)[0].params);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), 10000);
       this.#waiters.push({ method, predicate, resolve: value => { clearTimeout(timer); resolve(value); } });
@@ -133,7 +194,15 @@ class LspClient {
         return;
       const message = JSON.parse(this.#buffer.subarray(headerEnd + 4, messageEnd).toString());
       this.#buffer = this.#buffer.subarray(messageEnd);
-      if (message.id !== undefined) {
+      if (message.id !== undefined && message.method !== undefined) {
+        this.#notifications.push(message);
+        this.#send({ jsonrpc: "2.0", id: message.id, result: null });
+        const index = this.#waiters.findIndex(waiter => waiter.method === message.method && waiter.predicate(message.params));
+        if (index >= 0) {
+          const [waiter] = this.#waiters.splice(index, 1);
+          waiter.resolve(message.params);
+        }
+      } else if (message.id !== undefined) {
         const request = this.#requests.get(message.id);
         this.#requests.delete(message.id);
         if (message.error !== undefined)

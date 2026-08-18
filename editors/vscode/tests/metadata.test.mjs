@@ -25,6 +25,10 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(manifest.dependencies["vscode-languageclient"], "9.0.1");
   assert.equal(manifest.contributes.configuration.properties["ctilde.languageServer.dotnetPath"].default, "dotnet");
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
+  const semanticScopes = manifest.contributes.semanticTokenScopes[0];
+  assert.equal(semanticScopes.language, "ctilde");
+  assert.deepEqual(semanticScopes.scopes.property, ["variable.other.property.ctilde"]);
+  assert.deepEqual(semanticScopes.scopes["method.defaultLibrary"], ["support.function.ctilde"]);
   assert.deepEqual(language, {
     id: "ctilde",
     aliases: ["C~", "CTilde"],

@@ -47,7 +47,7 @@ public sealed record LanguageWorkspaceSymbol(
     LanguageSymbolKind Kind,
     LanguageDefinition Location);
 
-public sealed class LanguageServiceSnapshot
+public sealed partial class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
@@ -59,6 +59,7 @@ public sealed class LanguageServiceSnapshot
     private readonly CompilationModel _model;
     private readonly ImmutableArray<Diagnostic> _diagnostics;
     private readonly Dictionary<string, SyntaxTree> _treesByPath;
+    private readonly Dictionary<string, DocumentIndex> _documentIndexes;
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private LanguageServiceSnapshot(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions options)
@@ -72,8 +73,12 @@ public sealed class LanguageServiceSnapshot
         _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics);
         _diagnostics = Compilation.Create(_userTrees, options).GetDiagnostics();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
+        _documentIndexes = new Dictionary<string, DocumentIndex>(_pathComparer);
         foreach (var tree in _allTrees)
+        {
             _treesByPath[NormalizePath(tree.Text.FilePath)] = tree;
+            _documentIndexes[NormalizePath(tree.Text.FilePath)] = new DocumentIndex(tree, _model);
+        }
     }
 
     public CompilationOptions Options { get; }
@@ -92,7 +97,7 @@ public sealed class LanguageServiceSnapshot
             return [];
         position = Math.Clamp(position, 0, tree.Text.Length);
         var replacement = IdentifierSpan(tree.Text.Text, position);
-        var context = new DocumentContext(tree, position, _model);
+        var context = CreateContext(tree, position);
         var member = FindMemberAccess(context, replacement.Start);
         var results = new List<LanguageCompletion>();
         if (member is not null)
@@ -115,7 +120,7 @@ public sealed class LanguageServiceSnapshot
         var token = IdentifierTokenAt(tree, position);
         if (token is null)
             return null;
-        var context = new DocumentContext(tree, position, _model);
+        var context = CreateContext(tree, position);
         var symbols = ResolveToken(context, token).ToArray();
         if (symbols.Length == 0)
             return null;
@@ -127,7 +132,7 @@ public sealed class LanguageServiceSnapshot
         if (!TryGetTree(filePath, out var tree))
             return null;
         position = Math.Clamp(position, 0, tree.Text.Length);
-        var context = new DocumentContext(tree, position, _model);
+        var context = CreateContext(tree, position);
         var call = context.Nodes.OfType<CallExpressionSyntax>()
             .Where(candidate => candidate.Span.Start <= position && candidate.Span.End >= position)
             .OrderBy(candidate => candidate.Span.Length)
@@ -164,7 +169,7 @@ public sealed class LanguageServiceSnapshot
         var token = IdentifierTokenAt(tree, position);
         if (token is null)
             return null;
-        var context = new DocumentContext(tree, position, _model);
+        var context = CreateContext(tree, position);
         foreach (var symbol in ResolveToken(context, token))
         {
             var syntax = SymbolSyntax(symbol);
@@ -335,8 +340,9 @@ public sealed class LanguageServiceSnapshot
 
     private IEnumerable<object> ResolveToken(DocumentContext context, SyntaxToken token)
     {
+        var tokenName = IdentifierValue(token);
         var member = context.Nodes.OfType<MemberAccessExpressionSyntax>()
-            .Where(candidate => candidate.Name == token.Text && candidate.Receiver.Span.End <= token.Span.Start)
+            .Where(candidate => IdentifierEquals(candidate.Name, tokenName) && candidate.Receiver.Span.End <= token.Span.Start && candidate.Span.End >= token.Span.End)
             .OrderBy(candidate => candidate.Span.Length).FirstOrDefault();
         if (member is not null)
         {
@@ -345,32 +351,60 @@ public sealed class LanguageServiceSnapshot
             if (receiverType is not null)
             {
                 if (receiver.StaticType?.Kind == DeclaredTypeKind.Enum)
-                    foreach (var value in receiverType.EnumValues.Where(value => value.Name == token.Text))
+                    foreach (var value in receiverType.EnumValues.Where(value => IdentifierEquals(value.Name, tokenName)))
                         yield return value;
-                foreach (var value in Hierarchy(receiverType).SelectMany(type => type.Fields.Cast<object>().Concat(type.Properties).Concat(type.Methods)).Where(symbol => SymbolName(symbol) == token.Text))
+                foreach (var value in Hierarchy(receiverType)
+                    .SelectMany(type => type.Fields.Cast<object>().Concat(type.Properties).Concat(type.Methods))
+                    .Where(symbol => IdentifierEquals(SymbolName(symbol), tokenName) && IsQualifiedMember(symbol, receiver.StaticType is not null, context.TypeSymbol)))
                     yield return value;
             }
             yield break;
         }
 
-        foreach (var local in VisibleLocals(context).Where(local => local.Name == token.Text))
+        if (ResolveScopedVariable(context, tokenName) is { } scoped)
         {
-            yield return local;
+            yield return scoped;
             yield break;
         }
-        foreach (var parameter in Parameters(context).Where(parameter => parameter.Name == token.Text))
+        foreach (var parameter in Parameters(context).Where(parameter => IdentifierEquals(parameter.Name, tokenName)))
         {
             yield return parameter;
             yield break;
         }
         if (context.TypeSymbol is not null)
         {
-            foreach (var value in Hierarchy(context.TypeSymbol).SelectMany(type => type.Fields.Cast<object>().Concat(type.Properties).Concat(type.Methods)).Where(symbol => SymbolName(symbol) == token.Text))
+            var requireStatic = IsStatic(context.MemberDeclaration);
+            foreach (var value in Hierarchy(context.TypeSymbol)
+                .SelectMany(type => type.Fields.Cast<object>().Concat(type.Properties).Concat(type.Methods))
+                .Where(symbol => IdentifierEquals(SymbolName(symbol), tokenName) && IsUnqualifiedMember(symbol, requireStatic, context.TypeSymbol)))
                 yield return value;
         }
-        var typeSymbol = _model.ResolveNamedType(token.Text, context.Tree);
+        var typeSymbol = _model.ResolveNamedType(token.Text, context.Tree) ?? VisibleTypes(context.Tree).FirstOrDefault(type => IdentifierEquals(type.Name, tokenName));
         if (typeSymbol is not null)
             yield return typeSymbol;
+    }
+
+    private object? ResolveScopedVariable(DocumentContext context, string name)
+    {
+        var candidates = new List<(object Symbol, TextSpan Scope, int DeclarationStart)>();
+        foreach (var local in VisibleLocals(context).Where(local => IdentifierEquals(local.Name, name)))
+        {
+            var scope = context.Parent(local);
+            while (scope is not null && scope is not BlockStatementSyntax and not ForStatementSyntax)
+                scope = context.Parent(scope);
+            candidates.Add((local, scope?.Span ?? context.Tree.Root.Span, local.Span.Start));
+        }
+        foreach (var loop in context.Nodes.OfType<ForeachStatementSyntax>()
+            .Where(loop => IdentifierEquals(loop.Name, name) && ContainsPosition(loop.Body.Span, context.Position)))
+        {
+            candidates.Add((new LocalSemanticSymbol(loop.Name, loop.Type, loop, true), loop.Body.Span, loop.Span.Start));
+        }
+        foreach (var clause in context.Nodes.OfType<CatchClauseSyntax>()
+            .Where(clause => clause.Name is not null && IdentifierEquals(clause.Name, name) && ContainsPosition(clause.Body.Span, context.Position)))
+        {
+            candidates.Add((new LocalSemanticSymbol(clause.Name!, clause.Type, clause, true), clause.Body.Span, clause.Span.Start));
+        }
+        return candidates.OrderBy(candidate => candidate.Scope.Length).ThenByDescending(candidate => candidate.DeclarationStart).Select(candidate => candidate.Symbol).FirstOrDefault();
     }
 
     private IEnumerable<MethodSymbol> ResolveCallCandidates(DocumentContext context, CallExpressionSyntax call)
@@ -507,6 +541,9 @@ public sealed class LanguageServiceSnapshot
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();
 
+    private DocumentContext CreateContext(SyntaxTree tree, int position) =>
+        new(_documentIndexes[NormalizePath(tree.Text.FilePath)], position);
+
     private bool TryGetTree(string filePath, out SyntaxTree tree) => _treesByPath.TryGetValue(NormalizePath(filePath), out tree!);
 
     private string NormalizePath(string path)
@@ -529,6 +566,15 @@ public sealed class LanguageServiceSnapshot
     }
 
     private static bool IsIdentifierPart(char value) => value == '_' || value == '@' || char.IsLetterOrDigit(value) || value >= 0x80;
+
+    private static string IdentifierValue(SyntaxToken token) => NormalizeIdentifier(token.Value as string ?? token.Text);
+
+    private static bool IdentifierEquals(string left, string right) =>
+        string.Equals(NormalizeIdentifier(left), NormalizeIdentifier(right), StringComparison.Ordinal);
+
+    private static string NormalizeIdentifier(string value) => value.StartsWith('@') ? value[1..] : value;
+
+    private static bool ContainsPosition(TextSpan span, int position) => position >= span.Start && position <= span.End;
 
     private static string? QualifiedName(ExpressionSyntax expression)
     {
@@ -553,6 +599,12 @@ public sealed class LanguageServiceSnapshot
         Accessibility.Protected => currentType is not null && (currentType == member.ContainingType || currentType.DerivesFrom(member.ContainingType)),
         _ => false,
     };
+
+    private static bool IsQualifiedMember(object symbol, bool staticReceiver, TypeSymbol? currentType) =>
+        symbol is MemberSymbol member && member.IsStatic == staticReceiver && IsAccessible(member, currentType);
+
+    private static bool IsUnqualifiedMember(object symbol, bool staticContext, TypeSymbol? currentType) =>
+        symbol is MemberSymbol member && (!staticContext || member.IsStatic) && IsAccessible(member, currentType);
 
     private static bool IsStatic(MemberDeclarationSyntax? member) => member?.Modifiers.Contains("static", StringComparer.Ordinal) == true;
 
@@ -586,6 +638,7 @@ public sealed class LanguageServiceSnapshot
         MethodSymbol method => FormatMethod(method),
         ParameterSyntax parameter => $"{parameter.Type} {parameter.Name}",
         LocalDeclarationStatementSyntax local => $"{local.Type} {local.Name}",
+        LocalSemanticSymbol local => $"{local.Type} {local.Name}",
         EnumValueSymbol value => $"{value.Name} = {value.Value}",
         _ => string.Empty,
     };
@@ -601,6 +654,7 @@ public sealed class LanguageServiceSnapshot
         MemberSymbol member => member.Syntax,
         ParameterSyntax parameter => parameter,
         LocalDeclarationStatementSyntax local => local,
+        LocalSemanticSymbol local => local.Syntax,
         EnumValueSymbol value => value.Syntax,
         _ => null,
     };
@@ -611,6 +665,7 @@ public sealed class LanguageServiceSnapshot
         MemberSymbol member => member.Name,
         ParameterSyntax parameter => parameter.Name,
         LocalDeclarationStatementSyntax local => local.Name,
+        LocalSemanticSymbol local => local.Name,
         EnumValueSymbol value => value.Name,
         _ => string.Empty,
     };
@@ -635,21 +690,22 @@ public sealed class LanguageServiceSnapshot
 
     private sealed record InferredExpression(CType? Type, TypeSymbol? StaticType);
 
+    private sealed record LocalSemanticSymbol(string Name, TypeSyntax? Type, SyntaxNode Syntax, bool IsReadonly);
+
     private sealed class DocumentContext
     {
-        private readonly Dictionary<SyntaxNode, SyntaxNode?> _parents = new(ReferenceEqualityComparer.Instance);
+        private readonly DocumentIndex _index;
 
-        public DocumentContext(SyntaxTree tree, int position, CompilationModel model)
+        public DocumentContext(DocumentIndex index, int position)
         {
-            Tree = tree;
+            _index = index;
+            Tree = index.Tree;
             Position = position;
-            var nodes = new List<SyntaxNode>();
-            Visit(tree.Root, null, nodes);
-            Nodes = nodes;
-            SmallestNode = nodes.Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
-            TypeDeclaration = nodes.OfType<TypeDeclarationSyntax>().Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
-            MemberDeclaration = nodes.OfType<MemberDeclarationSyntax>().Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
-            TypeSymbol = TypeDeclaration is null ? null : model.Types.Values.FirstOrDefault(type => ReferenceEquals(type.Syntax, TypeDeclaration));
+            Nodes = index.Nodes;
+            SmallestNode = Nodes.Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
+            TypeDeclaration = Nodes.OfType<TypeDeclarationSyntax>().Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
+            MemberDeclaration = Nodes.OfType<MemberDeclarationSyntax>().Where(node => Contains(node.Span, position)).OrderBy(node => node.Span.Length).FirstOrDefault();
+            TypeSymbol = TypeDeclaration is null ? null : index.TypeSymbols.GetValueOrDefault(TypeDeclaration);
         }
 
         public SyntaxTree Tree { get; }
@@ -660,7 +716,7 @@ public sealed class LanguageServiceSnapshot
         public MemberDeclarationSyntax? MemberDeclaration { get; }
         public TypeSymbol? TypeSymbol { get; }
 
-        public SyntaxNode? Parent(SyntaxNode node) => _parents.GetValueOrDefault(node);
+        public SyntaxNode? Parent(SyntaxNode node) => _index.Parent(node);
 
         public bool IsAncestor(SyntaxNode ancestor, SyntaxNode node)
         {
@@ -670,6 +726,31 @@ public sealed class LanguageServiceSnapshot
             return false;
         }
 
+        private static bool Contains(TextSpan span, int position) => position >= span.Start && position <= span.End;
+    }
+
+    private sealed class DocumentIndex
+    {
+        private readonly Dictionary<SyntaxNode, SyntaxNode?> _parents = new(ReferenceEqualityComparer.Instance);
+
+        public DocumentIndex(SyntaxTree tree, CompilationModel model)
+        {
+            Tree = tree;
+            var nodes = new List<SyntaxNode>();
+            Visit(tree.Root, null, nodes);
+            Nodes = nodes;
+            TypeSymbols = new Dictionary<TypeDeclarationSyntax, TypeSymbol>(ReferenceEqualityComparer.Instance);
+            foreach (var declaration in nodes.OfType<TypeDeclarationSyntax>())
+                if (model.Types.Values.FirstOrDefault(type => ReferenceEquals(type.Syntax, declaration)) is { } symbol)
+                    TypeSymbols[declaration] = symbol;
+        }
+
+        public SyntaxTree Tree { get; }
+        public IReadOnlyList<SyntaxNode> Nodes { get; }
+        public Dictionary<TypeDeclarationSyntax, TypeSymbol> TypeSymbols { get; }
+
+        public SyntaxNode? Parent(SyntaxNode node) => _parents.GetValueOrDefault(node);
+
         private void Visit(SyntaxNode node, SyntaxNode? parent, List<SyntaxNode> nodes)
         {
             nodes.Add(node);
@@ -677,7 +758,5 @@ public sealed class LanguageServiceSnapshot
             foreach (var child in node.ChildNodesAndTokens().Where(item => item.Node is not null).Select(item => item.Node!))
                 Visit(child, node, nodes);
         }
-
-        private static bool Contains(TextSpan span, int position) => position >= span.Start && position <= span.End;
     }
 }

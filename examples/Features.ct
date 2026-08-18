@@ -53,14 +53,23 @@ public static class Program
     private const int Factor = 2;
     private static int seed = 7;
 
+    [NoAlloc]
     private static int Twice(int value)
     {
         return value * 2;
     }
 
+    [NoAlloc]
     private static uint Twice(uint value)
     {
         return value * 2u;
+    }
+
+    [NoAlloc]
+    private static void ShowDeferredCleanup()
+    {
+        defer Console.WriteLine("deferred");
+        Console.WriteLine("Before deferred, i hope?");
     }
 
     [EntryPoint]
@@ -105,6 +114,10 @@ public static class Program
         Console.WriteLine(text.Length);
         Console.WriteLine(text[0]);
 
+        if (text.Length < 10) {
+            Console.WriteLine("Text.Length < 10!");
+        }
+
         unsafe
         {
             int number = 9;
@@ -112,5 +125,7 @@ public static class Program
             *pointer = 10;
             Console.WriteLine(number);
         }
+
+        ShowDeferredCleanup();
     }
 }

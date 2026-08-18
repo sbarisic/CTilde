@@ -1,66 +1,52 @@
 # C~
 
-C~ is an experimental C#-inspired systems language for the Fishmachine virtual machine.
+C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained, portable C11 translation unit.
 
-The current compiler reads prototype C~ source, builds an abstract syntax tree, and emits FishAsm text. The repository also contains an early C source backend.
+The current language is draft 0.3. It includes namespaces, classes, structures, enumerations, properties, overloads, arrays, immutable UTF-8 strings, structured control flow, checked managed access, and explicit unsafe pointers. It does not require a CLR or a C# runtime.
 
-> [!WARNING]
-> The compiler predates the draft C#-style specification. The included demonstration compiles, but many features are incomplete or generate incorrect FishAsm.
+## Quick start
 
-## Project status
-
-The standalone compiler currently supports a small demonstration path. It is not ready for general programs or production use.
-
-Known correctness problems include pointer handling, argument order, byte-sized local variables, conditional branches, and loop control. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for the full support matrix and repair plan.
-
-The newer Fishmachine repository contains a separate C~ copy with later language work. The two copies are not synchronized. A future revision must select one canonical compiler source.
-
-## Documentation
-
-- [LANGUAGE.md](LANGUAGE.md) defines the proposed C#-style C~ language.
-- [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler pipeline and FishAsm backend.
-- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) lists supported features, defects, and roadmap priorities.
-- [CTilde/todo.md](CTilde/todo.md) tracks the original single-assignment idea and its draft `readonly` design.
-
-## Requirements
-
-- Windows
-- A .NET SDK or Visual Studio installation that can build .NET Framework 4.8 projects
-- The .NET Framework 4.8 targeting pack
-
-The repository uses classic MSBuild project files. It does not use NuGet packages.
-
-## Build
-
-Run this command from the repository root:
+Build the .NET 10 solution:
 
 ```powershell
 dotnet build .\CTilde.sln
 ```
 
-The build creates these main files in `bin`:
-
-- `CTilde.dll` contains the compiler library.
-- `Test.exe` contains the command-line demonstration harness.
-- `tests/FishAsm.c` contains the default C~ demonstration program.
-
-## Compile the demonstration
-
-Run these commands after the build:
+Compile the example to C:
 
 ```powershell
-Set-Location .\bin
-.\Test.exe .\tests\FishAsm.c
+dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\bin\hello.c
 ```
 
-The harness writes `out.asm` in the current directory. It also prints parser debug tokens to standard output.
+Compile the generated file with a C11 compiler. For MSVC:
 
-The harness does not assemble or run the generated FishAsm. Use the separate [Fishmachine](https://github.com/sbarisic/Fishmachine) project for the assembler and virtual machine.
+```powershell
+cl /std:c11 /W4 /WX /Fe:.\bin\hello.exe .\bin\hello.c
+.\bin\hello.exe
+```
 
-## Design target example
+The program prints:
+
+```text
+5
+```
+
+The CLI accepts multiple input files as one compilation:
+
+```text
+ctilde <input.ct>... -o <program.c> [--check] [--trace]
+```
+
+- `-o` selects the generated C file.
+- `--check` parses and checks the program without writing C.
+- `--trace` reports compiler phase progress to standard error.
+
+The compiler writes no output file when an error is present.
+
+## Language example
 
 ```csharp
-using Fishmachine.Runtime;
+using System;
 
 namespace Examples;
 
@@ -69,44 +55,68 @@ public static class Program
     [EntryPoint]
     public static void Main()
     {
-        uint result = 2 + 3;
-        FishVm.Syscall(2, result);
-        FishVm.Stop();
+        int[] values = new int[3];
+        values[0] = 2;
+        values[1] = 3;
+        values[2] = 4;
+
+        int total = 0;
+        foreach (int value in values)
+        {
+            total += value;
+        }
+
+        Console.WriteLine(total);
     }
 }
 ```
 
-This example follows the draft specification. The current compiler does not accept the complete example yet.
+See [examples/Features.ct](examples/Features.ct) for classes, properties, overloads, structures, enums, loops, strings, and unsafe pointers.
 
-## Compiler library example
+## Public compiler API
 
 ```csharp
-using CTilde;
-using CTilde.FishAsm;
-using CTilde.Langs;
+var tree = SyntaxTree.Parse(SourceText.From(source, "program.ct"));
+var compilation = Compilation.Create(new[] { tree });
 
-var tokenizer = new Tokenizer("program.ct");
-var parser = new Parser(tokenizer);
-var state = new FishCompileState();
-var backend = new FishAsmProvider(state);
-
-backend.Compile(parser.Parse());
-string assembly = backend.CompileToSource();
+using var output = new StringWriter();
+EmitResult result = compilation.EmitC(output);
 ```
 
-`Tokenizer(string)` treats the string as a file path. Use the `TextReader` constructor to compile source held in memory.
+`Compilation.GetDiagnostics()` returns structured diagnostics without requiring emission. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location.
 
-## Repository layout
+## Projects
 
-| Path | Purpose |
+| Project | Purpose |
 | --- | --- |
-| `CTilde/` | Compiler library |
-| `CTilde/Expr/` | Abstract syntax tree nodes and parser routines |
-| `CTilde/FishAsm/` | FishAsm instruction names and compiler state |
-| `CTilde/Langs/` | FishAsm and C source backends |
-| `Test/` | Console harness and sample programs |
-| `Test/vm_out.txt` | Historical Fishmachine execution trace |
+| `CTilde` | Lexer, parser, semantic analysis, lowering, and C11 emission |
+| `CTilde.Cli` | The `ctilde` command-line compiler |
+| `Test` | Compiler and native C conformance runner |
+| `examples` | Checked draft 0.3 programs |
+
+## Validation
+
+```powershell
+dotnet build .\CTilde.sln
+dotnet run --project .\Test\Test.csproj --no-build
+```
+
+The native tests discover Visual Studio C tools on Windows. Set `CTILDE_CC` to test another compiler:
+
+```powershell
+$env:CTILDE_CC = "clang"
+dotnet run --project .\Test\Test.csproj
+```
+
+GCC and Clang are invoked with `-std=c11 -Wall -Wextra -Werror -pedantic`. MSVC is invoked with `/std:c11 /W4 /WX`.
+
+## Documentation
+
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.3 language specification.
+- [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
+- [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.
+- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records the measured feature and validation status.
 
 ## License
 
-The project uses the Unlicense. See [LICENSE](LICENSE).
+See [LICENSE](LICENSE).

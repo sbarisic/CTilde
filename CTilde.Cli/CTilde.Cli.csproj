@@ -6,14 +6,11 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <AssemblyName>CTilde.Tests</AssemblyName>
-    <RootNamespace>CTilde.Tests</RootNamespace>
-    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>ctilde</AssemblyName>
+    <PackageId>CTilde.CommandLine</PackageId>
+    <RootNamespace>CTilde.Cli</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Conformance/**/*.cs" />
     <ProjectReference Include="../CTilde/CTilde.csproj" />
-    <Content Include="../examples/*.ct" Link="Examples/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Snapshots/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

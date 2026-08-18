@@ -1,0 +1,116 @@
+using System;
+
+namespace Examples;
+
+public enum Direction : byte
+{
+    North = 0,
+    East = 1,
+    South = 2,
+    West = 3
+}
+
+public struct Point
+{
+    public int X;
+    public int Y;
+
+    public Point(int x, int y)
+    {
+        X = x;
+        Y = y;
+    }
+
+    public int Sum()
+    {
+        return X + Y;
+    }
+}
+
+public sealed class Counter
+{
+    private int value;
+
+    public Counter(int initialValue)
+    {
+        value = initialValue;
+    }
+
+    public int Value
+    {
+        get { return value; }
+        private set { this.value = value; }
+    }
+
+    public void Increment()
+    {
+        value++;
+    }
+}
+
+public static class Program
+{
+    private const int Factor = 2;
+    private static int seed = 7;
+
+    private static int Twice(int value)
+    {
+        return value * 2;
+    }
+
+    private static uint Twice(uint value)
+    {
+        return value * 2u;
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        Console.WriteLine(seed * Factor);
+        Counter counter = new Counter(3);
+        counter.Increment();
+        Console.WriteLine(counter.Value);
+
+        int[] values = new int[3];
+        for (int index = 0; index < values.Length; index++)
+        {
+            values[index] = index + 1;
+        }
+
+        int total = 0;
+        foreach (int value in values)
+        {
+            total += value;
+        }
+        Console.WriteLine(Twice(total));
+
+        Point point = new Point(2, 4);
+        Console.WriteLine(point.Sum());
+
+        Direction direction = Direction.East;
+        switch (direction)
+        {
+            case Direction.North:
+                Console.WriteLine("north");
+                break;
+            case Direction.East:
+                Console.WriteLine("east");
+                break;
+            default:
+                Console.WriteLine("other");
+                break;
+        }
+
+        string text = "A" + "B";
+        Console.WriteLine(text.Length);
+        Console.WriteLine(text[0]);
+
+        unsafe
+        {
+            int number = 9;
+            int* pointer = &number;
+            *pointer = 10;
+            Console.WriteLine(number);
+        }
+    }
+}

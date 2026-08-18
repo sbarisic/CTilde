@@ -1,235 +1,150 @@
-# Implementation status and roadmap
-
-## Status
+# Implementation status
 
 Last reviewed: 2026-08-18
 
-The standalone solution builds successfully for .NET Framework 4.8. The default demonstration also completes the parser and FishAsm code-generation steps.
+## Current state
 
-This result does not validate the generated program. The console harness does not run the assembler or virtual machine.
+C~ draft 0.3 has one compiler path:
 
-The current maturity level is an experimental prototype.
-
-## Specification alignment
-
-[LANGUAGE.md](LANGUAGE.md) defines a proposed C#-style design for C~ draft 0.2. The current parser and backends implement an older C-like prototype.
-
-The draft changes program structure, classes, arrays, constructors, low-level intrinsics, and interrupt declarations. The migration table in the specification maps old forms to new forms.
-
-No draft 0.2 feature is conforming until the compiler validates it through the complete Fishmachine path.
-
-| Draft 0.2 area | Current implementation |
-| --- | --- |
-| Namespaces and `using` directives | Not implemented |
-| Type-contained program structure | Prototype uses module-level functions and variables |
-| C#-style constructors | Prototype uses `__ctor` |
-| Structures and enumerations | Not implemented in this repository |
-| Properties and member access | Not implemented |
-| Attributes | Prototype uses keywords and function-name conventions |
-| `T[]` arrays and `new` | Prototype uses limited static string arrays |
-| Method calls as expressions | Not implemented |
-| C# operator precedence | Not implemented |
-| Safe and unsafe contexts | Not implemented |
-| Managed class and array references | Not implemented |
-
-## Support matrix
-
-The terms in this table have these meanings:
-
-- **Yes** means the basic path exists.
-- **Partial** means the feature has important limits or known defects.
-- **No** means the component rejects the feature or has no implementation.
-
-| Feature | Parser | FishAsm | C backend | Status notes |
-| --- | --- | --- | --- | --- |
-| Modules | Yes | Yes | Yes | One source file only |
-| Integer literals | Yes | Yes | Yes | FishAsm parses values as `uint` |
-| Decimal literals | Yes | No | No | FishAsm throws during `uint.Parse` |
-| Character literals | Yes | Yes | No | Escape set is limited |
-| String literals | Yes | Yes | No | Generated labels appear at module end |
-| Boolean literals | Yes | Partial | No | `while (true)` works, but `if (true)` fails |
-| Scalar declarations | Yes | Partial | Yes | Byte-sized local storage is incorrect |
-| Initialized globals | Yes | Partial | Yes | Integers and static strings have paths |
-| Uninitialized globals | Yes | No | Yes | FishAsm emits no storage or label |
-| Static string arrays | Yes | Partial | No | This is the only allocation form |
-| General arrays | Partial | No | Partial | Syntax differs from C |
-| Pointers | Partial | Incorrect | Partial | Pointer and pointee loads are confused |
-| Address-of | Partial | Partial | No | FishAsm supports labels only |
-| Dereference | Yes | No | No | No FishAsm dispatch case |
-| Addition and subtraction | Yes | Yes | Yes | No formal precedence rules |
-| Multiplication and division | No | No | No | Enum values exist only |
-| Comparisons | Yes | Partial | No | Flags work in some paths, values do not |
-| Simple assignment | Yes | Partial | No | FishAsm handles identifiers |
-| Indexed assignment | Yes | Partial | No | Identifier bases only |
-| Function definitions | Yes | Partial | Partial | No signature validation |
-| Function declarations | Yes | Partial | No | C backend compiles a null body |
-| Function calls as statements | Yes | Incorrect | Yes | Multi-argument order is reversed |
-| Function calls as expressions | No | No | No | Return values cannot be consumed normally |
-| Return statements | Yes | Partial | No | No type or control-flow checks |
-| `if` and `else` | Partial | Incorrect | No | Comparison branches are inconsistent |
-| `while` | Partial | Partial | No | Limited conditions and control-state defects |
-| `break` | Yes | Incorrect | No | Nested `if` statements can capture it |
-| `continue` | Yes | Incorrect | No | Jumps can bypass stack restoration |
-| Increment and decrement | Partial | Partial | No | Identifier statements only |
-| Classes | Partial | No | Partial | No usable object model |
-| Naked functions | Yes | Partial | No | Explicit return emits an invalid epilogue |
-| Inline FishAsm | Yes | Yes | No | String literals only |
-| Two-argument syscall | Yes | Partial | No | First argument must be a number literal |
-
-## Confirmed high-priority defects
-
-### P0: Function arguments use the wrong order
-
-The caller pushes arguments from first to last. The callee assigns the first parameter to `EBP+8`.
-
-The last pushed argument occupies that slot. All calls with two or more arguments receive reversed values.
-
-### P0: Byte-sized local variables use invalid stack offsets
-
-The first local always receives offset `EBP-4`. A one-byte local reserves only one byte from `ESP`.
-
-Initialized locals also use a four-byte store. This can overwrite nearby stack data.
-
-### P0: Pointer loads use pointee sizes
-
-The identifier backend chooses a pointer element size before it loads the variable. A string parameter therefore loads one byte from its stack slot.
-
-The backend must first load the four-byte pointer value. It can then load the pointee when an expression requests dereference or indexing.
-
-### P0: Conditional branches do not preserve source meaning
-
-The `if` backend jumps to the false branch with the equality jump. The `while` backend uses the opposite jump for the same comparison.
-
-Relational conditions also swap operands in one code path. The backend needs one tested branch-emission routine.
-
-### P0: Loop exits can leave the stack unbalanced
-
-The loop body saves `EAX` and `EBX`. A `break` or `continue` can jump past the matching pop instructions.
-
-`PopLoopLabel()` also returns the top label without removing it. Later loops can observe stale state.
-
-### P1: Uninitialized globals have no definition
-
-The backend emits `.globl name` but does not emit `name:` or reserve bytes.
-
-### P1: Comparisons do not produce Boolean values
-
-Comparison code sets flags only. An assignment from a comparison stores an unrelated register value.
-
-### P1: Parser terminator ownership is inconsistent
-
-Some expression parsers consume their closing token. Others return before it. Callers then make different assumptions.
-
-This causes valid-looking forms such as `if (true)` and function calls in expressions to fail with unrelated token errors.
-
-### P1: Normal compilation prints parser look-ahead
-
-Each statement or expression parse prints five tokens. The compiler needs an optional trace interface instead of unconditional console output.
-
-## Validation baseline
-
-The current baseline uses these checks:
-
-```powershell
-dotnet build .\CTilde.sln
-
-Set-Location .\bin
-.\Test.exe .\tests\FishAsm.c
+```text
+.ct source -> syntax -> semantic analysis -> typed lowering -> C11
 ```
 
-The build completed with zero warnings and zero errors during the last review.
+The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler generated FishAsm for the included demonstration. The harness did not assemble or execute that output.
+The compiler emits one self-contained C file. It does not invoke a native compiler.
 
-Focused review probes had these results:
+## Measured baseline
 
-| Probe | Result |
-| --- | --- |
-| Integer declaration and addition | Passed |
-| Multiplication | `NotImplementedException` |
-| Function call in an initializer | Parse failure |
-| Decimal literal | `FormatException` |
-| `if (true)` | Parse failure |
-| Pointer dereference | FishAsm `NotImplementedException` |
-| C-style array declaration | Parse failure |
-| Empty statement | Parse failure |
-| Included sample through C backend | `NotImplementedException` |
+The current workspace passes:
 
-## Test gaps
+```powershell
+dotnet build .\CTilde.sln --nologo
+dotnet run --project .\Test\Test.csproj --no-build
+```
 
-The solution has no automated unit, parser, code-generation, or conformance tests.
+The .NET build completes with zero warnings and zero errors. The conformance runner completes all managed and native checks.
 
-The `Test` project is a compiler harness. It has no expected-output comparison and does not return a failure for invalid FishAsm.
+Native checks discover Visual Studio 2022 C tools and compile generated files with:
 
-The repository needs these test layers:
+```text
+cl /std:c11 /W4 /WX
+```
 
-1. Lexer tests for every token and escape sequence.
-2. Parser tests for valid trees and precise invalid syntax.
-3. Binder and type-checker tests after those phases exist.
-4. FishAsm snapshot tests for small language constructs.
-5. Assembler tests for every emitted instruction and directive.
-6. End-to-end Fishmachine tests that check visible program output.
-7. Regression tests for every P0 and P1 defect in this document.
+The checked feature example prints:
 
-## Roadmap
+```text
+14
+4
+12
+6
+east
+2
+A
+10
+```
 
-### Phase 1: Select the canonical compiler
+The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. The generated feature example compiles with:
 
-Choose this repository or the embedded Fishmachine compiler as the source of truth.
+```text
+gcc -std=c11 -Wall -Wextra -Werror -pedantic
+```
 
-Move shared compiler code into one project. Make Fishmachine reference that project instead of keeping a copy.
+It exits successfully and produces the same checked output. The runner also accepts a native compiler path through `CTILDE_CC` for repeatable GCC or Clang runs.
 
-Record the supported FishAsm and bytecode versions.
+## Language support
 
-### Phase 2: Build the draft 0.2 frontend
+| Area | Status | Evidence |
+| --- | --- | --- |
+| UTF-8 files and Unicode identifiers | Implemented | Strict UTF-8 decoding and rune-based identifier categories |
+| Comments, escapes, and numeric forms | Implemented | Lexer diagnostics and literal tests |
+| File and block namespaces | Implemented | Parser and multi-file test |
+| Namespace imports | Implemented | Multi-file test with imported type |
+| Classes and static classes | Implemented | Native object test and feature example |
+| Structures | Implemented | Native feature example |
+| Enumerations and fixed underlying types | Implemented | Native enum and switch example |
+| Fields and static initialization | Implemented | Native ordered-evaluation and feature tests |
+| Constructors and `new` | Implemented | Class and structure native tests |
+| Custom and automatic properties | Implemented | Native property tests |
+| Access modifiers | Implemented | Private member and setter diagnostics |
+| Method overloads | Implemented | Feature example and conversion-based selection |
+| `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
+| Definite assignment and reachability | Implemented | Structured flow diagnostics |
+| Fixed-width numeric types | Implemented | Typed lowering and C static assertions |
+| Checked arrays and `foreach` | Implemented | Native iteration and failure tests |
+| Immutable UTF-8 strings | Implemented | Native concatenation, output, indexing, and length tests |
+| Expression precedence | Implemented | Pratt parser and deterministic emission test |
+| Calls as expressions | Implemented | Nested call and overload tests |
+| Ordered evaluation | Implemented | Native `Pack(Next(), Next()) == 12` test |
+| Arithmetic, logical, bitwise, shift, and comparison operators | Implemented | Typed lowering and constant folding |
+| Assignment and compound assignment | Implemented | Native state and iteration tests |
+| `if`, loops, `switch`, `break`, and `continue` | Implemented | Label lowering and native tests |
+| Numeric casts and conversions | Implemented | Binder conversion rules and typed C casts |
+| Unsafe address, dereference, indexing, and pointer arithmetic | Implemented | Native unsafe example and signature diagnostics |
+| `[EntryPoint]` | Implemented | Validation and native wrapper tests |
+| `[Extern]` | Implemented | Validation and emitted-prototype test |
+| `System.Console` and `System.Environment` | Implemented | Native output tests |
+| Structured diagnostics | Implemented | Stable phase ranges and source locations |
 
-Replace fixed look-ahead parsing with the draft grammar and its explicit operator precedence.
+## Conformance coverage
 
-Add a binder with nested scopes and symbol tables. Add a type checker with explicit expression result types.
+The executable test project checks:
 
-Add namespaces, using directives, type declarations, members, constructors, properties, attributes, and access modifiers.
+- Byte-identical repeated C emission.
+- Recoverable syntax diagnostics.
+- Definite assignment.
+- Multi-file declarations and imports.
+- Accessor access control.
+- Unsafe pointer exposure.
+- Entry point and extern validation.
+- Readonly branch merging and duplicate assignment.
+- Left-to-right receiver and argument evaluation.
+- Constant folding into C case labels.
+- Classes, structures, enums, constructors, methods, and properties.
+- Arrays, loops, strings, and the core library.
+- Managed null, bounds, negative-length, division-by-zero, and allocation-overflow paths.
+- Native C compilation with warnings treated as errors.
+- Checked standard output and runtime error output.
 
-Define and test one calling convention. Separate pointer values, array storage, and pointee loads.
+The full example in [examples/Features.ct](examples/Features.ct) is part of the native suite.
 
-Build control-flow blocks before instruction emission. Track stack depth at every branch target.
+## Runtime status
 
-### Phase 3: Repair the current language subset
+Managed objects currently use program-lifetime allocation. This is conforming draft 0.3 behavior.
 
-Fix parameter order, local offsets, uninitialized globals, condition branches, loop labels, and Boolean results.
+The runtime provides deterministic failures for null access, bad array lengths, allocation-size overflow, bounds access, allocation failure, integer division by zero, and string-length overflow.
 
-Implement function calls as expressions. Complete dereference and address-of behavior for local and global values.
+The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
 
-Replace prototype arrays with the specified `T[]` type and `new T[length]` allocation model.
+## Deliberately deferred
 
-### Phase 4: Add diagnostics and tests
+These features are outside draft 0.3:
 
-Replace general exceptions with diagnostics that contain a code, message, file, line, and column.
+- Class inheritance and interfaces.
+- Generics.
+- Exceptions.
+- Delegates, lambdas, and function types.
+- Iterators and yield statements.
+- Pattern matching.
+- Nullable reference analysis.
+- Reflection and dynamic binding.
+- Async methods and tasks.
+- Named, optional, `ref`, `in`, `out`, and parameter-array arguments.
+- Multidimensional and jagged arrays.
+- String interpolation and raw or verbatim strings.
+- Finalizers and automatic disposal.
+- Garbage collection before process exit.
+- Exact-source compilation of the current C# compiler.
 
-Remove unconditional token output. Add an optional compiler trace.
+## Release gate
 
-Create automated tests for the frontend, backend, assembler, and virtual machine path.
+A draft 0.3 release requires:
 
-### Phase 5: Complete the draft language
+- A zero-warning .NET build.
+- All managed and native conformance checks.
+- Byte-identical repeated output.
+- MSVC C11 compilation with warnings as errors.
+- GCC or Clang C11 compilation with strict warnings as errors.
+- Documentation synchronized with measured behavior.
 
-Implement multiplication, division, modulo, unary operators, logical operators, and bitwise operators.
-
-Add `for`, `foreach`, `do`, `switch`, structures, enums, member access, casts, arrays, and object creation.
-
-Implement the specified class layout, construction, managed references, allocation, properties, and method calls.
-
-### Phase 6: Add user tooling
-
-Create a compiler command that accepts input and output paths. Add options for the backend, diagnostics, and debug traces.
-
-Document the Fishmachine toolchain. Add versioned examples and a small standard library.
-
-## Release criteria
-
-A first usable release should meet all these conditions:
-
-- The standalone and Fishmachine projects use one compiler source.
-- All P0 and P1 defects in this document have regression tests.
-- The compiler has deterministic diagnostics and no debug output by default.
-- The supported language subset has a conformance suite.
-- Generated FishAsm assembles and runs through Fishmachine in automated tests.
-- The README example produces checked program output.
+All draft 0.3 release gates are measured in this workspace with MSVC and GCC as the two independent C11 compilers.

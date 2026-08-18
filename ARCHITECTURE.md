@@ -1,219 +1,169 @@
 # Compiler architecture
 
-## Scope
+## Overview
 
-This document describes the standalone CTilde solution. The solution contains a compiler library and a console demonstration.
-
-The repository does not contain the FishAsm assembler or the Fishmachine virtual machine.
-
-The current frontend predates the proposed C#-style language in [LANGUAGE.md](LANGUAGE.md). This document describes the implementation that exists today.
-
-## Pipeline
+The C~ compiler is a .NET 10 library with one output format: portable C11.
 
 ```text
-C~ source
-    |
-    v
-Lexer -> Tokenizer -> Parser and AST -> Language backend -> Text output
-                                                    |
-                                      +-------------+-------------+
-                                      |                           |
-                                      v                           v
-                                  FishAsm text                C source text
+UTF-8 source files
+    -> SourceText and locations
+    -> Lexer
+    -> Parser and immutable syntax trees
+    -> Declaration and type model
+    -> Semantic and control-flow analysis
+    -> Typed expression and statement lowering
+    -> Deterministic C11 emission
+    -> External C compiler
+    -> Native executable
 ```
 
-The parser builds the abstract syntax tree directly. Most abstract syntax tree nodes contain their own parsing method.
+The compiler emits no C when any error diagnostic is present. It does not contain an assembler, virtual machine, native linker, or second code generator.
 
-The compiler has no separate binding, semantic analysis, typed intermediate representation, or optimization phase.
-
-## Projects
+## Project boundaries
 
 ### CTilde
 
-`CTilde/CTilde.csproj` builds the compiler library for .NET Framework 4.8.
+The `CTilde.Compiler` assembly owns the complete language implementation.
 
-The public entry points are:
+- `SourceText` owns UTF-8-decoded text, line starts, spans, and one-based source locations.
+- `Lexer` owns tokenization, comments, literals, escapes, Unicode identifiers, and lexical diagnostics.
+- `Parser` owns declarations, statements, Pratt expression precedence, recovery, and immutable syntax nodes.
+- `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the built-in `System` surface.
+- `MethodLowerer` performs method-body binding, definite assignment, access checks, conversions, ordered evaluation, control-flow lowering, and typed C expression construction.
+- `CEmitter` owns the C runtime, layouts, symbol names, declarations, initialization, definitions, and entry wrapper.
 
-- `Tokenizer` reads a file or a `TextReader`.
-- `Parser` creates an `Expr_Module` tree.
-- `LangProvider` defines the text backend interface.
-- `FishAsmProvider` emits FishAsm.
-- `CLangProvider` emits a small C source subset.
+Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
+
+### CTilde.Cli
+
+The CLI is a thin file-system adapter. It reads one or more `.ct` files, creates syntax trees, creates one `Compilation`, prints diagnostics, and writes the generated translation unit only after successful analysis.
+
+The CLI does not invoke a C compiler. This keeps C emission deterministic and leaves native toolchain selection to the caller.
 
 ### Test
 
-`Test/Test.csproj` builds a console harness for .NET Framework 4.8.
+The conformance runner exercises the public API and compiles generated C with a real C compiler. On Windows it discovers Visual Studio with `vswhere`. The `CTILDE_CC` environment variable selects another compiler.
 
-The harness accepts one source path. It uses `Test/tests/FishAsm.c` when no argument is present in the build output directory.
+Native tests use temporary directories and check process output, error text, and exit codes.
 
-The harness always uses `FishAsmProvider`. It writes `out.asm` in the current directory.
-
-The project name is historical. It is not an automated test project and contains no assertions.
-
-## Frontend
-
-### Lexer
-
-`Lexer.cs` is a generic configurable lexer. It tracks source positions and produces whitespace, comment, identifier, keyword, symbol, number, and quoted-string tokens.
-
-The file is much larger than the C~-specific lexical configuration. Most C~ rules come from `Tokenizer` settings.
-
-### Tokenizer
-
-`Tokenizer.cs` configures keywords, symbols, comments, and quote characters. It reads the complete token stream into an array.
-
-The tokenizer removes comments and whitespace. It supports `NextToken()` and fixed look-ahead through `Peek()`.
-
-The tokenizer has no rewind, checkpoint, or error-recovery feature.
-
-### Parser and abstract syntax tree
-
-`Parser.Parse()` delegates to `Expr_Module.Parse()`. The module repeatedly calls `Expression.ParseStatement()` until the token stream ends.
-
-`Expression.ParseStatement()` selects a statement type through token look-ahead. `Expression.ParseExpression()` builds expression nodes.
-
-This design has three important limits:
-
-1. Statement parsing depends on fixed token patterns.
-2. Expression parsing has no operator-precedence table.
-3. Parser methods consume terminators inconsistently.
-
-The parser does not create a symbol table. It also does not resolve names or check types.
-
-## Abstract syntax tree
-
-Files under `CTilde/Expr` define the abstract syntax tree.
-
-The main node groups are:
-
-| Group | Nodes |
-| --- | --- |
-| Structure | Module, block, class, function, parameters |
-| Declarations | Type, variable, initialized variable, static value |
-| Values | Identifier, number, character, string |
-| Operations | Math, comparison, index, address, dereference, increment |
-| Statements | Assignment, call, return, if, while, break, continue |
-
-The tree stores type names as strings. It does not carry resolved type identities, conversions, or expression result types.
-
-Several nodes implement `ToSourceStr()`, but the base method is optional and throws by default. Backends use these methods mainly for comments.
-
-## Backend interface
-
-`LangProvider` owns a `StringBuilder` and indentation state. A backend implements one method:
+## Public API lifecycle
 
 ```csharp
-public abstract void Compile(Expression expression);
+SourceText text = SourceText.From(source, path);
+SyntaxTree tree = SyntaxTree.Parse(text);
+Compilation compilation = Compilation.Create(new[] { tree });
+
+ImmutableArray<Diagnostic> diagnostics = compilation.GetDiagnostics();
+EmitResult result = compilation.EmitC(writer);
 ```
 
-The backend appends output as it walks the tree. `CompileToSource()` returns the complete string.
+`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily builds the program model and generated C once. Subsequent diagnostics and emission requests reuse that immutable result, so repeated emission is byte-identical.
 
-The interface has no diagnostic sink, output sections, source map, relocation model, or capability query.
+`EmitC` writes nothing when `EmitResult.Success` is false.
 
-## FishAsm backend
+## Syntax and recovery
 
-`FishAsmProvider` uses a large type switch over abstract syntax tree nodes. It emits text instructions and data directives immediately.
+The lexer removes whitespace and comments while preserving token spans. Invalid input produces a token or diagnostic and continues whenever possible.
 
-`FishCompileState` stores mutable compilation state:
+The parser uses:
 
-- Global and local variable records
-- Stack and parameter offsets
-- Generated labels
-- Loop and break label stacks
-- Flags for the current compilation context
+- Recursive descent for files, namespaces, types, members, and statements.
+- A Pratt parser for unary and binary expressions.
+- Right-recursive parsing for assignment.
+- Token synchronization at type boundaries.
+- Missing zero-width tokens after recoverable expectation failures.
 
-The state is global to one backend instance. It does not model nested lexical scopes.
+The syntax tree contains source syntax only. It does not contain resolved types or generated C names.
 
-### Current calling convention
+## Symbols and types
 
-The backend intends to use this stack frame:
+The declaration pass creates all user types before it declares members. This permits references to types declared later or in another input file.
 
-```text
-EBP + 8   first parameter
-EBP + 12  second parameter
-...
-EBP + 4   return address
-EBP + 0   saved EBP
-EBP - N   local storage
-```
+The semantic model owns:
 
-Scalar return values use `EAX`. The caller removes argument slots after a call.
+- Fully qualified namespace and type names.
+- Class, structure, enum, field, property, constructor, method, parameter, and local symbols.
+- Static and instance membership.
+- Accessibility.
+- Fixed-width built-in types, arrays, pointers, and target-width references.
+- The automatically imported `System.Console` and `System.Environment` declarations.
 
-Each argument uses a four-byte stack slot. The current caller pushes arguments in source order, which reverses the parameter mapping.
+Overload resolution filters by name, static or instance context, argument count, and implicit conversions. Identity conversions score before widening conversions. Equal best scores produce an ambiguity diagnostic.
 
-### Function emission
+## Flow and lowering
 
-A normal function uses this prologue:
+Method lowering carries explicit lexical scopes and assignment state.
 
-```text
-PUSH_REG %ebp
-MOVE_REG_REG %esp, %ebp
-```
+- Branches merge local and required-field assignment state by intersection.
+- Loops do not make body-only assignments definite after the loop.
+- `readonly` assignment counts are merged across branches.
+- Return coverage and unreachable statements are checked before successful emission.
+- Loop and switch exits lower to unique labels, so nested control flow cannot capture the wrong target.
 
-A normal return uses this epilogue:
+A lowered expression contains:
 
-```text
-LEAVE
-RET
-```
+- Its resolved `CType`.
+- Ordered prerequisite statements.
+- A C expression for its value.
+- Optional lvalue store and address operations.
+- Optional constant value information.
 
-The backend also emits an implicit epilogue after every function body. An explicit return can therefore make a second unreachable epilogue.
+Receivers and operands with side effects are placed in generated temporaries. Calls evaluate the receiver first and arguments from left to right. Compound assignments evaluate their target once. Short-circuit operators lower their right operand into a conditional block.
 
-### Data emission
+This ordered prerequisite list is the compiler's typed intermediate representation between binding and text emission.
 
-Initialized globals emit a global label followed by data. Integer values use `.long`.
+## C emission
 
-Static string arrays use `.Raw`. String literals receive generated `.L_` labels and `.String` directives at module end.
+The emitter assembles one translation unit in this order:
 
-Uninitialized globals do not receive storage. General static arrays are not implemented.
+1. Standard headers and runtime support.
+2. String literal data.
+3. User-type forward declarations.
+4. Enum and aggregate layouts.
+5. Array layouts and allocators.
+6. Static fields.
+7. Function and accessor prototypes.
+8. Method, constructor, and accessor definitions.
+9. Deterministic static initialization.
+10. Symbol-retention routine.
+11. C `main` wrapper.
 
-### Interrupt wrappers
+Emission first lowers all bodies and initializers into memory. This discovers every array specialization and string literal before section ordering begins.
 
-The backend treats each function name that starts with `handler_` as an interrupt handler. It emits an implementation function and a register-saving wrapper.
+Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
 
-This behavior belongs in an explicit function attribute. A name prefix is easy to trigger by accident and is difficult to validate.
+## Runtime ownership
 
-## C source backend
+The generated translation unit embeds a small runtime:
 
-`CLangProvider` walks the same abstract syntax tree and writes C-like source.
+- Zero-initialized program-lifetime allocation.
+- Array allocation and bounds checks.
+- Null checks.
+- Checked division failure.
+- Two's-complement wrapping helpers for signed arithmetic.
+- Immutable UTF-8 strings and concatenation.
+- Console output and process exit.
 
-It supports modules, blocks, classes, functions, parameters, types, declarations, identifiers, integer constants, simple math, and calls.
+Managed storage is not reclaimed before process exit. C~ source has no `delete` operation.
 
-It does not support most statements or expressions accepted by the parser. It cannot translate the included FishAsm demonstration.
+Unsafe pointers lower to native C pointers. Unsafe operations bypass managed null and bounds checks but remain statically typed.
 
-The C backend also mixes statement formatting with expression formatting. For example, every function-call node emits a semicolon and newline.
+## Diagnostics
 
-Treat this backend as an unfinished experiment.
+Diagnostic code ranges are stable by phase:
 
-## External Fishmachine integration
+| Range | Owner |
+| --- | --- |
+| `CT0xxx` | Lexing and parsing |
+| `CT1xxx` | Declarations, names, access, and attributes |
+| `CT2xxx` | Types, conversions, and expressions |
+| `CT3xxx` | Definite assignment and control flow |
+| `CT4xxx` | C layout and emission |
 
-The [Fishmachine](https://github.com/sbarisic/Fishmachine) project contains the assembler, linker, bytecode format, virtual machine, and graphical host.
+Runtime failures use separate short codes such as `CTN0001` for null access and `CTA0003` for array bounds.
 
-Fishmachine also contains a newer embedded C~ compiler. That copy has more syntax and a larger type system than this repository.
+## Extension rules
 
-The two compiler copies have changed independently. This standalone repository cannot serve as the compiler dependency until the projects select a canonical source.
+A new language feature must define syntax, binding, conversions, ordered lowering, diagnostics, generated C, and positive and negative tests together.
 
-## Main architectural gaps
-
-The draft language requires these explicit compiler phases:
-
-```text
-Source
-  -> Lexer
-  -> Parser
-  -> Syntax tree
-  -> Binder and scope resolver
-  -> Type checker
-  -> Typed intermediate representation
-  -> FishAsm code generator
-  -> Assembler and linker
-  -> Fishmachine bytecode
-```
-
-The binder must own names, scopes, function signatures, and class or structure members.
-
-The type checker must own conversions, pointer rules, expression types, return checks, and lvalue checks.
-
-The intermediate representation must make control flow and stack lifetimes explicit. This step removes many current backend state errors.
-
-The compiler should also return structured diagnostics instead of throwing general exceptions.
+Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.

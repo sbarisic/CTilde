@@ -1,34 +1,31 @@
 # C~ language specification
 
-Specification version: draft 0.2
+Specification version: draft 0.3
 
 ## Status
 
-This document defines the proposed C~ language. The design uses C# syntax and a small systems runtime for Fishmachine.
+This document is the normative specification for C~ draft 0.3.
 
-The current compiler does not implement this specification. [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) describes the implemented prototype and its known defects.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.3 compiler emits portable C11 and diagnoses invalid programs before writing C.
 
-The words **must**, **must not**, **should**, and **may** define language requirements in this document.
+The words **must**, **must not**, **should**, and **may** define language requirements.
 
 ## Design goals
 
-C~ has these design goals:
-
 - Use familiar C# declaration, type, member, expression, and statement syntax.
-- Keep runtime behavior small enough for Fishmachine.
-- Separate safe code from pointer and inline assembly operations.
-- Define deterministic type sizes and a stable application binary interface.
-- Produce clear compile-time diagnostics before code generation.
-- Support classes without requiring the full .NET runtime.
+- Keep scalar sizes and safe-code behavior deterministic.
+- Use portable C11 as the compilation boundary.
+- Separate managed references from explicit unsafe pointers.
+- Preserve receiver-first and left-to-right expression evaluation.
+- Report structured source diagnostics before emission.
+- Support useful classes without a CLR.
 
-C~ does not try to implement the complete C# language or the Common Language Runtime.
+C~ is not C#, C++/CLI, or a CLR language.
 
-The first conforming version does not require generics, exceptions, delegates, reflection, dynamic binding, tasks, or language-integrated query.
-
-## Example program
+## Example
 
 ```csharp
-using Fishmachine.Runtime;
+using System;
 
 namespace Examples;
 
@@ -37,27 +34,28 @@ public static class Program
     [EntryPoint]
     public static void Main()
     {
-        uint left = 2;
-        uint right = 3;
-        uint result = left + right;
-
-        FishVm.Syscall(2, result);
-        FishVm.Stop();
+        uint left = 2u;
+        uint right = 3u;
+        Console.WriteLine(left + right);
     }
 }
 ```
 
-This example shows the design target. The current compiler does not accept this complete program.
+## Source files and compilation
 
-## Source files
+C~ files use the `.ct` extension and UTF-8 text. Invalid UTF-8 is an input error.
 
-C~ source files should use the `.ct` extension. A source file contains zero or more `using` directives and type declarations.
+One compilation can contain multiple files. All files share declarations and `internal` access. File order must not change name binding or generated symbols.
 
-A type can belong to the global namespace or one declared namespace.
+A file contains:
 
-The compiler must support UTF-8 source text. It must not depend on the host culture for identifiers or numeric literals.
+1. Zero or more `using` directives.
+2. Zero or one namespace declaration.
+3. Zero or more type declarations.
 
-### File layout
+Namespace-level variables and functions are not permitted.
+
+### Namespaces
 
 A file can use a file-scoped namespace:
 
@@ -69,7 +67,7 @@ public sealed class Entity
 }
 ```
 
-A file can also use a block namespace:
+It can instead use a block namespace:
 
 ```csharp
 namespace Game.World
@@ -80,20 +78,20 @@ namespace Game.World
 }
 ```
 
-A file must not contain both namespace forms. Namespace-level variables and functions are not permitted.
-
-Place functions and mutable state in a class or structure. Use a static class for program-wide functions and state.
+A file must not mix the two forms or place declarations outside a block namespace.
 
 ### Using directives
 
-A `using` directive imports type names from one namespace.
+A `using` directive imports simple type names from one namespace:
 
 ```csharp
-using Fishmachine.Runtime;
+using System;
 using Game.World;
 ```
 
-The first conforming version does not require aliases or `using static`.
+Draft 0.3 has no aliases and no `using static`.
+
+The `System` namespace is imported automatically.
 
 ## Lexical structure
 
@@ -101,54 +99,36 @@ The first conforming version does not require aliases or `using static`.
 
 An identifier starts with a Unicode letter or underscore. Later characters can contain Unicode letters, decimal digits, and underscores.
 
-Identifiers are case-sensitive. `Player`, `player`, and `PLAYER` name different symbols.
-
-An `@` prefix permits a keyword as an identifier.
+Identifiers are case-sensitive. An `@` prefix permits a keyword as an identifier; the prefix is not part of the name.
 
 ```csharp
 int @class = 1;
 ```
 
-The `@` character is not part of the declared name.
-
 ### Keywords
-
-The core language reserves these keywords:
 
 ```text
 bool      break      byte       case       char       class
 const     continue   default    do         else       enum
-false     float      for        foreach    if         in
-int       internal   namespace  new        null       private
-protected public     readonly   return     sbyte      sealed
-short     static     string     struct     switch     this
-true      uint       unsafe     ushort     using      var
-void      while
+false     float      for        foreach    get        if
+in        int        internal   namespace  new        null
+private   protected  public     readonly   return     sbyte
+sealed    set        short      static     string     struct
+switch    this       true       uint       unsafe     ushort
+using     var        void       while
 ```
 
-`get` and `set` are contextual keywords inside property declarations.
+`get` and `set` are meaningful only in property declarations. `default` is a switch label.
 
-Future specifications can reserve more keywords. A compiler must not reserve undocumented words.
+### Comments and terminators
 
-### Comments
+`//` starts a line comment. `/*` and `*/` delimit a non-nesting block comment.
 
-C~ supports line comments and block comments.
-
-```csharp
-// A line comment ends at the next line break.
-
-/* A block comment can span lines. */
-```
-
-Block comments do not nest.
-
-### Statement terminators
-
-Declarations and simple statements end with `;`. Blocks do not require a trailing semicolon.
+Declarations and simple statements end with a semicolon. A block does not have a trailing semicolon.
 
 ### Numeric literals
 
-Integer literals can use decimal, hexadecimal, or binary notation. An underscore can separate digits.
+Integer literals can use decimal, hexadecimal, or binary notation. Underscores can separate digits.
 
 ```csharp
 42
@@ -157,230 +137,164 @@ Integer literals can use decimal, hexadecimal, or binary notation. An underscore
 0b1010_0110
 ```
 
-The suffix `u` or `U` selects an unsigned integer literal. The suffix `f` or `F` selects a floating-point literal.
+`u` or `U` selects `uint`. `f` or `F` selects `float`.
 
 ```csharp
 42u
 3.5f
 ```
 
-The compiler must diagnose a literal that does not fit its target type.
+A literal must fit its selected type. An explicit cast applies normal truncation rules after literal typing.
 
 ### Character literals
 
-A `char` literal uses single quotes.
+`char` is one eight-bit UTF-8 code unit. A character literal must encode to exactly one byte.
 
-```csharp
-'A'
-'\n'
-'\x7F'
-```
-
-C~ supports `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`, and `\\`.
-
-A hexadecimal escape uses exactly two hexadecimal digits. A `char` contains one eight-bit code unit.
+Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`, `\\`, and `\xHH`. A hexadecimal escape contains exactly two hexadecimal digits.
 
 ### String literals
 
-A string literal uses double quotes.
+Strings use double quotes and the character escape set. Draft 0.3 has no verbatim, raw, or interpolated strings.
 
-```csharp
-"Hello, world!"
-"Line one\nLine two"
-```
-
-Strings use UTF-8 storage and end with a zero byte at Fishmachine boundaries. The string length does not include that terminator.
-
-`Length` returns the number of UTF-8 code units. Indexing a string returns one read-only `char` code unit.
-
-The first conforming version does not require verbatim strings, raw strings, or string interpolation.
+String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
 ### Boolean and null literals
 
-`true` and `false` have type `bool`. `null` can convert to a reference type or pointer type.
+`true` and `false` have type `bool`. Integers do not convert to `bool`.
 
-C~ does not use integer values as Boolean values.
+`null` converts to a class, array, string, or unsafe pointer type.
 
 ## Type system
 
-C~ is statically typed. Every expression has a compile-time type before code generation starts.
-
-Types belong to one of three groups:
-
-- Value types contain their data directly.
-- Reference types refer to runtime-managed objects.
-- Pointer types contain unchecked machine addresses.
+Every expression has a compile-time type before C emission.
 
 ### Built-in types
 
-| Type | Kind | Size | Description |
-| --- | --- | ---: | --- |
-| `bool` | Value | 1 byte | `true` or `false` |
-| `byte` | Value | 1 byte | Unsigned integer |
-| `sbyte` | Value | 1 byte | Signed integer |
-| `short` | Value | 2 bytes | Signed integer |
-| `ushort` | Value | 2 bytes | Unsigned integer |
-| `char` | Value | 1 byte | UTF-8 code unit |
-| `int` | Value | 4 bytes | Signed integer |
-| `uint` | Value | 4 bytes | Unsigned integer |
-| `float` | Value | 4 bytes | IEEE 754 binary32 value |
-| `string` | Reference | 4 bytes | Immutable UTF-8 string |
-| `void` | Return marker | None | No return value |
+| Type | Kind | Size |
+| --- | --- | ---: |
+| `bool` | Value | 1 byte |
+| `byte` | Unsigned value | 1 byte |
+| `sbyte` | Signed value | 1 byte |
+| `short` | Signed value | 2 bytes |
+| `ushort` | Unsigned value | 2 bytes |
+| `char` | UTF-8 code-unit value | 1 byte |
+| `int` | Signed value | 4 bytes |
+| `uint` | Unsigned value | 4 bytes |
+| `float` | IEEE-754 binary32 value | 4 bytes |
+| `string` | Managed reference | Target pointer width |
+| `void` | Return marker | None |
 
-The Fishmachine target uses 32-bit addresses. Every reference and pointer therefore occupies four bytes.
+Class, array, string, and unsafe pointer values use the native pointer width of the selected C target.
 
-Unlike C#, C~ defines `char` as an eight-bit UTF-8 code unit. This choice matches the Fishmachine text interface.
+Draft 0.3 has no `long`, `ulong`, `double`, `decimal`, `nint`, or `nuint`.
 
-The first conforming version does not require `long`, `ulong`, `double`, `decimal`, `nint`, or `nuint`.
+### Value and reference types
 
-### Value types
+Numeric types, `bool`, structures, and enums are value types. Assignment copies the complete value.
 
-Numeric types, `bool`, structures, and enumerations are value types. Assignment copies the complete value.
+Classes, arrays, and strings are reference types. Assignment copies object identity. Their default value is `null`.
 
-Each value type has a default value. Numeric types use zero, `bool` uses `false`, and each structure field uses its default value.
+Class and array equality compares identity. String equality compares contents, with two null strings equal.
 
-### Reference types
+### Arrays
 
-Classes, arrays, and strings are reference types. Assignment copies the reference, not the object.
-
-Reference equality compares object identity. String equality compares string contents.
-
-The default value of a reference type is `null`. Nullable reference analysis is not part of draft 0.2.
-
-### Pointer types
-
-`T*` declares a pointer to `T`. Pointer types are valid only in an `unsafe` context.
-
-```csharp
-unsafe
-{
-    int value = 10;
-    int* pointer = &value;
-    *pointer = 20;
-}
-```
-
-Pointer arithmetic scales an integer offset by the pointed type size. Pointer operations do not perform bounds or null checks.
-
-### Array types
-
-`T[]` declares a one-dimensional array reference. The array length belongs to the object, not the type.
+`T[]` declares a one-dimensional managed array reference.
 
 ```csharp
 byte[] data = new byte[256];
 ```
 
-Each array has a read-only `Length` property of type `int`. Array indexing starts at zero and performs a bounds check.
+Every array has a read-only `Length` property of type `int`. Indexing starts at zero and checks the receiver, index, and length.
 
-Draft 0.2 does not require multidimensional or jagged arrays.
+Draft 0.3 has no multidimensional or jagged arrays.
+
+### Unsafe pointers
+
+`T*` is a native pointer to `T`. Pointer syntax and operations require an `unsafe` method or block.
+
+Pointer arithmetic scales by the pointed element size. Dereference and pointer indexing do not perform managed null or bounds checks.
+
+Safe members must not expose a pointer through a field, property, parameter, or return type.
 
 ### Enumerations
 
-An enumeration defines named integral constants.
+An enum has a fixed underlying type:
 
 ```csharp
 public enum Direction : byte
 {
     North = 0,
-    East = 1,
-    South = 2,
-    West = 3
+    East = 1
 }
 ```
 
-The underlying type can be `byte`, `sbyte`, `short`, `ushort`, `int`, or `uint`. The default underlying type is `int`.
+The underlying type can be `byte`, `sbyte`, `short`, `ushort`, `int`, or `uint`. The default is `int`.
 
-### Type conversions
+Draft 0.3 enum initializers are integral literals. An omitted initializer is one greater than the previous value. Every value must fit the underlying type.
 
-The compiler permits an implicit numeric conversion when every source value fits the target type.
+### Conversions
 
-Other numeric conversions require an explicit cast.
+Identity conversions are implicit.
 
-```csharp
-byte small = 10;
-int wide = small;
-byte narrowed = (byte)wide;
-```
+An implicit numeric conversion is valid when the target range contains every source value. Integral values can also convert implicitly to `float` because the range fits, although precision can change.
 
-An explicit numeric conversion truncates excess high bits. The first conforming version does not require checked overflow contexts.
+All other numeric conversions require a cast. Explicit numeric conversions truncate high bits. There is no checked-overflow context.
 
-Reference conversions follow the declared class hierarchy when inheritance becomes available. Draft 0.2 defines no user class inheritance.
+`null` converts implicitly to reference and pointer types.
+
+Classes have no inheritance conversions in draft 0.3.
 
 ## Declarations and scope
 
-### Local variables
-
-A local variable declaration specifies a type or uses `var`.
+### Locals
 
 ```csharp
 int count = 0;
 var total = count + 10;
 ```
 
-`var` requires an initializer. It does not make a variable dynamically typed.
+`var` requires an initializer and adopts its compile-time type. It is not dynamic.
 
-A local variable must receive a value before its first read. The compiler must report a definite-assignment error otherwise.
+A local must be definitely assigned before its first read. A declaration cannot hide another active local or parameter.
 
 ### Constants
 
-A `const` variable receives a compile-time constant value at its declaration.
+`const` requires a compile-time constant initializer. Constant uses substitute the constant value.
 
 ```csharp
-const int BufferSize = 256;
+const int BufferSize = 128 * 2;
 ```
 
-The initializer must contain constants only. The compiler substitutes the value where the program uses the constant.
+### Read-only storage
 
-### Read-only variables
-
-`readonly` permits one runtime assignment. This rule applies to fields and local variables in C~.
+A `readonly` local permits one delayed runtime assignment:
 
 ```csharp
-readonly int deviceId;
-deviceId = ReadDeviceId();
+readonly int device;
+if (condition)
+    device = 1;
+else
+    device = 2;
 ```
 
-A read-only local can receive a value at most once. It must receive that value before its first read.
+Every reachable read must follow an assignment, and no reachable path can assign the value twice.
 
-A constructor can assign a read-only instance field. Each constructor must assign that field before it returns.
+A constructor can assign a `readonly` instance field. Each constructor must assign that field exactly once before returning.
 
-This local-variable behavior is a C~ extension to C#.
-
-### Scope
-
-A block creates a lexical scope. A nested block can read symbols from its parent scope.
-
-A declaration cannot hide another local variable from an active parent scope. Fields and local variables can share a name through explicit `this` access.
-
-```csharp
-private int count;
-
-public void SetCount(int count)
-{
-    this.count = count;
-}
-```
-
-## Classes and structures
+## Types and members
 
 ### Classes
 
-A class is a reference type with fields, properties, constructors, and methods.
+A class is a managed reference type with fields, properties, constructors, and methods.
 
 ```csharp
 public sealed class Counter
 {
     private int value;
 
-    public Counter(int initialValue)
+    public Counter(int initial)
     {
-        value = initialValue;
-    }
-
-    public int Value
-    {
-        get { return value; }
-        private set { this.value = value; }
+        value = initial;
     }
 
     public void Increment()
@@ -390,15 +304,13 @@ public sealed class Counter
 }
 ```
 
-A constructor uses the class name and has no return type. C~ does not use `__ctor` or `__dtor` keywords.
+All draft 0.3 classes are sealed. The optional `sealed` modifier documents this rule.
 
-Draft 0.2 permits the `sealed` modifier only as documentation of the default rule. User classes do not support inheritance yet.
-
-The compiler does not generate a finalizer. A type must expose `Dispose()` when it owns an external resource.
+There are no finalizers. External resources require an explicit `Dispose()` method; the name has no compiler magic.
 
 ### Structures
 
-A structure is a value type with fields, constructors, properties, and methods.
+A structure is a value type. Assignment, parameters, fields, array elements, and return values copy it.
 
 ```csharp
 public struct Point
@@ -414,48 +326,31 @@ public struct Point
 }
 ```
 
-Structure assignment copies all fields. A structure cannot inherit from another type.
-
-Each structure constructor must assign every instance field before it returns.
+Every structure constructor must assign every instance field on every reachable path.
 
 ### Static classes
 
-A static class contains only static members and cannot be instantiated.
+A static class contains only static members and cannot be constructed.
 
-```csharp
-public static class MathHelpers
-{
-    public static int Square(int value)
-    {
-        return value * value;
-    }
-}
-```
+### Access
 
-Use a static class for functions that do not belong to an object.
+Namespace types can be `public` or `internal` and default to `internal`.
 
-### Access modifiers
+Members can be `public`, `internal`, or `private` and default to `private`. `internal` means accessible anywhere in the same compilation.
 
-C~ supports `public`, `internal`, `protected`, and `private`.
+`protected` is reserved for inheritance and produces a draft 0.3 diagnostic.
 
-Top-level types default to `internal`. Class and structure members default to `private`.
+An accessor can be less accessible than its property but cannot be more accessible.
 
-Draft 0.2 reserves `protected` for future inheritance support. A compiler can accept it but must report that the target does not support inheritance.
+### Fields and initialization
 
-### Fields
+Fields can be instance or `static`. A `const` field is implicitly static.
 
-A field stores data in a class, structure, or static class.
-
-```csharp
-private int count;
-public static readonly uint Version = 1u;
-```
-
-An instance field belongs to each object. A static field has one value for the program.
+Storage starts at the type's default value. Instance field initializers run before each constructor body. Static field initializers run once before the entry method, in ordinal fully qualified type-name order and source declaration order within each type.
 
 ### Properties
 
-A property exposes accessors through field-like syntax.
+A property has a getter, setter, or both:
 
 ```csharp
 public int Count
@@ -465,139 +360,95 @@ public int Count
 }
 ```
 
-The implicit `value` parameter contains the assigned value in a setter.
+`value` is the setter's implicit parameter.
 
-Draft 0.2 also permits auto-properties:
+An accessor ending in a semicolon is automatic:
 
 ```csharp
 public int Count { get; private set; }
 ```
 
-The compiler creates a hidden backing field for an auto-property.
-
-### Member access
-
-The `.` operator selects an instance or static member.
-
-```csharp
-counter.Increment();
-int value = counter.Value;
-int squared = MathHelpers.Square(value);
-```
-
-An instance method uses `this` for the current object. A static method has no `this` value.
+The compiler creates a private backing field. A missing getter makes the property unreadable; a missing setter makes it unassignable.
 
 ## Methods
 
-### Method declarations
+A method declares a return type, name, parameters, and body.
 
-A method declaration contains modifiers, a return type, a name, parameters, and a body.
+Methods can be overloaded by parameter types. Resolution considers accessible static or instance candidates with the correct argument count. Identity conversions are better than widening conversions. No unique best candidate is an error.
 
-```csharp
-public static uint Add(uint left, uint right)
-{
-    return left + right;
-}
-```
-
-Each parameter has a type and a name. The argument count and argument types must match the selected method.
-
-Draft 0.2 supports overloads with different parameter lists. It does not require optional, named, `ref`, `in`, `out`, or parameter-array arguments.
+Draft 0.3 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
 
 ### Evaluation order
 
-The runtime evaluates the receiver first. It then evaluates arguments from left to right.
+The receiver is evaluated first. Arguments are evaluated from left to right. Binary operands are evaluated from left to right.
 
-The calling convention must preserve that language order. Stack push order is a backend detail and must not change parameter values.
+`&&` and `||` evaluate the right operand only when required. Compound assignment evaluates its left expression once.
 
-### Return values
+These rules apply even when the target C compiler leaves an equivalent C expression order unspecified.
+
+### Returns
 
 A `void` method returns no value. A non-void method must return a compatible value on every reachable path.
 
+Statements after an unconditional return, break, or continue are unreachable.
+
+### EntryPoint
+
+Exactly one method has `[EntryPoint]`. It must be a body-bearing `static void` method with no parameters.
+
+The C backend generates `int main(void)`, initializes static storage, calls the entry method, and returns `EXIT_SUCCESS`.
+
+### Extern
+
+`[Extern("symbol")]` marks a static bodyless method supplied by native code.
+
+The symbol must be a portable C identifier. Its native signature must use the C~ mappings in [C_ABI.md](C_ABI.md).
+
+Unknown attributes, invalid targets, duplicate attributes, and non-constant arguments are errors.
+
+## Core library
+
+The automatically imported `System` namespace contains:
+
 ```csharp
-public int GetValue()
+public static class Console
 {
-    return value;
+    public static void Write(string value);
+    public static void Write(char value);
+    public static void Write(int value);
+    public static void Write(uint value);
+    public static void Write(float value);
+    public static void Write(bool value);
+
+    public static void WriteLine();
+    // The same value overloads are available for WriteLine.
+}
+
+public static class Environment
+{
+    public static void Exit(int code);
 }
 ```
 
-The compiler must report unreachable statements after an unconditional return.
-
-### Entry point
-
-One static method must have the `[EntryPoint]` attribute.
-
-```csharp
-[EntryPoint]
-public static void Main()
-{
-}
-```
-
-The entry point must return `void` and take no parameters in draft 0.2. The Fishmachine backend maps it to the runtime entry symbol.
-
-## Attributes
-
-An attribute attaches compile-time metadata to a declaration.
-
-```csharp
-[EntryPoint]
-[Interrupt(2)]
-[Naked]
-```
-
-An attribute name uses an identifier. Arguments must be compile-time constants.
-
-Draft 0.2 defines these standard attributes:
-
-| Attribute | Target | Meaning |
-| --- | --- | --- |
-| `EntryPoint` | Static method | Program entry method |
-| `Interrupt(number)` | Static method | Fishmachine interrupt handler |
-| `Naked` | Static method | No generated prologue or epilogue |
-| `Extern(symbol)` | Static method | Function supplied by another module |
-| `Intrinsic(name)` | Static method | Compiler or runtime intrinsic |
-
-The compiler must validate attribute targets and argument types.
-
-An interrupt handler name has no special meaning. `[Interrupt]` replaces the current `handler_` name prefix.
+String output writes its exact UTF-8 bytes. Boolean output is `True` or `False`. Float output uses enough significant digits for a binary32 round trip.
 
 ## Object and array creation
 
-The `new` operator creates a class instance or array.
+`new Class(args)` allocates a zero-initialized managed object and calls the selected constructor.
 
-```csharp
-Counter counter = new Counter(10);
-byte[] buffer = new byte[256];
-```
+`new Struct(args)` creates and returns a structure value.
 
-The runtime manages class and array storage. Unreachable managed objects are eligible for reclamation.
+`new T[length]` checks the length and allocates a zero-initialized managed array.
 
-An early runtime may keep managed allocations until program exit. This limit must not change source semantics.
-
-Structures do not require heap allocation. `new Point(1, 2)` creates a structure value.
+If a class or structure declares no constructor, it has an implicit public parameterless constructor.
 
 ## Expressions
 
-### Primary expressions
+Primary expressions include literals, names, `this`, member access, calls, indexing, construction, and parentheses.
 
-Primary expressions include literals, names, `this`, member access, calls, indexing, object creation, and parenthesized expressions.
+A non-void call is a value expression and can appear in any compatible context.
 
-```csharp
-42
-this.value
-counter.Value
-MathHelpers.Square(4)
-buffer[index]
-new Counter(0)
-(left + right)
-```
-
-A method call is an expression. A non-void result can appear in any compatible expression context.
-
-### Operator precedence
-
-Operators use this precedence from highest to lowest:
+### Precedence
 
 | Level | Operators | Association |
 | ---: | --- | --- |
@@ -615,163 +466,65 @@ Operators use this precedence from highest to lowest:
 | 12 | `||` | Left |
 | 13 | `=`, `+=`, `-=`, `*=`, `/=`, `%=` | Right |
 
-Parentheses override this precedence.
+### Arithmetic
 
-### Arithmetic operators
+Numeric types support `+`, `-`, `*`, `/`, and `%`. Smaller integers promote to `int` or `uint`. Integer division truncates toward zero.
 
-Numeric types support `+`, `-`, `*`, `/`, and `%`. Integer division truncates toward zero.
+Signed integer arithmetic wraps in two's-complement form. Division by zero terminates with a runtime failure. `int.MinValue / -1` wraps to `int.MinValue`.
 
-Unary `+` keeps a numeric value. Unary `-` negates a signed numeric value.
+String `+` concatenates two string-compatible operands. A null string operand is empty.
 
-The increment and decrement operators work on assignable numeric expressions.
+### Comparison and logic
 
-The binary `+` operator concatenates two strings and produces a new string.
+Comparisons produce `bool`. Ordered comparisons require numeric operands or the same enum type.
 
-### Comparison operators
+References and pointers can compare with `null`. String equality compares contents.
 
-`==`, `!=`, `<`, `<=`, `>`, and `>=` produce a `bool` value.
+`!`, `&&`, and `||` require `bool` operands.
 
-Ordered comparisons require numeric operands or an enumeration with the same type.
+### Bitwise and shifts
 
-A reference or pointer can compare with `null` through `==` and `!=`.
+Integral types and enums support `~`, `&`, `|`, `^`, `<<`, and `>>`. Binary enum bitwise operands must have the same enum type.
 
-### Logical operators
-
-`!`, `&&`, and `||` require Boolean operands. `&&` and `||` use short-circuit evaluation.
-
-### Bitwise and shift operators
-
-Integral types and enumerations support `~`, `&`, `|`, `^`, `<<`, and `>>`.
-
-The right operand of a shift uses its low five bits for 32-bit values. Smaller values promote to `int` or `uint` first.
+A shift count uses its low five bits after conversion to `int`.
 
 ### Assignment
 
-An assignment requires an assignable left expression and a compatible right expression.
+Assignment requires an assignable target and a compatible value. The expression produces the assigned value.
 
-```csharp
-count = 10;
-buffer[index] = value;
-counter.Value = 4;
-```
-
-An assignment expression produces the assigned value. Compound assignments evaluate the left expression once.
+Fields, writable properties, array elements, locals, parameters, and unsafe dereferences can be assignment targets.
 
 ## Statements
 
-### Block
+### Blocks and empty statements
 
-A block contains zero or more statements and creates a lexical scope.
+A block creates a lexical scope. A single semicolon is an empty statement.
 
-```csharp
-{
-    int value = 1;
-    value++;
-}
-```
+### Selection
 
-An empty statement is valid.
+`if` requires a `bool` condition. Braces are optional for one embedded statement.
 
-```csharp
-;
-```
+`switch` accepts an integral or enum value. Case labels are compile-time constants. One `default` label is permitted. A section must end with `break`, `continue`, or `return`; implicit fallthrough is not permitted.
 
-### If statement
+Draft 0.3 has no pattern cases and no `goto case`.
 
-An `if` condition must have type `bool`.
+### Loops
 
-```csharp
-if (value > 0)
-{
-    value--;
-}
-else
-{
-    value = 0;
-}
-```
+`while`, `do while`, and `for` use `bool` conditions. An omitted `for` condition is true.
 
-Braces are optional for one embedded statement. Project style should use braces.
-
-### Switch statement
-
-A `switch` selects one section from constant case labels.
-
-```csharp
-switch (direction)
-{
-    case Direction.North:
-        MoveNorth();
-        break;
-
-    default:
-        Stop();
-        break;
-}
-```
-
-Draft 0.2 does not require pattern matching or `goto case`.
-
-### While and do statements
-
-Loop conditions must have type `bool`.
-
-```csharp
-while (index < count)
-{
-    index++;
-}
-
-do
-{
-    index--;
-}
-while (index > 0);
-```
-
-### For statement
-
-A `for` statement has an initializer, condition, iterator, and body.
-
-```csharp
-for (int index = 0; index < count; index++)
-{
-    Process(index);
-}
-```
-
-An omitted condition has the value `true`.
-
-### Foreach statement
-
-`foreach` iterates through an array from index zero to `Length - 1`.
-
-```csharp
-foreach (byte value in buffer)
-{
-    Process(value);
-}
-```
-
-Draft 0.2 requires `foreach` for arrays only. A later version can add an enumeration protocol.
-
-### Break and continue
+`foreach` iterates a one-dimensional array from index zero through `Length - 1` and copies each element into the iteration local.
 
 `break` exits the nearest loop or switch. `continue` starts the next iteration of the nearest loop.
 
-These statements must restore the stack state required at their target.
-
 ### Return
 
-`return;` exits a void method. `return expression;` exits a non-void method with a value.
+`return;` exits a void method. `return expression;` exits a non-void method with a converted value.
 
-The returned expression must convert to the declared return type.
+Constructors do not use a C~ return statement.
 
 ## Unsafe code
 
-Pointer declarations, address-of, dereference, pointer arithmetic, and inline assembly require an unsafe context.
-
-Mark a method or block with `unsafe`:
+A method or block can be marked `unsafe`:
 
 ```csharp
 public static unsafe void Clear(byte* address, int length)
@@ -783,120 +536,51 @@ public static unsafe void Clear(byte* address, int length)
 }
 ```
 
-Safe code must not expose an unchecked pointer through a field, property, return value, or parameter.
+Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, and pointer casts. It does not disable normal type checking.
 
-The compiler must still type-check unsafe code. `unsafe` disables selected runtime checks, not compile-time type rules.
+Draft 0.3 has no inline assembly.
 
-## Fishmachine runtime interface
+## Managed lifetime and failures
 
-Low-level Fishmachine operations use intrinsic methods. They do not use reserved identifiers or function-name conventions.
+C~ source has no `delete` operator. Draft 0.3 permits the runtime to retain all managed allocations until process exit.
 
-```csharp
-using Fishmachine.Runtime;
+External resources require explicit release. There is no language `using` statement for disposal.
 
-FishVm.Syscall(1, character);
-FishVm.Syscall(2, number);
-FishVm.Stop();
-FishVm.Wait();
-```
-
-The runtime library declares these methods with `[Intrinsic]`. The backend replaces each call with the matching FishAsm instruction.
-
-### Inline FishAsm
-
-Inline FishAsm requires an unsafe context and a compile-time constant string.
-
-```csharp
-unsafe
-{
-    FishVm.Emit("DBG_BREAK");
-}
-```
-
-The compiler must not parse register effects from arbitrary inline FishAsm in draft 0.2. The programmer owns register and stack correctness.
-
-### Interrupt handlers
-
-An interrupt handler is a static method with `[Interrupt(number)]`.
-
-```csharp
-[Interrupt(2)]
-public static void KeyboardCharacter(uint character)
-{
-    Input.Add((char)character);
-}
-```
-
-The backend must generate the required wrapper and preserve the documented registers. Handler names do not affect code generation.
-
-### Naked methods
-
-A `[Naked]` method has no generated prologue or epilogue. It must also be static and unsafe.
-
-Every reachable path in a naked method must end with inline FishAsm that transfers control. A C~ `return` is not valid in a naked method.
-
-## Managed object lifetime
-
-C~ source uses managed reference semantics for classes, arrays, and strings. The source language has no `delete` operator.
-
-The runtime may use tracing collection, reference counting, regions, or program-lifetime allocation. The selected method must preserve observable reference behavior.
-
-External resources require explicit release through a `Dispose()` method. Draft 0.2 does not define a `using` statement for disposal.
+Managed null access, invalid array lengths, allocation overflow or failure, bounds access, integer division by zero, and string length overflow terminate the program with `EXIT_FAILURE` and a stable runtime code.
 
 ## Diagnostics
 
-A conforming compiler must report errors before it emits FishAsm for an invalid program.
+Every diagnostic contains:
 
-Each diagnostic must contain:
+- A stable code.
+- Severity.
+- Source file.
+- One-based line and column.
+- Concise message.
+- A related declaration location when useful.
 
-- A stable diagnostic code
-- A severity
-- A source file
-- A one-based line and column
-- A concise message
-- A related declaration location when useful
-
-The compiler should continue after a recoverable syntax or type error. It must not print parser traces unless the user enables tracing.
+The compiler should continue after recoverable lexical, syntax, and semantic errors. It must not emit C when any error remains. Parser traces are disabled unless the CLI receives `--trace`.
 
 ## Conformance
 
-A compiler conforms to draft 0.2 only when it implements every non-deferred rule in this document.
+A compiler conforms to draft 0.3 when:
 
-An implementation can expose incomplete features behind an experimental flag. It must not report those features as conforming.
+1. It implements every non-deferred rule in this document.
+2. Invalid programs produce structured diagnostics and no C.
+3. Repeated compilation produces byte-identical C.
+4. Generated C compiles as strict C11 without warnings.
+5. Native execution passes the language and runtime conformance suite.
 
-The conformance suite must test parsing, name binding, type checking, FishAsm generation, assembly, and Fishmachine execution.
+The canonical backend is C11. There is no second backend in draft 0.3.
 
 ## Deliberate differences from C#
 
-C~ differs from C# in these core areas:
+- `char` is one UTF-8 code unit, not UTF-16.
+- References and pointers use the target C ABI width.
+- Signed integer overflow is always wrapping.
+- `readonly` locals permit one delayed assignment.
+- All classes are sealed.
+- Managed allocations can live until process exit.
+- The core library is intentionally small.
 
-- C~ targets Fishmachine instead of the Common Language Runtime.
-- C~ uses fixed 32-bit references and pointers.
-- C~ defines `char` as one UTF-8 code unit.
-- C~ exposes unsafe pointers and FishAsm intrinsics as first-class systems features.
-- C~ permits read-only local variables with one delayed runtime assignment.
-- Draft 0.2 has no class inheritance, interfaces, generics, exceptions, delegates, or asynchronous methods.
-- Draft 0.2 has no nullable reference analysis.
-- The first runtime can keep managed allocations until program exit.
-
-These limits keep the initial compiler and runtime small. They do not change the C#-style syntax used by supported features.
-
-## Migration from the current prototype
-
-The new specification replaces several prototype forms:
-
-| Prototype form | Draft 0.2 form |
-| --- | --- |
-| Module-level function | Static class method |
-| Module-level variable | Static field |
-| `__ctor()` | Constructor named after its type |
-| `__dtor()` | Explicit `Dispose()` method |
-| `naked void Entry()` | `[Naked] static unsafe void Entry()` |
-| Function name starting with `handler_` | Method with `[Interrupt(number)]` |
-| `string buffer = static string[50]` | `byte[] buffer = new byte[50]` |
-| Mutable `string` buffer | `byte[]` or `char[]` |
-| `__asm("WAIT")` | `FishVm.Emit("WAIT")` in unsafe code |
-| `syscall_2(2, value)` | `FishVm.Syscall(2, value)` |
-| `void kmain()` | `[EntryPoint] static void Main()` |
-
-The compiler should provide focused migration diagnostics for these old forms during the transition.
+Draft 0.3 defers inheritance, interfaces, generics, exceptions, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional and jagged arrays, string interpolation, and automatic disposal.

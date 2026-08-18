@@ -1,0 +1,15 @@
+using System;
+
+namespace Examples;
+
+public static class Program
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        uint left = 2u;
+        uint right = 3u;
+        uint result = left + right;
+        Console.WriteLine(result);
+    }
+}

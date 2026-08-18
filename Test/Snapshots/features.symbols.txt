@@ -1,0 +1,28 @@
+typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
+typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
+typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
+typedef struct ct_a_i32 ct_a_i32;
+typedef uint8_t ct_t_8_Examples_9_Direction;
+struct ct_t_8_Examples_7_Counter
+struct ct_t_8_Examples_5_Point
+struct ct_t_8_Examples_7_Program
+struct ct_a_i32 { int32_t Length; int32_t* Data; };
+static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue);
+static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self);
+static int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self);
+static void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value);
+static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y);
+static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self);
+static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
+static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
+static void ct_m__16_Examples_2EProgram_4_Main(void);
+static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue)
+static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self)
+static int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self)
+static void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value)
+static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y)
+static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
+static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
+static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
+static void ct_m__16_Examples_2EProgram_4_Main(void)
+int main(void)

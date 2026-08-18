@@ -36,10 +36,15 @@ internal sealed class MethodLowerer
     private readonly string _temporaryPrefix;
     private readonly Stack<Dictionary<string, LocalSymbol>> _scopes = [];
     private readonly Dictionary<string, ParameterSymbol> _parameters;
+    private readonly Dictionary<ParameterSymbol, string> _heapParameters = [];
     private readonly Stack<string> _breakLabels = [];
     private readonly Stack<string> _continueLabels = [];
     private readonly Stack<List<AssignmentSnapshot>> _breakAssignmentStates = [];
     private readonly Stack<List<AssignmentSnapshot>> _continueAssignmentStates = [];
+    private readonly Stack<string> _catchExceptions = [];
+    private readonly List<ActiveHandler> _activeExceptionFrames = [];
+    private readonly Stack<FinallyContext> _finallyContexts = [];
+    private readonly Stack<(int BreakDepth, int ContinueDepth)> _finallyBarriers = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
     private readonly Dictionary<FieldSymbol, int> _fieldAssignmentCounts = [];
     private readonly HashSet<FieldSymbol> _constantFieldsBeingEvaluated = [];
@@ -48,6 +53,8 @@ internal sealed class MethodLowerer
     private int _labelId;
     private int _unsafeDepth;
     private int _repeatableLoopDepth;
+    private int _tryId;
+    private readonly int _tryCount;
 
     public MethodLowerer(CEmitter emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "")
     {
@@ -62,6 +69,14 @@ internal sealed class MethodLowerer
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
+        _tryCount = CountTryStatements(method.Body);
+        if (_tryCount != 0)
+        {
+            for (var index = 0; index < method.Parameters.Length; index++)
+                _heapParameters[method.Parameters[index]] = $"ct_pp_{index}";
+        }
+        if (_tryCount != 0 || ContainsThrow(method.Body))
+            _emitter.RegisterExceptions();
     }
 
     public string EmitDefinition()
@@ -73,6 +88,8 @@ internal sealed class MethodLowerer
         using (writer.Block())
         {
             EmitConstructorPrologue(writer);
+            EmitExceptionFrameStorage(writer);
+            EmitHeapParameterStorage(writer);
             if (!_method.IsStatic && !_method.IsConstructor)
                 writer.WriteLine("(void)ct_self;");
             foreach (var parameter in _method.Parameters)
@@ -121,6 +138,8 @@ internal sealed class MethodLowerer
         using (writer.Block())
         {
             writer.WriteLine("(void)ct_self;");
+            EmitExceptionFrameStorage(writer);
+            EmitHeapParameterStorage(writer);
             foreach (var parameter in _method.Parameters)
                 writer.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
             var delegatesToThis = EmitConstructorInitializer(writer);
@@ -271,24 +290,33 @@ internal sealed class MethodLowerer
             case BreakStatementSyntax:
                 if (_breakLabels.Count == 0)
                     Report("CT3102", "break is valid only inside a loop or switch.", statement);
+                else if (_finallyBarriers.Count != 0 && _breakLabels.Count <= _finallyBarriers.Peek().BreakDepth)
+                    Report("CT3110", "break cannot leave a finally block.", statement);
                 else
                 {
                     _breakAssignmentStates.Peek().Add(SnapshotAssignments());
-                    writer.WriteLine($"goto {_breakLabels.Peek()};");
+                    EmitBreakOrContinue(writer, false);
                 }
                 return new FlowResult(FlowExit.Break);
             case ContinueStatementSyntax:
                 if (_continueLabels.Count == 0)
                     Report("CT3103", "continue is valid only inside a loop.", statement);
+                else if (_finallyBarriers.Count != 0 && _continueLabels.Count <= _finallyBarriers.Peek().ContinueDepth)
+                    Report("CT3110", "continue cannot leave a finally block.", statement);
                 else
                 {
                     _continueAssignmentStates.Peek().Add(SnapshotAssignments());
-                    writer.WriteLine($"goto {_continueLabels.Peek()};");
+                    EmitBreakOrContinue(writer, true);
                 }
                 return new FlowResult(FlowExit.Continue);
             case ReturnStatementSyntax @return:
                 EmitReturn(writer, @return);
                 return new FlowResult(FlowExit.Return);
+            case ThrowStatementSyntax @throw:
+                EmitThrow(writer, @throw);
+                return new FlowResult(FlowExit.Throw);
+            case TryStatementSyntax @try:
+                return EmitTry(writer, @try);
             case UnsafeStatementSyntax unsafeStatement:
                 _unsafeDepth++;
                 var unsafeFlow = EmitStatement(writer, unsafeStatement.Body);
@@ -341,12 +369,20 @@ internal sealed class MethodLowerer
             AssignmentCount = initializer is null ? 0 : 1,
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
+            IsHeapBacked = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = symbol;
         if (initializer is not null)
             EmitPrelude(writer, initializer.Prelude);
-        var qualifier = syntax.IsConst ? "const " : string.Empty;
-        writer.WriteLine($"{qualifier}{_emitter.CTypeName(type)} {symbol.CName}{(initializer is null ? string.Empty : " = " + initializer.Code)};");
+        var qualifier = syntax.IsConst && !symbol.IsHeapBacked ? "const " : string.Empty;
+        if (symbol.IsHeapBacked)
+        {
+            writer.WriteLine($"{_emitter.CTypeName(type)}* {symbol.StorageName} = ({_emitter.CTypeName(type)}*)ct_alloc(sizeof({_emitter.CTypeName(type)}), {CEmitter.SourceArgument(syntax)});");
+            if (initializer is not null)
+                writer.WriteLine($"{symbol.CName} = {initializer.Code};");
+        }
+        else
+            writer.WriteLine($"{qualifier}{_emitter.CTypeName(type)} {symbol.CName}{(initializer is null ? string.Empty : " = " + initializer.Code)};");
         writer.WriteLine($"(void){symbol.CName};");
     }
 
@@ -662,16 +698,21 @@ internal sealed class MethodLowerer
 
     private void EmitReturn(CWriter writer, ReturnStatementSyntax syntax)
     {
+        if (_finallyBarriers.Count != 0)
+        {
+            Report("CT3110", "return cannot leave a finally block.", syntax);
+            return;
+        }
         if (_method.IsConstructor)
         {
-            Report("CT3106", "A constructor cannot contain a return statement in draft 0.4.", syntax);
+            Report("CT3106", "A constructor cannot contain a return statement in draft 0.5.", syntax);
             return;
         }
         if (_method.ReturnType == CType.Void)
         {
             if (syntax.Expression is not null)
                 Report("CT2109", "A void method cannot return a value.", syntax.Expression);
-            writer.WriteLine("return;");
+            EmitReturnTransfer(writer, null);
             return;
         }
         if (syntax.Expression is null)
@@ -682,7 +723,326 @@ internal sealed class MethodLowerer
         }
         var expression = Convert(LowerExpression(syntax.Expression), _method.ReturnType, syntax.Expression, false);
         EmitPrelude(writer, expression.Prelude);
-        writer.WriteLine($"return {expression.Code};");
+        EmitReturnTransfer(writer, expression.Code);
+    }
+
+    private void EmitThrow(CWriter writer, ThrowStatementSyntax syntax)
+    {
+        string exceptionCode;
+        if (syntax.Expression is null)
+        {
+            if (_catchExceptions.Count == 0)
+            {
+                Report("CT2154", "A rethrow statement is valid only inside a catch clause.", syntax);
+                return;
+            }
+            exceptionCode = _catchExceptions.Peek();
+        }
+        else
+        {
+            var expression = LowerExpression(syntax.Expression);
+            var exceptionType = _model.Types["System.Exception"].Type;
+            if (expression.Type.Kind != CTypeKind.Null &&
+                (expression.Type.Kind != CTypeKind.Class || expression.Type.Symbol is null ||
+                 expression.Type.Symbol != exceptionType.Symbol && !expression.Type.Symbol.DerivesFrom(exceptionType.Symbol!)))
+                Report("CT2151", "A thrown value must derive from System.Exception.", syntax.Expression);
+            expression = Convert(expression, exceptionType, syntax.Expression, false);
+            EmitPrelude(writer, expression.Prelude);
+            exceptionCode = expression.Code;
+        }
+        writer.WriteLine($"ct_throw((ct_object*)(void*){exceptionCode}, {CEmitter.SourceArgument(syntax)});");
+    }
+
+    private FlowResult EmitTry(CWriter writer, TryStatementSyntax syntax)
+    {
+        var id = _tryId++;
+        var before = SnapshotAssignments();
+        return syntax.Finally is null
+            ? EmitTryCatchCore(writer, syntax, id, before)
+            : EmitTryFinally(writer, syntax, id, before);
+    }
+
+    private FlowResult EmitTryFinally(CWriter writer, TryStatementSyntax syntax, int id, AssignmentSnapshot before)
+    {
+        var frame = $"ct_eh_{id}_finally";
+        var cleanup = NewLabel("finally");
+        var after = NewLabel("after_finally");
+        var context = new FinallyContext(
+            id, cleanup, _activeExceptionFrames.Count, _breakLabels.Count, _continueLabels.Count,
+            _breakLabels.Count == 0 ? null : _breakLabels.Peek(),
+            _continueLabels.Count == 0 ? null : _continueLabels.Peek());
+        _finallyContexts.Push(context);
+
+        writer.WriteLine($"{frame}->Previous = ct_exception_top;");
+        writer.WriteLine($"ct_exception_top = {frame};");
+        _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
+        writer.WriteLine($"if (setjmp({frame}->Target) == 0)");
+        FlowResult protectedFlow;
+        using (writer.Block())
+        {
+            protectedFlow = syntax.Catches.Length == 0
+                ? EmitStatement(writer, syntax.Body)
+                : EmitTryCatchCore(writer, syntax, id, before);
+            if (protectedFlow.FallsThrough)
+            {
+                writer.WriteLine($"ct_exception_top = {frame}->Previous;");
+                writer.WriteLine($"*ct_ep_{id} = 0;");
+                writer.WriteLine($"goto {cleanup};");
+            }
+        }
+        writer.WriteLine("else");
+        using (writer.Block())
+        {
+            writer.WriteLine($"*ct_ex_{id} = {frame}->Exception;");
+            writer.WriteLine($"ct_exception_top = {frame}->Previous;");
+            writer.WriteLine($"*ct_ep_{id} = 4;");
+            writer.WriteLine($"goto {cleanup};");
+        }
+        _activeExceptionFrames.RemoveAt(_activeExceptionFrames.Count - 1);
+        _finallyContexts.Pop();
+
+        writer.WriteLine($"{cleanup}:;");
+        var protectedAssignments = SnapshotAssignments();
+        RestoreAssignments(before);
+        _finallyBarriers.Push((_breakLabels.Count, _continueLabels.Count));
+        var finallyFlow = EmitStatement(writer, syntax.Finally!.Body);
+        _finallyBarriers.Pop();
+        var finallyAssignments = SnapshotAssignments();
+        ValidateFinallyReadonlyAssignments(protectedAssignments, before, finallyAssignments, syntax.Finally!);
+        if (finallyFlow.FallsThrough)
+            RestoreAssignments(ApplyFinallyAssignments(protectedAssignments, before, finallyAssignments));
+
+        if (finallyFlow.FallsThrough)
+        {
+            writer.WriteLine($"if (*ct_ep_{id} == 4) ct_throw(*ct_ex_{id}, {CEmitter.SourceArgument(syntax)});");
+            if (!_method.IsConstructor && _method.ReturnType != CType.Void)
+            {
+                writer.WriteLine($"if (*ct_ep_{id} == 1)");
+                using (writer.Block())
+                    EmitReturnTransfer(writer, $"*ct_er_{id}");
+            }
+            else
+            {
+                writer.WriteLine($"if (*ct_ep_{id} == 1)");
+                using (writer.Block())
+                    EmitReturnTransfer(writer, null);
+            }
+            if (context.BreakTarget is not null)
+            {
+                writer.WriteLine($"if (*ct_ep_{id} == 2)");
+                using (writer.Block())
+                    EmitResumedBranch(writer, false, context.BreakTarget);
+            }
+            if (context.ContinueTarget is not null)
+            {
+                writer.WriteLine($"if (*ct_ep_{id} == 3)");
+                using (writer.Block())
+                    EmitResumedBranch(writer, true, context.ContinueTarget);
+            }
+            writer.WriteLine($"goto {after};");
+            writer.WriteLine($"{after}:;");
+            if (!protectedFlow.FallsThrough)
+                writer.WriteLine(_method.ReturnType == CType.Void || _method.IsConstructor
+                    ? "return;"
+                    : $"return {_emitter.DefaultValue(_method.ReturnType)};");
+        }
+
+        if (!finallyFlow.FallsThrough)
+            return finallyFlow;
+        var exits = (protectedFlow.Exits | finallyFlow.Exits) & ~FlowExit.FallThrough;
+        if (protectedFlow.FallsThrough)
+            exits |= FlowExit.FallThrough;
+        return new FlowResult(exits);
+    }
+
+    private FlowResult EmitTryCatchCore(CWriter writer, TryStatementSyntax syntax, int id, AssignmentSnapshot before)
+    {
+        if (syntax.Catches.Length == 0)
+            return EmitStatement(writer, syntax.Body);
+
+        var catches = BindCatches(syntax);
+        var frame = $"ct_eh_{id}_catch";
+        var done = NewLabel("after_catch");
+        writer.WriteLine($"{frame}->Previous = ct_exception_top;");
+        writer.WriteLine($"ct_exception_top = {frame};");
+        _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
+        writer.WriteLine($"if (setjmp({frame}->Target) == 0)");
+        FlowResult tryFlow;
+        var fallthroughStates = new List<AssignmentSnapshot>();
+        using (writer.Block())
+        {
+            tryFlow = EmitStatement(writer, syntax.Body);
+            if (tryFlow.FallsThrough)
+            {
+                fallthroughStates.Add(SnapshotAssignments());
+                writer.WriteLine($"ct_exception_top = {frame}->Previous;");
+                writer.WriteLine($"goto {done};");
+            }
+        }
+        _activeExceptionFrames.RemoveAt(_activeExceptionFrames.Count - 1);
+        writer.WriteLine("else");
+        var catchExits = FlowExit.None;
+        using (writer.Block())
+        {
+            writer.WriteLine($"ct_object* ct_caught_{id} = {frame}->Exception;");
+            writer.WriteLine($"(void)ct_caught_{id};");
+            writer.WriteLine($"ct_exception_top = {frame}->Previous;");
+            foreach (var boundCatch in catches)
+            {
+                var condition = boundCatch.Type is null
+                    ? null
+                    : $"ct_type_is_assignable(ct_caught_{id}->Type, {_emitter.DescriptorExpression(boundCatch.Type)})";
+                if (condition is not null)
+                    writer.WriteLine($"if ({condition})");
+                using (writer.Block())
+                {
+                    RestoreAssignments(before);
+                    PushScope();
+                    DeclareCatchLocal(writer, boundCatch, $"ct_caught_{id}");
+                    _catchExceptions.Push($"ct_caught_{id}");
+                    var catchFlow = EmitStatements(writer, boundCatch.Syntax.Body.Statements);
+                    _catchExceptions.Pop();
+                    PopScope();
+                    catchExits |= catchFlow.Exits;
+                    if (catchFlow.FallsThrough)
+                    {
+                        fallthroughStates.Add(SnapshotAssignments());
+                        writer.WriteLine($"goto {done};");
+                    }
+                }
+            }
+            if (!catches.Any(boundCatch => boundCatch.Type is null))
+                writer.WriteLine($"ct_throw(ct_caught_{id}, {CEmitter.SourceArgument(syntax)});");
+        }
+        if (fallthroughStates.Count != 0)
+            writer.WriteLine($"{done}:;");
+        if (fallthroughStates.Count != 0)
+            RestoreAssignments(MergeAssignments(fallthroughStates));
+        else
+            RestoreAssignments(before);
+        var hasCatchAll = catches.Any(boundCatch => boundCatch.Type is null);
+        var exits = tryFlow.Exits | catchExits | (hasCatchAll ? FlowExit.None : FlowExit.Throw);
+        if (fallthroughStates.Count != 0)
+            exits |= FlowExit.FallThrough;
+        return new FlowResult(exits);
+    }
+
+    private ImmutableArray<BoundCatch> BindCatches(TryStatementSyntax syntax)
+    {
+        var result = ImmutableArray.CreateBuilder<BoundCatch>();
+        var priorTypes = new List<CType>();
+        var sawCatchAll = false;
+        var exceptionType = _model.Types["System.Exception"].Type;
+        foreach (var catchClause in syntax.Catches)
+        {
+            CType? type = null;
+            if (catchClause.Type is null)
+            {
+                if (sawCatchAll || catchClause != syntax.Catches[^1])
+                    Report("CT2153", "A catch-all clause must be the last catch clause.", catchClause);
+                sawCatchAll = true;
+            }
+            else
+            {
+                type = _model.ResolveType(catchClause.Type, TreeFor(catchClause));
+                if (type.Kind != CTypeKind.Class || type.Symbol is null ||
+                    type.Symbol != exceptionType.Symbol && !type.Symbol.DerivesFrom(exceptionType.Symbol!))
+                    Report("CT2152", "A catch type must derive from System.Exception.", catchClause.Type);
+                if (sawCatchAll || priorTypes.Any(prior => type.Symbol is not null && prior.Symbol is not null &&
+                    (type.Symbol == prior.Symbol || type.Symbol.DerivesFrom(prior.Symbol))))
+                    Report("CT2153", "This catch clause is unreachable because an earlier clause handles its type.", catchClause);
+                priorTypes.Add(type);
+                _emitter.RegisterType(type);
+            }
+            result.Add(new BoundCatch(catchClause, type));
+        }
+        return result.ToImmutable();
+    }
+
+    private void DeclareCatchLocal(CWriter writer, BoundCatch boundCatch, string exceptionCode)
+    {
+        if (boundCatch.Syntax.Name is null || boundCatch.Type is null)
+            return;
+        if (FindLocal(boundCatch.Syntax.Name) is not null || _parameters.ContainsKey(boundCatch.Syntax.Name))
+            Report("CT1106", $"A local named '{boundCatch.Syntax.Name}' is already active.", boundCatch.Syntax);
+        var symbol = new LocalSymbol
+        {
+            Name = boundCatch.Syntax.Name,
+            Type = boundCatch.Type,
+            Id = _localId++,
+            Syntax = boundCatch.Syntax,
+            IsAssigned = true,
+            AssignmentCount = 1,
+            IsHeapBacked = true,
+        };
+        _scopes.Peek()[symbol.Name] = symbol;
+        writer.WriteLine($"{_emitter.CTypeName(symbol.Type)}* {symbol.StorageName} = ({_emitter.CTypeName(symbol.Type)}*)ct_alloc(sizeof({_emitter.CTypeName(symbol.Type)}), {CEmitter.SourceArgument(boundCatch.Syntax)});");
+        writer.WriteLine($"{symbol.CName} = ({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode};");
+    }
+
+    private void EmitReturnTransfer(CWriter writer, string? value)
+    {
+        if (_finallyContexts.Count != 0)
+        {
+            var context = _finallyContexts.Peek();
+            EmitPopHandlersTo(writer, context.HandlerDepth);
+            if (value is not null)
+                writer.WriteLine($"*ct_er_{context.TryId} = {value};");
+            writer.WriteLine($"*ct_ep_{context.TryId} = 1;");
+            writer.WriteLine($"goto {context.CleanupLabel};");
+            return;
+        }
+        EmitPopHandlersTo(writer, 0);
+        writer.WriteLine(value is null ? "return;" : $"return {value};");
+    }
+
+    private void EmitBreakOrContinue(CWriter writer, bool isContinue)
+    {
+        var depth = isContinue ? _continueLabels.Count : _breakLabels.Count;
+        var context = _finallyContexts.FirstOrDefault(item => depth <= (isContinue ? item.ContinueDepth : item.BreakDepth));
+        if (context is not null)
+        {
+            EmitPopHandlersTo(writer, context.HandlerDepth);
+            writer.WriteLine($"*ct_ep_{context.TryId} = {(isContinue ? 3 : 2)};");
+            writer.WriteLine($"goto {context.CleanupLabel};");
+            return;
+        }
+        EmitPopCrossedHandlers(writer, isContinue, depth);
+        writer.WriteLine($"goto {(isContinue ? _continueLabels.Peek() : _breakLabels.Peek())};");
+    }
+
+    private void EmitResumedBranch(CWriter writer, bool isContinue, string target)
+    {
+        var context = _finallyContexts.FirstOrDefault(item =>
+            (isContinue ? item.ContinueTarget : item.BreakTarget) == target);
+        if (context is not null)
+        {
+            EmitPopHandlersTo(writer, context.HandlerDepth);
+            writer.WriteLine($"*ct_ep_{context.TryId} = {(isContinue ? 3 : 2)};");
+            writer.WriteLine($"goto {context.CleanupLabel};");
+        }
+        else
+        {
+            EmitPopHandlersTo(writer, 0);
+            writer.WriteLine($"goto {target};");
+        }
+    }
+
+    private void EmitPopHandlersTo(CWriter writer, int depth)
+    {
+        for (var index = _activeExceptionFrames.Count - 1; index >= depth; index--)
+            writer.WriteLine($"ct_exception_top = {_activeExceptionFrames[index].Name}->Previous;");
+    }
+
+    private void EmitPopCrossedHandlers(CWriter writer, bool isContinue, int depth)
+    {
+        for (var index = _activeExceptionFrames.Count - 1; index >= 0; index--)
+        {
+            var handler = _activeExceptionFrames[index];
+            if (depth > (isContinue ? handler.ContinueDepth : handler.BreakDepth))
+                break;
+            writer.WriteLine($"ct_exception_top = {handler.Name}->Previous;");
+        }
     }
 
     private void ValidateConstructorAssignments()
@@ -738,6 +1098,77 @@ internal sealed class MethodLowerer
         return new AssignmentSnapshot(locals, fields, fieldCounts);
     }
 
+    private void EmitExceptionFrameStorage(CWriter writer)
+    {
+        if (_tryCount == 0)
+            return;
+        var source = _method.Syntax ?? _method.ContainingType.Syntax!;
+        for (var index = 0; index < _tryCount; index++)
+        {
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = (ct_exception_frame*)ct_alloc(sizeof(ct_exception_frame), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"int32_t* ct_ep_{index} = (int32_t*)ct_alloc(sizeof(int32_t), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"ct_object** ct_ex_{index} = (ct_object**)ct_alloc(sizeof(ct_object*), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"(void)ct_eh_{index}_catch;");
+            writer.WriteLine($"(void)ct_eh_{index}_finally;");
+            writer.WriteLine($"(void)ct_ep_{index};");
+            writer.WriteLine($"(void)ct_ex_{index};");
+            if (!_method.IsConstructor && _method.ReturnType != CType.Void)
+            {
+                writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)}* ct_er_{index} = ({_emitter.CTypeName(_method.ReturnType)}*)ct_alloc(sizeof({_emitter.CTypeName(_method.ReturnType)}), {CEmitter.SourceArgument(source)});");
+                writer.WriteLine($"(void)ct_er_{index};");
+            }
+        }
+    }
+
+    private void EmitHeapParameterStorage(CWriter writer)
+    {
+        if (_heapParameters.Count == 0)
+            return;
+        var source = _method.Syntax ?? _method.ContainingType.Syntax!;
+        foreach (var parameter in _method.Parameters)
+        {
+            var storage = _heapParameters[parameter];
+            var typeName = _emitter.CTypeName(parameter.Type);
+            var parameterName = NameMangler.Identifier(parameter.Name);
+            writer.WriteLine($"{typeName}* {storage} = ({typeName}*)ct_alloc(sizeof({typeName}), {CEmitter.SourceArgument(source)});");
+            writer.WriteLine($"*{storage} = {parameterName};");
+        }
+    }
+
+    private static int CountTryStatements(BlockStatementSyntax? body) => body is null ? 0 : CountTry(body);
+
+    private static int CountTry(StatementSyntax statement) => statement switch
+    {
+        TryStatementSyntax @try => 1 + CountTry(@try.Body) + @try.Catches.Sum(catchClause => CountTry(catchClause.Body)) + (@try.Finally is null ? 0 : CountTry(@try.Finally.Body)),
+        BlockStatementSyntax block => block.Statements.Sum(CountTry),
+        IfStatementSyntax @if => CountTry(@if.Then) + (@if.Else is null ? 0 : CountTry(@if.Else)),
+        WhileStatementSyntax @while => CountTry(@while.Body),
+        DoStatementSyntax @do => CountTry(@do.Body),
+        ForStatementSyntax @for => CountTry(@for.Body) + (@for.Initializer is null ? 0 : CountTry(@for.Initializer)),
+        ForeachStatementSyntax @foreach => CountTry(@foreach.Body),
+        SwitchStatementSyntax @switch => @switch.Sections.Sum(section => section.Statements.Sum(CountTry)),
+        UnsafeStatementSyntax unsafeStatement => CountTry(unsafeStatement.Body),
+        _ => 0,
+    };
+
+    private static bool ContainsThrow(BlockStatementSyntax? body) => body is not null && ContainsThrow((StatementSyntax)body);
+
+    private static bool ContainsThrow(StatementSyntax statement) => statement switch
+    {
+        ThrowStatementSyntax => true,
+        TryStatementSyntax @try => ContainsThrow(@try.Body) || @try.Catches.Any(catchClause => ContainsThrow(catchClause.Body)) || @try.Finally is not null && ContainsThrow(@try.Finally.Body),
+        BlockStatementSyntax block => block.Statements.Any(ContainsThrow),
+        IfStatementSyntax @if => ContainsThrow(@if.Then) || @if.Else is not null && ContainsThrow(@if.Else),
+        WhileStatementSyntax @while => ContainsThrow(@while.Body),
+        DoStatementSyntax @do => ContainsThrow(@do.Body),
+        ForStatementSyntax @for => ContainsThrow(@for.Body) || @for.Initializer is not null && ContainsThrow(@for.Initializer),
+        ForeachStatementSyntax @foreach => ContainsThrow(@foreach.Body),
+        SwitchStatementSyntax @switch => @switch.Sections.Any(section => section.Statements.Any(ContainsThrow)),
+        UnsafeStatementSyntax unsafeStatement => ContainsThrow(unsafeStatement.Body),
+        _ => false,
+    };
+
     private static AssignmentSnapshot MergeAssignments(IReadOnlyList<AssignmentSnapshot> states)
     {
         if (states.Count == 0)
@@ -758,6 +1189,42 @@ internal sealed class MethodLowerer
             field => states.Max(state => state.FieldCounts.GetValueOrDefault(field)));
         return new AssignmentSnapshot(locals, fields, fieldCounts);
     }
+
+    private static AssignmentSnapshot ApplyFinallyAssignments(AssignmentSnapshot protectedState, AssignmentSnapshot before, AssignmentSnapshot finallyState)
+    {
+        var locals = protectedState.Locals.ToDictionary(
+            pair => pair.Key,
+            pair =>
+            {
+                var beforeValue = before.Locals.GetValueOrDefault(pair.Key);
+                var finallyValue = finallyState.Locals.GetValueOrDefault(pair.Key);
+                var addedAssignments = Math.Max(0, finallyValue.AssignmentCount - beforeValue.AssignmentCount);
+                return (pair.Value.IsAssigned || finallyValue.IsAssigned, pair.Value.AssignmentCount + addedAssignments);
+            });
+        var fields = new HashSet<FieldSymbol>(protectedState.Fields);
+        fields.UnionWith(finallyState.Fields);
+        var fieldCounts = protectedState.FieldCounts.Keys.Concat(finallyState.FieldCounts.Keys).Distinct().ToDictionary(
+            field => field,
+            field => protectedState.FieldCounts.GetValueOrDefault(field) +
+                Math.Max(0, finallyState.FieldCounts.GetValueOrDefault(field) - before.FieldCounts.GetValueOrDefault(field)));
+        return new AssignmentSnapshot(locals, fields, fieldCounts);
+    }
+
+    private void ValidateFinallyReadonlyAssignments(AssignmentSnapshot protectedState, AssignmentSnapshot before, AssignmentSnapshot finallyState, FinallyClauseSyntax syntax)
+    {
+        foreach (var local in protectedState.Locals.Keys.Where(local => local.IsReadonly))
+        {
+            if (protectedState.Locals.GetValueOrDefault(local).AssignmentCount > before.Locals.GetValueOrDefault(local).AssignmentCount &&
+                finallyState.Locals.GetValueOrDefault(local).AssignmentCount > before.Locals.GetValueOrDefault(local).AssignmentCount)
+                Report("CT3130", $"Readonly local '{local.Name}' can be assigned only once.", syntax);
+        }
+        foreach (var field in protectedState.FieldCounts.Keys.Concat(finallyState.FieldCounts.Keys).Distinct().Where(field => field.IsReadonly))
+        {
+            if (protectedState.FieldCounts.GetValueOrDefault(field) > before.FieldCounts.GetValueOrDefault(field) &&
+                finallyState.FieldCounts.GetValueOrDefault(field) > before.FieldCounts.GetValueOrDefault(field))
+                Report("CT3131", $"Readonly field '{field.Name}' can be assigned only once.", syntax);
+        }
+    }
     private string NewTemp() => $"ct_tmp{_temporaryPrefix}_{_tempId++}";
     private string NewLabel(string prefix) => $"ct_{prefix}_{_labelId++}";
     private SyntaxTree TreeFor(SyntaxNode syntax) => _model.SyntaxTrees.First(tree => ReferenceEquals(tree.Text, syntax.Source));
@@ -776,19 +1243,24 @@ internal sealed class MethodLowerer
         Return = 2,
         Break = 4,
         Continue = 8,
+        Throw = 16,
     }
 
     private readonly record struct FlowResult(FlowExit Exits)
     {
         public static FlowResult None => new(FlowExit.FallThrough);
         public bool FallsThrough => (Exits & FlowExit.FallThrough) != 0;
-        public bool AlwaysReturns => Exits == FlowExit.Return;
+        public bool AlwaysReturns => !FallsThrough && (Exits & (FlowExit.Return | FlowExit.Throw)) != 0;
     }
 
     private sealed record AssignmentSnapshot(
         Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount)> Locals,
         HashSet<FieldSymbol> Fields,
         Dictionary<FieldSymbol, int> FieldCounts);
+
+    private sealed record ActiveHandler(string Name, int BreakDepth, int ContinueDepth);
+    private sealed record FinallyContext(int TryId, string CleanupLabel, int HandlerDepth, int BreakDepth, int ContinueDepth, string? BreakTarget, string? ContinueTarget);
+    private sealed record BoundCatch(CatchClauseSyntax Syntax, CType? Type);
 
     private LoweredExpression LowerExpression(ExpressionSyntax syntax)
     {
@@ -844,7 +1316,7 @@ internal sealed class MethodLowerer
                 var bounded = (uint)numeric.Integer;
                 return Constant(CType.Uint, bounded, $"UINT32_C({bounded.ToString(CultureInfo.InvariantCulture)})");
             }
-            Report("CT2112", "Integer literal does not fit any draft 0.4 integer type.", syntax);
+            Report("CT2112", "Integer literal does not fit any draft 0.5 integer type.", syntax);
             return Constant(CType.Int, 0, "0");
         }
         return ErrorExpression();
@@ -872,7 +1344,9 @@ internal sealed class MethodLowerer
         {
             if (parameter.Type.ContainsPointer)
                 RequireUnsafe(syntax);
-            var name = NameMangler.Identifier(parameter.Name);
+            var name = _heapParameters.TryGetValue(parameter, out var storage)
+                ? $"(*{storage})"
+                : NameMangler.Identifier(parameter.Name);
             return new LoweredExpression
             {
                 Type = parameter.Type,
@@ -1186,7 +1660,7 @@ internal sealed class MethodLowerer
         }
         else
         {
-            Report("CT2120", "Only methods can be called in draft 0.4.", syntax.Target);
+            Report("CT2120", "Only methods can be called in draft 0.5.", syntax.Target);
             return ErrorExpression();
         }
 
@@ -1693,7 +2167,7 @@ internal sealed class MethodLowerer
         }
 
         if (!target.Type.IsNumeric)
-            Report("CT2133", "Compound assignment requires a numeric target in draft 0.4.", syntax.Left);
+            Report("CT2133", "Compound assignment requires a numeric target in draft 0.5.", syntax.Left);
         var old = NewTemp();
         prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
         var rawRight = LowerExpression(syntax.Right);

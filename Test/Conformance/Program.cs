@@ -157,6 +157,9 @@ Run("extern ABI validation", () =>
 
     const string boxGenerated = "public static class Program { [Extern(\"ct_box_value_i32\")] public static int Native(); [EntryPoint] public static void Main() { object value = 1; } }";
     Assert(Compile(boxGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated boxing-helper collision was not rejected.");
+
+    const string exceptionGenerated = "public static class Program { [Extern(\"ct_eh_0_catch\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+    Assert(Compile(exceptionGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "An exception-lowering symbol collision was not rejected.");
 });
 
 Run("target validation precedes output", () =>
@@ -585,7 +588,7 @@ Run("object syntax surface", () =>
 {
     const string source = "public class Base { public Base(int value) { } } public class Derived : Base { public Derived() : this(1) { } private Derived(int value) : base(value) { } public bool Check(object value) { return value is Derived && value as Derived != null; } }";
     var tree = SyntaxTree.ParseText(source, "object-syntax.ct");
-    Assert(tree.ToFullString() == source, "Draft 0.4 object syntax did not round-trip.");
+    Assert(tree.ToFullString() == source, "Draft 0.5 object syntax did not round-trip.");
     var derived = tree.Root.Types.Single(type => type.Name == "Derived");
     Assert(derived.BaseType?.Name == "Base", "The class base clause was not retained.");
     Assert(derived.Members.OfType<ConstructorDeclarationSyntax>().Any(constructor => constructor.Initializer?.Kind == ConstructorInitializerKind.This), "A this constructor initializer was not retained.");
@@ -694,7 +697,7 @@ Run("null string ToString failure", () =>
 
 Run("Environment Exit", () =>
 {
-    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { Environment.Exit(7); Console.WriteLine(1); } }";
+    const string source = "using System; public static class Program { [EntryPoint] public static void Main() { try { Environment.Exit(7); } finally { Console.WriteLine(1); } } }";
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 7, $"Expected exit code 7, got {result.ExitCode}. {result.StandardError}");
     Assert(result.StandardOutput.Length == 0, result.StandardOutput);
@@ -760,6 +763,229 @@ Run("object model example", () =>
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
     Assert(Normalize(result.StandardOutput) == "Examples.Pair\n", result.StandardOutput);
+});
+
+Run("exception syntax and diagnostics", () =>
+{
+    const string syntaxSource = "public static class Program { [EntryPoint] public static void Main() { try { throw new System.Exception(\"x\"); } catch (System.Exception value) { throw; } finally { } } }";
+    var tree = SyntaxTree.ParseText(syntaxSource, "exceptions.ct");
+    Assert(tree.ToFullString() == syntaxSource, "Exception syntax did not round-trip exactly.");
+    Assert(!tree.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, tree.Diagnostics));
+    const string recoveredSource = "public static class Program { [EntryPoint] public static void Main() { try { throw; } catch (System.Exception value { } } }";
+    var recovered = SyntaxTree.ParseText(recoveredSource, "recovered-exceptions.ct");
+    Assert(recovered.ToFullString() == recoveredSource, "Recovered exception syntax did not round-trip exactly.");
+    Assert(recovered.Tokens.Any(token => token.IsMissing), "Exception recovery did not retain a missing token.");
+
+    const string invalid = "public static class Program { [EntryPoint] public static void Main() { try { } throw 1; throw; try { } catch (int) { } } }";
+    var diagnostics = Compile(invalid).GetDiagnostics();
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT0108"), "A try statement without catch or finally was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2151"), "A non-Exception throw was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2152"), "A non-Exception catch type was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2154"), "A rethrow outside catch was accepted.");
+    var invalidCompilation = Compile(invalid);
+    using var invalidOutput = new StringWriter(CultureInfo.InvariantCulture);
+    Assert(!invalidCompilation.EmitC(invalidOutput).Success && invalidOutput.GetStringBuilder().Length == 0, "Invalid exception syntax produced C output.");
+
+    const string catchOrder = "using System; public class DerivedException : Exception { } public static class Program { [EntryPoint] public static void Main() { try { } catch (Exception) { } catch (DerivedException) { } catch { } catch (Exception) { } } }";
+    Assert(Compile(catchOrder).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT2153") >= 2, "Unreachable or misplaced catches were accepted.");
+
+    const string completeReturns = "using System; public static class Program { private static int Throwing() { throw new Exception(); } private static int Handled() { try { return 1; } catch { return 2; } } [EntryPoint] public static void Main() { } }";
+    Assert(!Compile(completeReturns).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3100"), "Throw and fully returning catches did not complete return flow.");
+});
+
+Run("exception C lowering snapshot", () =>
+{
+    var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Exceptions.ct"));
+    var first = Emit(source);
+    var second = Emit(source);
+    Assert(first == second, "Exception lowering was not byte-identical across repeated emission.");
+    Assert(first.Contains("#include <setjmp.h>", StringComparison.Ordinal), "Exception lowering did not include setjmp support.");
+    Assert(first.Contains("typedef struct ct_exception_frame", StringComparison.Ordinal), "The exception frame ABI was not emitted.");
+    Assert(first.Contains("if (setjmp(ct_eh_0_finally->Target) == 0)", StringComparison.Ordinal), "The lexical finally handler was not emitted in controlling-expression form.");
+    Assert(first.Contains("ct_exception_top = ct_eh_0_finally->Previous;", StringComparison.Ordinal), "A handler-pop path was not emitted.");
+    Assert(first.Contains("*ct_ep_0 = 1;", StringComparison.Ordinal), "The pending return cleanup action was not emitted.");
+    Assert(!Emit("public static class Program { [EntryPoint] public static void Main() { } }").Contains("#include <setjmp.h>", StringComparison.Ordinal), "A program without exception syntax included setjmp support.");
+    var durable = Emit("using System; public static class Program { private static void M(int value) { int local = value; try { local = 2; throw new Exception(); } catch { Console.WriteLine(local); } } [EntryPoint] public static void Main() { M(1); } }");
+    Assert(durable.Contains("int32_t* ct_pp_0", StringComparison.Ordinal) && durable.Contains("int32_t* ct_lp_0", StringComparison.Ordinal), "Exception methods did not use durable parameter and local slots.");
+    Assert(!durable.Contains("int32_t ct_l_0", StringComparison.Ordinal), "An ordinary C automatic represented a C~ local across setjmp.");
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) == "handled\ncleanup\n5\n", result.StandardOutput + result.StandardError);
+});
+
+Run("exception catches rethrow and finally", () =>
+{
+    const string source = """
+        using System;
+        public class DerivedException : Exception
+        {
+            public DerivedException(string message) : base(message) { }
+        }
+        public static class Program
+        {
+            private static Exception saved;
+            private static void Fail(int value)
+            {
+                if (value == 1) throw new DerivedException("derived");
+                throw new Exception("base");
+            }
+            [EntryPoint]
+            public static void Main()
+            {
+                int value = 1;
+                try
+                {
+                    try { Fail(value); }
+                    catch (DerivedException caught)
+                    {
+                        Console.WriteLine(caught.Message);
+                        saved = caught;
+                        throw;
+                    }
+                }
+                catch (Exception caught)
+                {
+                    Console.WriteLine(caught.Message);
+                    Console.WriteLine(Object.ReferenceEquals(saved, caught));
+                }
+                finally { Console.WriteLine("finally"); }
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "derived\nderived\nTrue\nfinally\n", result.StandardOutput);
+});
+
+Run("exception unhandled and null failures", () =>
+{
+    const string formattingSource = "using System; public class NamedException : Exception { public NamedException(string message) : base(message) { } } public static class Program { [EntryPoint] public static void Main() { Exception empty = new Exception(); Console.WriteLine(empty.Message.Length); Console.WriteLine(new Exception(null)); Console.WriteLine(new NamedException(\"detail\")); } }";
+    var formatting = CompileAndRun(formattingSource);
+    Assert(formatting.ExitCode == 0 && Normalize(formatting.StandardOutput) == "0\nSystem.Exception\nNamedException: detail\n", formatting.StandardOutput + formatting.StandardError);
+
+    var unhandled = CompileAndRun("using System; public static class Program { [EntryPoint] public static void Main() { try { throw new Exception(\"caught\"); } catch { } throw new Exception(\"boom\"); } }");
+    Assert(unhandled.ExitCode != 0 && unhandled.StandardError.Contains("CTE0001", StringComparison.Ordinal) && unhandled.StandardError.Contains("System.Exception: boom", StringComparison.Ordinal), unhandled.StandardError);
+
+    var nullThrow = CompileAndRun("using System; public static class Program { [EntryPoint] public static void Main() { Exception value = null; throw value; } }");
+    Assert(nullThrow.ExitCode != 0 && nullThrow.StandardError.Contains("CTE0002", StringComparison.Ordinal), nullThrow.StandardError);
+});
+
+Run("exception cleanup transfers and heap state", () =>
+{
+    const string source = """
+        using System;
+        public struct Pair { public int Value; public Pair(int value) { Value = value; } }
+        public static class Program
+        {
+            private static int ReturnThroughFinally()
+            {
+                try { return 5; }
+                finally { Console.WriteLine("return cleanup"); }
+            }
+            private static void PreserveState(int value)
+            {
+                string text = "before";
+                Pair pair = new Pair(2);
+                try
+                {
+                    value = 7;
+                    text = "after";
+                    pair.Value = 9;
+                    throw new Exception("state");
+                }
+                catch
+                {
+                    Console.WriteLine(value);
+                    Console.WriteLine(text);
+                    Console.WriteLine(pair.Value);
+                }
+            }
+            [EntryPoint]
+            public static void Main()
+            {
+                Console.WriteLine(ReturnThroughFinally());
+                int index = 0;
+                while (index < 2)
+                {
+                    index++;
+                    try { continue; }
+                    finally { Console.WriteLine(index); }
+                }
+                while (true)
+                {
+                    try { break; }
+                    finally
+                    {
+                        while (true) { break; }
+                        Console.WriteLine("break cleanup");
+                    }
+                }
+                PreserveState(1);
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "return cleanup\n5\n1\n2\nbreak cleanup\n7\nafter\n9\n", result.StandardOutput);
+});
+
+Run("exceptions across constructors virtual calls and catches", () =>
+{
+    const string source = """
+        using System;
+        public class DemoException : Exception { public DemoException(string message) : base(message) { } }
+        public class Base
+        {
+            public Base() { Run(); }
+            protected virtual void Run() { }
+        }
+        public class Derived : Base
+        {
+            public Derived() : base() { }
+            protected override void Run() { throw new DemoException("virtual constructor"); }
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                try { Derived value = new Derived(); }
+                catch (DemoException value) { Console.WriteLine(value.Message); }
+
+                try
+                {
+                    try { throw new DemoException("first"); }
+                    catch (DemoException) { throw new Exception("from catch"); }
+                    catch (Exception) { Console.WriteLine("wrong sibling"); }
+                }
+                catch (Exception value) { Console.WriteLine(value.Message); }
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "virtual constructor\nfrom catch\n", result.StandardOutput);
+});
+
+Run("exception finally diagnostics and replacement", () =>
+{
+    const string invalid = "public static class Program { private static void M() { while (true) { try { } finally { break; continue; return; } } } [EntryPoint] public static void Main() { } }";
+    Assert(Compile(invalid).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT3110") == 3, "A control transfer was allowed to leave finally.");
+
+    const string replacement = "using System; public static class Program { private static int Value() { try { return 1; } finally { throw new Exception(\"replacement\"); } } [EntryPoint] public static void Main() { try { Console.WriteLine(Value()); } catch (Exception value) { Console.WriteLine(value.Message); } } }";
+    var result = CompileAndRun(replacement);
+    Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) == "replacement\n", result.StandardOutput + result.StandardError);
+
+    const string exceptionalRead = "using System; public static class Program { private static void MayThrow() { } [EntryPoint] public static void Main() { int value; try { MayThrow(); value = 1; } finally { Console.WriteLine(value); } } }";
+    Assert(Compile(exceptionalRead).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3108"), "A finally block used the normal try assignment state.");
+
+    const string assignments = "public static class Program { [EntryPoint] public static void Main() { int fromTry; int fromFinally; try { fromTry = 1; } finally { fromFinally = 2; } int first = fromTry; int second = fromFinally; } }";
+    Assert(!Compile(assignments).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3108"), "Assignments from normal try and finally completion were not preserved.");
+
+    const string readonlyMerge = "public static class Program { [EntryPoint] public static void Main() { readonly int value; try { value = 1; } finally { value = 2; } } }";
+    Assert(Compile(readonlyMerge).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3130"), "Readonly assignments in try and finally were not merged.");
+
+    const string readonlyFieldMerge = "public class Value { public readonly int Data; public Value() { try { Data = 1; } finally { Data = 2; } } } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(readonlyFieldMerge).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3131"), "Constructor readonly-field assignments in try and finally were not merged.");
 });
 
 Run("feature C symbol snapshot", () =>

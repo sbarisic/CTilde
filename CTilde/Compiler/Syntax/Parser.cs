@@ -308,6 +308,8 @@ internal sealed class Parser
             SyntaxKind.BreakKeyword => ParseSimpleJump(true),
             SyntaxKind.ContinueKeyword => ParseSimpleJump(false),
             SyntaxKind.ReturnKeyword => ParseReturn(),
+            SyntaxKind.ThrowKeyword => ParseThrow(),
+            SyntaxKind.TryKeyword => ParseTry(),
             SyntaxKind.UnsafeKeyword when Peek(1).Kind == SyntaxKind.OpenBraceToken => ParseUnsafe(),
             _ when LooksLikeLocalDeclaration() => ParseLocalDeclaration(true),
             _ => ParseExpressionStatement(),
@@ -457,6 +459,49 @@ internal sealed class Parser
         var expression = Current.Kind == SyntaxKind.SemicolonToken ? null : ParseExpression();
         var end = Match(SyntaxKind.SemicolonToken).Span.End;
         return new ReturnStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
+    }
+
+    private ThrowStatementSyntax ParseThrow()
+    {
+        var start = NextToken().Span.Start;
+        var expression = Current.Kind == SyntaxKind.SemicolonToken ? null : ParseExpression();
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new ThrowStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
+    }
+
+    private TryStatementSyntax ParseTry()
+    {
+        var start = NextToken().Span.Start;
+        var body = ParseBlock();
+        var catches = ImmutableArray.CreateBuilder<CatchClauseSyntax>();
+        while (Current.Kind == SyntaxKind.CatchKeyword)
+        {
+            var catchStart = NextToken().Span.Start;
+            TypeSyntax? type = null;
+            string? name = null;
+            if (Current.Kind == SyntaxKind.OpenParenToken)
+            {
+                NextToken();
+                type = ParseType();
+                if (Current.Kind == SyntaxKind.IdentifierToken)
+                    name = NextToken().Text;
+                Match(SyntaxKind.CloseParenToken);
+            }
+            var catchBody = ParseBlock();
+            catches.Add(new CatchClauseSyntax(_source, TextSpan.FromBounds(catchStart, catchBody.Span.End), type, name, catchBody));
+        }
+
+        FinallyClauseSyntax? finallyClause = null;
+        if (Current.Kind == SyntaxKind.FinallyKeyword)
+        {
+            var finallyStart = NextToken().Span.Start;
+            var finallyBody = ParseBlock();
+            finallyClause = new FinallyClauseSyntax(_source, TextSpan.FromBounds(finallyStart, finallyBody.Span.End), finallyBody);
+        }
+        if (catches.Count == 0 && finallyClause is null)
+            _diagnostics.Add("CT0108", "A try statement requires a catch or finally clause.", _source, TextSpan.FromBounds(start, body.Span.End));
+        var end = finallyClause?.Span.End ?? (catches.Count == 0 ? body.Span.End : catches[^1].Span.End);
+        return new TryStatementSyntax(_source, TextSpan.FromBounds(start, end), body, catches.ToImmutable(), finallyClause);
     }
 
     private UnsafeStatementSyntax ParseUnsafe()

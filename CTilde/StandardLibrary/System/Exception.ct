@@ -1,0 +1,31 @@
+namespace System;
+
+public class Exception
+{
+    private string message;
+
+    public Exception() : this("")
+    {
+    }
+
+    public Exception(string message) : base()
+    {
+        if (message == null)
+            this.message = "";
+        else
+            this.message = message;
+    }
+
+    public string Message
+    {
+        get { return message; }
+    }
+
+    public override string ToString()
+    {
+        string typeName = base.ToString();
+        if (message == null || message.Length == 0)
+            return typeName;
+        return typeName + ": " + message;
+    }
+}

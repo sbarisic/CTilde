@@ -36,7 +36,7 @@ public class Object
 
 internal static class ObjectRuntime
 {
-    [Extern("ct_object_to_string")]
+    [Extern("ct_object_base_to_string")]
     internal static string ToString(object value);
 
     [Extern("ct_object_hash")]

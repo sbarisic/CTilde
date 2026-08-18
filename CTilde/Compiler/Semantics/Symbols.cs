@@ -162,7 +162,9 @@ internal sealed class LocalSymbol
     public int AssignmentCount { get; set; }
     public string? ConstantCode { get; set; }
     public object? ConstantValue { get; set; }
-    public string CName => $"ct_l_{Id}";
+    public bool IsHeapBacked { get; init; }
+    public string StorageName => IsHeapBacked ? $"ct_lp_{Id}" : $"ct_l_{Id}";
+    public string CName => IsHeapBacked ? $"(*{StorageName})" : StorageName;
 }
 
 internal static class NameMangler

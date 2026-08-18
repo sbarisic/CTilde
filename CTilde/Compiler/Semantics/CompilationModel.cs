@@ -344,7 +344,7 @@ internal sealed class CompilationModel
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
                     ValidateAttributes(constructor.Attributes, constructor, []);
                     if (isStatic)
-                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.4.", constructor.Source, constructor.Span);
+                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.5.", constructor.Source, constructor.Span);
                     var parameters = DeclareParameters(constructor.Parameters, tree);
                     var symbol = new MethodSymbol
                     {
@@ -441,7 +441,7 @@ internal sealed class CompilationModel
             if (member.Value is LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken } && numeric.FloatingPoint is null && numeric.Integer >= long.MinValue && numeric.Integer <= long.MaxValue)
                 value = (long)numeric.Integer;
             else if (member.Value is not null)
-                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.4.", member.Source, member.Value.Span);
+                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.5.", member.Source, member.Value.Span);
             if (!FitsEnumValue(value, underlying))
                 Diagnostics.Add("CT1215", $"Enum value {value} does not fit underlying type '{underlying.DisplayName}'.", member.Source, member.Span);
             type.EnumValues.Add(new EnumValueSymbol(member.Name, value, member));
@@ -563,10 +563,11 @@ internal sealed class CompilationModel
             "ct_write_int", "ct_write_uint", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
             "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
             "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
-            "ct_object_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
+            "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
             "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals",
             "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",
             "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", "NAN", "INFINITY",
+            "ct_exception_frame", "ct_exception_top", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)
@@ -596,7 +597,7 @@ internal sealed class CompilationModel
             .ToArray();
         foreach (var method in externs.Where(method => !method.IsTrustedExtern))
         {
-            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!))
+            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!) || IsExceptionLoweringName(method.ExternName!))
                 Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a compiler-owned or generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
         }
 
@@ -612,6 +613,17 @@ internal sealed class CompilationModel
             }
         }
     }
+
+    private static bool IsExceptionLoweringName(string name) =>
+        name.StartsWith("ct_eh_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_ep_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_ex_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_er_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_lp_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_pp_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_finally_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_after_finally_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_after_catch_", StringComparison.Ordinal);
 
     private static bool HaveSameAbiSignature(MethodSymbol left, MethodSymbol right) =>
         left.ReturnType == right.ReturnType &&

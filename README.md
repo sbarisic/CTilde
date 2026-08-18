@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one self-contained GNU C23 translation unit. GCC-compatible extensions are enabled by default for hosted and embedded toolchains.
 
-The current language is draft 0.4. It includes single class inheritance, virtual dispatch, `System.Object`, boxing, checked casts, and all earlier language features. It does not require a CLR or C# runtime.
+The current language is draft 0.5. It adds unchecked exceptions, typed and catch-all handlers, rethrow, and finally cleanup to the draft 0.4 object model. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -84,7 +84,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing.
+See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing. [examples/Exceptions.ct](examples/Exceptions.ct) covers typed catch and finally cleanup.
 
 ## Public compiler API
 
@@ -107,7 +107,7 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 | `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.4 programs |
+| `examples` | Checked draft 0.5 programs |
 
 ## Validation
 
@@ -129,7 +129,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.4 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.5 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.4. The compiler includes this library in every compilation.
+This document is the canonical standard-library reference for C~ draft 0.5. The compiler includes this library in every compilation.
 
 ## Object
 
@@ -31,6 +31,24 @@ Static `Equals` handles null values and then calls the virtual instance method. 
 Boxing creates a new managed object. Unboxing requires the exact boxed type. Pointer boxing and unboxing require an unsafe context.
 
 The `System` namespace is imported automatically. Writing `using System;` is allowed but is not required.
+
+## Exception
+
+`System.Exception` is the root type for values that C~ code can throw and catch.
+
+```csharp
+public class Exception
+{
+    public Exception();
+    public Exception(string message);
+    public string Message { get; }
+    public override string ToString();
+}
+```
+
+The parameterless constructor uses an empty message. The string constructor also converts a null message to an empty string.
+
+`ToString()` returns the fully qualified runtime type name. It appends `": "` and `Message` when the message is not empty. Derived exception classes inherit this behavior, so the result uses the derived runtime type name.
 
 ## Console
 
@@ -73,7 +91,7 @@ public static class Environment
 }
 ```
 
-`Exit` terminates the process immediately with the supplied native exit code.
+`Exit` terminates the process immediately with the supplied native exit code. It does not run pending finally blocks.
 
 ## Scalar ToString
 
@@ -117,6 +135,10 @@ These operations are compiler intrinsics rather than declarations in the bundled
 The GNU C23 runtime is part of each generated translation unit. Managed allocations live until process exit.
 
 Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
+
+An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. Both failures exit with `EXIT_FAILURE`.
+
+Other runtime failures remain fatal and are not catchable in draft 0.5.
 
 Standard-library declarations use native `[Extern]` bindings internally. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 

@@ -1,0 +1,34 @@
+using System;
+
+namespace Examples;
+
+public class DemoException : Exception
+{
+    public DemoException(string message) : base(message) { }
+}
+
+public static class ExceptionExample
+{
+    private static int Read()
+    {
+        try
+        {
+            throw new DemoException("handled");
+        }
+        catch (DemoException error)
+        {
+            Console.WriteLine(error.Message);
+            return 5;
+        }
+        finally
+        {
+            Console.WriteLine("cleanup");
+        }
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        Console.WriteLine(Read());
+    }
+}

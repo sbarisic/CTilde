@@ -11,6 +11,7 @@ UTF-8 source files
     -> Parser and immutable syntax trees
     -> Declaration binding
     -> Combined body binding, flow analysis, and C-fragment lowering
+    -> Exception cleanup and handler lowering
     -> Transitional typed-line IR adapter
     -> Target validation
     -> Deterministic GNU C23 emission
@@ -32,6 +33,7 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
 - `MethodLowerer` currently combines name binding, access and conversion checks, overload resolution, flow analysis, and ordered C-fragment lowering.
 - The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
+- Exception lowering owns lexical handler frames, durable local slots, catch dispatch, rethrow, and pending finally actions.
 - `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
 - `TargetValidator` rejects ABI and generated-symbol conflicts before output starts.
 - `CEmitter` consumes the transitional IR and owns the runtime, layouts, declarations, initialization, definitions, and entry wrapper.
@@ -73,7 +75,7 @@ EmitResult result = compilation.EmitC(writer);
 
 ## Syntax and recovery
 
-The lexer retains whitespace, newlines, comments, and invalid text. Each token has leading trivia, trailing trivia, `Span`, and `FullSpan`.
+The lexer retains whitespace, newlines, comments, and invalid text. Each token has leading trivia, trailing trivia, `Span`, and `FullSpan`. Try, catch, finally, and throw nodes use the same full-fidelity model.
 
 The parser uses:
 
@@ -116,6 +118,9 @@ Control-flow analysis carries explicit lexical scopes and assignment state.
 - A `do` body contributes assignments to its condition path because it executes once.
 - Switch break exits remain separate from return exits.
 - Case constants convert to the governing type before range and duplicate checks.
+- A throw is a non-fallthrough exit. Catch bodies start with the assignment state from before the try.
+- A finally body also starts with the pre-try assignment state because any call can throw. Normal try, catch, and finally assignments merge for subsequent code.
+- Return, break, continue, and exception exits that cross finally lower to an explicit pending action and one cleanup label.
 
 A bound expression contains:
 
@@ -165,8 +170,12 @@ The generated translation unit embeds a small runtime:
 - Two's-complement wrapping helpers for signed arithmetic.
 - Immutable UTF-8 strings and concatenation.
 - Console output and process exit.
+- A single-thread `setjmp` and `longjmp` handler stack for C~ exceptions.
+- Heap-backed parameters and locals in methods with try statements, so modified C automatic storage is not read after `longjmp`.
 
 Managed storage is not reclaimed before process exit. C~ source has no `delete` operation.
+
+Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
 
 A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`. Strings, arrays, and boxes use the same header. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation.
 
@@ -184,7 +193,7 @@ Diagnostic code ranges are stable by phase:
 | `CT3xxx` | Definite assignment and control flow |
 | `CT4xxx` | C layout and emission |
 
-Runtime failures use separate short codes such as `CTN0001` for null access and `CTA0003` for array bounds.
+Runtime failures use separate short codes such as `CTN0001` for null access, `CTA0003` for array bounds, and `CTE0001` for an unhandled exception.
 
 ## Extension rules
 

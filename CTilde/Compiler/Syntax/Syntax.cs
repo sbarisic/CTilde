@@ -56,6 +56,7 @@ public enum SyntaxKind
     BreakKeyword,
     ByteKeyword,
     CaseKeyword,
+    CatchKeyword,
     CharKeyword,
     ClassKeyword,
     ConstKeyword,
@@ -65,6 +66,7 @@ public enum SyntaxKind
     ElseKeyword,
     EnumKeyword,
     FalseKeyword,
+    FinallyKeyword,
     FloatKeyword,
     ForKeyword,
     ForeachKeyword,
@@ -91,7 +93,9 @@ public enum SyntaxKind
     StructKeyword,
     SwitchKeyword,
     ThisKeyword,
+    ThrowKeyword,
     TrueKeyword,
+    TryKeyword,
     UintKeyword,
     UnsafeKeyword,
     UshortKeyword,
@@ -362,6 +366,10 @@ public sealed record ForeachStatementSyntax(SourceText Source, TextSpan Span, Ty
 public sealed record BreakStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record ContinueStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record ReturnStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
+public sealed record ThrowStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
+public sealed record TryStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body, ImmutableArray<CatchClauseSyntax> Catches, FinallyClauseSyntax? Finally) : StatementSyntax(Source, Span);
+public sealed record CatchClauseSyntax(SourceText Source, TextSpan Span, TypeSyntax? Type, string? Name, BlockStatementSyntax Body) : SyntaxNode(Source, Span);
+public sealed record FinallyClauseSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body) : SyntaxNode(Source, Span);
 public sealed record UnsafeStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body) : StatementSyntax(Source, Span);
 public sealed record SwitchStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, ImmutableArray<SwitchSectionSyntax> Sections) : StatementSyntax(Source, Span);
 public sealed record SwitchSectionSyntax(SourceText Source, TextSpan Span, ImmutableArray<SwitchLabelSyntax> Labels, ImmutableArray<StatementSyntax> Statements) : SyntaxNode(Source, Span);

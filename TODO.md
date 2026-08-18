@@ -1,5 +1,19 @@
 # C~ TODO
 
+## Compiler architecture completion
+
+Draft 0.5 exception behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
+
+1. Bind method, accessor, constructor, and initializer bodies into immutable bound nodes.
+2. Move lookup, access checks, overload resolution, conversions, constants, and flow diagnostics out of `MethodLowerer`.
+3. Replace line-classified instructions with typed three-address operands, blocks, loads, stores, calls, branches, checks, throws, and cleanup actions.
+4. Make `GetDiagnostics()` stop after declaration, binding, flow, and target validation. It must not construct rendered C fragments.
+5. Make the C emitter consume structured IR only.
+
+Retain the 53 conformance checks and byte-identical C output while this work proceeds.
+
+Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
+
 ## ESP-IDF target support
 
 ### Goal
@@ -28,7 +42,7 @@ The current compiler has these hosted assumptions:
 - The CLI emits C but does not create ESP-IDF project files.
 - `[Extern]` supports simple C ABI calls but not callbacks or exported C~ methods.
 
-The draft 0.4 `System.Object` runtime is complete. Preserve its managed header, descriptors, vtables, and boxing behavior when ESP work changes the runtime and emitter files.
+The draft 0.5 object and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
 
 ### Design rules
 

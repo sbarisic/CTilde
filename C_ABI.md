@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.4. The managed layout is not compatible with draft 0.3.
+This document defines the generated C contract for C~ draft 0.5. The managed layout is not compatible with draft 0.4. `System.Exception`, exception metadata, and compiler-owned unwind state change standard-library type IDs and generated symbols.
 
 The output is a single GNU C23 translation unit. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -32,7 +32,7 @@ References and unsafe pointers use native C pointer width. A 64-bit C target the
 | `float` | `float` |
 | `T*` | the mapped C type followed by `*` |
 
-Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.4 defines two's-complement wrapping.
+Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.5 defines two's-complement wrapping.
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
@@ -61,7 +61,10 @@ Generated prefixes identify symbol kinds:
 | `ct_init_` | Non-allocating class constructor initializer |
 | `ct_box_`, `ct_unbox_` | Value box layout and conversion helper |
 | `ct_l_` | User local |
+| `ct_lp_`, `ct_pp_` | Heap-backed local and parameter slot used by exception lowering |
 | `ct_tmp_` | Lowering temporary |
+| `ct_eh_` | Lexical exception handler frame |
+| `ct_ep_`, `ct_ex_`, `ct_er_` | Pending cleanup action, exception, and return payload |
 
 Method names append a structural code for every parameter type. Overloads therefore have distinct C symbols without hashes.
 
@@ -185,9 +188,35 @@ int main(void)
 
 The compiler emits an external C prototype using the mappings in this document. The native definition must use exactly that ABI. Arrays, strings, classes, and structures are C~ runtime layouts, not libc substitutes.
 
-External names cannot collide with `main`, runtime definitions, or generated symbols. Compiler-owned symbols include descriptors, vtables, thunks, and box helpers.
+External names cannot collide with `main`, runtime definitions, or generated symbols. Compiler-owned symbols include descriptors, vtables, thunks, box helpers, exception handlers, cleanup state, and durable local-storage prefixes.
 
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
+
+An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.5 does not support exceptions across native callbacks or other native boundaries.
+
+## Exceptions
+
+The compiler includes `<setjmp.h>` only when the program uses exception syntax. The generated runtime then defines:
+
+```c
+typedef struct ct_exception_frame {
+    jmp_buf Target;
+    struct ct_exception_frame* Previous;
+    ct_object* Exception;
+} ct_exception_frame;
+```
+
+One process-global pointer identifies the active handler. Draft 0.5 handler state is single-threaded.
+
+Each invocation of a method that contains a try statement allocates durable handler and cleanup storage with program lifetime. Parameters and C~ locals in that method use heap-backed slots. This prevents a read of a C automatic object that became indeterminate because it changed after `setjmp` and before `longjmp`.
+
+Each lexical try statement owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
+
+The generated `setjmp` call is the controlling expression of an `if`. Normal and exceptional paths pop the active frame before a catch starts. Catch matching follows the runtime descriptor base chain. Rethrow passes the same `ct_object*` to the next active frame.
+
+Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it.
+
+`Environment.Exit` calls native process termination directly. It does not unwind C~ handlers and does not run finally blocks.
 
 ## Runtime failures
 
@@ -206,11 +235,15 @@ The embedded runtime prints one line to standard error and exits with `EXIT_FAIL
 | `CTO0001` | Invalid managed reference cast |
 | `CTO0002` | Null unboxing |
 | `CTO0003` | Boxed type mismatch |
+| `CTE0001` | Unhandled C~ exception |
+| `CTE0002` | Null thrown reference |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 
+The existing null, array, allocation, division, string, cast, and unboxing failures remain fatal. They do not enter the exception handler stack.
+
 ## Lifetime
 
-Class instances, arrays, concatenated or scalar-formatted strings, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them.
+Class instances, arrays, concatenated or scalar-formatted strings, exception objects, durable method slots, handler frames, and their data use zero-initialized program-lifetime allocation. The generated runtime does not free them.
 
 This preserves managed reference identity and removes use-after-free from safe C~ code. A future collector can replace the allocator without changing source semantics or object layouts described here.

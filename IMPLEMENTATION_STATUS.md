@@ -4,10 +4,10 @@ Last reviewed: 2026-08-18
 
 ## Current state
 
-C~ draft 0.4 has one compiler path:
+C~ draft 0.5 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> binding -> flow -> typed IR -> target validation -> GNU C23
+.ct source -> full-fidelity syntax -> combined binding and flow -> transitional typed-line IR -> target validation -> GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -23,9 +23,9 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET build completes with zero warnings and zero errors. The conformance runner contains 46 managed and native checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 53 managed and native checks.
 
-Native checks discover Visual Studio 2022 C tools and compile generated files with:
+Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
 ```text
 cl /std:clatest /W4 /WX
@@ -42,6 +42,14 @@ east
 2
 A
 10
+```
+
+The checked exception example prints:
+
+```text
+handled
+cleanup
+5
 ```
 
 The independent compiler check uses GCC 13.3.0 from Ubuntu 24.04 under WSL. That compiler uses the draft compatibility spelling for the C23 dialect:
@@ -68,6 +76,10 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -W
 | Virtual methods and properties | Implemented | Multi-level dispatch and sealed-override tests |
 | Base and same-type constructor chains | Implemented | Constructor order and cycle tests |
 | `System.Object` and `object` | Implemented | Instance, static, null, and override tests |
+| `System.Exception` | Implemented | Constructors, message, inherited runtime name, and unhandled output tests |
+| `throw` and rethrow | Implemented | Cross-call throw, null throw, rethrow identity, and replacement tests |
+| Typed and catch-all handlers | Implemented | Source-order matching, reachability diagnostics, and native dispatch tests |
+| `finally` cleanup | Implemented | Normal, return, break, continue, and exception cleanup tests |
 | Boxing and exact unboxing | Implemented | Scalar, enum, structure, and unsafe pointer tests |
 | Checked casts, `is`, and `as` | Implemented | Positive, null, mismatch, and runtime-failure tests |
 | Structures | Implemented | Native feature example |
@@ -122,14 +134,20 @@ The executable test project checks:
 - Managed null, bounds, negative-length, division-by-zero, and allocation-overflow paths.
 - Native C compilation with warnings treated as errors.
 - Checked standard output and runtime error output.
+- Exact exception-syntax round trips and stable exception diagnostics.
+- Deterministic handler, `setjmp`, catch-dispatch, pending-action, and finally lowering.
+- Durable integer, string, structure, parameter, and return state across `longjmp`.
+- Handler cleanup on normal completion, return, loop transfer, catch, rethrow, and finally paths.
 
-The full examples in [examples/Features.ct](examples/Features.ct) and [examples/ObjectModel.ct](examples/ObjectModel.ct) are part of the native and ABI snapshot suites.
+The full examples in [examples/Features.ct](examples/Features.ct), [examples/ObjectModel.ct](examples/ObjectModel.ct), and [examples/Exceptions.ct](examples/Exceptions.ct) are part of the native and ABI checks.
 
 ## Runtime status
 
-Managed objects currently use program-lifetime allocation. This is conforming draft 0.4 behavior.
+Managed objects and exception-method durable slots currently use program-lifetime allocation. This is conforming draft 0.5 behavior.
 
-The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, and string overflow.
+The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
+
+Exception handlers use one process-global `setjmp` and `longjmp` stack. The implementation is single-threaded. Methods with try statements store parameters and C~ locals in durable heap slots.
 
 The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
 
@@ -137,7 +155,7 @@ The C ABI uses native target-width pointers. The reviewed native run used a 64-b
 
 The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
 
-The draft 0.4 language and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
+The draft 0.5 exception surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
 
 ## Planned platform work
 
@@ -149,11 +167,12 @@ The first hardware target is the connected ESP32-D0WDQ6-V3 on `COM4`. The roadma
 
 ## Deliberately deferred
 
-These features are outside draft 0.4:
+These features are outside draft 0.5:
 
 - Interfaces and abstract types.
 - Generics.
-- Exceptions.
+- Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
+- Exceptions across native boundaries and thread-safe handler state.
 - Delegates, lambdas, and function types.
 - Iterators and yield statements.
 - Pattern matching.
@@ -169,7 +188,7 @@ These features are outside draft 0.4:
 
 ## Release gate
 
-A draft 0.4 release requires:
+A draft 0.5 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -179,4 +198,4 @@ A draft 0.4 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.4 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.
+Draft 0.5 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.

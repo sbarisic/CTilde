@@ -1,12 +1,12 @@
 # C~ language specification
 
-Specification version: draft 0.4
+Specification version: draft 0.5
 
 ## Status
 
-This document is the normative specification for C~ draft 0.4.
+This document is the normative specification for C~ draft 0.5.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.4 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.5 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -121,15 +121,15 @@ int @class = 1;
 
 ```text
 as        base       bool       break      byte       case
-char      class
-const     continue   default    do         else       enum
-false     float      for        foreach    get        if
-in        int        internal   is         namespace  new
-null      object     override   private    protected  public
-readonly  return     sbyte
-sealed    set        short      static     string     struct
-switch    this       true       uint       unsafe     ushort
-using     var        virtual    void       while
+catch     char       class      const      continue   default
+do        else       enum       false      finally    float
+for       foreach    get        if         in         int
+internal  is         namespace  new        null       object
+override  private    protected  public     readonly   return
+sbyte     sealed     set        short      static     string
+struct    switch     this       throw      true       try
+uint      unsafe     ushort     using      var        virtual
+void      while
 ```
 
 `get` and `set` are meaningful only in property declarations. `default` is a switch label.
@@ -247,7 +247,7 @@ public enum Direction : byte
 
 The underlying type can be `byte`, `sbyte`, `short`, `ushort`, `int`, or `uint`. The default is `int`.
 
-Draft 0.4 enum initializers are integral literals. An omitted initializer is one greater than the previous value. Every value must fit the underlying type.
+Draft 0.5 enum initializers are integral literals. An omitted initializer is one greater than the previous value. Every value must fit the underlying type.
 
 ### Conversions
 
@@ -415,7 +415,7 @@ The compiler compares candidates for each argument. Identity is better than wide
 
 A candidate must be no worse for every argument. It must also be better for at least one argument. Otherwise, the call reports `CT2123`.
 
-Draft 0.4 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
+Draft 0.5 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
 
 ### Evaluation order
 
@@ -429,7 +429,7 @@ These rules apply even when the target C compiler leaves an equivalent C express
 
 A `void` method returns no value. A non-void method must return a compatible value on every reachable path.
 
-Statements after an unconditional return, break, or continue are unreachable.
+Statements after an unconditional return, break, continue, or throw are unreachable.
 
 ### EntryPoint
 
@@ -449,9 +449,9 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 ## Core library
 
-The automatically imported `System` namespace provides `Object`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
+The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.4 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
+Draft 0.5 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
 
 ## Object and array creation
 
@@ -533,11 +533,11 @@ A block creates a lexical scope. A single semicolon is an empty statement.
 
 `switch` accepts an integral or enum value. The compiler converts each case constant to the governing type. It rejects out-of-range and duplicate converted values.
 
-One `default` label is permitted. A section must end with `break`, `continue`, or `return`. Implicit fallthrough is not permitted.
+One `default` label is permitted. A section must end with `break`, `continue`, `return`, or `throw`. Implicit fallthrough is not permitted.
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.4 has no pattern cases and no `goto case`.
+Draft 0.5 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -555,6 +555,45 @@ A `do` body executes once for definite assignment. The compiler merges normal co
 
 Constructors do not use a C~ return statement.
 
+### Exceptions
+
+`throw expression;` throws a non-null reference whose runtime type derives from `System.Exception`. The conversion to `System.Exception` is implicit. Throwing `null` terminates the process with `CTE0002`.
+
+`throw;` rethrows the current exception. It is valid only inside a catch clause. Rethrow preserves the same managed object.
+
+A try statement has one or more catch clauses, a finally clause, or both:
+
+```csharp
+try
+{
+    Work();
+}
+catch (SpecificException error)
+{
+    Console.WriteLine(error.Message);
+}
+catch (Exception)
+{
+    throw;
+}
+catch
+{
+    Console.WriteLine("fallback");
+}
+finally
+{
+    Console.WriteLine("cleanup");
+}
+```
+
+Catch clauses run in source order. A typed catch accepts the declared type and its derived types. A catch can omit its local name. A catch-all has no parentheses and must be last. A catch is invalid when an earlier compatible catch makes it unreachable.
+
+Exceptions are unchecked. Every call can complete by throwing. A throw from a catch propagates to an enclosing handler and cannot enter a sibling catch.
+
+A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks.
+
+Exception filters, inner exceptions, stack traces, specialized exception subclasses, automatic disposal, and exceptions across native callback boundaries are not part of draft 0.5.
+
 ## Unsafe code
 
 A method or block can be marked `unsafe`:
@@ -571,15 +610,17 @@ public static unsafe void Clear(byte* address, int length)
 
 Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, and pointer casts. It does not disable normal type checking.
 
-Draft 0.4 has no inline assembly.
+Draft 0.5 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator. Draft 0.4 permits the runtime to retain all managed allocations until process exit.
+C~ source has no `delete` operator. Draft 0.5 permits the runtime to retain all managed allocations until process exit.
 
 External resources require explicit release. There is no language `using` statement for disposal.
 
-Managed null access, invalid casts, invalid unboxing, array failures, allocation failures, integer division by zero, and string overflow terminate the program.
+Managed null access, invalid casts, invalid unboxing, array failures, allocation failures, integer division by zero, and string overflow terminate the program. These runtime failures are not catchable.
+
+An unhandled exception prints `CTE0001`, its fully qualified runtime type, and its non-empty message. It then exits with `EXIT_FAILURE`.
 
 ## Diagnostics
 
@@ -596,7 +637,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.4 when:
+A compiler conforms to draft 0.5 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -604,7 +645,7 @@ A compiler conforms to draft 0.4 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.4 has no second backend.
+The canonical backend is GNU C23. Draft 0.5 has no second backend.
 
 ## Deliberate differences from C#
 
@@ -615,4 +656,4 @@ The canonical backend is GNU C23. Draft 0.4 has no second backend.
 - Managed allocations can live until process exit.
 - The core library is intentionally small.
 
-Draft 0.4 defers interfaces, abstract types, generics, exceptions, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, and automatic disposal.
+Draft 0.5 defers interfaces, abstract types, generics, exception filters, inner exceptions, stack traces, specialized exception subclasses, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal, native-boundary unwinding, and thread-safe exception handlers.

@@ -4,9 +4,9 @@ namespace CTilde;
 
 internal static class BoundProgramBuilder
 {
-    public static BoundProgram Build(CompilationModel model, CompilationTarget target)
+    public static BoundProgram Build(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
     {
-        var services = new AnalysisServices(model, target);
+        var services = new AnalysisServices(model, target, sourceRoot);
         var bodies = ImmutableArray.CreateBuilder<BoundBody>();
         foreach (var type in model.UserTypes)
         {

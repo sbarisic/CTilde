@@ -94,7 +94,8 @@ internal sealed record BoundBody(
     ImmutableDictionary<SyntaxNode, BoundSemanticEntry> Semantics,
     BoundFlowSummary Flow,
     ImmutableArray<AllocationOperation> AllocationEffects,
-    ImmutableArray<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses);
+    ImmutableArray<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses,
+    ImmutableArray<MethodSymbol> DeferredCalls);
 
 internal sealed record BoundProgram(
     CompilationModel Model,

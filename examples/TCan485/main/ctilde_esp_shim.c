@@ -11,6 +11,8 @@
 #include "led_strip.h"
 #include "led_strip_rmt.h"
 
+extern int32_t ctilde_thread_probe(int32_t value) __attribute__((weak));
+
 static uint64_t ct_esp_configured_pins;
 static uint64_t ct_esp_output_pins;
 static led_strip_handle_t ct_esp_ws2812_strip;
@@ -42,7 +44,8 @@ static void ct_esp_thread_test_worker(void* argument)
 {
     struct ct_esp_thread_test_context* context = argument;
     ct_thread_attach();
-    context->result = ctilde_thread_probe(context->input) + context->callback(context->input, context->callback_context);
+    int32_t probe_result = ctilde_thread_probe == NULL ? context->input : ctilde_thread_probe(context->input);
+    context->result = probe_result + context->callback(context->input, context->callback_context);
     ct_thread_detach();
     xTaskNotifyGive(context->waiter);
     vTaskDelete(NULL);

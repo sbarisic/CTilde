@@ -27,7 +27,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("#include <float.h>");
         writer.WriteLine("#include <math.h>");
         writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#endif");
-        foreach (var header in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Opaque).Select(type => type.NativeHeader!).Distinct(StringComparer.Ordinal).OrderBy(header => header, StringComparer.Ordinal))
+        foreach (var header in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Opaque).Select(type => type.NativeHeader!).Distinct(StringComparer.Ordinal).OrderBy(header => header, StringComparer.Ordinal))
             writer.WriteLine($"#include <{header}>");
         if (_nativeBufferTypes.Count != 0)
             writer.WriteLine("#if defined(_MSC_VER)\n#include <malloc.h>\n#endif");
@@ -52,6 +52,7 @@ internal sealed partial class CEmitter
         writer.WriteLine();
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("#define CT_NORETURN __declspec(noreturn)");
+        writer.WriteLine("#pragma warning(disable: 4505) /* reachability may conservatively retain translation-local helpers */");
         writer.WriteLine("#elif defined(__GNUC__) || defined(__clang__)");
         writer.WriteLine("#define CT_NORETURN __attribute__((noreturn))");
         writer.WriteLine("#else");
@@ -175,10 +176,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void ct_cleanup_disarm(ct_cleanup_record* record) { record->Active = false; }");
         if (_usesExceptions)
         {
-            writer.WriteLine("CT_NORETURN static void ct_throw(ct_object* exception, const char* file, int line)");
+            writer.WriteLine("CT_NORETURN static CT_UNUSED void ct_throw(ct_object* exception, const char* file, int line)");
             writer.WriteLine("{");
             writer.WriteLine("    if (exception == NULL) ct_fail(\"CTE0002\", file, line);");
-            writer.WriteLine("    if (ct_exception_top == NULL) ct_unhandled_exception(exception);");
+            writer.WriteLine("    if (ct_exception_top == NULL) { ct_retain(exception); ct_cleanup_unwind_to(NULL); ct_unhandled_exception(exception); }");
             writer.WriteLine("    ct_retain(exception);");
             writer.WriteLine("    ct_release(ct_current_exception);");
             writer.WriteLine("    ct_current_exception = exception;");
@@ -260,6 +261,21 @@ internal sealed partial class CEmitter
         writer.WriteLine("    uint8_t* data = (uint8_t*)ct_alloc((size_t)length + 1u, file, line);");
         writer.WriteLine("    if (a->Length != 0) (void)memcpy(data, a->Data, (size_t)a->Length);");
         writer.WriteLine("    if (b->Length != 0) (void)memcpy(data + a->Length, b->Data, (size_t)b->Length);");
+        writer.WriteLine("    data[length] = 0;");
+        writer.WriteLine("    result->Length = length;");
+        writer.WriteLine("    result->Data = data;");
+        writer.WriteLine("    return result;");
+        writer.WriteLine("}");
+        writer.WriteLine("static ct_string* ct_string_build(const uint8_t* const* parts, const int32_t* lengths, size_t count, const char* file, int line)");
+        writer.WriteLine("{");
+        writer.WriteLine("    int32_t length = 0;");
+        writer.WriteLine("    for (size_t index = 0; index < count; index++) { if (lengths[index] < 0 || length > INT32_MAX - lengths[index]) ct_fail(\"CTS0001\", file, line); length += lengths[index]; }");
+        writer.WriteLine("    ct_string* result = (ct_string*)ct_alloc(sizeof(ct_string), file, line);");
+        writer.WriteLine("    ct_init_object(result, &ct_desc_string);");
+        writer.WriteLine("    uint8_t* data = (uint8_t*)ct_alloc((size_t)length + 1u, file, line);");
+        writer.WriteLine("    size_t offset = 0u;");
+        writer.WriteLine("    for (size_t index = 0; index < count; index++) { size_t segment = (size_t)lengths[index]; if (segment != 0u) (void)memcpy(data + offset, parts[index], segment); offset += segment; }");
+        writer.WriteLine("    data[length] = 0;");
         writer.WriteLine("    result->Length = length;");
         writer.WriteLine("    result->Data = data;");
         writer.WriteLine("    return result;");
@@ -342,7 +358,7 @@ internal sealed partial class CEmitter
         }
         if (_nativeBufferTypes.Count != 0)
             writer.WriteLine();
-        foreach (var type in Model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError"))
+        foreach (var type in EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError"))
             writer.WriteLine($"typedef struct {NameMangler.Type(type)} {NameMangler.Type(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.Array(array.ElementType!)} {NameMangler.Array(array.ElementType!)};");
@@ -350,13 +366,13 @@ internal sealed partial class CEmitter
             writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"static ct_type_descriptor {ArrayDescriptorName(array.ElementType!)};");
-        if (Model.UserTypes.Any(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError") || _arrayTypes.Count > 0)
+        if (EmittedTypes.Any(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError") || _arrayTypes.Count > 0)
             writer.WriteLine();
     }
 
     private void EmitTypeLayouts(CWriter writer)
     {
-        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Enum))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Enum))
         {
             var underlying = type.Fields.Single(field => field.Name == "<underlying>").Type;
             writer.WriteLine($"typedef {CTypeName(underlying)} {NameMangler.Type(type)};");
@@ -397,7 +413,7 @@ internal sealed partial class CEmitter
 
     private IEnumerable<TypeSymbol> OrderLayoutTypes()
     {
-        var types = Model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError").ToArray();
+        var types = EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError").ToArray();
         var emitted = new HashSet<TypeSymbol>();
         var visiting = new HashSet<TypeSymbol>();
         foreach (var type in types)
@@ -439,12 +455,15 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("static ct_atomic_u32 ct_memory_live_allocations = CT_ATOMIC_U32_INIT(0u);");
         writer.WriteLine("static ct_atomic_u32 ct_memory_live_objects = CT_ATOMIC_U32_INIT(0u);");
+        writer.WriteLine("static ct_atomic_u32 ct_memory_total_allocations = CT_ATOMIC_U32_INIT(0u);");
         writer.WriteLine("uint32_t ct_memory_diagnostic_live_allocations(void) { return ct_atomic_load_relaxed(&ct_memory_live_allocations); }");
         writer.WriteLine("uint32_t ct_memory_diagnostic_live_objects(void) { return ct_atomic_load_relaxed(&ct_memory_live_objects); }");
+        writer.WriteLine("uint32_t ct_memory_diagnostic_total_allocations(void) { return ct_atomic_load_relaxed(&ct_memory_total_allocations); }");
         writer.WriteLine("#endif");
         writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = calloc(1u, size == 0u ? 1u : size); if (value == NULL) ct_fail(\"CTM0001\", file, line);");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_live_allocations, 1u);");
+        writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_total_allocations, 1u);");
         writer.WriteLine("#endif");
         writer.WriteLine("    return value; }");
         writer.WriteLine("static void ct_dealloc(void* value) { if (value == NULL) return;");
@@ -561,21 +580,23 @@ internal sealed partial class CEmitter
 
     private void EmitGlobals(CWriter writer)
     {
-        foreach (var field in Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
+        foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
         {
             writer.WriteLine($"static {CDeclaration(field.Type, field.CName)} = {DefaultValue(field.Type)};");
         }
-        if (Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
+        if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();
     }
 
     private void EmitPrototypes(CWriter writer)
     {
         var emittedExternalSymbols = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in Model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
+        foreach (var type in EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
         {
             foreach (var constructor in type.Constructors)
             {
+                if (!_reachableMethods.Contains(constructor))
+                    continue;
                 writer.WriteLine(MethodSignature(constructor, prototype: true));
                 if (type.Kind == DeclaredTypeKind.Class)
                 {
@@ -590,10 +611,14 @@ internal sealed partial class CEmitter
                     continue;
                 if (method.ExternName is not null && !emittedExternalSymbols.Add(method.ExternName))
                     continue;
+                if (method.ExternName is null && !_reachableMethods.Contains(method))
+                    continue;
                 writer.WriteLine(MethodSignature(method, prototype: true));
             }
             foreach (var property in type.Properties)
             {
+                if (!_reachableProperties.Contains(property))
+                    continue;
                 var self = property.IsStatic ? string.Empty : $"{InstanceStorageType(type)}* ct_self";
                 if (property.Getter is not null)
                     writer.WriteLine("static " + CFunctionDeclaration(property.Type, NameMangler.Getter(property), self.Length == 0 ? [] : [self]) + ";");

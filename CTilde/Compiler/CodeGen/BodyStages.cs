@@ -44,7 +44,7 @@ internal sealed class CBodyLowerer
     {
         if (!ReferenceEquals(boundBody.Method.Syntax, method.Syntax) || boundBody.Method.Name != method.Name)
             throw new InvalidOperationException($"Bound body for '{boundBody.Method.Name}' does not match emission method '{method.Name}'.");
-        _pipeline = new BodyPipeline(emitter, method, nameOverride, property, getter, temporaryPrefix);
+        _pipeline = new BodyPipeline(emitter, method, nameOverride, property, getter, temporaryPrefix, semanticHints: boundBody.Semantics);
     }
 
     public string LowerDefinition() => _pipeline.EmitDefinition();

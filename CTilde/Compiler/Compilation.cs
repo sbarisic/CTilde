@@ -68,8 +68,9 @@ public sealed class Compilation
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
+            var sourceRoot = ValidateSourceRoot(diagnostics, target);
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target);
-            _boundProgram = BoundProgramBuilder.Build(model, Options.Target);
+            _boundProgram = BoundProgramBuilder.Build(model, Options.Target, sourceRoot);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
         }
@@ -91,8 +92,63 @@ public sealed class Compilation
 
     private string GenerateC()
     {
-        var emitter = new CEmitter(_boundProgram!.Model, Options.Target);
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot());
         var ir = new TypedIrLowerer(_boundProgram).Lower();
-        return emitter.Emit(ir);
+        var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
+        return emitter.Emit(optimizedIr);
+    }
+
+    private string? ValidateSourceRoot(DiagnosticBag diagnostics, CompilationTarget target)
+    {
+        if (Options.SourceRoot is null)
+            return null;
+
+        var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
+        if (target != CompilationTarget.Hosted)
+        {
+            diagnostics.Add("CT4106", "A source root is supported only for the hosted target.", source, new TextSpan(0, 0));
+            return null;
+        }
+        if (!Path.IsPathFullyQualified(Options.SourceRoot))
+        {
+            diagnostics.Add("CT4106", "The source root must be an absolute path.", source, new TextSpan(0, 0));
+            return null;
+        }
+
+        string root;
+        try
+        {
+            root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Options.SourceRoot));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            diagnostics.Add("CT4106", $"The source root is invalid: {exception.Message}", source, new TextSpan(0, 0));
+            return null;
+        }
+        foreach (var tree in SyntaxTrees.Where(tree => Path.IsPathFullyQualified(tree.Text.FilePath)))
+        {
+            var path = Path.GetFullPath(tree.Text.FilePath);
+            var relative = Path.GetRelativePath(root, path);
+            if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
+            {
+                diagnostics.Add("CT4106", $"Source file '{tree.Text.FilePath}' is outside source root '{root}'.", tree.Text, new TextSpan(0, 0));
+                return null;
+            }
+        }
+        return root;
+    }
+
+    private string? ValidatedSourceRoot()
+    {
+        if (Options.SourceRoot is null || Options.Target != CompilationTarget.Hosted || !Path.IsPathFullyQualified(Options.SourceRoot))
+            return null;
+        try
+        {
+            return Path.TrimEndingDirectorySeparator(Path.GetFullPath(Options.SourceRoot));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return null;
+        }
     }
 }

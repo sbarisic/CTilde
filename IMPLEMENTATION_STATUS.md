@@ -7,7 +7,7 @@ Last reviewed: 2026-08-19
 C~ draft 0.12 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> hosted or ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -22,7 +22,7 @@ The current workspace passes:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 103 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs cover operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, `System.Vec2`, `System.Vec3`, `System.Vec4`, and the HostedIo ray tracer's deterministic PPM output.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner includes managed and native checks plus end-to-end LSP protocol and VS Code Extension Host checks. Coverage includes operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, `System.Vec2`, `System.Vec3`, `System.Vec4`, and HostedIo's exact 256×144 deterministic PPM hash. HostedIo's production profile compiles at 1200×675, 500 samples per pixel, and 50 bounces but is not executed by the automated suite.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -184,7 +184,7 @@ Managed objects use atomic, non-moving automatic reference counting. Classes, ar
 
 The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
 
-Each attached thread has independent `setjmp`/`longjmp` handlers, current-exception ownership, automatic cleanup records, and iterative release state. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate. Handler frames record cleanup boundaries so throwing releases all exited owning slots on the current thread before `longjmp`.
+Each attached thread has independent `setjmp`/`longjmp` handlers, current-exception ownership, automatic cleanup records, and iterative release state. Only real `try` regions create exception frames. CFG liveness moves values into volatile durable storage only when they are modified after `setjmp` and remain live after a possible `longjmp`. Ordinary `defer` uses direct automatic cleanup records and does not manufacture an exception frame.
 
 The entrypoint installs an automatic primary `ct_thread_state` before static initialization and publishes a ready phase afterward. Native-created threads use `ct_thread_attach` and `ct_thread_detach`; exports, callback trampolines, retain, and release reject unattached use. Hosted builds use C thread-local storage, while ESP-IDF uses a configured FreeRTOS task-local-storage slot with deletion checking. ARC atomics protect lifetime only; sharing ordinary object state still requires synchronization.
 
@@ -196,7 +196,13 @@ Hosted compilations add `Console.Read`, UTF-8 `Console.ReadLine`, and synchronou
 
 Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
 
-Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. The rendered-line classifier and `MethodLowerer` have been removed. `GetDiagnostics()` is analysis-only and a conformance check verifies that it constructs no `CEmitter`, `CWriter`, typed IR, or generated C. Emission remains lazy and deterministic; draft 0.10 deliberately updates the managed-header and runtime snapshots.
+Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. Draft 0.12 adds a reachability optimizer, direct-defer cleanup facts, leaf cleanup elision, durable-state liveness, fused scalar string builds, and user metadata pruning. The rendered-line classifier and `MethodLowerer` are gone. The remaining `BodyPipeline` function renderer still walks syntax with bound semantic hints, so instruction-only C body emission and removal of `LoweredExpression` remain open architecture work. `GetDiagnostics()` is analysis-only and constructs no `CEmitter`, `CWriter`, typed IR, or generated C.
+
+Every dynamic string helper now stores a trailing zero byte. A fused concatenation flattens nested string additions, formats supported built-in scalars into bounded automatic buffers, checks aggregate length, and allocates exactly one managed string object and one byte buffer. User-defined `ToString()` remains an ordinary owned call.
+
+Both targets omit `ct_keep_symbols`. Reachability starts from entrypoints, exports, module initializers, address-taken methods, delegate/callback and virtual targets, then closes over bound and IR calls. Unreachable user functions, layouts, descriptors, and thunks are omitted; a conservative common runtime remains annotated as unused until helper-level pruning is complete.
+
+Hosted callers can set an absolute `CompilationOptions.SourceRoot` or use CLI `--source-root`. Runtime paths are then normalized relative paths with `/` separators; default hosted output preserves full paths, virtual standard-library paths remain stable, and ESP-IDF continues to use compact filenames. Invalid API configuration reports `CT4106`, while invalid CLI combinations return usage exit code 2.
 
 ## Language server and VS Code
 
@@ -224,8 +230,8 @@ Measured self-test firmware sizes are:
 
 | Target | Image | Flash code | Flash data | IRAM/DRAM |
 | --- | ---: | ---: | ---: | ---: |
-| `esp32` | 153,280-byte binary; 153,165-byte image | 64,022 bytes | 32,560 bytes | 45,003 bytes IRAM; 14,020 bytes DRAM |
-| `esp32c3` | 156,744-byte image | 79,600 bytes | 29,900 bytes | 51,316 bytes DRAM, including 40,012 bytes executable text |
+| `esp32` | 154,640-byte binary; 154,525-byte image | 65,222 bytes | 32,704 bytes | 45,003 bytes IRAM; 14,028 bytes DRAM |
+| `esp32c3` | 159,728-byte binary; 159,428-byte image | 81,834 bytes | 30,236 bytes | 51,422 bytes DRAM, including 40,102 bytes executable text |
 
 The Draft 0.9 self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. In addition to every Draft 0.8 marker, it printed `native utf8: ok`, `opaque defer: ok`, `esp error: ESP_OK`, `delegate context: 42`, and `export: 42`. After the strip was configured and cleared and the managed self-tests returned, the board reported 297,700 bytes of free heap, a 295,112-byte minimum, and 6,552 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
 
@@ -234,6 +240,8 @@ The RMT-backed GPIO4 WS2812 commands completed more than ten 500 ms on/off cycle
 The Draft 0.9 ESP acceptance source repeats mixed acyclic managed allocations for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks a scoped UTF-8 call, deferred opaque release, exact ESP error naming, same-task delegate/context entry, a generated export, the timer, virtual delegate, unmanaged function pointer, and native buffer. Both Xtensa and RISC-V ESP cross-compilers accepted it with warnings as errors, complete firmware links passed with the sizes above, and its physical-board acceptance sequence is complete.
 
 The Draft 0.10 firmware adds two attached FreeRTOS workers, cross-task delegate and function-pointer callbacks, per-task exception/defer cleanup, and concurrent ARC lifetime operations. Complete Xtensa and RISC-V links pass. The final 155,360-byte Xtensa image was flashed to the connected dual-core ESP32 on 2026-08-19 and printed `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. It reported 297,620 bytes free, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom before continuing for more than ten GPIO4 WS2812 cycles without a watchdog reset.
+
+The optimized Draft 0.12 firmware was built with ESP-IDF 6.0.2 and GCC 15.2.0 for both architectures, then flashed to the same T-CAN485 on 2026-08-20. It passed every current marker, including `threading: ok`, `arc heap recovery: True`, and `CTILDE_ESP_OK`, and reported 297,692 bytes free, a 286,696-byte minimum, and 6,704 bytes of stack high-water headroom. UART showed more than 25 GPIO4 WS2812 transitions without a watchdog reset. The separate failure image produced `CTN0001`, called `abort()`, and rebooted with `SW_CPU_RESET`; the full self-test was reflashed and revalidated as the final board state.
 
 ## Deliberately deferred
 
@@ -271,4 +279,4 @@ A draft 0.12 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.12 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The vector standard-library addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI and the draft 0.11 operator lowering. The connected dual-core Xtensa ESP32 result above remains the historical Draft 0.10 threading and heap-recovery hardware acceptance sequence; no draft 0.12 firmware has been flashed or monitored.
+Draft 0.12 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The vector standard-library addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI and the draft 0.11 operator lowering. The Draft 0.12 dual-core Xtensa hardware sequence above closes the cleanup, reachability, exception, threading, heap-recovery, and failure/reset acceptance gate. Instruction-only function-body emission remains an architecture blocker rather than a hardware blocker.

@@ -4,7 +4,7 @@
 
 This document defines the generated C contract for C~ draft 0.10. Draft 0.10 makes ARC atomic, moves cleanup and exception state into attached-thread storage, and adds native attachment to the draft 0.9 export and callback ABI. Every generated translation unit uses the new runtime, so draft 0.10 generated objects and runtime entry points are ABI-incompatible with draft 0.9.
 
-C~ draft 0.11 adds source-level arithmetic operators without changing this ABI. Draft 0.12 uses them for allocation-free standard-library vectors and changes the generated source banner, but does not change the public-header signature prefix. Operator functions remain internal `ct_op_*` symbols and are never exported directly. A vector layout appears in a generated header only when an ordinary exported signature uses that unmanaged structure. Managed layouts, reference-return conventions, runtime entry points, and native ownership contracts remain draft 0.10 compatible.
+C~ draft 0.11 adds source-level arithmetic operators without changing this ABI. Draft 0.12 uses them for allocation-free standard-library vectors and intentionally changes internal generated C through reachability pruning, direct-defer cleanup, scalar string-build fusion, and removal of `ct_keep_symbols`; it does not change the public-header signature prefix. Operator functions remain internal `ct_op_*` symbols and are never exported directly. A vector layout appears in a generated header only when an ordinary exported signature uses that unmanaged structure. Managed layouts, reference-return conventions, runtime entry points, and native ownership contracts remain draft 0.10 compatible.
 
 The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -209,7 +209,7 @@ typedef struct ct_string {
 
 `Length` counts UTF-8 code units. `Data` is followed by a zero byte for native boundary convenience, but embedded zero bytes are valid and all C~ operations use `Length`.
 
-String literals use static byte arrays and string objects. Concatenation allocates a new string object and byte array. A null concatenation operand is treated as an empty string.
+String literals use static byte arrays and string objects. Every dynamic string stores `Data[Length] == 0`, including concatenation results. A null concatenation operand is treated as an empty string. Nested concatenations containing built-in scalar `ToString()` calls are flattened, evaluated once from left to right, formatted into bounded automatic buffers, and copied into one allocated string object and one allocated byte array. User-defined `ToString()` calls remain ordinary calls.
 
 String equality compares contents. Other class and array equality compares pointer identity.
 
@@ -230,16 +230,13 @@ The hosted wrapper is:
 ```c
 int main(void)
 {
-    ct_keep_symbols();
     ct_module_init();
     mangled_entry_method();
     return EXIT_SUCCESS;
 }
 ```
 
-`ct_keep_symbols` references translation-unit-local functions and fields. It has no observable behavior. Its purpose is to keep strict GCC and Clang unused-symbol warnings from rejecting valid C~ programs.
-
-ESP-IDF output omits `main` and `ct_keep_symbols`. Translation-unit-local definitions use a GCC-compatible unused attribute, allowing ESP-IDF linker garbage collection to discard unreachable sections. Its wrapper disables buffering for `stdout` and `stderr`, initializes the module, and calls the C~ entry method:
+No target emits `ct_keep_symbols`. Compiler reachability removes unreachable user functions and metadata before emission. Conservatively retained translation-local runtime definitions use portable unused annotations and narrowly scoped MSVC warning handling. ESP-IDF can therefore continue linker garbage collection. Its wrapper disables buffering for `stdout` and `stderr`, initializes the module, and calls the C~ entry method:
 
 ```c
 void app_main(void)
@@ -319,7 +316,7 @@ No native call or callback may unwind a C~ exception through C frames. A callbac
 
 ## Exceptions
 
-The compiler includes `<setjmp.h>` only when the program uses exception or `defer` syntax. The generated runtime then defines:
+The compiler includes `<setjmp.h>` only when the program uses real exception regions or callback exception barriers. A method containing only ordinary `defer` does not create a `jmp_buf`. When required, the generated runtime defines:
 
 ```c
 typedef struct ct_exception_frame {
@@ -331,13 +328,13 @@ typedef struct ct_exception_frame {
 
 Each attached thread owns a `ct_thread_state` containing its active handler, current owned exception, top automatic cleanup record, and iterative release worklist. `setjmp` targets and cleanup records remain automatic storage on that thread's C stack. A throw can unwind only frames registered by the current thread.
 
-Each invocation of a method that contains `try` or `defer` creates its `jmp_buf` values and handler frames on the C stack. Parameters, C~ locals, caught exceptions, pending actions, return payloads, and defer captures that can survive `longjmp` are fields in one compiler-generated `volatile` automatic method-state aggregate. This avoids indeterminate modified C automatic values without calling `ct_alloc` for control state.
+Each invocation of a method that contains `try` creates its `jmp_buf` values and handler frames on the C stack. CFG liveness places only values modified after `setjmp` and live after a possible `longjmp` in compiler-generated volatile durable storage. Unrelated parameters, locals, and hot-loop state remain ordinary automatic values.
 
-Each lexical try statement or lowered defer cleanup region owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
+Each lexical try statement owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
 
 The generated `setjmp` call is the controlling expression of an `if`. Normal and exceptional paths pop the active frame before a catch starts. Catch matching follows the runtime descriptor base chain. Throw retains the exception into the global slot, unwinds automatic cleanup records to the selected handler boundary, and then performs `longjmp`. A catch moves the global ownership into a cleanup-tracked slot. Rethrow establishes the next current-exception ownership before unwinding the caught slot.
 
-Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it. `defer` captures its bound receiver and converted arguments before the protected remainder, then uses nested finally lowering to produce allocation-free LIFO cleanup without a runtime registration list.
+Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it. `defer` captures its converted receiver and arguments into automatic state immediately. It pushes capture ownership below a deferred-invocation cleanup record, preserving LIFO invocation and release on fallthrough, transfer, or exception without synthetic try/finally lowering. Unhandled propagation unwinds outstanding cleanup records before termination, so an older enclosing defer still runs when a newer cleanup throws.
 
 `Environment.Exit` calls native process termination directly. It does not unwind C~ handlers and does not run finally blocks or defers.
 

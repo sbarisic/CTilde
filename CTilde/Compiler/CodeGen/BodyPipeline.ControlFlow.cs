@@ -638,6 +638,50 @@ internal sealed partial class BodyPipeline
 
     private static bool ContainsThrow(BlockStatementSyntax? body) => body is not null && ContainsThrow((StatementSyntax)body);
 
+    private bool RequiresDurableStorage(string name, int declarationStart)
+    {
+        if (_tryCount == 0 || _method.Body is null)
+            return false;
+        foreach (var @try in DescendantNodes(_method.Body).OfType<TryStatementSyntax>())
+        {
+            if (declarationStart >= @try.Body.Span.Start)
+                continue;
+            var enclosingLoop = DescendantNodes(_method.Body).OfType<StatementSyntax>()
+                .Where(statement => statement is WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax or ForeachStatementSyntax)
+                .FirstOrDefault(loop => loop.Span.Start <= @try.Span.Start && loop.Span.End >= @try.Span.End);
+            if (enclosingLoop is not null && IsModified(enclosingLoop, name) && ContainsName(enclosingLoop, name))
+                return true;
+            if (!IsModified(@try, name))
+                continue;
+            var usedAfterProtectedBody = @try.Catches.Any(catchClause => ContainsName(catchClause.Body, name)) ||
+                @try.Finally is not null && ContainsName(@try.Finally.Body, name) ||
+                DescendantNodes(_method.Body).OfType<NameExpressionSyntax>()
+                    .Any(reference => reference.Name == name && reference.Span.Start >= @try.Span.End);
+            if (usedAfterProtectedBody)
+                return true;
+        }
+        return false;
+    }
+
+    private static bool IsModified(SyntaxNode root, string name) => DescendantNodes(root).Any(node => node switch
+    {
+        AssignmentExpressionSyntax assignment when ContainsName(assignment.Left, name) => true,
+        UnaryExpressionSyntax { OperatorKind: SyntaxKind.PlusPlusToken or SyntaxKind.MinusMinusToken } unary when ContainsName(unary.Operand, name) => true,
+        ArgumentSyntax { PassingKind: ParameterPassingKind.Ref or ParameterPassingKind.Out } argument when ContainsName(argument.Expression, name) => true,
+        _ => false,
+    });
+
+    private static bool ContainsName(SyntaxNode root, string name) =>
+        DescendantNodes(root).OfType<NameExpressionSyntax>().Any(reference => reference.Name == name);
+
+    private static IEnumerable<SyntaxNode> DescendantNodes(SyntaxNode root)
+    {
+        yield return root;
+        foreach (var child in root.ChildNodesAndTokens().Where(child => child.IsNode).Select(child => child.Node!))
+            foreach (var descendant in DescendantNodes(child))
+                yield return descendant;
+    }
+
     private static bool ContainsThrow(StatementSyntax statement) => statement switch
     {
         ThrowStatementSyntax => true,

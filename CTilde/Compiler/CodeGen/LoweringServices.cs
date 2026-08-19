@@ -1,5 +1,7 @@
 namespace CTilde;
 
+internal sealed record DirectDeferThunk(string Name, string Code);
+
 internal interface ILoweringServices
 {
     CompilationModel Model { get; }
@@ -20,6 +22,9 @@ internal interface ILoweringServices
     string SourceArgument(SyntaxNode syntax);
     string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch);
     string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method);
+    string DirectDeferThunkName(MethodSymbol method, int id);
+    string DurableStateTypeName(MethodSymbol method);
+    void RegisterDirectDeferState(MethodSymbol method, IReadOnlyDictionary<string, CType> fields, IReadOnlyList<DirectDeferThunk> thunks);
     string SynchronousCallbackAdapterName(TypeSymbol delegateType);
     string MethodSignature(MethodSymbol method, string? name = null, bool prototype = false);
     MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter);

@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
+using System.Text;
 
 namespace CTilde;
 
@@ -62,6 +63,8 @@ internal sealed partial class BodyPipeline
     private readonly Stack<FinallyContext> _finallyContexts = [];
     private readonly Stack<(int BreakDepth, int ContinueDepth)> _finallyBarriers = [];
     private readonly Dictionary<DeferStatementSyntax, LoweredExpression> _deferredCalls = [];
+    private readonly List<DirectDeferThunk> _directDefers = [];
+    private readonly HashSet<MethodSymbol> _deferTargets = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
     private readonly Dictionary<FieldSymbol, int> _fieldAssignmentCounts = [];
     private readonly HashSet<ParameterSymbol> _assignedOutParameters = [];
@@ -78,8 +81,10 @@ internal sealed partial class BodyPipeline
     private readonly int _tryCount;
     private readonly int _externUseStart;
     private readonly bool _analysisOnly;
+    private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
+    private bool _capturingDirectDefer;
 
-    public BodyPipeline(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false)
+    public BodyPipeline(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null)
     {
         _emitter = emitter;
         _model = emitter.Model;
@@ -90,16 +95,17 @@ internal sealed partial class BodyPipeline
         _isGetter = isGetter;
         _temporaryPrefix = temporaryPrefix;
         _analysisOnly = analysisOnly;
+        _semanticHints = semanticHints;
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
         _cleanupBoundaries.Push("ct_cleanup_method");
         _externUseStart = _emitter.ExternUses.Count();
-        _tryCount = CountTryStatements(method.Body) + CountDeferStatements(method.Body);
+        _tryCount = CountTryStatements(method.Body) + (_analysisOnly ? CountDeferStatements(method.Body) : 0);
         if (_tryCount != 0)
         {
             for (var index = 0; index < method.Parameters.Length; index++)
-                if (method.Parameters[index].PassingKind == ParameterPassingKind.Value)
+                if (method.Parameters[index].PassingKind == ParameterPassingKind.Value && RequiresDurableStorage(method.Parameters[index].Name, -1))
                     _durableParameters[method.Parameters[index]] = $"ct_pp_{index}";
         }
         if (_tryCount != 0 || ContainsThrow(method.Body))
@@ -222,26 +228,158 @@ internal sealed partial class BodyPipeline
     private string RenderFunction(string signature, ILoweringWriter body)
     {
         var writer = CreateWriter();
+        if (_directDefers.Count != 0)
+            _emitter.RegisterDirectDeferState(_method, _durableSlots, _directDefers);
         writer.WriteLine(signature);
         using (writer.Block())
         {
             if (_durableSlots.Count != 0)
             {
-                writer.WriteLine("volatile struct");
-                using (writer.Block())
+                if (_directDefers.Count == 0)
                 {
-                    foreach (var slot in _durableSlots)
-                        writer.WriteLine($"{_emitter.CDeclaration(slot.Value, slot.Key)};");
+                    writer.WriteLine("volatile struct");
+                    using (writer.Block())
+                    {
+                        foreach (var slot in _durableSlots)
+                            writer.WriteLine($"{_emitter.CDeclaration(slot.Value, slot.Key)};");
+                    }
+                    writer.WriteLine("ct_state = {0};");
                 }
-                writer.WriteLine("ct_state = {0};");
+                else
+                    writer.WriteLine($"{(_tryCount == 0 ? string.Empty : "volatile ")}{_emitter.DurableStateTypeName(_method)} ct_state = {{0}};");
                 writer.WriteLine("(void)ct_state;");
             }
             foreach (var record in _cleanupRecords.Order(StringComparer.Ordinal))
                 writer.WriteLine($"ct_cleanup_record {record} = {{0}};");
-            writer.WriteBlock((body.ToString() ?? string.Empty).TrimEnd().Split('\n'));
+            var bodyText = OptimizeGeneratedBody(body.ToString() ?? string.Empty);
+            writer.WriteBlock(bodyText.TrimEnd().Split('\n'));
         }
         writer.WriteLine();
         return writer.ToString() ?? string.Empty;
+    }
+
+    private string OptimizeGeneratedBody(string body)
+    {
+        var lines = body.Replace("\r\n", "\n", StringComparison.Ordinal).Split('\n').ToList();
+        if (_cleanupRecords.Count == 0 && _tryCount == 0)
+        {
+            lines.RemoveAll(line =>
+            {
+                var text = line.Trim();
+                return text.StartsWith("ct_cleanup_record* ct_cleanup_", StringComparison.Ordinal) ||
+                    text.StartsWith("(void)ct_cleanup_", StringComparison.Ordinal) ||
+                    text.StartsWith("ct_cleanup_unwind_to(ct_cleanup_", StringComparison.Ordinal);
+            });
+        }
+
+        var parameterNames = _method.Parameters.SelectMany(parameter => parameter.Type.IsNativeBuffer
+            ? new[] { $"{NameMangler.Identifier(parameter.Name)}_data", $"{NameMangler.Identifier(parameter.Name)}_length" }
+            : new[] { NameMangler.Identifier(parameter.Name) }).ToHashSet(StringComparer.Ordinal);
+        if (!_method.IsStatic || _method.IsConstructor)
+            parameterNames.Add("ct_self");
+        for (var index = lines.Count - 1; index >= 0; index--)
+        {
+            var text = lines[index].Trim();
+            if (!text.StartsWith("(void)", StringComparison.Ordinal) || !text.EndsWith(';'))
+                continue;
+            var name = text[6..^1];
+            if (!parameterNames.Contains(name))
+                continue;
+            var uses = lines.Where((_, candidate) => candidate != index).Count(line => ContainsIdentifier(line, name));
+            var requiredUses = name == "ct_self" && _method.IsConstructor ? 2 : 1;
+            if (uses >= requiredUses)
+                lines.RemoveAt(index);
+        }
+        FoldPureSingleUseTemporaries(lines);
+        return string.Join('\n', lines);
+    }
+
+    private static void FoldPureSingleUseTemporaries(List<string> lines)
+    {
+        bool changed;
+        do
+        {
+            changed = false;
+            for (var declarationIndex = lines.Count - 1; declarationIndex >= 0; declarationIndex--)
+            {
+                if (!TryGetSimpleTemporary(lines[declarationIndex], out var name, out var value))
+                    continue;
+                var uses = Enumerable.Range(declarationIndex + 1, lines.Count - declarationIndex - 1)
+                    .Where(index => ContainsIdentifier(lines[index], name)).ToArray();
+                if (uses.Length != 1)
+                    continue;
+                var useIndex = uses[0];
+                if (Enumerable.Range(declarationIndex + 1, useIndex - declarationIndex - 1)
+                    .Any(index => !string.IsNullOrWhiteSpace(lines[index]) && !TryGetSimpleTemporary(lines[index], out _, out _)))
+                    continue;
+                lines[useIndex] = ReplaceIdentifier(lines[useIndex], name, $"({value})");
+                lines.RemoveAt(declarationIndex);
+                changed = true;
+                break;
+            }
+        }
+        while (changed);
+    }
+
+    private static bool TryGetSimpleTemporary(string line, out string name, out string value)
+    {
+        name = string.Empty;
+        value = string.Empty;
+        var text = line.Trim();
+        var assignment = text.IndexOf(" = ", StringComparison.Ordinal);
+        if (assignment < 0 || !text.EndsWith(';'))
+            return false;
+        var prefix = text[..assignment];
+        var separator = prefix.LastIndexOf(' ');
+        if (separator < 0)
+            return false;
+        name = prefix[(separator + 1)..];
+        if (!name.StartsWith("ct_tmp", StringComparison.Ordinal) || name.Any(character => !(char.IsLetterOrDigit(character) || character == '_')))
+            return false;
+        value = text[(assignment + 3)..^1];
+        if (value.StartsWith("ct_state.", StringComparison.Ordinal))
+            return false;
+        return value.Length != 0 && value.All(character => char.IsLetterOrDigit(character) || character is '_' or '-' or '+');
+    }
+
+    private static string ReplaceIdentifier(string text, string identifier, string replacement)
+    {
+        var result = new StringBuilder(text.Length + replacement.Length);
+        var start = 0;
+        while (start < text.Length)
+        {
+            var match = text.IndexOf(identifier, start, StringComparison.Ordinal);
+            if (match < 0)
+            {
+                result.Append(text, start, text.Length - start);
+                break;
+            }
+            var before = match == 0 || !(char.IsLetterOrDigit(text[match - 1]) || text[match - 1] == '_');
+            var end = match + identifier.Length;
+            var after = end == text.Length || !(char.IsLetterOrDigit(text[end]) || text[end] == '_');
+            result.Append(text, start, match - start);
+            if (before && after)
+                result.Append(replacement);
+            else
+                result.Append(identifier);
+            start = end;
+        }
+        return result.ToString();
+    }
+
+    private static bool ContainsIdentifier(string text, string identifier)
+    {
+        var start = 0;
+        while ((start = text.IndexOf(identifier, start, StringComparison.Ordinal)) >= 0)
+        {
+            var before = start == 0 || !(char.IsLetterOrDigit(text[start - 1]) || text[start - 1] == '_');
+            var end = start + identifier.Length;
+            var after = end == text.Length || !(char.IsLetterOrDigit(text[end]) || text[end] == '_');
+            if (before && after)
+                return true;
+            start = end;
+        }
+        return false;
     }
 
     private ILoweringWriter CreateWriter() => _analysisOnly ? NullLoweringWriter.Instance : new CWriter();
@@ -290,7 +428,7 @@ internal sealed partial class BodyPipeline
         var externUses = _emitter.ExternUses.Skip(_externUseStart).ToImmutableArray();
         var semantics = _semanticEntries.ToImmutableDictionary();
         var root = BoundTreeFactory.CreateRoot(_method, semantics);
-        return new BoundBody(_method, root, semantics, BoundTreeFactory.Summarize(root), effects, externUses);
+        return new BoundBody(_method, root, semantics, BoundTreeFactory.Summarize(root), effects, externUses, [.. _deferTargets]);
     }
 
     private void EmitConstructorPrologue(ILoweringWriter writer)

@@ -12,8 +12,9 @@ UTF-8 source files
     -> Declaration binding
     -> Immutable bound bodies and per-document semantic maps
     -> Flow, allocation-effect, and ARC ownership validation
-    -> Structured typed three-address IR and cleanup actions
     -> Target validation
+    -> Structured typed three-address IR and cleanup actions
+    -> Reachability and semantics-preserving IR optimization
     -> Deterministic GNU C23 emission
     -> External C compiler
     -> Native executable
@@ -38,7 +39,8 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `AllocationEffectRegistry` records direct allocation reasons and exact or virtual call edges during lowering, computes recursive effects to a fixed point, and verifies `[NoAlloc]` contracts with deterministic witnesses.
 - `TypedIrLowerer` consumes bound bodies and produces typed values, basic blocks, loads, stores, calls, conversions, allocations, checks, ownership operations, branches, throws, returns, and cleanup actions. It never classifies rendered C lines.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
-- `CEmitter` consumes `TypedIrProgram` and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy. Hosted I/O support is emitted lazily from resolved trusted-extern uses, so unrelated hosted output and every ESP translation unit remain unchanged.
+- `TypedIrOptimizer` computes reachable methods from entrypoints, exports, module initializers, address-taken and virtual targets, bound calls, and implicit runtime roots. The emitter receives only that closed program and derives the user layouts and metadata it must retain.
+- `CEmitter` owns common runtime emission plus hosted or ESP-IDF entry, failure, console, and source-path policy. Translation-local definitions use portable unused annotations where conservative runtime retention remains necessary; no target emits a symbol-retention routine.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -70,6 +72,8 @@ The GNU adapter tries `gnu23` first. It retries with `gnu2x` only after an unsup
 
 Native tests use temporary directories and check process output, error text, and exit codes.
 
+HostedIo is also an end-to-end object-model fixture. Its acyclic scene graph stores `Hittable` references in an ARC-owned array and stores one material reference in each sphere. Virtual `[NoAlloc]` hit and scatter calls exercise polymorphic dispatch inside a recursive renderer. Production settings remain in the example entry point, while conformance supplies a separate small entry point over the same source files so native tests do not run the 500-sample render.
+
 ## Public API lifecycle
 
 ```csharp
@@ -83,7 +87,7 @@ ImmutableArray<Diagnostic> diagnostics = compilation.GetDiagnostics();
 EmitResult result = compilation.EmitC(writer);
 ```
 
-`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached common and target-specific standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees. `CompilationOptions` is immutable and defaults to `Hosted`.
+`SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached common and target-specific standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees. `CompilationOptions` is immutable and defaults to `Hosted`; its optional absolute `SourceRoot` validates rooted user inputs and produces normalized relative hosted runtime paths. Invalid or outside-root inputs report `CT4106`. ESP-IDF keeps compact filenames and rejects a source root.
 
 `GetDiagnostics()` runs declarations, immutable body binding, flow/effect analysis, and target validation. It does not construct a C emitter, C writer, typed IR, or translation unit. `EmitC()` lazily lowers and caches the backend result after successful analysis. Repeated emission is byte-identical.
 
@@ -141,7 +145,7 @@ Control-flow analysis carries explicit lexical scopes and assignment state.
 - A throw is a non-fallthrough exit. Catch bodies start with the assignment state from before the try.
 - A finally body also starts with the pre-try assignment state because any call can throw. Normal try, catch, and finally assignments merge for subsequent code.
 - Return, break, continue, and exception exits that cross finally lower to an explicit pending action and one cleanup label.
-- A direct block `defer` captures its receiver and converted arguments before the remaining statements. Nested finally regions provide LIFO cleanup and reuse the same pending-action transfers.
+- A direct block `defer` captures its receiver and converted arguments immediately into automatic state. Capture ownership records are pushed before its invocation record, so LIFO unwinding invokes the call and then releases its captures. It does not create a synthetic try/finally or `setjmp` region.
 
 A bound expression contains:
 
@@ -154,7 +158,7 @@ A bound expression contains:
 
 Generated temporaries hold receivers and operands with side effects. Calls and overloaded operators evaluate inputs from left to right. Compound assignments evaluate their target once, preserve its old value through right-operand evaluation, and use normal strong-slot replacement. Short-circuit operators lower the right operand into a conditional block.
 
-Bound statements preserve lexical scopes, control-flow constructs, catches, finally regions, defers, and cleanup boundaries. Typed-IR lowering assigns typed values in source evaluation order and creates explicit blocks, checks, ownership operations, and terminators. The C emitter does not repeat name lookup, overload selection, type conversion, or diagnostic flow analysis.
+Bound statements preserve lexical scopes, control-flow constructs, catches, finally regions, defers, and cleanup boundaries. Typed-IR lowering assigns typed values in source evaluation order and creates explicit blocks, checks, ownership operations, and terminators. Reachability consumes IR call targets and bound semantic references. Function-body rendering still uses the transitional `BodyPipeline` with immutable semantic hints; replacing that final syntax-to-C renderer with instruction-only emission remains the compiler-architecture closure item.
 
 ## C emission
 
@@ -170,10 +174,9 @@ The emitter assembles one translation unit in this order:
 8. Runtime descriptors, vtables, delegate thunks, and unmanaged callback trampolines.
 9. Method, constructor, and accessor definitions.
 10. Deterministic static initialization.
-11. Symbol-retention routine.
-12. Hosted C `main` or ESP-IDF `app_main` wrapper.
+11. Hosted C `main` or ESP-IDF `app_main` wrapper.
 
-Emission lazily lowers the already validated bound program to typed IR. `CEmitter` then renders function bodies from that structured program before it orders runtime sections, so array specializations and string literals are registered deterministically without storing rendered C inside IR. Calling `GetDiagnostics()` never initializes those backend artifacts.
+Emission lazily lowers the already validated bound program to typed IR, computes a reachability closure, and then renders the retained functions. The body optimizer removes unused cleanup boundaries and blanket parameter reads, direct `defer` records avoid exception frames, and fused scalar string builds evaluate segments once from left to right. Calling `GetDiagnostics()` never initializes typed IR or emitter artifacts.
 
 Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` declarations. Compilation detects exact vector identifiers and loads only the corresponding embedded source, while language-service snapshots load all three for discovery and navigation. Every translation-unit banner identifies draft 0.12, but unused vector layouts and functions remain absent. The managed runtime, ARC header, exception/thread state, export ABI, and generated public-header contract remain draft 0.10 compatible.
 

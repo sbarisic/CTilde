@@ -1,0 +1,136 @@
+using System;
+
+namespace HostedIoExample;
+
+public struct HitRecord
+{
+    public Vec3 Point;
+    public Vec3 Normal;
+    public float Distance;
+    public bool FrontFace;
+    public Material SurfaceMaterial;
+
+    [NoAlloc]
+    public void SetFaceNormal(Ray ray, Vec3 outwardNormal)
+    {
+        FrontFace = ray.Direction.Dot(outwardNormal) < 0.0f;
+        if (FrontFace)
+            Normal = outwardNormal;
+        else
+            Normal = -outwardNormal;
+    }
+}
+
+public class Hittable
+{
+    [NoAlloc]
+    public virtual bool Hit(Ray ray, Interval interval, out HitRecord hit)
+    {
+        hit = new HitRecord();
+        return false;
+    }
+}
+
+public sealed class Sphere : Hittable
+{
+    private Vec3 center;
+    private float radius;
+    private Material material;
+
+    public Sphere(Vec3 center, float radius, Material material)
+    {
+        this.center = center;
+        this.radius = radius;
+        this.material = material;
+    }
+
+    [NoAlloc]
+    public override bool Hit(Ray ray, Interval interval, out HitRecord hit)
+    {
+        hit = new HitRecord();
+        Vec3 centerToOrigin = ray.Origin - center;
+        float a = ray.Direction.LengthSquared();
+        float halfB = centerToOrigin.Dot(ray.Direction);
+        float c = centerToOrigin.LengthSquared() - radius * radius;
+        float discriminant = halfB * halfB - a * c;
+        if (discriminant < 0.0f)
+            return false;
+
+        float root = (-halfB - Math.Sqrt(discriminant)) / a;
+        if (!interval.Surrounds(root))
+        {
+            root = (-halfB + Math.Sqrt(discriminant)) / a;
+            if (!interval.Surrounds(root))
+                return false;
+        }
+
+        HitRecord result = new HitRecord();
+        result.Distance = root;
+        result.Point = ray.At(root);
+        Vec3 outwardNormal = (result.Point - center) / radius;
+        result.SetFaceNormal(ray, outwardNormal);
+        result.SurfaceMaterial = material;
+        hit = result;
+        return true;
+    }
+}
+
+public sealed class HittableList : Hittable
+{
+    private Hittable[] objects;
+    private int count;
+
+    public HittableList()
+    {
+        objects = new Hittable[512];
+        count = 0;
+    }
+
+    [NoAlloc]
+    public int Count
+    {
+        get { return count; }
+    }
+
+    public void Add(Hittable value)
+    {
+        if (count >= objects.Length)
+            throw new Exception("HittableList capacity exceeded.");
+        objects[count] = value;
+        count++;
+    }
+
+    public void Clear()
+    {
+        int index = 0;
+        while (index < count)
+        {
+            objects[index] = null;
+            index++;
+        }
+        count = 0;
+    }
+
+    [NoAlloc]
+    public override bool Hit(Ray ray, Interval interval, out HitRecord hit)
+    {
+        HitRecord closestHit = new HitRecord();
+        bool hitAnything = false;
+        float closestDistance = interval.Max;
+        int index = 0;
+        while (index < count)
+        {
+            HitRecord candidate;
+            bool didHit = objects[index].Hit(ray, new Interval(interval.Min, closestDistance), out candidate);
+            if (didHit)
+            {
+                hitAnything = true;
+                closestDistance = candidate.Distance;
+                closestHit = candidate;
+            }
+            index++;
+        }
+        hit = closestHit;
+        return hitAnything;
+    }
+}

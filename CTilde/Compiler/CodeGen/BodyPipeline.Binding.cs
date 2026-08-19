@@ -178,6 +178,8 @@ internal sealed partial class BodyPipeline
     {
         if (syntax.OperatorKind is SyntaxKind.AmpersandAmpersandToken or SyntaxKind.PipePipeToken)
             return LowerShortCircuit(syntax);
+        if (IsKnownStringConcat(syntax))
+            return LowerStringBuild(syntax);
         var left = LowerExpression(syntax.Left);
         var right = LowerExpression(syntax.Right);
         if (syntax.OperatorKind == SyntaxKind.PercentToken &&

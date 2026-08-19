@@ -17,19 +17,24 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
     private readonly Dictionary<(CType Type, MethodSymbol Method), string> _functionPointerTrampolines = [];
+    private readonly Dictionary<MethodSymbol, (ImmutableArray<KeyValuePair<string, CType>> Fields, ImmutableArray<DirectDeferThunk> Thunks)> _directDeferStates = [];
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
+    private readonly string? _sourceRoot;
     private bool _usesExceptions;
     private bool _usesHostedIo;
     private bool _usesNativeIntegers;
     private bool _usesNativeUtf8;
+    private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
+    private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
-    public CEmitter(CompilationModel model, CompilationTarget target)
+    public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
+        _sourceRoot = sourceRoot;
         foreach (var type in model.Types.Values)
         {
             foreach (var field in type.Fields)
@@ -59,7 +64,7 @@ internal sealed partial class CEmitter : ILoweringServices
     public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
-    private bool HasExports => Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.ExportName is not null);
+    private bool HasExports => _reachableMethods.Any(method => method.ExportName is not null);
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -141,6 +146,10 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public string Emit(TypedIrProgram program)
     {
+        _reachableMethods = program.Functions.Select(function => function.Method).ToImmutableHashSet();
+        _reachableProperties = program.Functions.Where(function => function.Property is not null)
+            .Select(function => function.Property!).ToImmutableHashSet();
+        ComputeReachableTypes(program);
         RegisterDeclaredTypes();
         var definitions = program.Functions.Select(RenderFunction).ToImmutableArray();
         var moduleInitializer = RenderModuleInitializer(program.ModuleInitializers);
@@ -160,6 +169,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitDelegateSupport(writer);
         EmitSynchronousDelegateAdapters(writer);
         EmitFunctionPointerTrampolines(writer);
+        EmitDirectDeferSupport(writer);
         writer.WriteLine();
         foreach (var definition in definitions)
         {
@@ -171,14 +181,9 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitExports(writer);
         if (HasExports)
             writer.WriteLine();
-        if (!IsEspIdf)
-        {
-            EmitKeepSymbols(writer);
-            writer.WriteLine();
-        }
         EmitMain(writer);
         var output = writer.ToString();
-        return IsEspIdf ? MarkUnusedDefinitions(output) : output;
+        return MarkUnusedDefinitions(output);
     }
 
     private string RenderFunction(IrFunction function)
@@ -457,8 +462,51 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public string SourceArgument(SyntaxNode syntax)
     {
-        var path = IsEspIdf ? Path.GetFileName(syntax.Source.FilePath) : syntax.Source.FilePath.Replace('\\', '/');
+        var path = IsEspIdf
+            ? Path.GetFileName(syntax.Source.FilePath)
+            : _sourceRoot is not null && Path.IsPathFullyQualified(syntax.Source.FilePath)
+                ? Path.GetRelativePath(_sourceRoot, Path.GetFullPath(syntax.Source.FilePath)).Replace('\\', '/')
+                : syntax.Source.FilePath.Replace('\\', '/');
         return $"\"{EscapeCString(path)}\", {syntax.Source.GetLocation(syntax.Span).Line}";
+    }
+
+    public string DirectDeferThunkName(MethodSymbol method, int id) =>
+        $"ct_defer_{NameMangler.Identifier(method.CName)}_{id}";
+
+    public string DurableStateTypeName(MethodSymbol method) =>
+        $"ct_state_{NameMangler.Identifier(method.CName)}";
+
+    public void RegisterDirectDeferState(MethodSymbol method, IReadOnlyDictionary<string, CType> fields, IReadOnlyList<DirectDeferThunk> thunks)
+    {
+        _directDeferStates[method] = ([.. fields], [.. thunks]);
+    }
+
+    private void EmitDirectDeferSupport(CWriter writer)
+    {
+        foreach (var pair in _directDeferStates.OrderBy(pair => pair.Key.CName, StringComparer.Ordinal))
+        {
+            var stateType = DurableStateTypeName(pair.Key);
+            writer.WriteLine($"typedef struct {stateType}");
+            using (writer.Block())
+            {
+                foreach (var field in pair.Value.Fields)
+                    writer.WriteLine($"{CDeclaration(field.Value, field.Key)};");
+            }
+            writer.WriteLine($"{stateType};");
+            foreach (var thunk in pair.Value.Thunks)
+            {
+                writer.WriteLine($"static void {thunk.Name}(void* storage)");
+                using (writer.Block())
+                {
+                    if (thunk.Code.Contains("ct_state.", StringComparison.Ordinal))
+                        writer.WriteLine($"{stateType}* capture = ({stateType}*)storage;");
+                    else
+                        writer.WriteLine("(void)storage;");
+                    writer.WriteLine(thunk.Code.Replace("ct_state.", "capture->", StringComparison.Ordinal));
+                }
+            }
+            writer.WriteLine();
+        }
     }
 
     private static string FormatIntegralConstant(BigInteger value, CType type) => type.Kind switch
@@ -530,7 +578,7 @@ internal sealed partial class CEmitter : ILoweringServices
 
     internal void RegisterDeclaredTypes()
     {
-        foreach (var type in Model.UserTypes)
+        foreach (var type in EmittedTypes)
         {
             foreach (var field in type.Fields)
                 RegisterType(field.Type);

@@ -10,6 +10,7 @@ internal sealed record IrLoad(IrValue Result, SyntaxNode Syntax, object? Symbol,
 internal sealed record IrStore(IrValue Result, SyntaxNode Syntax, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
 internal sealed record IrUnary(IrValue Result, UnaryExpressionSyntax Expression, IrValue Operand) : IrInstruction(Result, Expression, [Operand]);
 internal sealed record IrBinary(IrValue Result, BinaryExpressionSyntax Expression, IrValue Left, IrValue Right) : IrInstruction(Result, Expression, [Left, Right]);
+internal sealed record IrStringBuild(IrValue Result, BinaryExpressionSyntax Expression, ImmutableArray<IrValue> Segments) : IrInstruction(Result, Expression, Segments);
 internal sealed record IrConvert(IrValue Result, SyntaxNode Syntax, IrValue Operand) : IrInstruction(Result, Syntax, [Operand]);
 internal sealed record IrCall(IrValue Result, CallExpressionSyntax Expression, object? Target, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
 internal sealed record IrAllocate(IrValue Result, NewExpressionSyntax Expression, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
@@ -43,6 +44,86 @@ internal sealed record IrStaticInitializer(FieldSymbol Field, BoundBody Body, CT
 internal sealed record TypedIrProgram(
     ImmutableArray<IrFunction> Functions,
     ImmutableArray<IrStaticInitializer> ModuleInitializers);
+
+internal sealed class TypedIrOptimizer(BoundProgram program)
+{
+    public TypedIrProgram Optimize(TypedIrProgram ir)
+    {
+        var functionsByMethod = ir.Functions.ToDictionary(function => function.Method);
+        var functionsByProperty = ir.Functions.Where(function => function.Property is not null)
+            .GroupBy(function => (PropertySymbol)function.Property!)
+            .ToDictionary(group => group.Key, group => group.ToImmutableArray());
+        var reachable = new HashSet<MethodSymbol>();
+        var pending = new Queue<MethodSymbol>();
+
+        void Add(MethodSymbol? method)
+        {
+            if (method is not null && functionsByMethod.ContainsKey(method) && reachable.Add(method))
+                pending.Enqueue(method);
+        }
+
+        Add(program.Model.EntryPoint);
+        foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null || function.Method.IsVirtual || function.Method.IsOverride))
+            Add(function.Method);
+        foreach (var function in ir.Functions.Where(function => function.Method.IsOperator))
+            Add(function.Method);
+        if (program.Model.Types.TryGetValue("System.Exception", out var exceptionType))
+        {
+            foreach (var function in ir.Functions.Where(function => function.Property?.ContainingType == exceptionType && function.Property.Name == "Message"))
+                Add(function.Method);
+        }
+        if (program.Model.Types.TryGetValue("System.IO.IOException", out var ioExceptionType))
+        {
+            foreach (var constructor in ioExceptionType.Constructors)
+                Add(constructor);
+        }
+        if (program.Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.Type.Kind == CTypeKind.FunctionPointer) ||
+            program.Model.UserSyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.AmpersandToken))
+        {
+            foreach (var function in ir.Functions.Where(function => function.Method.IsStatic))
+                Add(function.Method);
+        }
+        foreach (var initializer in program.Bodies.Where(body => body.Method.Name == "<module_init>"))
+            AddDependencies(initializer);
+
+        while (pending.Count != 0)
+        {
+            var method = pending.Dequeue();
+            if (functionsByMethod.TryGetValue(method, out var function))
+            {
+                foreach (var call in function.Blocks.SelectMany(block => block.Instructions).OfType<IrCall>())
+                    Add(call.Target as MethodSymbol);
+                AddDependencies(function.Body);
+            }
+            Add(method.ConstructorInitializerTarget);
+        }
+
+        return ir with { Functions = ir.Functions.Where(function => reachable.Contains(function.Method)).ToImmutableArray() };
+
+        void AddDependencies(BoundBody body)
+        {
+            foreach (var deferred in body.DeferredCalls)
+                Add(deferred);
+            foreach (var semantic in body.Semantics.Values)
+            {
+                switch (semantic.Symbol)
+                {
+                    case MethodSymbol method:
+                        Add(method);
+                        break;
+                    case PropertySymbol property when functionsByProperty.TryGetValue(property, out var accessors):
+                        foreach (var accessor in accessors)
+                            Add(accessor.Method);
+                        break;
+                    case MethodGroupBinding group:
+                        foreach (var candidate in group.Candidates)
+                            Add(candidate);
+                        break;
+                }
+            }
+        }
+    }
+}
 
 internal sealed class TypedIrLowerer(BoundProgram program)
 {
@@ -116,6 +197,7 @@ internal sealed class TypedIrLowerer(BoundProgram program)
                     LiteralExpressionSyntax => new IrConstant(result, expression.Syntax, expression.ConstantValue),
                     AssignmentExpressionSyntax => new IrStore(result, expression.Syntax, inputs),
                     UnaryExpressionSyntax unary when inputs.Length != 0 => new IrUnary(result, unary, inputs[0]),
+                    BinaryExpressionSyntax binary when expression.Type == CType.String && binary.OperatorKind == SyntaxKind.PlusToken => new IrStringBuild(result, binary, inputs),
                     BinaryExpressionSyntax binary when inputs.Length >= 2 => new IrBinary(result, binary, inputs[0], inputs[1]),
                     CastExpressionSyntax or ParenthesizedExpressionSyntax when inputs.Length != 0 => new IrConvert(result, expression.Syntax, inputs[0]),
                     CallExpressionSyntax call => new IrCall(result, call, expression.Symbol, inputs),

@@ -1,0 +1,72 @@
+using System;
+
+namespace HostedIoExample;
+
+public static class Scene
+{
+    public static HittableList CreateFinal(RandomGenerator random)
+    {
+        HittableList world = new HittableList();
+        Material ground = new Lambertian(new Vec3(0.5f, 0.5f, 0.5f));
+        world.Add(new Sphere(new Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, ground));
+
+        int a = -11;
+        while (a < 11)
+        {
+            int b = -11;
+            while (b < 11)
+            {
+                float materialChoice = random.NextFloat();
+                Vec3 center = new Vec3(
+                    (float)a + 0.9f * random.NextFloat(),
+                    0.2f,
+                    (float)b + 0.9f * random.NextFloat());
+
+                if ((center - new Vec3(4.0f, 0.2f, 0.0f)).Length() > 0.9f)
+                {
+                    Material material;
+                    if (materialChoice < 0.8f)
+                    {
+                        Vec3 albedo = random.Vector() * random.Vector();
+                        material = new Lambertian(albedo);
+                    }
+                    else if (materialChoice < 0.95f)
+                    {
+                        Vec3 albedo = random.Vector(0.5f, 1.0f);
+                        float fuzz = random.Range(0.0f, 0.5f);
+                        material = new Metal(albedo, fuzz);
+                    }
+                    else
+                    {
+                        material = new Dielectric(1.5f);
+                    }
+                    world.Add(new Sphere(center, 0.2f, material));
+                }
+                b++;
+            }
+            a++;
+        }
+
+        world.Add(new Sphere(new Vec3(0.0f, 1.0f, 0.0f), 1.0f, new Dielectric(1.5f)));
+        world.Add(new Sphere(new Vec3(-4.0f, 1.0f, 0.0f), 1.0f, new Lambertian(new Vec3(0.4f, 0.2f, 0.1f))));
+        world.Add(new Sphere(new Vec3(4.0f, 1.0f, 0.0f), 1.0f, new Metal(new Vec3(0.7f, 0.6f, 0.5f), 0.0f)));
+        return world;
+    }
+
+    public static Camera CreateBookCamera()
+    {
+        Camera camera = new Camera();
+        camera.AspectRatio = 16.0f / 9.0f;
+        camera.ImageWidth = 1200;
+        camera.SamplesPerPixel = 500;
+        camera.MaxDepth = 50;
+        camera.VerticalFieldOfView = 20.0f;
+        camera.LookFrom = new Vec3(13.0f, 2.0f, 3.0f);
+        camera.LookAt = Vec3.Zero;
+        camera.Up = Vec3.UnitY;
+        camera.DefocusAngle = 0.6f;
+        camera.FocusDistance = 10.0f;
+        camera.ProgressRows = 25;
+        return camera;
+    }
+}

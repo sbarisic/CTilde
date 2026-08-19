@@ -3,125 +3,19 @@ using System.IO;
 
 namespace HostedIoExample;
 
-public struct Ray
-{
-    public Vec3 Origin;
-    public Vec3 Direction;
-
-    public Ray(Vec3 origin, Vec3 direction)
-    {
-        Origin = origin;
-        Direction = direction;
-    }
-
-    public Vec3 At(float distance)
-    {
-        return Origin + Direction * distance;
-    }
-}
-
 public static class Program
 {
-    private const int ImageWidth = 256;
-    private const int ImageHeight = 144;
-
-    private static float HitSphere(Ray ray, Vec3 center, float radius)
-    {
-        Vec3 originToCenter = ray.Origin - center;
-        float a = ray.Direction.LengthSquared();
-        float halfB = originToCenter.Dot(ray.Direction);
-        float c = originToCenter.LengthSquared() - radius * radius;
-        float discriminant = halfB * halfB - a * c;
-
-        if (discriminant < 0.0f)
-            return -1.0f;
-
-        return (-halfB - Math.Sqrt(discriminant)) / a;
-    }
-
-    private static Vec3 SurfaceColor(Ray ray, Vec3 center, float distance)
-    {
-        Vec3 normal = (ray.At(distance) - center).Normalize();
-        return (normal + Vec3.One) * 0.5f;
-    }
-
-    private static Vec3 RayColor(Ray ray)
-    {
-        Vec3 sphereCenter = new Vec3(0.0f, 0.0f, -1.0f);
-        Vec3 groundCenter = new Vec3(0.0f, -100.5f, -1.0f);
-        float sphereDistance = HitSphere(ray, sphereCenter, 0.5f);
-        float groundDistance = HitSphere(ray, groundCenter, 100.0f);
-
-        if (sphereDistance > 0.001f &&
-            (groundDistance <= 0.001f || sphereDistance < groundDistance))
-        {
-            return SurfaceColor(ray, sphereCenter, sphereDistance);
-        }
-
-        if (groundDistance > 0.001f)
-            return SurfaceColor(ray, groundCenter, groundDistance);
-
-        Vec3 unitDirection = ray.Direction.Normalize();
-        float blend = 0.5f * (unitDirection.Y + 1.0f);
-        Vec3 white = Vec3.One;
-        Vec3 blue = new Vec3(0.5f, 0.7f, 1.0f);
-        return (1.0f - blend) * white + blue * blend;
-    }
-
-    private static int ToColorByte(float value)
-    {
-        float clamped = Math.Min(Math.Max(value, 0.0f), 0.999f);
-        return (int)(256.0f * clamped);
-    }
-
-    private static void WriteColor(FileHandle image, Vec3 color)
-    {
-        int red = ToColorByte(color.X);
-        int green = ToColorByte(color.Y);
-        int blue = ToColorByte(color.Z);
-        string line = red.ToString() + " " + green.ToString() + " " + blue.ToString() + "\n";
-        File.Write(image, line);
-    }
-
     [EntryPoint]
     public static void Main()
     {
         FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
         defer File.Close(image);
-        defer Console.WriteLine("Defering!");
 
         Console.WriteLine("Rendering image.ppm...");
-        File.Write(image, "P3\n256 144\n255\n");
-
-        float focalLength = 1.0f;
-        float viewportHeight = 2.0f;
-        float viewportWidth = viewportHeight * ((float)ImageWidth / (float)ImageHeight);
-        Vec3 cameraCenter = Vec3.Zero;
-        Vec3 viewportU = +Vec3.UnitX * viewportWidth;
-        Vec3 viewportV = -Vec3.UnitY * viewportHeight;
-        Vec3 pixelDeltaU = viewportU / (float)ImageWidth;
-        Vec3 pixelDeltaV = viewportV / (float)ImageHeight;
-
-        Vec3 viewportUpperLeft = cameraCenter - new Vec3(0.0f, 0.0f, focalLength);
-        viewportUpperLeft -= viewportU * 0.5f;
-        viewportUpperLeft -= viewportV * 0.5f;
-        Vec3 pixel00Location = viewportUpperLeft + (pixelDeltaU + pixelDeltaV) * 0.5f;
-
-        int row = 0;
-        while (row < ImageHeight)
-        {
-            int column = 0;
-            while (column < ImageWidth)
-            {
-                Vec3 pixelCenter = pixel00Location + pixelDeltaU * (float)column;
-                pixelCenter += pixelDeltaV * (float)row;
-                Ray ray = new Ray(cameraCenter, pixelCenter - cameraCenter);
-                WriteColor(image, RayColor(ray));
-                column++;
-            }
-            row++;
-        }
-
-        Console.WriteLine("Done: 256x144.");
+        RandomGenerator random = new RandomGenerator(RandomGenerator.DefaultSeed);
+        HittableList world = Scene.CreateFinal(random);
+        Camera camera = Scene.CreateBookCamera();
+        camera.Render(image, world, random);
+        Console.WriteLine("Done: 1200x675.");
     }
 }

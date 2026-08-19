@@ -40,18 +40,32 @@
 - [x] Add documentation, editor navigation, hosted native tests, ESP cross-build coverage, and the HostedIo migration.
 - [ ] Add interpolation, clamping, distance, swizzles, conversions, or SIMD-specific lowering only when applications require them.
 
+## Draft 0.12 typed-IR and C optimization
+
+- [x] Add an optimization stage between typed-IR lowering and C emission.
+- [x] Remove cleanup-stack access from value-only leaf functions and narrow durable `setjmp` state through CFG liveness.
+- [x] Lower ordinary `defer` to direct cleanup records without synthetic try/finally frames.
+- [x] NUL-terminate concatenated strings and fuse nested built-in scalar formatting into one string object and one data allocation.
+- [x] Add whole-program function reachability, user-layout/metadata pruning, and remove `ct_keep_symbols` from both targets.
+- [x] Add opt-in reproducible hosted paths through `CompilationOptions.SourceRoot` and CLI `--source-root`.
+- [ ] Make typed instructions the sole function-body emission input, then remove transitional `BodyPipeline`, `CBodyLowerer`, and `LoweredExpression` syntax re-lowering.
+- [ ] Prune common runtime helpers individually instead of retaining the conservative runtime core with unused annotations.
+- [x] Record final GCC/Clang sanitizer results, ESP link sizes, the exact 256×144 ray-tracer PPM hash, and T-CAN485 hardware measurements.
+- [ ] Record a comparable pre-optimization ray-tracer timing baseline; current measurements are non-gating because the integrated vector renderer changed before this pass.
+
 ## Compiler architecture completion
 
-Draft 0.12 uses the release pipeline completed for draft 0.7:
+Draft 0.12 retains the analysis pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.
 - [x] Replace line-classified instructions with typed operands, blocks, loads, stores, calls, branches, checks, throws, ownership operations, and cleanup actions.
 - [x] Make `GetDiagnostics()` stop after declaration, binding, flow/effect analysis, and target validation without constructing a C emitter, C writer, typed IR, or C translation unit.
-- [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and line classifier.
+- [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and rendered-line classifier.
+- [ ] Remove the remaining syntax-based `BodyPipeline` function renderer after every construct emits from typed IR instructions.
 - [x] Split non-generated C# implementation and conformance files below 900 physical lines.
 
-The migration retained the original 74 conformance checks and deterministic hosted and ESP-IDF C baselines. Draft 0.10 deliberately changes every generated runtime for atomic ARC and attached-thread state.
+The migration retained the original 74 conformance checks and now passes 107 checks, including an exact 256×144 PPM hash and the optimized ESP hardware sequence. Draft 0.10 deliberately changed every generated runtime for atomic ARC and attached-thread state; Draft 0.12 intentionally changes internal generated C again while preserving the public native ABI.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, and broader native-boundary propagation policy.
 
@@ -201,9 +215,8 @@ Permanent loops can allocate temporary managed values when their ownership does 
 - [x] Mark intentionally unused internal definitions with a GCC-compatible attribute.
 - [x] Verify that ESP-IDF removes unused function and data sections.
 - [x] Record flash and DRAM size for each conformance firmware.
-- [ ] Add whole-program reachability analysis if attributes do not give acceptable size.
-
-`ct_keep_symbols()` currently takes the address of all generated functions and runtime helpers. A reachable call can prevent linker garbage collection.
+- [x] Add compiler-side whole-program reachability for functions and user metadata.
+- [ ] Extend reachability to prune the remaining conservative common-runtime helper set.
 
 Review the new `System.Object` metadata for embedded placement:
 
@@ -329,7 +342,7 @@ Do not call general C~ allocation, console, or virtual dispatch from an interrup
 - [x] Verify `Environment.Exit` diagnostics.
 - [x] Verify target-specific reserved-symbol diagnostics.
 - [x] Verify target-specific standard-library loading.
-- [x] Verify that unused code does not stay reachable through `ct_keep_symbols`.
+- [x] Verify that no target emits `ct_keep_symbols` and unreachable user code is pruned before emission.
 - [x] Verify 64-bit literal, promotion, wrapping, formatting, boxing, enum, switch, and ABI behavior.
 - [x] Verify named delegate selection, ARC receiver lifetime, virtual/base dispatch, identity, exceptions, and null invocation.
 - [x] Verify unmanaged function-pointer signatures, unsafe enforcement, exact native calls, and the `CTE0003` callback boundary.
@@ -391,7 +404,15 @@ The 2026-08-19 Draft 0.9 builds produced 153,165-byte `esp32` and 156,744-byte `
 - [x] Complete-link the `esp32` and `esp32c3` attached-task firmware.
 - [x] Flash the connected dual-core ESP32 and confirm `threading: ok`, ARC heap recovery, exception isolation, and the existing hardware markers.
 
-The 2026-08-19 Draft 0.10 build produced a 155,360-byte `esp32` image. Both complete Xtensa and RISC-V firmware links passed. The connected ESP32-D0WDQ6-V3 reported `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`, with 297,620 bytes of free heap, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom. More than ten GPIO4 WS2812 cycles continued without a watchdog reset, and the Draft 0.10 self-test remains flashed.
+The 2026-08-19 Draft 0.10 build produced a 155,360-byte `esp32` image. Both complete Xtensa and RISC-V firmware links passed. The connected ESP32-D0WDQ6-V3 reported `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`, with 297,620 bytes of free heap, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom. More than ten GPIO4 WS2812 cycles continued without a watchdog reset. Draft 0.12 later superseded this image.
+
+#### Draft 0.12 optimization closure
+
+- [x] Complete-link optimized `esp32` and `esp32c3` firmware with GCC 15.2.0 warnings treated as errors and record final size reports.
+- [x] Flash the optimized self-test, confirm every Draft 0.12/threading/ARC marker, and observe more than 25 UART WS2812 transitions without a watchdog reset.
+- [x] Flash `RuntimeFailure.ct`, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore and recheck the optimized self-test.
+
+The 2026-08-20 optimized builds produced 154,525-byte `esp32` and 159,428-byte `esp32c3` measured images. The T-CAN485 reported 297,692 bytes free, a 286,696-byte minimum, and 6,704 bytes of stack high-water headroom. The full self-test is the final board state.
 
 ### First-release acceptance criteria
 

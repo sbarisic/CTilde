@@ -57,10 +57,10 @@ The program prints:
 The CLI accepts multiple input files as one compilation:
 
 ```text
-ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--check] [--trace]
+ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]
 ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]
-ctilde --project <ctilde.json> [--build] [native build options] [--check] [--trace]
-ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
+ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]
+ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]
 ```
 
 - `-o` selects the generated C file.
@@ -68,6 +68,7 @@ ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
 - `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
+- `--source-root` makes hosted source locations reproducible by emitting normalized `/`-separated paths relative to an absolute root. Relative CLI roots resolve from the invocation directory. The API requires an absolute root and reports `CT4106` when a rooted input is outside it. ESP-IDF continues to use compact filenames.
 - `--project` loads deterministic source globs and the target from `ctilde.json`. It cannot be combined with direct inputs or `--target`.
 - `--build` emits C and a native header, then invokes MSVC/GCC/Clang for hosted projects or `idf.py build` for ESP-IDF projects.
 - `--configuration debug|release`, `--compiler`, and `--native-output` override hosted build settings. Debug is the default.
@@ -114,7 +115,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a hosted ray tracer that uses `System.Math`, `System.Vec3`, and an owned file handle to render a PPM image. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
+See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a deterministic hosted path tracer with antialiasing, recursive Lambertian/metal/dielectric scattering, a positionable defocus camera, and owned PPM output. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
 
 ## Public compiler API
 
@@ -135,7 +136,9 @@ EmitResult headerResult = compilation.EmitCHeader(header);
 
 The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
 
-Omit `CompilationOptions` to retain hosted output.
+Omit `CompilationOptions` to retain hosted output and full source paths. Use `new CompilationOptions(SourceRoot: absoluteRoot)` for reproducible hosted paths.
+
+Draft 0.12 emission runs a reachability and body-optimization pass before rendering C. It removes unreachable user functions and metadata, omits cleanup machinery from value-only leaves, registers `defer` directly on the cleanup stack without manufacturing exception frames, and fuses nested built-in string formatting into one string-object allocation plus one data allocation. The hosted path-tracer gate renders an exact 256×144 PPM with SHA-256 `A7099E2431144A542753BA5496880735DBD2A6708A6A9716C3079588D07B3507`.
 
 `LanguageServiceSnapshot` provides editor-neutral completion, lazy symbol documentation, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. C#-style `///` XML comments supply summaries, parameter and return descriptions, exceptions, remarks, resolved references, and explicit inherited documentation. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same documented target-specific standard library as `Compilation`.
 
@@ -176,7 +179,7 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.12 programs |
-| `examples/HostedIo` | Hosted PPM ray tracer with `System.Vec3` arithmetic and owned file output |
+| `examples/HostedIo` | Deterministic hosted path tracer with materials, defocus blur, and owned PPM output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 

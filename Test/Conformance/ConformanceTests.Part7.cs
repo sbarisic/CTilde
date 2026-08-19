@@ -51,42 +51,208 @@ internal static partial class ConformanceTests
             Assert(Compile(reserved).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A hosted runtime symbol conflict was not diagnosed.");
         });
 
-        suite.Run("hosted ray tracer native render", () =>
+        suite.Run("hosted path tracer model and deterministic sampling", () =>
         {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "HostedIo.Program.ct"));
-            var generated = Emit(source);
-            Assert(generated.Contains("ct_math_sqrt(", StringComparison.Ordinal), "The ray tracer did not emit its square-root dependency.");
-            Assert(generated.Contains("ct_math_min(", StringComparison.Ordinal) && generated.Contains("ct_math_max(", StringComparison.Ordinal), "The ray tracer did not emit its color-clamping dependencies.");
-            Assert(generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The ray tracer did not emit hosted file output.");
-            Assert(!generated.Contains("ct_console_read()", StringComparison.Ordinal) && !generated.Contains("ct_console_read_line()", StringComparison.Ordinal), "The ray tracer unexpectedly reads console input.");
+            const string harness = """
+                using System;
+                namespace HostedIoExample;
 
-            var first = CompileAndRun(source, captureFile: "image.ppm");
-            var second = CompileAndRun(source, captureFile: "image.ppm");
+                public static class MemoryDiagnostics
+                {
+                    [Extern("ct_memory_diagnostic_live_objects")]
+                    [NoAlloc]
+                    public static uint LiveObjects();
+                }
+
+                public static class TestProgram
+                {
+                    private static bool Close(float left, float right)
+                    {
+                        return Math.Abs(left - right) < 0.0001f;
+                    }
+
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        uint baseline = MemoryDiagnostics.LiveObjects();
+                        {
+                            RandomGenerator sequence = new RandomGenerator(RandomGenerator.DefaultSeed);
+                            Console.WriteLine(sequence.NextUInt() == 4170923632u);
+                            Console.WriteLine(sequence.NextUInt() == 1979402906u);
+                            RandomGenerator zeroSeed = new RandomGenerator(0u);
+                            Console.WriteLine(zeroSeed.NextUInt() == 4170923632u);
+
+                            RandomGenerator samples = new RandomGenerator(123u);
+                            float scalar = samples.NextFloat();
+                            Vec3 sphereSample = samples.InUnitSphere();
+                            Vec3 unitSample = samples.UnitVector();
+                            Vec3 diskSample = samples.InUnitDisk();
+                            Console.WriteLine(scalar >= 0.0f && scalar < 1.0f);
+                            Console.WriteLine(sphereSample.LengthSquared() < 1.0f);
+                            Console.WriteLine(Close(unitSample.Length(), 1.0f));
+                            Console.WriteLine(diskSample.Z == 0.0f && diskSample.LengthSquared() < 1.0f);
+
+                            Material matte = new Lambertian(new Vec3(0.8f, 0.3f, 0.2f));
+                            Sphere sphere = new Sphere(new Vec3(0.0f, 0.0f, -1.0f), 0.5f, matte);
+                            HitRecord outsideHit;
+                            bool hitOutside = sphere.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out outsideHit);
+                            Console.WriteLine(hitOutside && Close(outsideHit.Distance, 0.5f) && outsideHit.FrontFace && Close(outsideHit.Normal.Z, 1.0f));
+                            HitRecord insideHit;
+                            bool hitInside = sphere.Hit(new Ray(new Vec3(0.0f, 0.0f, -1.0f), Vec3.UnitX), new Interval(0.001f, 100.0f), out insideHit);
+                            Console.WriteLine(hitInside && !insideHit.FrontFace && Close(insideHit.Normal.X, -1.0f));
+
+                            HittableList closest = new HittableList();
+                            closest.Add(new Sphere(new Vec3(0.0f, 0.0f, -3.0f), 0.5f, matte));
+                            closest.Add(sphere);
+                            HitRecord closestHit;
+                            bool foundClosest = closest.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out closestHit);
+                            Console.WriteLine(foundClosest && Close(closestHit.Distance, 0.5f));
+
+                            bool capacityFailed = false;
+                            try
+                            {
+                                HittableList limited = new HittableList();
+                                int fill = 0;
+                                while (fill < 512)
+                                {
+                                    limited.Add(sphere);
+                                    fill++;
+                                }
+                                limited.Add(sphere);
+                            }
+                            catch (Exception error)
+                            {
+                                capacityFailed = error.Message == "HittableList capacity exceeded.";
+                            }
+                            Console.WriteLine(capacityFailed);
+
+                            Vec3 reflected = VectorMath.Reflect(new Vec3(1.0f, -1.0f, 0.0f).Normalize(), Vec3.UnitY);
+                            Console.WriteLine(reflected.X > 0.0f && reflected.Y > 0.0f);
+                            Vec3 refracted = VectorMath.Refract(new Vec3(0.0f, -1.0f, 0.0f), Vec3.UnitY, 1.0f / 1.5f);
+                            Console.WriteLine(Close(refracted.Length(), 1.0f) && refracted.Y < 0.0f);
+
+                            HitRecord materialHit = new HitRecord();
+                            materialHit.Point = Vec3.Zero;
+                            materialHit.Normal = Vec3.UnitY;
+                            materialHit.FrontFace = true;
+                            Vec3 attenuation;
+                            Ray scattered;
+                            bool matteScattered = matte.Scatter(new Ray(Vec3.Zero, -Vec3.UnitY), materialHit, samples, out attenuation, out scattered);
+                            Console.WriteLine(matteScattered && attenuation.X == 0.8f && scattered.Direction.Dot(Vec3.UnitY) > -1.0f);
+                            Material metal = new Metal(new Vec3(0.7f, 0.6f, 0.5f), 0.0f);
+                            bool metalScattered = metal.Scatter(new Ray(Vec3.Zero, -Vec3.UnitY), materialHit, samples, out attenuation, out scattered);
+                            Console.WriteLine(metalScattered && scattered.Direction.Y > 0.0f);
+                            Material glass = new Dielectric(1.5f);
+                            bool glassScattered = glass.Scatter(new Ray(Vec3.Zero, -Vec3.UnitY), materialHit, samples, out attenuation, out scattered);
+                            Console.WriteLine(glassScattered && attenuation.X == 1.0f && Close(scattered.Direction.Length(), 1.0f));
+                            materialHit.FrontFace = false;
+                            materialHit.Normal = -Vec3.UnitY;
+                            Vec3 grazing = new Vec3(0.9f, 0.4358899f, 0.0f).Normalize();
+                            bool internallyReflected = glass.Scatter(new Ray(Vec3.Zero, grazing), materialHit, samples, out attenuation, out scattered);
+                            Console.WriteLine(internallyReflected && scattered.Direction.X > 0.0f && scattered.Direction.Y < 0.0f);
+
+                            RandomGenerator sceneRandom = new RandomGenerator(RandomGenerator.DefaultSeed);
+                            HittableList finalScene = Scene.CreateFinal(sceneRandom);
+                            Console.WriteLine(finalScene.Count > 400 && finalScene.Count <= 488);
+                        }
+                        Console.WriteLine(MemoryDiagnostics.LiveObjects() == baseline);
+                    }
+                }
+                """;
+            var result = CompileAndRun(HostedIoSources(harness), memoryDiagnostics: true);
+            Assert(result.ExitCode == 0, result.StandardError);
+            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 19)), result.StandardOutput);
+        });
+
+        suite.Run("hosted path tracer deterministic native render", () =>
+        {
+            var production = Compile(HostedIoSources(includeProgram: true));
+            Assert(!production.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, production.GetDiagnostics()));
+
+            const string harness = """
+                using System;
+                using System.IO;
+                namespace HostedIoExample;
+
+                public static class TestProgram
+                {
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
+                        defer File.Close(image);
+                        Console.WriteLine("Rendering test image...");
+                        RandomGenerator random = new RandomGenerator(RandomGenerator.DefaultSeed);
+                        HittableList world = Scene.CreateFinal(random);
+                        Camera camera = Scene.CreateBookCamera();
+                        camera.ImageWidth = 256;
+                        camera.SamplesPerPixel = 4;
+                        camera.MaxDepth = 8;
+                        camera.ProgressRows = 48;
+                        camera.Render(image, world, random);
+                        Console.WriteLine("Done: 256x144.");
+                    }
+                }
+                """;
+            var sources = HostedIoSources(harness);
+            var generated = Emit(sources);
+            Assert(generated.Contains("ct_math_sqrt(", StringComparison.Ordinal) && generated.Contains("ct_math_tan(", StringComparison.Ordinal), "The path tracer omitted its camera or scattering math dependencies.");
+            Assert(generated.Contains("ct_vthunk_", StringComparison.Ordinal), "The path tracer did not emit virtual hittable/material dispatch.");
+            Assert(generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The path tracer did not emit hosted file output.");
+            Assert(!generated.Contains("ct_console_read()", StringComparison.Ordinal) && !generated.Contains("ct_console_read_line()", StringComparison.Ordinal), "The path tracer unexpectedly reads console input.");
+
+            var first = CompileAndRun(sources, captureFile: "image.ppm");
+            var second = CompileAndRun(sources, captureFile: "image.ppm");
             Assert(first.ExitCode == 0, first.StandardError);
             Assert(second.ExitCode == 0, second.StandardError);
-            Assert(Normalize(first.StandardOutput) == "Rendering image.ppm...\nDone: 256x144.\n", first.StandardOutput);
+            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nRendered rows: 48/144.\nRendered rows: 96/144.\nRendered rows: 144/144.\nDone: 256x144.\n", first.StandardOutput);
             Assert(Normalize(second.StandardOutput) == Normalize(first.StandardOutput), second.StandardOutput);
-            var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first ray-tracer run did not produce image.ppm.");
-            var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second ray-tracer run did not produce image.ppm.");
-            Assert(firstImage.SequenceEqual(secondImage), "Repeated renders were not byte-identical.");
+            var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first path-tracer run did not produce image.ppm.");
+            var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second path-tracer run did not produce image.ppm.");
+            Assert(firstImage.SequenceEqual(secondImage), "Repeated seeded path-tracer runs were not byte-identical.");
 
+            const int width = 256;
+            const int height = 144;
+            var imageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstImage));
+            Assert(imageHash == "A7099E2431144A542753BA5496880735DBD2A6708A6A9716C3079588D07B3507", $"The deterministic 256x144 PPM hash changed: {imageHash}.");
             var tokens = Encoding.ASCII.GetString(firstImage).Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-            Assert(tokens.Length == 4 + 256 * 144 * 3, $"The PPM contained {tokens.Length} tokens instead of {4 + 256 * 144 * 3}.");
-            Assert(tokens[0] == "P3" && tokens[1] == "256" && tokens[2] == "144" && tokens[3] == "255", "The PPM header was incorrect.");
+            Assert(tokens.Length == 4 + width * height * 3, $"The PPM contained {tokens.Length} tokens instead of {4 + width * height * 3}.");
+            Assert(tokens[0] == "P3" && tokens[1] == "256" && tokens[2] == "144" && tokens[3] == "255", "The acceptance-render PPM header was incorrect.");
 
-            var components = new int[256 * 144 * 3];
+            var components = new int[width * height * 3];
+            var colors = new HashSet<(int Red, int Green, int Blue)>();
+            var darkPixels = 0;
+            var nonSkyBottomPixels = 0;
+            long topRed = 0;
+            long topGreen = 0;
+            long topBlue = 0;
             for (var index = 0; index < components.Length; index++)
             {
                 Assert(int.TryParse(tokens[index + 4], NumberStyles.None, CultureInfo.InvariantCulture, out components[index]), $"PPM component {index} was not an integer.");
                 Assert(components[index] is >= 0 and <= 255, $"PPM component {index} was outside 0 through 255.");
             }
-
-            var sky = ReadPixel(components, 256, 128, 0);
-            Assert(sky.Blue == 255 && sky.Blue > sky.Green && sky.Green > sky.Red, "The top-center pixel did not contain the expected blue sky gradient.");
-            var sphere = ReadPixel(components, 256, 128, 72);
-            Assert(sphere.Red is >= 110 and <= 145 && sphere.Green is >= 110 and <= 145 && sphere.Blue is >= 240 and <= 255, "The center pixel did not contain the expected sphere-normal color.");
-            var ground = ReadPixel(components, 256, 128, 120);
-            Assert(ground.Green >= 240 && ground.Red is >= 110 and <= 145 && ground.Blue is >= 110 and <= 145, "The lower-center pixel did not contain the expected ground-normal color.");
+            for (var y = 0; y < height; y++)
+            {
+                for (var x = 0; x < width; x++)
+                {
+                    var pixel = ReadPixel(components, width, x, y);
+                    colors.Add(pixel);
+                    if (pixel.Red + pixel.Green + pixel.Blue < 240)
+                        darkPixels++;
+                    if (y < height / 3)
+                    {
+                        topRed += pixel.Red;
+                        topGreen += pixel.Green;
+                        topBlue += pixel.Blue;
+                    }
+                    if (y >= height * 2 / 3 && !(pixel.Blue > pixel.Green && pixel.Green > pixel.Red))
+                        nonSkyBottomPixels++;
+                }
+            }
+            Assert(colors.Count > 64, $"The acceptance render contained only {colors.Count} distinct colors.");
+            Assert(darkPixels > width, "The acceptance render did not contain shaded object pixels.");
+            Assert(topBlue > topGreen && topGreen > topRed, "The upper image region was not the expected blue-biased sky.");
+            Assert(nonSkyBottomPixels > width, "The lower image region did not contain enough ground or object pixels.");
         });
 
         suite.Run("hosted console EOF and I/O exceptions", () =>
@@ -243,6 +409,19 @@ internal static partial class ConformanceTests
                 Assert(!esp.Contains(symbol, StringComparison.Ordinal), $"Hosted I/O symbol '{symbol}' changed ESP output.");
             }
         });
+    }
+
+    private static SyntaxTree[] HostedIoSources(string? harness = null, bool includeProgram = false)
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "Examples", "HostedIo");
+        var sources = Directory.GetFiles(directory, "*.ct", SearchOption.TopDirectoryOnly)
+            .Where(path => includeProgram || !Path.GetFileName(path).Equals("Program.ct", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .Select(path => SyntaxTree.ParseText(File.ReadAllText(path), path))
+            .ToList();
+        if (harness is not null)
+            sources.Add(SyntaxTree.ParseText(harness, "HostedIo.TestProgram.ct"));
+        return [.. sources];
     }
 
     private static (int Red, int Green, int Blue) ReadPixel(int[] components, int width, int x, int y)

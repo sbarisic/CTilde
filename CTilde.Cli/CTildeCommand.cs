@@ -77,7 +77,7 @@ internal static class CTildeCommand
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
             }
             var trees = request.Inputs.Select(path => SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
-            var compilation = Compilation.Create(trees, new CompilationOptions(request.Target));
+            var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, request.SourceRoot));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             var diagnostics = request.CheckOnly ? compilation.GetDiagnostics() : compilation.EmitC(generated).Diagnostics;
@@ -122,6 +122,8 @@ internal static class CTildeCommand
 
     private static int CompileDirectory(CommandLineOptions options)
     {
+        if (options.Target == CompilationTarget.EspIdf && options.SourceRoot is not null)
+            return UsageError("--source-root is valid only for hosted compilations.");
         if (options.Inputs.Count != 0 || options.Output is not null || options.HeaderOutput is not null ||
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null)
@@ -138,7 +140,8 @@ internal static class CTildeCommand
             var exitCode = 0;
             foreach (var input in inputs)
             {
-                var request = new BuildRequest([input], options.Target, null, directory, Path.ChangeExtension(input, ".c"),
+                var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
+                var request = new BuildRequest([input], options.Target, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
                     null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null);
                 if (Compile(request) != 0)
                 {
@@ -220,10 +223,10 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
-        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--build] [native build options] [--check] [--trace]");
-        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]");
+        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
+        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path>");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
     }

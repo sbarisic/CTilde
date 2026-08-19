@@ -6,4 +6,6 @@ public enum CompilationTarget
     EspIdf,
 }
 
-public sealed record CompilationOptions(CompilationTarget Target = CompilationTarget.Hosted);
+public sealed record CompilationOptions(
+    CompilationTarget Target = CompilationTarget.Hosted,
+    string? SourceRoot = null);

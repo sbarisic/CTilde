@@ -564,9 +564,9 @@ internal static partial class ConformanceTests
             const string nativeSuffix = "\nint64_t ct_test_invoke_i64(int64_t (*callback)(int64_t), int64_t value) { return callback(value); }\nint64_t ct_test_identity_i64(int64_t value) { return value; }\n";
             var generated = Emit(source);
             Assert(generated.Contains("extern int64_t ct_test_invoke_i64(int64_t (*", StringComparison.Ordinal), "Extern function-pointer parameters did not use a C declarator.");
-            Assert(generated.Contains("static int64_t (*ct_f_", StringComparison.Ordinal), "Function-pointer fields did not use a C declarator.");
+            Assert(generated.Contains("static CT_UNUSED int64_t (*ct_f_", StringComparison.Ordinal), "Function-pointer fields did not use a C declarator.");
             Assert(generated.Contains("int64_t (*ct_l_", StringComparison.Ordinal), "Function-pointer locals did not use a C declarator.");
-            Assert(generated.Contains("static int64_t (*ct_m_", StringComparison.Ordinal), "Function-pointer returns did not use a C declarator.");
+            Assert(generated.Contains("static CT_UNUSED int64_t (*ct_m_", StringComparison.Ordinal), "Function-pointer returns did not use a C declarator.");
             Assert(generated.Contains("(int64_t (*)(int64_t))", StringComparison.Ordinal), "Function-pointer casts did not use an unnamed C declarator.");
             Assert(generated.Contains("&ct_test_identity_i64", StringComparison.Ordinal), "An extern method address did not use its native C symbol directly.");
             var result = CompileAndRun(source, nativeSuffix: nativeSuffix);

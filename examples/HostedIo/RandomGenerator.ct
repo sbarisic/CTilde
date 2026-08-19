@@ -1,0 +1,84 @@
+using System;
+
+namespace HostedIoExample;
+
+public sealed class RandomGenerator
+{
+    public const uint DefaultSeed = 0x00C0FFEEu;
+
+    private uint state;
+
+    public RandomGenerator(uint seed)
+    {
+        if (seed == 0u)
+            state = DefaultSeed;
+        else
+            state = seed;
+    }
+
+    [NoAlloc]
+    public uint NextUInt()
+    {
+        uint value = state;
+        value = value ^ (value << 13);
+        value = value ^ (value >> 17);
+        value = value ^ (value << 5);
+        state = value;
+        return value;
+    }
+
+    [NoAlloc]
+    public float NextFloat()
+    {
+        return (float)(NextUInt() >> 8) / 16777216.0f;
+    }
+
+    [NoAlloc]
+    public float Range(float min, float max)
+    {
+        return min + (max - min) * NextFloat();
+    }
+
+    [NoAlloc]
+    public Vec3 Vector()
+    {
+        return new Vec3(NextFloat(), NextFloat(), NextFloat());
+    }
+
+    [NoAlloc]
+    public Vec3 Vector(float min, float max)
+    {
+        return new Vec3(Range(min, max), Range(min, max), Range(min, max));
+    }
+
+    [NoAlloc]
+    public Vec3 InUnitSphere()
+    {
+        while (true)
+        {
+            Vec3 point = Vector(-1.0f, 1.0f);
+            float lengthSquared = point.LengthSquared();
+            if (lengthSquared < 1.0f && lengthSquared > 0.000000000001f)
+                return point;
+        }
+        return Vec3.Zero;
+    }
+
+    [NoAlloc]
+    public Vec3 UnitVector()
+    {
+        return InUnitSphere().Normalize();
+    }
+
+    [NoAlloc]
+    public Vec3 InUnitDisk()
+    {
+        while (true)
+        {
+            Vec3 point = new Vec3(Range(-1.0f, 1.0f), Range(-1.0f, 1.0f), 0.0f);
+            if (point.LengthSquared() < 1.0f)
+                return point;
+        }
+        return Vec3.Zero;
+    }
+}

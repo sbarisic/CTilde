@@ -7,6 +7,7 @@ internal sealed record BuildRequest(
     CompilationTarget Target,
     string? ManifestPath,
     string RootDirectory,
+    string? SourceRoot,
     string? GeneratedCPath,
     string? GeneratedHeaderPath,
     bool CheckOnly,
@@ -51,7 +52,7 @@ internal static class BuildRequestResolver
         if (options.Build && idfProject is not null)
             ValidateEspOutputs(idfProject, generatedC!, generatedHeader);
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, project.ManifestPath,
-            project.RootDirectory, generatedC, generatedHeader, options.CheckOnly, options.Trace, options.Build,
+            project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, options.CheckOnly, options.Trace, options.Build,
             options.Configuration ?? build.Configuration, options.Compiler ?? build.Compiler, executable,
             idfProject, options.EspIdfPath);
     }
@@ -84,6 +85,7 @@ internal static class BuildRequestResolver
         if (idfProject is not null)
             ValidateEspOutputs(idfProject, generatedC!, generatedHeader);
         return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, null, root,
+            ResolveSourceRoot(options),
             generatedC, generatedHeader, options.CheckOnly, options.Trace, options.Build,
             options.Configuration ?? CTildeNativeBuildConfiguration.Debug, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath);
@@ -105,6 +107,22 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--idf-project and --idf-path are valid only for ESP-IDF builds.");
         if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null || options.Configuration is not null))
             throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted builds.");
+        if (target == CompilationTarget.EspIdf && options.SourceRoot is not null)
+            throw new CommandLineException("--source-root is valid only for hosted compilations.");
+    }
+
+    private static string? ResolveSourceRoot(CommandLineOptions options)
+    {
+        if (options.SourceRoot is null)
+            return null;
+        try
+        {
+            return Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            throw new CommandLineException($"Invalid --source-root value: {exception.Message}");
+        }
     }
 
     private static void ValidateDistinctOutputs(string? generatedC, string? generatedHeader, string? executable)

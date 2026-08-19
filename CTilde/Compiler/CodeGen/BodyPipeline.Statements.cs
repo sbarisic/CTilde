@@ -29,7 +29,27 @@ internal sealed partial class BodyPipeline
                     _ = LowerExpression(defer.Expression);
                     continue;
                 }
+                if (!_analysisOnly)
+                {
+                    var deferId = _deferId;
+                    _capturingDirectDefer = true;
+                    var directLowered = LowerCall(call, captureForDefer: true);
+                    _capturingDirectDefer = false;
+                    EmitPrelude(writer, directLowered.Prelude);
+                    var thunkName = _emitter.DirectDeferThunkName(_method, deferId);
+                    var action = directLowered.Type.ContainsManagedReferences
+                        ? $"{_emitter.CDeclaration(directLowered.Type, "ignored")} = {directLowered.Code}; {CEmitter.ValueDropName(directLowered.Type)}((void*)&ignored);"
+                        : $"(void)({directLowered.Code});";
+                    _directDefers.Add(new DirectDeferThunk(thunkName, action));
+                    RegisterDurableSlot("ct_defer_marker", CType.Byte);
+                    var record = $"ct_cleanup_defer_{deferId}";
+                    RegisterCleanupRecord(record);
+                    writer.WriteLine($"ct_cleanup_push(&{record}, (void*)&ct_state, {thunkName});");
+                    continue;
+                }
                 var lowered = LowerCall(call, captureForDefer: true);
+                if (lowered.Symbol is MethodSymbol deferTarget)
+                    _deferTargets.Add(deferTarget);
                 EmitPrelude(writer, lowered.Prelude);
                 _deferredCalls[defer] = lowered;
                 var tailStatements = statements[(index + 1)..];
@@ -201,7 +221,7 @@ internal sealed partial class BodyPipeline
             AssignmentCount = initializer is null ? 0 : 1,
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
-            IsDurable = _tryCount != 0,
+            IsDurable = RequiresDurableStorage(syntax.Name, syntax.Span.Start),
             NativeResourceState = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer
                 ? initializer?.Ownership == OwnershipKind.Owned ? NativeResourceState.Owned :
                     initializer?.Ownership == OwnershipKind.Borrowed ? NativeResourceState.Borrowed : NativeResourceState.None

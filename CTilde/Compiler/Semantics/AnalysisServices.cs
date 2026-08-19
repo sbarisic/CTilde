@@ -13,12 +13,14 @@ internal sealed class AnalysisServices : ILoweringServices
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
+    private readonly string? _sourceRoot;
 
-    public AnalysisServices(CompilationModel model, CompilationTarget target)
+    public AnalysisServices(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
+        _sourceRoot = sourceRoot;
         foreach (var type in model.Types.Values)
         {
             foreach (var field in type.Fields)
@@ -236,7 +238,11 @@ internal sealed class AnalysisServices : ILoweringServices
 
     public string SourceArgument(SyntaxNode syntax)
     {
-        var path = _target == CompilationTarget.EspIdf ? Path.GetFileName(syntax.Source.FilePath) : syntax.Source.FilePath.Replace('\\', '/');
+        var path = _target == CompilationTarget.EspIdf
+            ? Path.GetFileName(syntax.Source.FilePath)
+            : _sourceRoot is not null && Path.IsPathFullyQualified(syntax.Source.FilePath)
+                ? Path.GetRelativePath(_sourceRoot, Path.GetFullPath(syntax.Source.FilePath)).Replace('\\', '/')
+                : syntax.Source.FilePath.Replace('\\', '/');
         return $"\"{CEmitter.EscapeCString(path)}\", {syntax.Source.GetLocation(syntax.Span).Line}";
     }
 
@@ -259,6 +265,16 @@ internal sealed class AnalysisServices : ILoweringServices
         var name = $"ct_callback_{NameMangler.Identifier(method.CName)}_{NameMangler.TypeCode(type)}";
         _functionPointerTrampolines.Add(key, name);
         return name;
+    }
+
+    public string DirectDeferThunkName(MethodSymbol method, int id) =>
+        $"ct_defer_{NameMangler.Identifier(method.CName)}_{id}";
+
+    public string DurableStateTypeName(MethodSymbol method) =>
+        $"ct_state_{NameMangler.Identifier(method.CName)}";
+
+    public void RegisterDirectDeferState(MethodSymbol method, IReadOnlyDictionary<string, CType> fields, IReadOnlyList<DirectDeferThunk> thunks)
+    {
     }
 
     public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => $"ct_delegate_callback_{NameMangler.Identifier(delegateType.FullName)}";

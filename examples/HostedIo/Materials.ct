@@ -1,0 +1,122 @@
+using System;
+
+namespace HostedIoExample;
+
+public class Material
+{
+    [NoAlloc]
+    public virtual bool Scatter(
+        Ray incoming,
+        HitRecord hit,
+        RandomGenerator random,
+        out Vec3 attenuation,
+        out Ray scattered)
+    {
+        attenuation = Vec3.Zero;
+        scattered = new Ray(Vec3.Zero, Vec3.Zero);
+        return false;
+    }
+}
+
+public sealed class Lambertian : Material
+{
+    private Vec3 albedo;
+
+    public Lambertian(Vec3 albedo)
+    {
+        this.albedo = albedo;
+    }
+
+    [NoAlloc]
+    public override bool Scatter(
+        Ray incoming,
+        HitRecord hit,
+        RandomGenerator random,
+        out Vec3 attenuation,
+        out Ray scattered)
+    {
+        Vec3 direction = hit.Normal + random.UnitVector();
+        if (VectorMath.NearZero(direction))
+            direction = hit.Normal;
+        attenuation = albedo;
+        scattered = new Ray(hit.Point, direction);
+        return true;
+    }
+}
+
+public sealed class Metal : Material
+{
+    private Vec3 albedo;
+    private float fuzz;
+
+    public Metal(Vec3 albedo, float fuzz)
+    {
+        this.albedo = albedo;
+        this.fuzz = Math.Min(Math.Max(fuzz, 0.0f), 1.0f);
+    }
+
+    [NoAlloc]
+    public override bool Scatter(
+        Ray incoming,
+        HitRecord hit,
+        RandomGenerator random,
+        out Vec3 attenuation,
+        out Ray scattered)
+    {
+        Vec3 reflected = VectorMath.Reflect(incoming.Direction, hit.Normal).Normalize();
+        Vec3 direction = reflected + fuzz * random.UnitVector();
+        attenuation = albedo;
+        scattered = new Ray(hit.Point, direction);
+        return direction.Dot(hit.Normal) > 0.0f;
+    }
+}
+
+public sealed class Dielectric : Material
+{
+    private float refractionIndex;
+
+    public Dielectric(float refractionIndex)
+    {
+        this.refractionIndex = refractionIndex;
+    }
+
+    [NoAlloc]
+    public override bool Scatter(
+        Ray incoming,
+        HitRecord hit,
+        RandomGenerator random,
+        out Vec3 attenuation,
+        out Ray scattered)
+    {
+        attenuation = Vec3.One;
+        float ratio;
+        if (hit.FrontFace)
+            ratio = 1.0f / refractionIndex;
+        else
+            ratio = refractionIndex;
+        Vec3 unitDirection = incoming.Direction.Normalize();
+        float cosine = Math.Min((-unitDirection).Dot(hit.Normal), 1.0f);
+        float sine = Math.Sqrt(1.0f - cosine * cosine);
+        bool cannotRefract = ratio * sine > 1.0f;
+
+        Vec3 direction;
+        if (cannotRefract || Reflectance(cosine, ratio) > random.NextFloat())
+            direction = VectorMath.Reflect(unitDirection, hit.Normal);
+        else
+            direction = VectorMath.Refract(unitDirection, hit.Normal, ratio);
+
+        scattered = new Ray(hit.Point, direction);
+        return true;
+    }
+
+    [NoAlloc]
+    private static float Reflectance(float cosine, float refractionRatio)
+    {
+        float baseValue = (1.0f - refractionRatio) / (1.0f + refractionRatio);
+        baseValue = baseValue * baseValue;
+        float complement = 1.0f - cosine;
+        float complementSquared = complement * complement;
+        float complementFifth = complementSquared * complementSquared * complement;
+        return baseValue + (1.0f - baseValue) * complementFifth;
+    }
+}

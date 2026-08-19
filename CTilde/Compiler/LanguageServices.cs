@@ -89,7 +89,10 @@ public sealed partial class LanguageServiceSnapshot
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
         _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target);
-        _boundProgram = BoundProgramBuilder.Build(_model, options.Target);
+        var sourceRoot = options.Target == CompilationTarget.Hosted && options.SourceRoot is not null && Path.IsPathFullyQualified(options.SourceRoot)
+            ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.SourceRoot))
+            : null;
+        _boundProgram = BoundProgramBuilder.Build(_model, options.Target, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
         _documentIndexes = new Dictionary<string, DocumentIndex>(_pathComparer);

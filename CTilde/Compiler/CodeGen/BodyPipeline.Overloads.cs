@@ -215,7 +215,16 @@ internal sealed partial class BodyPipeline
                     codes.Add("NULL");
                 }
                 else
-                    codes.Add(address);
+                {
+                    if (_capturingDirectDefer)
+                    {
+                        var addressSlot = $"ct_df_{_deferId}_arg_{index}_address";
+                        AddCapturedSlot(prelude, new CType(CTypeKind.Pointer, ElementType: argument.Type), addressSlot, address);
+                        codes.Add(Durable(addressSlot));
+                    }
+                    else
+                        codes.Add(address);
+                }
                 continue;
             }
             var converted = Convert(arguments[index], parameters[index].Type, syntax[index].Expression, false);

@@ -23,7 +23,7 @@ The monitor must show `CTILDE_ESP_FAILURE_TEST` followed by runtime code `CTN000
 
 An earlier 2026-08-18 run on an ESP32-D0WDQ6-V3 revision 3.1 at `COM4` established the managed-runtime, failure, heap, stack, and yielding-delay behavior. That firmware alternated ordinary GPIO2 commands, which did not constitute a visible blink test after the hardware was identified as T-CAN485: GPIO2 is the SD MISO signal and the onboard light is an addressable WS2812 on GPIO4.
 
-The Draft 0.9 acceptance image was flashed and monitored on 2026-08-19. It printed:
+The Draft 0.12 acceptance image was flashed and monitored on 2026-08-20. Its stable output was:
 
 ```text
 esp error: ESP_OK
@@ -37,22 +37,23 @@ native utf8: ok
 opaque defer: ok
 delegate context: 42
 export: 42
+threading: ok
 boxed: 7
 exception: caught on ESP32
 arc heap recovery: True
-free heap: 297700
-minimum free heap: 295112
-stack high water: 6552
-tick: 14
+free heap: 297692
+minimum free heap: 286696
+stack high water: 6704
+tick: 19
 CTILDE_ESP_OK
 ws2812: on
 ws2812: off
 ```
 
-The monitor observed more than ten 500 ms `ws2812: on/off` cycles without a watchdog reset. The same GPIO4 WS2812 path was previously confirmed by a person to blink the onboard RGB LED green in step with these commands. The Draft 0.9 failure image reported `C~ runtime error CTN0001 at RuntimeFailure.ct:23`, called `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`.
+The monitor observed more than 25 500 ms `ws2812: on/off` transitions without a watchdog reset. The same GPIO4 WS2812 path was previously confirmed by a person to blink the onboard RGB LED green in step with these commands.
 
-The Draft 0.10 threading image was flashed and monitored on the same board on 2026-08-19. Both attached FreeRTOS workers completed their export, callback, ARC, exception, and defer checks and produced `threading: ok`. The complete run also printed `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`; it reported 297,620 bytes of free heap, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom. The final 155,360-byte image completed more than ten GPIO4 WS2812 cycles without a watchdog reset and remains flashed.
+The Draft 0.10 threading image was flashed and monitored on the same board on 2026-08-19. Both attached FreeRTOS workers completed their export, callback, ARC, exception, and defer checks and produced `threading: ok`. The complete run also printed `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`; it reported 297,620 bytes of free heap, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom.
 
-Fresh Draft 0.9 firmware uses 153,165 bytes for the `esp32` image: 64,022 bytes of flash code, 32,560 bytes of flash data, 45,003 bytes of IRAM, and 14,020 bytes of DRAM. The `esp32c3` image uses 156,744 bytes: 79,600 bytes of flash code, 29,900 bytes of flash data, and 51,316 bytes of DRAM, including 40,012 bytes of executable text. After the failure test, `Program.ct` was rebuilt, reflashed, and rechecked through every marker and more than ten additional WS2812 cycles. It is the final board state.
+The optimized Draft 0.12 image was flashed and monitored on 2026-08-20. It printed every marker above plus `threading: ok`, reported 297,692 bytes of free heap, a 286,696-byte minimum, and 6,704 bytes of stack high-water headroom, and completed more than 25 UART-confirmed WS2812 transitions without a watchdog reset. The `esp32` build uses a 154,640-byte binary and a 154,525-byte measured image: 65,222 bytes of flash code, 32,704 bytes of flash data, 45,003 bytes of IRAM, and 14,028 bytes of DRAM. The `esp32c3` build uses a 159,728-byte binary and a 159,428-byte measured image: 81,834 bytes of flash code, 30,236 bytes of flash data, and 51,422 bytes of DRAM, including 40,102 bytes of executable text. The failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:23`, called `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`. `Program.ct` was then rebuilt, reflashed, and rechecked through every marker and additional WS2812 cycles; it is the final board state.
 
 Draft 0.10 uses atomic ARC and per-task exception, cleanup, and release state; cycles leak and cleanup is not promised after fatal failures or reset. The example reserves FreeRTOS application TLS slot 0 through `sdkconfig.defaults`. Native buffers and UTF-8 views remain scoped synchronous values and cannot be retained by the shim. Opaque ownership is lexical; long-lived resource fields are not supported. The WS2812 API owns one native strip handle for firmware lifetime. Native-created tasks must call `ct_thread_attach` and `ct_thread_detach`; retained callbacks and interrupt entry remain unsupported. Permanent loops must keep live ownership bounded and call a yielding API such as `DelayMilliseconds`; a busy loop can trigger the ESP-IDF task watchdog.

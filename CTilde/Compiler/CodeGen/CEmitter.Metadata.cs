@@ -127,13 +127,13 @@ internal sealed partial class CEmitter
         EmitSpecialVTable(writer, "ct_string_vtable", "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", virtualMethods, virtualProperties);
         writer.WriteLine("static ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string };");
         uint id = 2;
-        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
             var baseDescriptor = type.BaseType is null ? "NULL" : $"&{DescriptorName(type.BaseType)}";
             writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &ct_vtable_{NameMangler.Identifier(type.FullName)}, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)} }};");
         }
-        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)} }};");
         }
@@ -175,7 +175,7 @@ internal sealed partial class CEmitter
 
     private void EmitDelegateSupport(CWriter writer)
     {
-        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             var parameters = string.Concat(type.DelegateParameters.Select(parameter => $", {ParameterTypeName(parameter)}"));
             writer.WriteLine($"static {NameMangler.Type(type)}* {DelegateFactoryName(type)}(ct_object* target, {CTypeName(type.DelegateReturnType!)} (*invoke)(ct_object*{parameters}), const char* file, int line)");
@@ -210,7 +210,7 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"    return {call};");
             writer.WriteLine("}");
         }
-        if (Model.UserTypes.Any(type => type.Kind == DeclaredTypeKind.Delegate))
+        if (EmittedTypes.Any(type => type.Kind == DeclaredTypeKind.Delegate))
             writer.WriteLine();
     }
 
@@ -299,13 +299,13 @@ internal sealed partial class CEmitter
             writer.WriteLine();
     }
 
-    private IEnumerable<MethodSymbol> VirtualMethodRoots() => Model.UserTypes
+    private IEnumerable<MethodSymbol> VirtualMethodRoots() => EmittedTypes
         .SelectMany(type => type.Methods)
         .Where(method => method.IsVirtual && method.OverriddenMethod is null && !method.ContainingType.IsObject)
         .OrderBy(method => method.ContainingType.FullName, StringComparer.Ordinal)
         .ThenBy(method => method.CName, StringComparer.Ordinal);
 
-    private IEnumerable<PropertySymbol> VirtualPropertyRoots() => Model.UserTypes
+    private IEnumerable<PropertySymbol> VirtualPropertyRoots() => EmittedTypes
         .SelectMany(type => type.Properties)
         .Where(property => property.IsVirtual && property.OverriddenProperty is null)
         .OrderBy(property => property.ContainingType.FullName, StringComparer.Ordinal)
@@ -570,7 +570,6 @@ internal sealed partial class CEmitter
 
         writer.WriteLine("int main(void)");
         writer.WriteLine("{");
-        writer.WriteLine("    ct_keep_symbols();");
         writer.WriteLine("    ct_thread_state ct_primary_thread;");
         writer.WriteLine("    ct_thread_attach_primary(&ct_primary_thread);");
         writer.WriteLine("    ct_module_init();");
@@ -594,82 +593,4 @@ internal sealed partial class CEmitter
         return string.Join('\n', lines);
     }
 
-    private void EmitKeepSymbols(CWriter writer)
-    {
-        writer.WriteLine("static void ct_keep_symbols(void)");
-        writer.WriteLine("{");
-        var runtime = new[]
-        {
-            "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_thread_attach", "ct_thread_detach", "ct_thread_require_attached", "ct_memory_retain", "ct_memory_release", "ct_init_object", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
-            "ct_cleanup_push", "ct_cleanup_unwind_to", "ct_cleanup_disarm", "ct_retain_ref_value", "ct_drop_ref_value",
-            "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
-            "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
-            "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
-            "ct_u64_div", "ct_u64_mod", "ct_i64_shl", "ct_i64_shr",
-            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
-            "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
-            "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
-            "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash", "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals",
-            "ct_type_is_assignable", "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals", "ct_object_value_hash",
-        };
-        foreach (var name in runtime)
-            writer.WriteLine($"    (void)&{name};");
-        if (_usesExceptions)
-        {
-            writer.WriteLine("    (void)&ct_throw;");
-            writer.WriteLine("    (void)&ct_unhandled_exception;");
-        }
-        if (_usesHostedIo)
-        {
-            foreach (var name in new[] { "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close" })
-                writer.WriteLine($"    (void)&{name};");
-        }
-        foreach (var name in MathFunctions.Select(function => function.RuntimeName).Where(_usedMathSymbols.Contains))
-            writer.WriteLine($"    (void)&{name};");
-        if (_usesNativeIntegers)
-        {
-            foreach (var name in new[] { "ct_ni_bits", "ct_ni_add", "ct_ni_sub", "ct_ni_mul", "ct_ni_neg", "ct_ni_div", "ct_ni_mod", "ct_nu_div", "ct_nu_mod", "ct_ni_shl", "ct_ni_shr", "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint" })
-                writer.WriteLine($"    (void)&{name};");
-        }
-        if (_nativeBufferTypes.Count != 0)
-        {
-            writer.WriteLine("    (void)&ct_native_bounds;");
-            writer.WriteLine("    (void)&ct_stack_bytes;");
-        }
-        writer.WriteLine("    (void)&ct_default_vtable;");
-        foreach (var literal in _stringLiterals.Values.Order())
-            writer.WriteLine($"    (void)&ct_sl_{literal};");
-        foreach (var type in Model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
-        {
-            foreach (var constructor in type.Constructors)
-                writer.WriteLine($"    (void)&{constructor.CName};");
-            foreach (var method in type.Methods.Where(method => method.ExternName is null))
-                writer.WriteLine($"    (void)&{method.CName};");
-            foreach (var property in type.Properties)
-            {
-                if (property.Getter is not null)
-                    writer.WriteLine($"    (void)&{NameMangler.Getter(property)};");
-                if (property.Setter is not null)
-                    writer.WriteLine($"    (void)&{NameMangler.Setter(property)};");
-            }
-        }
-        foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
-            writer.WriteLine($"    (void)&ct_new_{NameMangler.Array(array.ElementType!)};");
-        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
-        {
-            writer.WriteLine($"    (void)&{DelegateFactoryName(type)};");
-            writer.WriteLine($"    (void)&{DelegateDropName(type)};");
-            writer.WriteLine($"    (void)&{DescriptorName(type)};");
-        }
-        foreach (var type in BoxedTypes)
-        {
-            writer.WriteLine($"    (void)&{BoxFunctionName(type)};");
-            writer.WriteLine($"    (void)&{UnboxFunctionName(type)};");
-            writer.WriteLine($"    (void)&{BoxDescriptorName(type)};");
-            writer.WriteLine($"    (void)&ct_vtable_box_{NameMangler.TypeCode(type)};");
-        }
-        foreach (var field in Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
-            writer.WriteLine($"    (void)&{field.CName};");
-        writer.WriteLine("}");
-    }
 }

@@ -8,6 +8,7 @@ internal sealed record CommandLineOptions(
     string? HeaderOutput,
     string? InputDirectory,
     string? ProjectManifest,
+    string? SourceRoot,
     bool CheckOnly,
     bool Trace,
     CompilationTarget Target,
@@ -33,6 +34,7 @@ internal sealed record CommandLineOptions(
         string? header = null;
         string? directory = null;
         string? project = null;
+        string? sourceRoot = null;
         string? compiler = null;
         string? nativeOutput = null;
         string? idfProject = null;
@@ -61,6 +63,7 @@ internal sealed record CommandLineOptions(
                 case "--header": header = RequireValue(); break;
                 case "--compile-directory": directory = RequireValue(); break;
                 case "--project": project = RequireValue(); break;
+                case "--source-root": sourceRoot = RequireValue(); break;
                 case "--compiler": compiler = RequireValue(); break;
                 case "--native-output": nativeOutput = RequireValue(); break;
                 case "--idf-project": idfProject = RequireValue(); break;
@@ -107,7 +110,7 @@ internal sealed record CommandLineOptions(
             }
         }
 
-        options = new CommandLineOptions(inputs, output, header, directory, project, check, trace, target,
+        options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath);
         return true;
     }

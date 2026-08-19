@@ -9,6 +9,8 @@ internal static partial class ConformanceTests
 {
     static Compilation Compile(string source, CompilationOptions? options = null, string path = "test.ct") => Compilation.Create([SyntaxTree.ParseText(source, path)], options);
 
+    static Compilation Compile(IEnumerable<SyntaxTree> sources, CompilationOptions? options = null) => Compilation.Create(sources, options);
+
     static string Emit(string source, CompilationOptions? options = null, string path = "test.ct")
     {
         var compilation = Compile(source, options, path);
@@ -18,7 +20,19 @@ internal static partial class ConformanceTests
         return writer.ToString();
     }
 
+    static string Emit(IEnumerable<SyntaxTree> sources, CompilationOptions? options = null)
+    {
+        var compilation = Compile(sources, options);
+        using var writer = new StringWriter(CultureInfo.InvariantCulture);
+        var result = compilation.EmitC(writer);
+        Assert(result.Success, string.Join(Environment.NewLine, result.Diagnostics));
+        return writer.ToString();
+    }
+
     static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null)
+        => CompileAndRun([SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics, nativeSuffix, threads, standardInput, standardInputBytes, captureFile);
+
+    static ProcessResult CompileAndRun(IEnumerable<SyntaxTree> sources, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
@@ -26,7 +40,7 @@ internal static partial class ConformanceTests
         {
             var cPath = Path.Combine(directory, "program.c");
             var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
-            File.WriteAllText(cPath, Emit(source) + nativeSuffix, new UTF8Encoding(false));
+            File.WriteAllText(cPath, Emit(sources) + nativeSuffix, new UTF8Encoding(false));
             var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads);
             Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
             var workingDirectory = standardInput is null && standardInputBytes is null && captureFile is null ? null : directory;
@@ -64,7 +78,7 @@ internal static partial class ConformanceTests
             }
             var compilerName = Path.GetFileNameWithoutExtension(configured);
             var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
-                ? new List<string> { "/nologo", "/std:clatest", "/O2", "/W4", "/WX", "/wd4702" }
+                ? new List<string> { "/nologo", "/std:clatest", "/O2", "/W4", "/WX", "/wd4702", $"/Fo:{Path.Combine(Path.GetDirectoryName(cPath)!, "program.obj")}" }
                 : null;
             if (arguments is not null)
             {
@@ -89,7 +103,8 @@ internal static partial class ConformanceTests
         var vcVars = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
         var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
         var defineArgument = diagnosticDefine is null ? "" : $" /D{diagnosticDefine}";
-        File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702{defineArgument} /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
+        var objectPath = Path.Combine(Path.GetDirectoryName(cPath)!, "program.obj");
+        File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702{defineArgument} /Fo:\"{objectPath}\" /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
         return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
     }
 
@@ -99,16 +114,20 @@ internal static partial class ConformanceTests
         var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
         var diagnosticArguments = memoryDiagnostics ? new[] { "-DCT_MEMORY_DIAGNOSTICS" } : [];
         var threadArguments = threads ? new[] { "-pthread" } : [];
+        var addressSanitizers = Environment.GetEnvironmentVariable("CTILDE_SANITIZERS") == "1";
         var sanitizerArguments = threads && Environment.GetEnvironmentVariable("CTILDE_THREAD_SANITIZER") == "1"
             ? new[] { "-fsanitize=thread", "-fno-omit-frame-pointer", "-g" }
-            : [];
+            : addressSanitizers
+                ? new[] { "-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-g" }
+                : [];
+        var optimization = addressSanitizers ? "-O1" : "-O2";
         var mathArguments = command.Equals("wsl", StringComparison.OrdinalIgnoreCase) || !OperatingSystem.IsWindows()
             ? new[] { "-lm" }
             : [];
-        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
+        var result = RunProcess(command, [.. prefix, $"-std={standard}", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
         if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
             return result;
-        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
+        return RunProcess(command, [.. prefix, "-std=gnu2x", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
     }
 
     static bool RejectedCStandard(ProcessResult result)
@@ -142,6 +161,12 @@ internal static partial class ConformanceTests
                 arguments.Add(WslPath(workingDirectory));
             }
             arguments.Add("--exec");
+            if (Environment.GetEnvironmentVariable("CTILDE_SANITIZERS") == "1")
+            {
+                arguments.Add("env");
+                arguments.Add("ASAN_OPTIONS=detect_leaks=0");
+                arguments.Add("UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1");
+            }
             arguments.Add(WslPath(executablePath));
             return RunProcess("wsl", arguments, standardInput, standardInputBytes);
         }

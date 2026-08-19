@@ -79,7 +79,7 @@ public sealed partial class LanguageServiceSnapshot
         Options = options;
         var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
         var nativeUtf8 = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
-        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target, nativeIntegers, nativeUtf8).AddRange(_userTrees);
+        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target, nativeIntegers, nativeUtf8, options.Target == CompilationTarget.Hosted).AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);

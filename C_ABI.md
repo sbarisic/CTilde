@@ -23,6 +23,8 @@ References, unsafe pointers, `nint`, and `nuint` use native C pointer width. A 6
 
 The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde_esp_shim.h`. ESP-IDF selects the concrete Xtensa or RISC-V compiler; C~ has no per-chip backend.
 
+Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. The support is absent when those APIs are unused and is never emitted for ESP-IDF.
+
 ## Scalar mapping
 
 | C~ type | C type |
@@ -248,6 +250,26 @@ void app_main(void)
 ```
 
 Returning from the C~ entry method returns from `app_main`; it does not stop the FreeRTOS scheduler.
+
+## Hosted console and file I/O
+
+Hosted input and file declarations bind to compiler-owned external symbols. The emitter defines those symbols only when a resolved call uses them. Each operation can create and throw `System.IO.IOException`, so using one also enables the ordinary per-thread C~ exception runtime.
+
+`Console.ReadLine` accumulates native bytes, validates complete UTF-8, and copies the result into an ARC-owned `ct_string`. It frees its temporary native buffer before returning or throwing. EOF before any byte returns a null managed reference; other lines return an owned string.
+
+`System.IO.FileHandle` has the nominal C representation `uintptr_t`. A nonzero value identifies a native wrapper containing `FILE*` and the declared access mode; this wrapper is not a managed object. `File.Open` produces ownership, borrowed read/write calls preserve it, and `File.Close` consumes it, calls `fclose`, frees the wrapper, and only then throws a close error if necessary.
+
+The file ABI uses the ordinary mappings:
+
+```c
+uintptr_t ct_host_file_open(ct_string* path, file_mode mode, file_access access);
+uintptr_t ct_host_file_read(uintptr_t file, uint8_t* data, size_t length);
+void ct_host_file_write_buffer(uintptr_t file, const uint8_t* data, size_t length);
+void ct_host_file_write_string(uintptr_t file, ct_string* value);
+void ct_host_file_close(uintptr_t file);
+```
+
+The actual enum typedef names are deterministically mangled. Windows converts validated UTF-8 paths to UTF-16 before `_wfopen_s`; POSIX passes the validated, zero-terminated bytes to `fopen`. File contents remain uninterpreted bytes.
 
 ## Extern methods
 

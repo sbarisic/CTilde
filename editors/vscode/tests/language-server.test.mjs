@@ -140,6 +140,33 @@ test("ESP-only documentation resolves from the target sidecar", async () => {
   }
 });
 
+test("hosted I/O documentation and target filtering", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-io-"));
+  const programPath = path.join(directory, "Program.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = "using System.IO; public static class Program { [EntryPoint] public static void Main() { File. } }";
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", { processId: process.pid, rootUri: pathToFileURL(directory).href, capabilities: {} });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+    const completionOffset = source.indexOf("File.") + "File.".length;
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: positionAt(source, completionOffset) });
+    const open = completion.items.find(item => item.label === "Open");
+    assert.ok(open);
+    const resolved = await client.request("completionItem/resolve", open);
+    assert.match(resolved.documentation.value, /Opens, creates, or appends/);
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 function decodeSemanticTokens(data, legend, source) {
   const lines = source.split(/\r?\n/);
   const result = [];

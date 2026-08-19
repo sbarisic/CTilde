@@ -1,33 +1,56 @@
 using System.Collections.Immutable;
+using System.Collections.Concurrent;
 using System.Text;
 
 namespace CTilde;
 
 internal static class StandardLibrary
 {
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyCommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct"], false));
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyNativeCommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct"], true));
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyUtf8CommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct"], false, true));
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyNativeUtf8CommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct"], true, true));
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyEspIdfSyntaxTrees = new(() => LoadSyntaxTrees(["EspIdf.ct"]));
+    private static readonly ConcurrentDictionary<(CompilationTarget Target, bool NativeIntegers, bool NativeUtf8, bool HostedIo), ImmutableArray<SyntaxTree>> SyntaxTreeCache = new();
 
-    public static ImmutableArray<SyntaxTree> GetSyntaxTrees(CompilationTarget target, bool includeNativeIntegers = false, bool includeNativeUtf8 = false)
+    public static ImmutableArray<SyntaxTree> GetSyntaxTrees(CompilationTarget target, bool includeNativeIntegers = false, bool includeNativeUtf8 = false, bool includeHostedIo = false)
     {
-        var common = (includeNativeIntegers, includeNativeUtf8) switch
+        includeHostedIo &= target == CompilationTarget.Hosted;
+        return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo), key =>
         {
-            (true, true) => LazyNativeUtf8CommonSyntaxTrees.Value,
-            (true, false) => LazyNativeCommonSyntaxTrees.Value,
-            (false, true) => LazyUtf8CommonSyntaxTrees.Value,
-            _ => LazyCommonSyntaxTrees.Value,
-        };
-        return target == CompilationTarget.EspIdf ? common.AddRange(LazyEspIdfSyntaxTrees.Value) : common;
+            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct" };
+            if (key.HostedIo)
+                files.Add("HostedIO.ct");
+            if (key.Target == CompilationTarget.EspIdf)
+                files.Add("EspIdf.ct");
+            return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo);
+        });
+    }
+
+    public static bool RequiresHostedIo(IEnumerable<SyntaxTree> trees)
+    {
+        var declaresIoNamespace = false;
+        var usesIoName = false;
+        foreach (var tree in trees)
+        {
+            var tokens = tree.Tokens.Where(token => token.Kind != SyntaxKind.EndOfFileToken).ToArray();
+            usesIoName |= tokens.Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text is "File" or "FileHandle" or "FileMode" or "FileAccess" or "IOException");
+            for (var index = 0; index + 2 < tokens.Length; index++)
+            {
+                if (tokens[index].Text == "Console" && tokens[index + 1].Kind == SyntaxKind.DotToken && tokens[index + 2].Text is "Read" or "ReadLine")
+                    return true;
+                if (tokens[index].Text != "System" || tokens[index + 1].Kind != SyntaxKind.DotToken || tokens[index + 2].Text != "IO")
+                    continue;
+                if (index > 0 && tokens[index - 1].Kind == SyntaxKind.UsingKeyword)
+                    return true;
+                declaresIoNamespace |= index > 0 && tokens[index - 1].Kind == SyntaxKind.NamespaceKeyword;
+                if (index + 4 < tokens.Length && tokens[index + 3].Kind == SyntaxKind.DotToken && tokens[index + 4].Text is "File" or "FileHandle" or "FileMode" or "FileAccess" or "IOException")
+                    return true;
+            }
+        }
+        return declaresIoNamespace && usesIoName;
     }
 
     public static ImmutableArray<string> GetDocumentationXml(CompilationTarget target)
     {
         var names = target == CompilationTarget.EspIdf
             ? new[] { "System.docs.xml", "EspIdf.docs.xml" }
-            : new[] { "System.docs.xml" };
+            : new[] { "System.docs.xml", "HostedIO.docs.xml" };
         var assembly = typeof(StandardLibrary).Assembly;
         return [.. names.Select(name =>
         {
@@ -38,7 +61,7 @@ internal static class StandardLibrary
         })];
     }
 
-    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(IReadOnlyList<string> files, bool includeNativeIntegers = false, bool includeNativeUtf8 = false)
+    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(IReadOnlyList<string> files, bool includeNativeIntegers = false, bool includeNativeUtf8 = false, bool includeHostedIo = false)
     {
         var assembly = typeof(StandardLibrary).Assembly;
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(files.Count);
@@ -52,6 +75,8 @@ internal static class StandardLibrary
             var text = reader.ReadToEnd();
             if (file == "Console.ct" && includeNativeIntegers)
                 text = text.Replace("    // CTILDE_NATIVE_INTEGER_OVERLOADS", NativeIntegerConsoleOverloads, StringComparison.Ordinal);
+            if (file == "Console.ct" && includeHostedIo)
+                text = text.Replace("    // CTILDE_HOSTED_INPUT_MEMBERS", HostedConsoleInputMembers, StringComparison.Ordinal);
             if (file == "Memory.ct" && includeNativeUtf8)
                 text = text.Replace("// CTILDE_NATIVE_UTF8_DECLARATION", NativeUtf8Declaration, StringComparison.Ordinal);
             trees.Add(SyntaxTree.ParseText(text, $"stdlib/System/{file}"));
@@ -80,6 +105,14 @@ internal static class StandardLibrary
             Write(value);
             WriteLine();
         }
+    """;
+
+    private const string HostedConsoleInputMembers = """
+        [Extern("ct_console_read")]
+        public static int Read();
+
+        [Extern("ct_console_read_line")]
+        public static string ReadLine();
     """;
 
     private const string NativeUtf8Declaration = """

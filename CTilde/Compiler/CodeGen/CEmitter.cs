@@ -20,6 +20,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private bool _usesExceptions;
+    private bool _usesHostedIo;
     private bool _usesNativeIntegers;
     private bool _usesNativeUtf8;
 
@@ -125,7 +126,14 @@ internal sealed partial class CEmitter : ILoweringServices
     public void RegisterExternUse(MethodSymbol method, SyntaxNode syntax)
     {
         if (method.ExternName is not null)
+        {
             _externUses.Add((method, syntax));
+            if (IsHostedIoSymbol(method.ExternName))
+            {
+                _usesHostedIo = true;
+                _usesExceptions = true;
+            }
+        }
     }
 
     public string Emit(TypedIrProgram program)
@@ -144,6 +152,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitOwnershipHelpers(writer);
         EmitPrototypes(writer);
         EmitObjectMetadata(writer);
+        EmitHostedIoSupport(writer);
         EmitDelegateSupport(writer);
         EmitSynchronousDelegateAdapters(writer);
         EmitFunctionPointerTrampolines(writer);

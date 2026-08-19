@@ -18,7 +18,7 @@ internal static partial class ConformanceTests
         return writer.ToString();
     }
 
-    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false)
+    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
@@ -29,7 +29,7 @@ internal static partial class ConformanceTests
             File.WriteAllText(cPath, Emit(source) + nativeSuffix, new UTF8Encoding(false));
             var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads);
             Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
-            return RunCompiledProgram(executablePath);
+            return RunCompiledProgram(executablePath, standardInput, standardInputBytes, standardInput is null && standardInputBytes is null ? null : directory);
         }
         finally
         {
@@ -116,26 +116,49 @@ internal static partial class ConformanceTests
         return result.StandardOutput.Trim();
     }
 
-    static ProcessResult RunCompiledProgram(string executablePath)
+    static ProcessResult RunCompiledProgram(string executablePath, string? standardInput = null, byte[]? standardInputBytes = null, string? workingDirectory = null)
     {
         var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
-        return configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true
-            ? RunProcess("wsl", ["--exec", WslPath(executablePath)])
-            : RunProcess(executablePath, []);
+        if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var arguments = new List<string>();
+            if (workingDirectory is not null)
+            {
+                arguments.Add("--cd");
+                arguments.Add(WslPath(workingDirectory));
+            }
+            arguments.Add("--exec");
+            arguments.Add(WslPath(executablePath));
+            return RunProcess("wsl", arguments, standardInput, standardInputBytes);
+        }
+        return RunProcess(executablePath, [], standardInput, standardInputBytes, workingDirectory);
     }
 
-    static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments)
+    static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string? standardInput = null, byte[]? standardInputBytes = null, string? workingDirectory = null)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = standardInput is not null || standardInputBytes is not null,
             CreateNoWindow = true,
         };
+        if (workingDirectory is not null)
+            startInfo.WorkingDirectory = workingDirectory;
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start '{fileName}'.");
+        if (standardInput is not null)
+        {
+            process.StandardInput.Write(standardInput);
+            process.StandardInput.Close();
+        }
+        else if (standardInputBytes is not null)
+        {
+            process.StandardInput.BaseStream.Write(standardInputBytes);
+            process.StandardInput.Close();
+        }
         var standardOutput = process.StandardOutput.ReadToEnd();
         var standardError = process.StandardError.ReadToEnd();
         process.WaitForExit();

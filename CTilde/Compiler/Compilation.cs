@@ -61,7 +61,8 @@ public sealed class Compilation
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
-            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8).AddRange(SyntaxTrees);
+            var hostedIo = target == CompilationTarget.Hosted && StandardLibrary.RequiresHostedIo(SyntaxTrees);
+            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)

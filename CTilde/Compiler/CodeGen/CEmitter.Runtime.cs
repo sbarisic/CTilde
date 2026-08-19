@@ -18,6 +18,11 @@ internal sealed partial class CEmitter
         writer.WriteLine("#include <stdio.h>");
         writer.WriteLine("#include <stdlib.h>");
         writer.WriteLine("#include <string.h>");
+        if (_usesHostedIo)
+        {
+            writer.WriteLine("#include <errno.h>");
+            writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#include <wchar.h>\n#endif");
+        }
         writer.WriteLine("#include <limits.h>");
         writer.WriteLine("#include <float.h>");
         writer.WriteLine("#include <math.h>");

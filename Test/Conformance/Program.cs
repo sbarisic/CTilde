@@ -7,6 +7,7 @@ ConformanceTests.RegisterPart3(suite);
 ConformanceTests.RegisterPart4(suite);
 ConformanceTests.RegisterPart5(suite);
 ConformanceTests.RegisterPart6(suite);
+ConformanceTests.RegisterPart7(suite);
 return suite.Complete();
 
 internal sealed class ConformanceSuite

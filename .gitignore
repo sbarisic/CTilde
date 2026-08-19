@@ -205,6 +205,12 @@ orleans.codegen.cs
 /examples/TCan485/main/generated/*.c
 /examples/TCan485/main/generated/*.h
 
+# Hosted I/O example output
+/examples/HostedIo/program.c
+/examples/HostedIo/program
+/examples/HostedIo/program.exe
+/examples/HostedIo/ctilde-hosted-*.txt
+
 # RIA/Silverlight projects
 Generated_Code/
 

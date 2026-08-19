@@ -11,6 +11,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
 - Draft 0.10 syntax and semantic classification for native integers, by-reference calls, buffers, `NativeUtf8String`, opaque declarations, native ownership attributes, exports, named delegates, callback adapters, and unmanaged function pointers.
+- Target-aware hosted completion and documentation for console input, `System.IO.IOException`, and owned binary-file handles; ESP-IDF projects omit these APIs.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.

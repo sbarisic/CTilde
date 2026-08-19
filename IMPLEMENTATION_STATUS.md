@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 82 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 89 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -132,6 +132,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Synchronous delegate/context callbacks | Implemented | ARC lifetime, virtual dispatch, ABI placement, attachment guards, and exception barriers |
 | `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
 | Bundled `System.Object`, `System.Console`, `System.Environment`, and `System.Runtime.Memory` sources | Implemented | Embedded-source and native output tests |
+| Hosted console input and `System.IO` | Implemented | UTF-8 line/EOF behavior, Unicode paths, opaque ownership, binary round trip, exceptions, target filtering, and editor documentation |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |
 
@@ -189,6 +190,8 @@ The entrypoint installs an automatic primary `ct_thread_state` before static ini
 
 The C ABI uses native target-width pointers and `nint`/`nuint`. Scoped native buffers use checked pointer-plus-length values, and scoped UTF-8 input retains its managed owner without allocating before flattening to `const char*`. Nominal opaque native handles carry lexical move-only ownership obligations. Stack allocation does not use the managed heap.
 
+Hosted compilations add `Console.Read`, UTF-8 `Console.ReadLine`, and synchronous binary `System.IO` only when source uses that surface. Windows file paths use validated UTF-8-to-UTF-16 conversion and `_wfopen_s`; POSIX uses validated UTF-8 `fopen` paths. File handles are move-only opaque values, reads use checked native buffers, complete writes accept buffers or managed UTF-8 strings, and close consumes native storage even when it reports a catchable `IOException`. Unrelated hosted programs and all ESP-IDF output retain their earlier generated C.
+
 ## Compiler pipeline status
 
 Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
@@ -203,7 +206,7 @@ Documentation analysis accepts summaries, parameters, returns, remarks, exceptio
 
 `ctilde.json` defines deterministic source globs, exclusions, and a hosted or ESP-IDF target. The CLI and language server share the loader. Files without a manifest are analyzed as standalone hosted programs; files outside a manifest source set retain that manifest's target but do not join its compilation.
 
-The 0.3.0 extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
+The 0.3.1 extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit. Hosted snapshots include documented console-input and `System.IO` symbols; ESP-IDF snapshots omit them.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 

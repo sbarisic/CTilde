@@ -8,7 +8,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AssemblyName>CTilde.LanguageServer</AssemblyName>
     <RootNamespace>CTilde.LanguageServer</RootNamespace>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CTilde/CTilde.csproj" />

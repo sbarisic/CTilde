@@ -15,6 +15,8 @@ internal sealed partial class CompilationModel
             "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
             "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
             "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
+            "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close",
+            "ct_host_io_throw", "ct_host_utf8_valid", "ct_host_file", "ct_host_file_require", "ct_host_write_all",
             "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_stack_bytes",
             "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
             "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",

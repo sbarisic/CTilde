@@ -1,0 +1,54 @@
+using System;
+using System.IO;
+using System.Runtime;
+
+namespace HostedIoExample;
+
+public static class Program
+{
+    private static void Save(string value)
+    {
+        FileHandle file = File.Open("ctilde-hosted-π.txt", FileMode.Create, FileAccess.Write);
+        defer File.Close(file);
+        File.Write(file, value);
+    }
+
+    private static unsafe void PrintSavedFile()
+    {
+        FileHandle file = File.Open("ctilde-hosted-π.txt", FileMode.Open, FileAccess.Read);
+        defer File.Close(file);
+
+        NativeBuffer<byte> buffer = stackalloc byte[64];
+        while (true)
+        {
+            nuint count = File.Read(file, buffer);
+            if (count == 0u)
+                break;
+
+            nuint index = 0u;
+            while (index < count)
+            {
+                Console.Write((char)buffer[index]);
+                index++;
+            }
+        }
+    }
+
+    [EntryPoint]
+    public static unsafe void Main()
+    {
+        Console.Write("Enter text: ");
+        string line = Console.ReadLine();
+        if (line == null)
+        {
+            Console.WriteLine("No input was available.");
+            return;
+        }
+
+        Save(line);
+        Console.Write("Saved and reloaded: ");
+        PrintSavedFile();
+        Console.WriteLine();
+        Console.WriteLine("HOSTED_IO_OK");
+    }
+}

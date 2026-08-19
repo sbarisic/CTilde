@@ -1,5 +1,12 @@
 # C~ TODO
 
+## Hosted standard-library I/O
+
+- [x] Add hosted `Console.Read` and UTF-8 `Console.ReadLine` while preserving common console output.
+- [x] Add owned `System.IO.FileHandle` open, checked buffer read, complete buffer/string write, and consuming close operations.
+- [x] Add portable UTF-8 path handling, catchable `IOException`, editor documentation, strict native tests, and the `examples/HostedIo` project.
+- [ ] Add seeking, directories, metadata, deletion, higher-level streams, encoding-aware text files, and asynchronous I/O when applications require them.
+
 ## Language server and editor support
 
 - [x] Add a shared `ctilde.json` project loader and CLI `--project` mode.

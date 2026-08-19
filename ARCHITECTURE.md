@@ -38,7 +38,7 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `AllocationEffectRegistry` records direct allocation reasons and exact or virtual call edges during lowering, computes recursive effects to a fixed point, and verifies `[NoAlloc]` contracts with deterministic witnesses.
 - `TypedIrLowerer` consumes bound bodies and produces typed values, basic blocks, loads, stores, calls, conversions, allocations, checks, ownership operations, branches, throws, returns, and cleanup actions. It never classifies rendered C lines.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
-- `CEmitter` consumes `TypedIrProgram` and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy.
+- `CEmitter` consumes `TypedIrProgram` and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy. Hosted I/O support is emitted lazily from resolved trusted-extern uses, so unrelated hosted output and every ESP translation unit remain unchanged.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -204,7 +204,7 @@ The generated translation unit embeds a small runtime:
 - Checked division failure.
 - Deterministic 32-bit and 64-bit two's-complement wrapping, division, remainder, negation, and arithmetic-shift helpers.
 - Immutable UTF-8 strings and concatenation.
-- Console output and process exit.
+- Console output, hosted UTF-8 input, owned hosted binary-file handles, and process exit.
 - Per-attached-thread `setjmp` and `longjmp` handler, current-exception, ownership-cleanup, and release-worklist state.
 - One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
 - ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and attached-thread callback exception barriers.

@@ -90,6 +90,10 @@ public static class Program { [EntryPoint] public static void Main() { string te
             value => value.map(token => `${token.text}:${token.type}`).join(', '));
         assert.ok(changedSemantic.some(token => token.text === 'UnsavedMarker' && token.modifiers.includes('declaration')));
 
+        const hostedIo = await hostedIoFeatures(directory);
+        assert.ok(hostedIo.labels.includes('Open'));
+        assert.ok(hostedIo.documentation.includes('Opens, creates, or appends'));
+
         const hosted = await targetFeatures(directory, 'hosted');
         const esp = await targetFeatures(directory, 'esp-idf');
         assert.ok(!hosted.labels.includes('Ws2812'));
@@ -101,6 +105,27 @@ public static class Program { [EntryPoint] public static void Main() { string te
         await new Promise(resolve => setTimeout(resolve, 200));
         await rm(directory, { recursive: true, force: true });
     }
+}
+
+async function hostedIoFeatures(root: string): Promise<{ labels: string[]; documentation: string }> {
+    const directory = path.join(root, 'hosted-io');
+    const filePath = path.join(directory, 'Program.ct');
+    const source = 'using System.IO; public static class Program { [EntryPoint] public static void Main() { File. } }';
+    await mkdir(directory);
+    await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['Program.ct'] }));
+    await writeFile(filePath, source);
+    const document = await vscode.workspace.openTextDocument(filePath);
+    await vscode.window.showTextDocument(document);
+    const position = document.positionAt(source.indexOf('File.') + 'File.'.length);
+    const completions = await waitFor(
+        async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, position, '.', 100),
+        value => value.items.some(item => item.label === 'Open'),
+        value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
+    const open = completions.items.find(item => item.label === 'Open');
+    return {
+        labels: completions.items.map(item => typeof item.label === 'string' ? item.label : item.label.label),
+        documentation: documentationText(open?.documentation),
+    };
 }
 
 async function targetFeatures(root: string, target: 'hosted' | 'esp-idf'): Promise<{ labels: string[]; semantic: DecodedSemanticToken[] }> {

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="M:System.Console.Read()"><summary>Reads the next UTF-8 byte from standard input.</summary><returns>A value from 0 through 255, or -1 at end of input.</returns><exception cref="System.IO.IOException">The input stream reports an error.</exception><remarks>This hosted-only operation can allocate when it reports an error.</remarks></member>
+  <member id="M:System.Console.ReadLine()"><summary>Reads one UTF-8 line from standard input.</summary><returns>An owned string without the line terminator, or null when end of input occurs before any bytes are read.</returns><exception cref="System.IO.IOException">Input fails, contains invalid UTF-8, or exceeds the maximum managed-string length.</exception><remarks>The method flushes standard output before reading and can allocate.</remarks></member>
+
+  <member id="T:System.IO.FileMode"><summary>Specifies how a hosted file is opened or created.</summary></member>
+  <member id="E:System.IO.FileMode.Open"><summary>Opens an existing file without truncating it.</summary></member>
+  <member id="E:System.IO.FileMode.Create"><summary>Creates a file or truncates an existing file.</summary></member>
+  <member id="E:System.IO.FileMode.Append"><summary>Creates a file or opens it for writes at the end.</summary></member>
+  <member id="T:System.IO.FileAccess"><summary>Specifies the permitted operations on a hosted file.</summary></member>
+  <member id="E:System.IO.FileAccess.Read"><summary>Permits reads.</summary></member>
+  <member id="E:System.IO.FileAccess.Write"><summary>Permits writes.</summary></member>
+  <member id="E:System.IO.FileAccess.ReadWrite"><summary>Permits reads and writes.</summary></member>
+  <member id="T:System.IO.FileHandle"><summary>Represents one owned hosted file resource.</summary><remarks>The handle is move-only. Reserve lexical cleanup with <see cref="System.IO.File.Close(FileHandle)"/>.</remarks></member>
+
+  <member id="T:System.IO.IOException"><summary>Represents a catchable hosted console or file error.</summary></member>
+  <member id="M:System.IO.IOException.#ctor(string)"><summary>Creates an I/O exception without a host error code.</summary><param name="message">The error description.</param></member>
+  <member id="M:System.IO.IOException.#ctor(string,int)"><summary>Creates an I/O exception with a host error code.</summary><param name="message">The error description.</param><param name="errorCode">The platform-dependent host error code.</param></member>
+  <member id="P:System.IO.IOException.ErrorCode"><summary>Gets the platform-dependent host error code, or zero when none was supplied.</summary></member>
+
+  <member id="T:System.IO.File"><summary>Provides synchronous hosted binary-file operations.</summary><remarks>These APIs are unavailable for ESP-IDF. Concurrent access to one handle requires external synchronization.</remarks></member>
+  <member id="M:System.IO.File.Open(string,System.IO.FileMode,System.IO.FileAccess)"><summary>Opens, creates, or appends to a hosted file.</summary><param name="path">A non-null UTF-8 path without an embedded NUL byte.</param><param name="mode">The open behavior.</param><param name="access">The permitted operations.</param><returns>An owned non-null file handle.</returns><exception cref="System.IO.IOException">The path, mode/access combination, conversion, allocation, or native open operation fails.</exception><remarks>Use <see cref="System.IO.File.Close(FileHandle)"/> in a defer statement to consume the owned result.</remarks></member>
+  <member id="M:System.IO.File.Read(System.IO.FileHandle,System.Runtime.NativeBuffer&lt;byte&gt;)"><summary>Reads bytes from a hosted file.</summary><param name="file">A borrowed readable file handle.</param><param name="destination">The writable destination buffer.</param><returns>The number of bytes copied. Zero for a nonempty buffer indicates end of file.</returns><exception cref="System.IO.IOException">The handle is not readable or the native read fails.</exception></member>
+  <member id="M:System.IO.File.Write(System.IO.FileHandle,System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;)"><summary>Writes an entire byte buffer to a hosted file.</summary><param name="file">A borrowed writable file handle.</param><param name="source">The bytes to write.</param><exception cref="System.IO.IOException">The handle is not writable or a complete native write cannot be performed.</exception></member>
+  <member id="M:System.IO.File.Write(System.IO.FileHandle,string)"><summary>Writes a managed string's exact UTF-8 bytes without a line terminator.</summary><param name="file">A borrowed writable file handle.</param><param name="value">The non-null managed string to write.</param><exception cref="System.IO.IOException">The handle is not writable or a complete native write cannot be performed.</exception></member>
+  <member id="M:System.IO.File.Close(System.IO.FileHandle)"><summary>Flushes, closes, and consumes an owned hosted file handle.</summary><param name="file">The owned handle to consume.</param><exception cref="System.IO.IOException">The native close reports an error. The handle is consumed even when this exception is thrown.</exception></member>
+</doc>

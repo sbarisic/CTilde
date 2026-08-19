@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console output, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -59,6 +59,10 @@ The parameterless constructor uses an empty message. The string constructor also
 ```csharp
 public static class Console
 {
+    // Hosted only.
+    public static int Read();
+    public static string ReadLine();
+
     public static void Write(string value);
     public static void Write(char value);
     public static void Write(int value);
@@ -89,6 +93,54 @@ public static class Console
 Smaller integer types use the language overload rules. A signed widening target is better when other rules do not decide. Strings write their exact UTF-8 bytes. A null string writes no bytes. `char` writes one UTF-8 code unit. Booleans write `True` or `False`. Floats use nine significant digits.
 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
+
+On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at EOF. `ReadLine()` flushes standard output, reads one UTF-8 line, removes LF and one preceding CR, and returns an owned string. It returns `null` only when EOF occurs before any byte. Invalid UTF-8, input errors, and lines beyond the managed-string length limit throw `System.IO.IOException`. These input methods can allocate and are unavailable to `[NoAlloc]` call paths and ESP-IDF.
+
+## Hosted file I/O
+
+The hosted target adds synchronous binary-file operations:
+
+```csharp
+namespace System.IO;
+
+public enum FileMode : byte { Open, Create, Append }
+public enum FileAccess : byte { Read, Write, ReadWrite }
+
+[NativeType("uintptr_t", "stdint.h")]
+public opaque FileHandle;
+
+public class IOException : Exception
+{
+    public IOException(string message);
+    public IOException(string message, int errorCode);
+    public int ErrorCode { get; }
+}
+
+public static class File
+{
+    [ReturnsOwned]
+    public static FileHandle Open(string path, FileMode mode, FileAccess access);
+    public static unsafe nuint Read([Borrowed] FileHandle file, NativeBuffer<byte> destination);
+    public static unsafe void Write([Borrowed] FileHandle file, ReadOnlyNativeBuffer<byte> source);
+    public static void Write([Borrowed] FileHandle file, string value);
+    public static void Close([Consumes] FileHandle file);
+}
+```
+
+`Open` accepts UTF-8 paths, rejects embedded NUL bytes, and either returns a non-null owned handle or throws `IOException`. Windows converts paths to UTF-16 and opens them through the wide CRT API; POSIX hosts pass validated UTF-8 bytes to `fopen`. Files always use binary mode.
+
+`Open` supports `Open` with every access, `Create` with `Write` or `ReadWrite`, and `Append` with `Write`. Other combinations throw with `EINVAL`. `Open` never truncates, `Create` creates or truncates, and `Append` creates or writes at the end.
+
+`Read` copies at most the destination length and returns a `nuint` count. Zero from a nonempty destination means EOF. Buffer and string writes complete fully or throw; string writes emit exact UTF-8 bytes without a newline. `Close` flushes, closes, frees native handle storage, and consumes ownership even when the native close reports an error.
+
+Every successful `Open` must transfer, return, consume, or reserve its handle. The normal pattern is:
+
+```csharp
+FileHandle file = File.Open(path, FileMode.Open, FileAccess.Read);
+defer File.Close(file);
+```
+
+`IOException.ErrorCode` is host-dependent. Concurrent access to one handle requires external native synchronization. Seeking, directories, metadata, deletion, streams, automatic disposal, file locking, and asynchronous I/O are not part of this subset.
 
 ## Environment
 
@@ -259,12 +311,12 @@ Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.10. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
+Other runtime failures remain fatal and are not catchable in draft 0.10. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
 ## Non-normative roadmap
 
-Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
+Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
 
 ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, source-level task APIs, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

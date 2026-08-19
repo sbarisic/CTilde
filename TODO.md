@@ -17,15 +17,16 @@
 
 ## Compiler architecture completion
 
-Draft 0.7 exception and ARC behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
+Draft 0.7 now has the release pipeline required by the architecture:
 
-1. Bind method, accessor, constructor, and initializer bodies into immutable bound nodes.
-2. Move lookup, access checks, overload resolution, conversions, constants, and flow diagnostics out of `MethodLowerer`.
-3. Replace line-classified instructions with typed three-address operands, blocks, loads, stores, calls, branches, checks, throws, and cleanup actions.
-4. Make `GetDiagnostics()` stop after declaration, binding, flow, and target validation. It must not construct rendered C fragments.
-5. Make the C emitter consume structured IR only.
+- [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
+- [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.
+- [x] Replace line-classified instructions with typed operands, blocks, loads, stores, calls, branches, checks, throws, ownership operations, and cleanup actions.
+- [x] Make `GetDiagnostics()` stop after declaration, binding, flow/effect analysis, and target validation without constructing a C emitter, C writer, typed IR, or C translation unit.
+- [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and line classifier.
+- [x] Split non-generated C# implementation and conformance files below 900 physical lines.
 
-Retain the 69 conformance checks and byte-identical C output while this work proceeds.
+The migration retains 74 conformance checks and byte-identical hosted and ESP-IDF C baselines.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 
@@ -157,7 +158,7 @@ A microcontroller firmware image has no portable process exit code. The compiler
 - [x] Document deterministic reclamation and the cycle-leak limitation.
 - [x] Add `CT_MEMORY_DIAGNOSTICS`-guarded live allocation and object counters.
 - [x] Compile and link the ARC heap-recovery source for both ESP architectures.
-- [ ] Flash the draft 0.7 image and verify the ARC heap-recovery marker on hardware.
+- [x] Flash the draft 0.7 image and verify the ARC heap-recovery marker on hardware.
 
 Permanent loops can allocate temporary managed values when their ownership does not escape an iteration. Programs must still bound live ownership and avoid accumulating cycles. Boxing is an allocation operation.
 
@@ -327,11 +328,11 @@ The stale `bin/hello.c` artifact currently fails both installed cross-compilers 
 - [x] Verify the configured failure reset or halt behavior.
 - [x] Record minimum free heap and main task stack high-water mark.
 - [x] Run the object construction, virtual dispatch, boxing, and string conformance cases on the target.
-- [ ] Flash Draft 0.7 and confirm `timer64: ok`, `delegate: 42`, `function pointer: 42`, `arc heap recovery: True`, and `CTILDE_ESP_OK` on `COM4`.
-- [ ] Re-run the Draft 0.7 null-failure image, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore the self-test image.
-- [ ] Record fresh Draft 0.7 heap and stack readings and reconfirm the visible green WS2812 blink without watchdog resets.
+- [x] Flash Draft 0.7 and confirm `timer64: ok`, `delegate: 42`, `function pointer: 42`, `arc heap recovery: True`, and `CTILDE_ESP_OK` on `COM4`.
+- [x] Re-run the Draft 0.7 null-failure image, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore the self-test image.
+- [x] Record fresh Draft 0.7 heap and stack readings and reconfirm the GPIO4 WS2812 cycle without watchdog resets.
 
-The corrected 2026-08-18 T-CAN485 run reported 298,172 bytes of free and minimum free heap and 7,744 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812. UART alternated `ws2812: on/off` on GPIO4 for several cycles without a watchdog reset, and the onboard LED was confirmed to blink green in step with it. The null-failure image printed `CTN0001`, aborted, and restarted with `SW_CPU_RESET`; the WS2812 image was restored afterward. The earlier GPIO2 run was command-level validation only because GPIO2 is microSD MISO, not a visible LED. On 2026-08-19 the Draft 0.7 cross-compiler and full-firmware gates passed, but `COM4` and the CH9102 device were absent, so the three Draft 0.7 hardware items above remain open.
+The 2026-08-19 Draft 0.7 run reported 298,012 bytes of free heap, a 295,468-byte minimum, and 6,960 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812 and returning from the managed self-tests. UART completed more than ten `ws2812: on/off` cycles on GPIO4 without a watchdog reset; the same path was previously confirmed by a person to blink the onboard LED green. The failure image printed `CTN0001`, called `abort()`, and restarted with `SW_CPU_RESET`. The self-test was reflashed and rechecked as the final board state. The earlier GPIO2 run remains command-level validation only because GPIO2 is microSD MISO, not a visible LED.
 
 ### First-release acceptance criteria
 

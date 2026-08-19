@@ -7,7 +7,7 @@ Last reviewed: 2026-08-19
 C~ draft 0.7 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> combined binding, flow, allocation effects, and ARC ownership lowering -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 73 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 74 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -169,11 +169,11 @@ Exception handlers use one process-global `setjmp` and `longjmp` stack, one owni
 
 The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
 
-## Known architecture debt
+## Compiler pipeline status
 
-The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
+Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
 
-The draft 0.7 exception and ARC surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
+Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. The rendered-line classifier and `MethodLowerer` have been removed. `GetDiagnostics()` is analysis-only and a conformance check verifies that it constructs no `CEmitter`, `CWriter`, typed IR, or generated C. Emission remains lazy and preserves the six frozen hosted and ESP-IDF output baselines byte-for-byte.
 
 ## Language server and VS Code
 
@@ -183,7 +183,7 @@ The repository includes an LSP 3.17 server and VS Code client. The server suppor
 
 The extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, completion, hover, signature help, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
 
-The language-service query snapshot is immutable and does not call `EmitC`. The broader compiler architecture debt above remains: compiler diagnostics still pass through the transitional combined body lowering path until immutable bound bodies replace it.
+The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 
 ## ESP-IDF target
 
@@ -200,11 +200,11 @@ Measured self-test firmware sizes are:
 | `esp32` | 150,592-byte binary; 150,477-byte image | 61,958 bytes | 32,240 bytes | 45,003 bytes IRAM; 13,708 bytes DRAM |
 | `esp32c3` | 153,952-byte binary; 153,662-byte image | 77,174 bytes | 29,580 bytes | 50,972 bytes DRAM, including 39,972 bytes executable text |
 
-The corrected self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `boxed: 7`, `exception: caught on ESP32`, and `CTILDE_ESP_OK`; the RMT-backed GPIO4 WS2812 commands alternated every 500 ms without a watchdog reset, and the onboard LED was confirmed to blink green in step with them. After the strip was configured and cleared, the board reported 298,172 bytes of free and minimum free heap and 7,744 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
+The Draft 0.7 self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `delegate: 42`, `function pointer: 42`, `timer64: ok`, `boxed: 7`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. After the strip was configured and cleared and the managed self-tests returned, the board reported 298,012 bytes of free heap, a 295,468-byte minimum, and 6,960 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
 
-The separate failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `SW_CPU_RESET`. The WS2812 self-test image was reflashed and verified by UART as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
+The RMT-backed GPIO4 WS2812 commands completed more than ten 500 ms on/off cycles without a watchdog reset. The same path was previously confirmed by a person to blink the onboard LED green. The separate Draft 0.7 failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`. The self-test image was then rebuilt, reflashed, and verified through `CTILDE_ESP_OK` and several additional LED cycles as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
 
-The draft 0.7 ESP acceptance source now repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks the 64-bit timer, an instance delegate with virtual dispatch, and a synchronous unmanaged callback. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, and complete `esp32` and `esp32c3` firmware links pass with the fresh sizes above. The revised image has not yet been flashed: at the 2026-08-19 validation point `COM4` and the board's CH9102 USB device were absent, so the new markers and heap/stack readings remain pending.
+The Draft 0.7 ESP acceptance source repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks the 64-bit timer, an instance delegate with virtual dispatch, and a synchronous unmanaged callback. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, complete `esp32` and `esp32c3` firmware links pass with the fresh sizes above, and the physical-board acceptance sequence is complete.
 
 ## Deliberately deferred
 

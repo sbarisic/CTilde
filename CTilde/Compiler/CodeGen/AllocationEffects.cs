@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace CTilde;
 
 internal sealed record AllocationOperation(
@@ -9,6 +11,9 @@ internal sealed record AllocationOperation(
 internal sealed class AllocationEffectRegistry
 {
     private readonly Dictionary<MethodSymbol, List<AllocationOperation>> _operations = [];
+
+    public ImmutableDictionary<MethodSymbol, ImmutableArray<AllocationOperation>> Snapshot() =>
+        _operations.ToImmutableDictionary(pair => pair.Key, pair => pair.Value.ToImmutableArray());
 
     public void RecordDirect(MethodSymbol method, SyntaxNode syntax, string reason) =>
         Operations(method).Add(new AllocationOperation(syntax, reason));

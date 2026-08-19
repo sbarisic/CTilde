@@ -2,229 +2,209 @@ using System.Collections.Immutable;
 
 namespace CTilde;
 
-internal abstract record IrInstruction(CType Type, string Text);
+internal readonly record struct IrValue(int Id, CType Type, OwnershipKind Ownership);
 
-internal sealed record IrLabel(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrBranch(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrConditionalBranch(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrLocal(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrStore(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrCall(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrCheck(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrReturn(CType Type, string Text) : IrInstruction(Type, Text);
-internal sealed record IrRaw(CType Type, string Text) : IrInstruction(Type, Text);
+internal abstract record IrInstruction(IrValue? Output, SyntaxNode Syntax, ImmutableArray<IrValue> Inputs);
+internal sealed record IrConstant(IrValue Result, SyntaxNode Syntax, object? Value) : IrInstruction(Result, Syntax, []);
+internal sealed record IrLoad(IrValue Result, SyntaxNode Syntax, object? Symbol, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
+internal sealed record IrStore(IrValue Result, SyntaxNode Syntax, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
+internal sealed record IrUnary(IrValue Result, UnaryExpressionSyntax Expression, IrValue Operand) : IrInstruction(Result, Expression, [Operand]);
+internal sealed record IrBinary(IrValue Result, BinaryExpressionSyntax Expression, IrValue Left, IrValue Right) : IrInstruction(Result, Expression, [Left, Right]);
+internal sealed record IrConvert(IrValue Result, SyntaxNode Syntax, IrValue Operand) : IrInstruction(Result, Syntax, [Operand]);
+internal sealed record IrCall(IrValue Result, CallExpressionSyntax Expression, object? Target, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
+internal sealed record IrAllocate(IrValue Result, NewExpressionSyntax Expression, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
+internal sealed record IrReadElement(IrValue Result, IndexExpressionSyntax Expression, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
+internal sealed record IrTypeCheck(IrValue Result, SyntaxNode Syntax, IrValue Operand) : IrInstruction(Result, Syntax, [Operand]);
+internal sealed record IrCopy(IrValue Result, SyntaxNode Syntax, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
+internal enum IrCheckKind { Null, Bounds, Division, Cast, Allocation }
+internal enum IrOwnershipActionKind { AcquireOwned, Retain, Drop }
+internal enum IrCleanupActionKind { EnterScope, LeaveScope, EnterExceptionRegion, LeaveExceptionRegion, RunDefer, RunFinally }
+internal sealed record IrCheck(SyntaxNode Syntax, IrCheckKind Kind, ImmutableArray<IrValue> Inputs) : IrInstruction(null, Syntax, Inputs);
+internal sealed record IrOwnershipAction(SyntaxNode Syntax, IrOwnershipActionKind Kind, IrValue Value) : IrInstruction(null, Syntax, [Value]);
+internal sealed record IrCleanupAction(SyntaxNode Syntax, IrCleanupActionKind Kind) : IrInstruction(null, Syntax, []);
 
-internal sealed record IrFunction(MethodSymbol Method, ImmutableArray<IrInstruction> Instructions)
+internal abstract record IrTerminator;
+internal sealed record IrFallThrough : IrTerminator;
+internal sealed record IrBranchTerminator(int TargetBlock) : IrTerminator;
+internal sealed record IrConditionalTerminator(IrValue? Condition, int TrueBlock, int FalseBlock) : IrTerminator;
+internal sealed record IrSwitchTerminator(IrValue? Value, ImmutableArray<int> TargetBlocks, int DefaultBlock) : IrTerminator;
+internal sealed record IrExceptionRegionTerminator(int ProtectedBlock, ImmutableArray<int> HandlerBlocks, int ContinuationBlock) : IrTerminator;
+internal sealed record IrReturnTerminator(CType Type) : IrTerminator;
+internal sealed record IrThrowTerminator : IrTerminator;
+
+internal sealed record IrBasicBlock(int Id, ImmutableArray<IrInstruction> Instructions, IrTerminator Terminator);
+internal sealed record IrFunction(
+    MethodSymbol Method,
+    BoundBody Body,
+    PropertySymbol? Property,
+    bool IsGetter,
+    ImmutableArray<IrBasicBlock> Blocks);
+internal sealed record IrStaticInitializer(FieldSymbol Field, BoundBody Body, CType Type, BoundSemanticEntry? Value);
+internal sealed record TypedIrProgram(
+    ImmutableArray<IrFunction> Functions,
+    ImmutableArray<IrStaticInitializer> ModuleInitializers);
+
+internal sealed class TypedIrLowerer(BoundProgram program)
 {
-    public string Render() => string.Join('\n', Instructions.Select(instruction => instruction.Text));
-}
+    private CompilationModel Model => program.Model;
 
-internal sealed record TypedIrProgram(ImmutableArray<IrFunction> Functions, ImmutableArray<IrInstruction> ModuleInitializer);
-
-internal sealed class TypedIrLowerer(CompilationModel model, CEmitter emitter)
-{
     public TypedIrProgram Lower()
     {
-        emitter.RegisterDeclaredTypes();
         var definitions = ImmutableArray.CreateBuilder<IrFunction>();
-        foreach (var type in model.UserTypes)
+        foreach (var type in Model.UserTypes)
         {
             if (type.Kind == DeclaredTypeKind.Enum)
                 continue;
             foreach (var constructor in type.Constructors)
-                definitions.Add(ToIr(constructor, new MethodLowerer(emitter, constructor).EmitDefinition()));
+                AddFunction(FindBoundBody(constructor));
             foreach (var method in type.Methods.Where(method => method.ExternName is null))
-                definitions.Add(ToIr(method, new MethodLowerer(emitter, method).EmitDefinition()));
+                AddFunction(FindBoundBody(method));
             foreach (var property in type.Properties)
             {
                 if (property.Getter is not null)
-                {
-                    var method = emitter.GetAccessorMethod(property, true);
-                    definitions.Add(ToIr(method, LowerAccessor(property, method, true)));
-                }
+                    AddFunction(FindBoundBody(property.Getter, $"get_{property.Name}"), property, isGetter: true);
                 if (property.Setter is not null)
-                {
-                    var method = emitter.GetAccessorMethod(property, false);
-                    definitions.Add(ToIr(method, LowerAccessor(property, method, false)));
-                }
+                    AddFunction(FindBoundBody(property.Setter, $"set_{property.Name}"), property, isGetter: false);
             }
         }
-        ValidateConstructorCycles();
-        return new TypedIrProgram(definitions.ToImmutable(), ToInstructions(LowerModuleInitializer(), CType.Void));
+        var moduleInitializers = Model.UserTypes.SelectMany(type => type.Fields)
+            .Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>")
+            .Select(field => new IrStaticInitializer(
+                field,
+                FindBoundBody(field.Syntax!, "<module_init>"),
+                field.Type,
+                program.SemanticMap.GetValueOrDefault(field.Initializer!)))
+            .ToImmutableArray();
+        return new TypedIrProgram(definitions.ToImmutable(), moduleInitializers);
+
+        void AddFunction(BoundBody body, PropertySymbol? property = null, bool isGetter = false) =>
+            definitions.Add(BuildIr(body, property, isGetter));
     }
 
-    private void ValidateConstructorCycles()
+    private IrFunction BuildIr(BoundBody body, PropertySymbol? property, bool isGetter)
     {
-        foreach (var type in model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class))
+        var method = body.Method;
+
+        var statements = BoundStatements(body.Root).ToArray();
+        var blockIds = new Dictionary<BoundStatement, int>(ReferenceEqualityComparer.Instance);
+        for (var index = 0; index < statements.Length; index++)
+            blockIds.Add(statements[index], index);
+        var blocks = ImmutableArray.CreateBuilder<IrBasicBlock>();
+        var values = new Dictionary<BoundExpression, IrValue>(ReferenceEqualityComparer.Instance);
+        var nextValue = 0;
+        for (var statementIndex = 0; statementIndex < statements.Length; statementIndex++)
         {
-            foreach (var constructor in type.Constructors)
+            var statement = statements[statementIndex];
+            var instructions = ImmutableArray.CreateBuilder<IrInstruction>();
+            if (statement.CreatesLexicalScope)
+                instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.EnterScope));
+            if (statement.Kind == BoundStatementKind.Try)
+                instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.EnterExceptionRegion));
+            if (statement.Kind == BoundStatementKind.Defer)
+                instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.RunDefer));
+            if (statement.Kind == BoundStatementKind.Finally)
+                instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.RunFinally));
+
+            foreach (var expression in statement.Expressions.SelectMany(BoundExpressions))
             {
-                var active = new HashSet<MethodSymbol>();
-                for (var current = constructor; current is not null && current.ContainingType == type; current = current.ConstructorInitializerTarget)
+                if (values.ContainsKey(expression))
+                    continue;
+                var result = new IrValue(nextValue++, expression.Type, expression.Ownership);
+                var inputs = expression.Children.Where(values.ContainsKey).Select(child => values[child]).ToImmutableArray();
+                instructions.Add(expression.Syntax switch
                 {
-                    if (active.Add(current))
-                        continue;
-                    var syntax = constructor.ConstructorInitializer ?? constructor.Syntax ?? type.Syntax!;
-                    model.Diagnostics.Add("CT1232", $"Constructor chain for '{type.FullName}' contains a cycle.", syntax.Source, syntax.Span);
-                    break;
-                }
+                    LiteralExpressionSyntax => new IrConstant(result, expression.Syntax, expression.ConstantValue),
+                    AssignmentExpressionSyntax => new IrStore(result, expression.Syntax, inputs),
+                    UnaryExpressionSyntax unary when inputs.Length != 0 => new IrUnary(result, unary, inputs[0]),
+                    BinaryExpressionSyntax binary when inputs.Length >= 2 => new IrBinary(result, binary, inputs[0], inputs[1]),
+                    CastExpressionSyntax or ParenthesizedExpressionSyntax when inputs.Length != 0 => new IrConvert(result, expression.Syntax, inputs[0]),
+                    CallExpressionSyntax call => new IrCall(result, call, expression.Symbol, inputs),
+                    NewExpressionSyntax allocation => new IrAllocate(result, allocation, inputs),
+                    IndexExpressionSyntax index => new IrReadElement(result, index, inputs),
+                    TypeTestExpressionSyntax or SafeCastExpressionSyntax when inputs.Length != 0 => new IrTypeCheck(result, expression.Syntax, inputs[0]),
+                    NameExpressionSyntax or ThisExpressionSyntax or BaseExpressionSyntax or MemberAccessExpressionSyntax => new IrLoad(result, expression.Syntax, expression.Symbol, inputs),
+                    _ => new IrCopy(result, expression.Syntax, inputs),
+                });
+                AddChecks(instructions, expression, inputs);
+                if (expression.Ownership == OwnershipKind.Owned && expression.Type.ContainsManagedReferences)
+                    instructions.Add(new IrOwnershipAction(expression.Syntax, IrOwnershipActionKind.AcquireOwned, result));
+                values[expression] = result;
             }
+            if (statement.CreatesLexicalScope)
+                instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.LeaveScope));
+            blocks.Add(new IrBasicBlock(statementIndex, instructions.ToImmutable(), Terminator(statement, statementIndex)));
         }
-    }
+        return new IrFunction(method, body, property, isGetter, blocks.ToImmutable());
 
-    private string LowerAccessor(PropertySymbol property, MethodSymbol method, bool getter)
-    {
-        var name = getter ? NameMangler.Getter(property) : NameMangler.Setter(property);
-        return new MethodLowerer(emitter, method, name, property, getter).EmitDefinition();
-    }
-
-    private string LowerModuleInitializer()
-    {
-        var writer = new CWriter();
-        writer.WriteLine("static void ct_module_init(void)");
-        writer.WriteLine("{");
-        var initializerIndex = 0;
-        foreach (var field in model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>"))
+        IrTerminator Terminator(BoundStatement statement, int index)
         {
-            var method = new MethodSymbol
+            var next = index + 1 < statements.Length ? index + 1 : -1;
+            var targets = statement.Children.Select(child => blockIds[child]).ToImmutableArray();
+            var condition = statement.Expressions.SelectMany(BoundExpressions).Select(expression => values.GetValueOrDefault(expression)).LastOrDefault();
+            return statement.Kind switch
             {
-                Name = "<module_init>",
-                ContainingType = field.ContainingType,
-                Accessibility = Accessibility.Private,
-                IsStatic = true,
-                Syntax = field.Syntax,
-                ReturnType = CType.Void,
-                Parameters = [],
-                Body = null,
+                BoundStatementKind.Return => new IrReturnTerminator(method.ReturnType),
+                BoundStatementKind.Throw => new IrThrowTerminator(),
+                BoundStatementKind.Break or BoundStatementKind.Continue => new IrBranchTerminator(-1),
+                BoundStatementKind.If or BoundStatementKind.While or BoundStatementKind.Do or BoundStatementKind.For or BoundStatementKind.Foreach =>
+                    new IrConditionalTerminator(condition.Id == 0 && condition.Type is null ? null : condition, targets.FirstOrDefault(-1), targets.Skip(1).FirstOrDefault(next)),
+                BoundStatementKind.Switch => new IrSwitchTerminator(condition.Id == 0 && condition.Type is null ? null : condition, targets, next),
+                BoundStatementKind.Try => new IrExceptionRegionTerminator(targets.FirstOrDefault(-1), targets.Skip(1).ToImmutableArray(), next),
+                _ when targets.Length != 0 => new IrBranchTerminator(targets[0]),
+                _ when next >= 0 => new IrBranchTerminator(next),
+                _ => new IrFallThrough(),
             };
-            var lowerer = new MethodLowerer(emitter, method, temporaryPrefix: $"_mi_{initializerIndex++}");
-            var expression = lowerer.LowerStandalone(field.Initializer!);
-            foreach (var line in expression.Prelude)
-                writer.WriteLine("    " + line);
-            var value = lowerer.ConvertStandalone(expression, field.Type, field.Initializer!);
-            if (field.IsConst && !value.IsConstant)
-                model.Diagnostics.Add("CT2140", $"Const field '{field.Name}' does not have a constant initializer.", field.Initializer!.Source, field.Initializer.Span);
-            foreach (var line in value.Prelude.Skip(expression.Prelude.Count))
-                writer.WriteLine("    " + line);
-            if (field.Type.ContainsManagedReferences)
-            {
-                writer.WriteLine($"    {emitter.CTypeName(field.Type)} ct_static_value_{initializerIndex} = {value.Code};");
-                if (value.Ownership != OwnershipKind.Owned)
-                    writer.WriteLine("    " + emitter.RetainValueStatement(field.Type, $"&ct_static_value_{initializerIndex}"));
-                writer.WriteLine($"    {field.CName} = ct_static_value_{initializerIndex};");
-            }
-            else
-                writer.WriteLine($"    {field.CName} = {value.Code};");
         }
-        writer.WriteLine("}");
-        return writer.ToString();
     }
 
-    private static IrFunction ToIr(MethodSymbol method, string definition) => new(method, ToInstructions(definition, method.ReturnType));
+    private BoundBody FindBoundBody(MethodSymbol method) =>
+        program.Bodies.FirstOrDefault(candidate => ReferenceEquals(candidate.Method, method)) ??
+        program.Bodies.FirstOrDefault(candidate => candidate.Method.Name == method.Name &&
+            ReferenceEquals(candidate.Method.Syntax, method.Syntax) && candidate.Method.IsStatic == method.IsStatic) ??
+        throw new InvalidOperationException($"No bound body exists for '{method.ContainingType.FullName}.{method.Name}'.");
 
-    private static ImmutableArray<IrInstruction> ToInstructions(string text, CType type) => text
-        .TrimEnd().Split('\n').Select(line => Classify(type, line.TrimEnd('\r'))).ToImmutableArray();
+    private BoundBody FindBoundBody(SyntaxNode syntax, string methodName) =>
+        program.Bodies.FirstOrDefault(candidate => candidate.Method.Name == methodName && ReferenceEquals(candidate.Method.Syntax, syntax)) ??
+        throw new InvalidOperationException($"No bound body exists for '{methodName}'.");
 
-    private static IrInstruction Classify(CType type, string text)
+    private static IEnumerable<BoundExpression> BoundExpressions(BoundStatement statement)
     {
-        var code = text.Trim();
-        if (code.EndsWith(":;", StringComparison.Ordinal))
-            return new IrLabel(type, text);
-        if (code.StartsWith("if ", StringComparison.Ordinal) && code.Contains(" goto ", StringComparison.Ordinal))
-            return new IrConditionalBranch(type, text);
-        if (code.StartsWith("goto ", StringComparison.Ordinal))
-            return new IrBranch(type, text);
-        if (code.StartsWith("return", StringComparison.Ordinal))
-            return new IrReturn(type, text);
-        if (code.Contains("ct_require_nonnull", StringComparison.Ordinal) || code.Contains("ct_bounds", StringComparison.Ordinal))
-            return new IrCheck(type, text);
-        if ((code.Contains("ct_tmp", StringComparison.Ordinal) || code.Contains("ct_l_", StringComparison.Ordinal)) && code.Contains(" = ", StringComparison.Ordinal))
-            return new IrLocal(type, text);
-        if (code.Contains(" = ", StringComparison.Ordinal))
-            return new IrStore(type, text);
-        if (code.Contains('(') && code.EndsWith(';'))
-            return new IrCall(type, text);
-        return new IrRaw(type, text);
+        foreach (var expression in statement.Expressions)
+            foreach (var descendant in BoundExpressions(expression))
+                yield return descendant;
+        foreach (var child in statement.Children)
+            foreach (var expression in BoundExpressions(child))
+                yield return expression;
     }
-}
 
-internal static class TargetValidator
-{
-    private static readonly HashSet<string> EspIdfSymbols = new(StringComparer.Ordinal)
+    private static IEnumerable<BoundExpression> BoundExpressions(BoundExpression expression)
     {
-        "app_main",
-        "ct_esp_delay_ms",
-        "ct_esp_tick_count",
-        "ct_esp_stack_high_water_mark",
-        "ct_esp_restart",
-        "ct_esp_free_heap_size",
-        "ct_esp_minimum_free_heap_size",
-        "ct_esp_timer_get_time_us",
-        "ct_esp_gpio_configure_input",
-        "ct_esp_gpio_configure_output",
-        "ct_esp_gpio_write",
-        "ct_esp_gpio_read",
-        "ct_esp_ws2812_configure",
-        "ct_esp_ws2812_set_pixel",
-        "ct_esp_ws2812_refresh",
-        "ct_esp_ws2812_clear",
-    };
+        foreach (var child in expression.Children)
+            foreach (var descendant in BoundExpressions(child))
+                yield return descendant;
+        yield return expression;
+    }
 
-    public static void Validate(CompilationModel model, CEmitter emitter, CompilationTarget target)
+    private static IEnumerable<BoundStatement> BoundStatements(BoundStatement statement)
     {
-        if (!Enum.IsDefined(target))
+        yield return statement;
+        foreach (var child in statement.Children)
+            foreach (var descendant in BoundStatements(child))
+                yield return descendant;
+    }
+
+    private static void AddChecks(ImmutableArray<IrInstruction>.Builder instructions, BoundExpression expression, ImmutableArray<IrValue> inputs)
+    {
+        var kind = expression.Syntax switch
         {
-            var source = model.UserSyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
-            model.Diagnostics.Add("CT4104", $"Compilation target value '{(int)target}' is not supported.", source, new TextSpan(0, 0));
-        }
-
-        var names = new Dictionary<string, MethodSymbol>(StringComparer.Ordinal);
-        foreach (var method in model.Types.Values.SelectMany(type => type.Methods).Where(method => method.ExternName is null))
-        {
-            if (names.TryAdd(method.CName, method))
-                continue;
-            var earlier = names[method.CName];
-            model.Diagnostics.Add("CT4103", $"Generated C symbol '{method.CName}' is not unique.", method.Syntax!.Source, method.Syntax.Span,
-                earlier.Syntax?.Source.GetLocation(earlier.Syntax.Span));
-        }
-
-        var dynamicSymbols = emitter.DynamicGeneratedSymbols.ToHashSet(StringComparer.Ordinal);
-        foreach (var method in model.Types.Values.SelectMany(type => type.Methods)
-                     .Where(method => method.ExternName is not null && !method.IsTrustedExtern && dynamicSymbols.Contains(method.ExternName)))
-        {
-            model.Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
-        }
-
-        if (target == CompilationTarget.EspIdf)
-        {
-            foreach (var method in model.Types.Values.SelectMany(type => type.Methods)
-                         .Where(method => method.ExternName is not null && !method.IsTrustedExtern && EspIdfSymbols.Contains(method.ExternName)))
-            {
-                model.Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with an ESP-IDF target symbol.", method.Syntax!.Source, method.Syntax.Span);
-            }
-
-            foreach (var use in emitter.ExternUses.Where(use => use.Method.ExternName == "ct_environment_exit"))
-                model.Diagnostics.Add("CT4105", "System.Environment.Exit is not available for the ESP-IDF target; use Esp.Idf.EspSystem.Restart when a reset is intended.", use.Syntax.Source, use.Syntax.Span);
-        }
-
-        var complete = new HashSet<TypeSymbol>();
-        var active = new HashSet<TypeSymbol>();
-        foreach (var type in model.UserTypes.Where(type => type.Kind != DeclaredTypeKind.Enum))
-            VisitLayout(type);
-
-        void VisitLayout(TypeSymbol type)
-        {
-            if (complete.Contains(type))
-                return;
-            if (!active.Add(type))
-            {
-                model.Diagnostics.Add("CT4100", $"Type '{type.FullName}' has a recursive value-type layout.", type.Syntax!.Source, type.Syntax.Span);
-                return;
-            }
-            foreach (var dependency in type.Fields.Where(field => !field.IsStatic && field.Type.Kind == CTypeKind.Struct).Select(field => field.Type.Symbol!).Distinct())
-                VisitLayout(dependency);
-            active.Remove(type);
-            complete.Add(type);
-        }
+            IndexExpressionSyntax => IrCheckKind.Bounds,
+            MemberAccessExpressionSyntax or CallExpressionSyntax when expression.Children.FirstOrDefault()?.Type.IsReference == true => IrCheckKind.Null,
+            BinaryExpressionSyntax binary when binary.OperatorKind is SyntaxKind.SlashToken or SyntaxKind.PercentToken => IrCheckKind.Division,
+            CastExpressionSyntax or SafeCastExpressionSyntax => IrCheckKind.Cast,
+            NewExpressionSyntax => IrCheckKind.Allocation,
+            _ => (IrCheckKind?)null,
+        };
+        if (kind is not null)
+            instructions.Add(new IrCheck(expression.Syntax, kind.Value, inputs));
     }
 }

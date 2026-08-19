@@ -57,9 +57,11 @@ public sealed partial class LanguageServiceSnapshot
     private readonly ImmutableArray<SyntaxTree> _userTrees;
     private readonly ImmutableArray<SyntaxTree> _allTrees;
     private readonly CompilationModel _model;
+    private readonly BoundProgram _boundProgram;
     private readonly ImmutableArray<Diagnostic> _diagnostics;
     private readonly Dictionary<string, SyntaxTree> _treesByPath;
     private readonly Dictionary<string, DocumentIndex> _documentIndexes;
+    private readonly Dictionary<string, ImmutableArray<BoundSemanticEntry>> _semanticEntries;
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     private LanguageServiceSnapshot(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions options)
@@ -71,13 +73,20 @@ public sealed partial class LanguageServiceSnapshot
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
         _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics);
-        _diagnostics = Compilation.Create(_userTrees, options).GetDiagnostics();
+        _boundProgram = BoundProgramBuilder.Build(_model, options.Target);
+        _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
         _documentIndexes = new Dictionary<string, DocumentIndex>(_pathComparer);
+        _semanticEntries = new Dictionary<string, ImmutableArray<BoundSemanticEntry>>(_pathComparer);
         foreach (var tree in _allTrees)
         {
-            _treesByPath[NormalizePath(tree.Text.FilePath)] = tree;
-            _documentIndexes[NormalizePath(tree.Text.FilePath)] = new DocumentIndex(tree, _model);
+            var path = NormalizePath(tree.Text.FilePath);
+            _treesByPath[path] = tree;
+            _documentIndexes[path] = new DocumentIndex(tree, _model);
+            _semanticEntries[path] = [.. _boundProgram.SemanticMap.Values
+                .Where(entry => ReferenceEquals(entry.Syntax.Source, tree.Text))
+                .OrderBy(entry => entry.Syntax.Span.Length)
+                .ThenBy(entry => entry.Syntax.Span.Start)];
         }
     }
 
@@ -425,6 +434,8 @@ public sealed partial class LanguageServiceSnapshot
 
     private InferredExpression InferExpression(DocumentContext context, ExpressionSyntax expression)
     {
+        if (_boundProgram.SemanticMap.TryGetValue(expression, out var bound) && bound.Type != CType.Error)
+            return new(bound.Type, null);
         switch (expression)
         {
             case LiteralExpressionSyntax literal:
@@ -559,6 +570,23 @@ public sealed partial class LanguageServiceSnapshot
     private DocumentContext CreateContext(SyntaxTree tree, int position) =>
         new(_documentIndexes[NormalizePath(tree.Text.FilePath)], position);
 
+    private bool TryGetBoundEntry(SyntaxTree tree, TextSpan span, out BoundSemanticEntry entry)
+    {
+        if (_semanticEntries.TryGetValue(NormalizePath(tree.Text.FilePath), out var entries))
+        {
+            foreach (var candidate in entries)
+            {
+                if (candidate.Syntax.Span.Start <= span.Start && candidate.Syntax.Span.End >= span.End)
+                {
+                    entry = candidate;
+                    return true;
+                }
+            }
+        }
+        entry = null!;
+        return false;
+    }
+
     private bool TryGetTree(string filePath, out SyntaxTree tree) => _treesByPath.TryGetValue(NormalizePath(filePath), out tree!);
 
     private string NormalizePath(string path)
@@ -652,6 +680,8 @@ public sealed partial class LanguageServiceSnapshot
         FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}",
         PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
         MethodSymbol method => FormatMethod(method),
+        ParameterSymbol parameter => $"{parameter.Type.DisplayName} {parameter.Name}",
+        LocalSymbol local => $"{local.Type.DisplayName} {local.Name}",
         ParameterSyntax parameter => $"{parameter.Type} {parameter.Name}",
         LocalDeclarationStatementSyntax local => $"{local.Type} {local.Name}",
         LocalSemanticSymbol local => $"{local.Type} {local.Name}",
@@ -668,6 +698,8 @@ public sealed partial class LanguageServiceSnapshot
     {
         TypeSymbol type => type.Syntax,
         MemberSymbol member => member.Syntax,
+        ParameterSymbol parameter => parameter.Syntax,
+        LocalSymbol local => local.Syntax,
         ParameterSyntax parameter => parameter,
         LocalDeclarationStatementSyntax local => local,
         LocalSemanticSymbol local => local.Syntax,
@@ -679,6 +711,8 @@ public sealed partial class LanguageServiceSnapshot
     {
         TypeSymbol type => type.Name,
         MemberSymbol member => member.Name,
+        ParameterSymbol parameter => parameter.Name,
+        LocalSymbol local => local.Name,
         ParameterSyntax parameter => parameter.Name,
         LocalDeclarationStatementSyntax local => local.Name,
         LocalSemanticSymbol local => local.Name,

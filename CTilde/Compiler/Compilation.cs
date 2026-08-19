@@ -7,8 +7,7 @@ public sealed class Compilation
     private readonly object _gate = new();
     private ImmutableArray<Diagnostic> _diagnostics;
     private string? _generatedC;
-    private CEmitter? _emitter;
-    private TypedIrProgram? _ir;
+    private BoundProgram? _boundProgram;
     private bool _analyzed;
 
     private Compilation(ImmutableArray<SyntaxTree> syntaxTrees, CompilationOptions options)
@@ -43,7 +42,7 @@ public sealed class Compilation
         if (success)
         {
             lock (_gate)
-                _generatedC ??= _emitter!.Emit(_ir!);
+                _generatedC ??= GenerateC();
             writer.Write(_generatedC);
         }
         return new EmitResult(success, _diagnostics);
@@ -65,12 +64,16 @@ public sealed class Compilation
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics);
-            _emitter = new CEmitter(model, Options.Target);
-            _ir = new TypedIrLowerer(model, _emitter).Lower();
-            _emitter.AllocationEffects.Validate(diagnostics);
-            TargetValidator.Validate(model, _emitter, Options.Target);
+            _boundProgram = BoundProgramBuilder.Build(model, Options.Target);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
         }
+    }
+
+    private string GenerateC()
+    {
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target);
+        var ir = new TypedIrLowerer(_boundProgram).Lower();
+        return emitter.Emit(ir);
     }
 }

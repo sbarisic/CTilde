@@ -2,10 +2,23 @@ using System.Text;
 
 namespace CTilde;
 
-internal sealed class CWriter
+internal interface ILoweringWriter
 {
+    void WriteLine(string text = "");
+    void WriteBlock(IEnumerable<string> lines);
+    IDisposable Block(string header);
+    IDisposable Block();
+}
+
+internal sealed class CWriter : ILoweringWriter
+{
+    private static int _constructionCount;
     private readonly StringBuilder _builder = new();
     private int _indent;
+
+    public CWriter() => Interlocked.Increment(ref _constructionCount);
+
+    internal static int ConstructionCount => Volatile.Read(ref _constructionCount);
 
     public void WriteLine(string text = "")
     {
@@ -49,5 +62,24 @@ internal sealed class CWriter
             writer._indent--;
             writer.WriteLine("}");
         }
+    }
+}
+
+internal sealed class NullLoweringWriter : ILoweringWriter
+{
+    private NullLoweringWriter() { }
+
+    public static NullLoweringWriter Instance { get; } = new();
+
+    public void WriteLine(string text = "") { }
+    public void WriteBlock(IEnumerable<string> lines) { }
+    public IDisposable Block(string header) => NullScope.Instance;
+    public IDisposable Block() => NullScope.Instance;
+    public override string ToString() => string.Empty;
+
+    private sealed class NullScope : IDisposable
+    {
+        public static NullScope Instance { get; } = new();
+        public void Dispose() { }
     }
 }

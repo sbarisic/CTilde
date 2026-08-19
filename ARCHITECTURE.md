@@ -10,9 +10,9 @@ UTF-8 source files
     -> Lexer
     -> Parser and immutable syntax trees
     -> Declaration binding
-    -> Combined body binding, flow analysis, and C-fragment lowering
-    -> Exception cleanup and handler lowering
-    -> Transitional typed-line IR adapter
+    -> Immutable bound bodies and per-document semantic maps
+    -> Flow, allocation-effect, and ARC ownership validation
+    -> Structured typed three-address IR and cleanup actions
     -> Target validation
     -> Deterministic GNU C23 emission
     -> External C compiler
@@ -31,14 +31,14 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `Lexer` owns tokenization, trivia, literals, escapes, Unicode identifiers, and lexical diagnostics.
 - `Parser` owns declarations, statements, Pratt expression precedence, recovery, missing tokens, and skipped-token trivia.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
-- `MethodLowerer` currently combines name binding, access and conversion checks, overload resolution, flow analysis, and ordered C-fragment lowering.
-- The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
+- `BoundBodyBinder` creates immutable structured statements and expressions with resolved types, symbols, constants, value categories, ownership, flow summaries, extern uses, and allocation effects.
+- Binding tracks reachability, returns, loop and switch exits, definite assignment, delayed read-only assignment, and exception/defer cleanup boundaries.
 - Ownership-aware lowering classifies values as non-owning, borrowed, owned, or immortal; emits strong-slot replacement, owned-result transfer, nested structure retain/drop helpers, and automatic cleanup records.
 - Exception lowering owns automatic lexical handler frames, volatile durable method state, catch dispatch, rethrow, pending finally/defer actions, and cleanup-stack boundaries.
 - `AllocationEffectRegistry` records direct allocation reasons and exact or virtual call edges during lowering, computes recursive effects to a fixed point, and verifies `[NoAlloc]` contracts with deterministic witnesses.
-- `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
+- `TypedIrLowerer` consumes bound bodies and produces typed values, basic blocks, loads, stores, calls, conversions, allocations, checks, ownership operations, branches, throws, returns, and cleanup actions. It never classifies rendered C lines.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
-- `CEmitter` consumes the transitional IR and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy.
+- `CEmitter` consumes `TypedIrProgram` and owns common runtime emission plus hosted or ESP-IDF entry, failure, console, source-path, and symbol-retention policy.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -56,7 +56,7 @@ The CLI does not invoke a C compiler. This keeps C emission deterministic and le
 
 The .NET 10 language server runs out of process over LSP 3.17 and header-delimited UTF-8 JSON-RPC. Standard output contains protocol frames only; logs use standard error.
 
-`LanguageServiceSnapshot` is an immutable editor-facing view over syntax, declarations, compiler diagnostics, target-specific standard-library sources, and source positions. A per-document index shares syntax hierarchy, parent, declaration, and scope information across completion, hover, definition, and semantic-token queries. Full-document semantic tokens classify only resolved identifiers; the TextMate grammar retains lexical and unresolved highlighting. Editor queries do not emit a C translation unit and tolerate missing tokens and incomplete expressions.
+`LanguageServiceSnapshot` is an immutable editor-facing view over syntax, bound-program semantic maps, compiler diagnostics, target-specific standard-library sources, and source positions. A per-document index shares syntax hierarchy, resolved expression types, parent, declaration, and scope information across completion, hover, definition, and semantic-token queries. Full-document semantic tokens classify only resolved identifiers; the TextMate grammar retains lexical and unresolved highlighting. Editor queries do not construct a C emitter, C writer, typed IR, or translation unit and tolerate missing tokens and incomplete expressions.
 
 The server applies versioned incremental document changes to in-memory text. Open buffers override disk sources. A 150 ms cancellable debounce publishes diagnostics and requests semantic-token refresh from the newest project snapshot. File and manifest changes invalidate cached snapshots. Semantic tokens use LSP UTF-16 delta encoding and full-document responses; range and delta-result protocols are deferred. One process owns all workspace folders and manifest-defined projects.
 
@@ -85,7 +85,7 @@ EmitResult result = compilation.EmitC(writer);
 
 `SyntaxTree` contains parser diagnostics immediately. `Compilation` lazily adds cached common and target-specific standard-library trees. Its public `SyntaxTrees` collection exposes only caller-supplied trees. `CompilationOptions` is immutable and defaults to `Hosted`.
 
-`GetDiagnostics()` runs declarations, the combined body pass, transitional IR construction, and target validation. It does not assemble the C translation unit. `EmitC()` consumes the cached result after successful analysis. Repeated emission is byte-identical.
+`GetDiagnostics()` runs declarations, immutable body binding, flow/effect analysis, and target validation. It does not construct a C emitter, C writer, typed IR, or translation unit. `EmitC()` lazily lowers and caches the backend result after successful analysis. Repeated emission is byte-identical.
 
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
@@ -142,16 +142,15 @@ Control-flow analysis carries explicit lexical scopes and assignment state.
 A bound expression contains:
 
 - Its resolved `CType`.
-- Ordered prerequisite statements.
-- A C expression for its value.
-- Optional lvalue store and address operations.
+- Its resolved declaration or method group.
 - Optional constant value information.
+- Its value, variable, type, method-group, or error category.
+- Its non-owning, borrowed, owned, or immortal ownership classification.
+- Immutable bound child expressions.
 
 Generated temporaries hold receivers and operands with side effects. Calls evaluate the receiver first. Arguments evaluate from left to right. Compound assignments evaluate their target once. Short-circuit operators lower the right operand into a conditional block.
 
-The combined lowering pass spills receivers, arguments, operands, indices, and compound targets in source order. The C emitter does not repeat name lookup, overload selection, type conversion, or flow analysis.
-
-The target architecture replaces the combined pass with immutable bound declarations and bodies, then lowers those bodies to typed operands, locals, blocks, calls, conversions, loads, stores, and branches. That replacement remains implementation work.
+Bound statements preserve lexical scopes, control-flow constructs, catches, finally regions, defers, and cleanup boundaries. Typed-IR lowering assigns typed values in source evaluation order and creates explicit blocks, checks, ownership operations, and terminators. The C emitter does not repeat name lookup, overload selection, type conversion, or diagnostic flow analysis.
 
 ## C emission
 
@@ -170,7 +169,7 @@ The emitter assembles one translation unit in this order:
 11. Symbol-retention routine.
 12. Hosted C `main` or ESP-IDF `app_main` wrapper.
 
-Emission first lowers all bodies and initializers into memory. This discovers every array specialization and string literal before section ordering begins.
+Emission lazily lowers the already validated bound program to typed IR. `CEmitter` then renders function bodies from that structured program before it orders runtime sections, so array specializations and string literals are registered deterministically without storing rendered C inside IR. Calling `GetDiagnostics()` never initializes those backend artifacts.
 
 Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
 
@@ -236,7 +235,7 @@ A new language feature must define syntax, binding, conversions, ordered lowerin
 
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
 
-ESP-IDF is a target profile, not a separate language backend. It reuses the parser, semantic model, transitional IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. Native GPIO and the singleton WS2812/RMT handle stay behind that shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
+ESP-IDF is a target profile, not a separate language backend. It reuses the parser, bound program, typed IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. Native GPIO and the singleton WS2812/RMT handle stay behind that shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 

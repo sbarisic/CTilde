@@ -23,7 +23,7 @@ The monitor must show `CTILDE_ESP_FAILURE_TEST` followed by runtime code `CTN000
 
 An earlier 2026-08-18 run on an ESP32-D0WDQ6-V3 revision 3.1 at `COM4` established the managed-runtime, failure, heap, stack, and yielding-delay behavior. That firmware alternated ordinary GPIO2 commands, which did not constitute a visible blink test after the hardware was identified as T-CAN485: GPIO2 is the SD MISO signal and the onboard light is an addressable WS2812 on GPIO4.
 
-The Draft 0.7 acceptance image must print these markers, live resource measurements, and the alternating LED command:
+The Draft 0.7 acceptance image was flashed and monitored on 2026-08-19. It printed:
 
 ```text
 C~ ESP-IDF hardware test
@@ -34,17 +34,17 @@ timer64: ok
 boxed: 7
 exception: caught on ESP32
 arc heap recovery: True
-free heap: 298172
-minimum free heap: 298172
-stack high water: 7744
-tick: 1
+free heap: 298012
+minimum free heap: 295468
+stack high water: 6960
+tick: 13
 CTILDE_ESP_OK
 ws2812: on
 ws2812: off
 ```
 
-The 2026-08-18 corrected run showed repeated 500 ms UART transitions without a watchdog reset, and the onboard RGB LED was confirmed to blink green in step with them. The failure image reported `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, called `abort()`, and rebooted with `SW_CPU_RESET`; `Program.ct` was then reflashed and its UART output rechecked as the final board state.
+The monitor observed more than ten 500 ms `ws2812: on/off` cycles without a watchdog reset. The same GPIO4 WS2812 path was previously confirmed by a person to blink the onboard RGB LED green in step with these commands. The Draft 0.7 failure image reported `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, called `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`.
 
-Fresh Draft 0.7 firmware builds measure 150,592 bytes for `esp32` and 153,952 bytes for `esp32c3`. At the 2026-08-19 hardware-validation point, `COM4` and the CH9102 device were not connected, so the numeric runtime values shown above remain the earlier 2026-08-18 board baseline rather than Draft 0.7 readings.
+Fresh Draft 0.7 firmware builds measure 150,592 bytes for `esp32` and 153,952 bytes for `esp32c3`. After the failure test, `Program.ct` was rebuilt, reflashed, and rechecked through `CTILDE_ESP_OK` and several additional WS2812 cycles. It is the final board state.
 
 Draft 0.7 uses single-threaded ARC; cycles leak and cleanup is not promised after fatal failures or reset. The WS2812 API owns one native strip handle for firmware lifetime; identical configuration is idempotent and conflicting reconfiguration fails. Only static-method function pointers invoked synchronously on the current C~ task are supported. Retained, cross-task, instance/delegate-to-C, and interrupt callbacks remain unsupported, as do multiple C~ tasks or strips. Permanent loops must keep live ownership bounded and call a yielding API such as `DelayMilliseconds`; a busy loop can trigger the ESP-IDF task watchdog.

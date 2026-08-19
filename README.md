@@ -101,7 +101,7 @@ using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
 ```
 
-`Compilation.GetDiagnostics()` returns structured diagnostics without requiring emission. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location.
+`Compilation.GetDiagnostics()` returns structured diagnostics from immutable bound bodies without initializing C emission or typed IR. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location. `EmitC()` lazily lowers the validated bound program and caches byte-identical output.
 
 The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
 

@@ -4,7 +4,7 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.7 has one compiler path:
+C~ draft 0.8 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 74 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 78 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -46,6 +46,9 @@ Text.Length < 10!
 42
 -9223372036854775808
 18446744073709551615
+42
+42
+42
 42
 Before deferred, i hope?
 deferred
@@ -100,6 +103,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
 | Definite assignment and reachability | Implemented | `do`, switch, read-only, constructor, and reachability tests |
 | Exact-width integers through `long`/`ulong` | Implemented | Suffix, boundary, promotion, wrapping, formatting, enum, boxing, and C ABI tests |
+| Native-sized `nint` and `nuint` | Implemented | Portable constants, promotions, wrapping, target-width shifts, overloads, formatting, boxing, and ABI tests |
 | Checked arrays and `foreach` | Implemented | Native iteration and failure tests |
 | Immutable UTF-8 strings | Implemented | Native concatenation, output, indexing, and length tests |
 | Expression precedence | Implemented | Pratt parser and deterministic emission test |
@@ -110,6 +114,9 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | `if`, loops, `switch`, `break`, and `continue` | Implemented | Label lowering and native tests |
 | Numeric, enum, null, and pointer conversions | Implemented | Positive and negative conversion tests |
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
+| `void*` data-pointer conversions | Implemented | Explicit typed conversion and operation-rejection tests |
+| `ref`, `in`, and `out` parameters | Implemented | Methods, constructors, delegates, function pointers, externs, flow, readonly, ARC, mangling, and pointer ABI tests |
+| Scoped native buffers and `stackalloc` | Implemented | Construction, conversion, flattening, bounds, count checks, escape diagnostics, and native fixtures |
 | Named single-cast delegates | Implemented | Static, instance, virtual, inherited/base, ARC receiver, identity, and null-invocation tests |
 | Unsafe unmanaged function pointers | Implemented | Structural signatures, trampolines, native round trip, unsafe checks, and fatal callback-exception test |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
@@ -133,6 +140,9 @@ The executable test project checks:
 - Unrelated reference-cast and integral-only operator diagnostics.
 - Pairwise overload ambiguity.
 - 64-bit suffixes, boundaries, conversions, promotions, wrapping arithmetic, shifts, boxing, formatting, enums, and switches.
+- Native-sized conversions, portable constant rules, target-dependent shifts, wrapping, boxing, formatting, overloads, and pointer differences.
+- By-reference modifier matching, addressability, readonly and definite-assignment flow, ARC slot replacement, delegate/function-pointer calls, and exact extern ABI mappings.
+- Native-buffer construction, writable/read-only views, checked indexing, stack-count failures, lexical loop rejection, scoped-storage restrictions, and flattened pointer-plus-length calls.
 - Delegate method-group selection, static and instance capture, virtual and base dispatch, ARC receiver lifetime, identity, and null invocation.
 - Unmanaged function-pointer parsing, exact signatures, native synchronous callback invocation, unsafe enforcement, and the `CTE0003` exception barrier.
 - `do` and switch return-flow analysis.
@@ -167,7 +177,7 @@ The runtime provides deterministic failures for null access, casts, unboxing, ar
 
 Exception handlers use one process-global `setjmp` and `longjmp` stack, one owning current-exception pointer, and one automatic cleanup-record stack. The implementation is single-threaded. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate. Handler frames record cleanup boundaries so throwing releases all exited owning slots before `longjmp`.
 
-The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
+The C ABI uses native target-width pointers and `nint`/`nuint`. The reviewed native run used a 64-bit MSVC target. Scoped native buffers use checked local pointer-plus-length values and flatten at call boundaries; stack allocation does not use the managed heap.
 
 ## Compiler pipeline status
 
@@ -197,25 +207,25 @@ Measured self-test firmware sizes are:
 
 | Target | Image | Flash code | Flash data | IRAM/DRAM |
 | --- | ---: | ---: | ---: | ---: |
-| `esp32` | 150,592-byte binary; 150,477-byte image | 61,958 bytes | 32,240 bytes | 45,003 bytes IRAM; 13,708 bytes DRAM |
-| `esp32c3` | 153,952-byte binary; 153,662-byte image | 77,174 bytes | 29,580 bytes | 50,972 bytes DRAM, including 39,972 bytes executable text |
+| `esp32` | 151,008-byte binary; 150,885-byte image | 62,254 bytes | 32,304 bytes | 45,003 bytes IRAM; 13,756 bytes DRAM |
+| `esp32c3` | 154,496-byte binary; 154,200-byte image | 77,604 bytes | 29,636 bytes | 51,024 bytes DRAM, including 39,976 bytes executable text |
 
-The Draft 0.7 self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `delegate: 42`, `function pointer: 42`, `timer64: ok`, `boxed: 7`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. After the strip was configured and cleared and the managed self-tests returned, the board reported 298,012 bytes of free heap, a 295,468-byte minimum, and 6,960 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
+The Draft 0.8 self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `delegate: 42`, `function pointer: 42`, `timer64: ok`, `native buffer: 42`, `boxed: 7`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. After the strip was configured and cleared and the managed self-tests returned, the board reported 297,964 bytes of free heap, a 295,420-byte minimum, and 6,960 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
 
-The RMT-backed GPIO4 WS2812 commands completed more than ten 500 ms on/off cycles without a watchdog reset. The same path was previously confirmed by a person to blink the onboard LED green. The separate Draft 0.7 failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`. The self-test image was then rebuilt, reflashed, and verified through `CTILDE_ESP_OK` and several additional LED cycles as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
+The RMT-backed GPIO4 WS2812 commands completed more than ten 500 ms on/off cycles without a watchdog reset. The same path was previously confirmed by a person to blink the onboard LED green. The separate Draft 0.8 failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `rst:0xc (SW_CPU_RESET)`. The Draft 0.8 self-test image was then rebuilt, reflashed, and verified through every marker and several additional LED cycles as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
 
-The Draft 0.7 ESP acceptance source repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks the 64-bit timer, an instance delegate with virtual dispatch, and a synchronous unmanaged callback. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, complete `esp32` and `esp32c3` firmware links pass with the fresh sizes above, and the physical-board acceptance sequence is complete.
+The Draft 0.8 ESP acceptance source repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks the 64-bit timer, an instance delegate with virtual dispatch, a synchronous unmanaged callback, and one stack-backed byte buffer passed through the flattened shim ABI. Both Xtensa and RISC-V ESP cross-compilers accepted it with warnings as errors, complete `esp32` and `esp32c3` firmware links passed with the sizes above, and its physical-board acceptance sequence is complete.
 
 ## Deliberately deferred
 
-These features are outside draft 0.7:
+These features are outside draft 0.8:
 
 - Interfaces and abstract types.
-- Generics.
+- General user-defined generics; only intrinsic native-buffer forms exist.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
 - General exceptions across native boundaries and thread-safe handler state.
 - Lambdas, closures, multicast delegates, exported methods, retained/cross-task callbacks, and callback lifetime management.
-- Native-sized integers, opaque native handles, native strings and buffers, and `ref`/`in`/`out` ABI parameters.
+- Opaque native handles, scoped native strings, ownership attributes, header-driven bindings, and exported or retained callbacks.
 - Header-driven ESP-IDF bindings for configuration structures, constants, macros, and static-inline functions.
 - Typed `esp_err_t` results and native resource ownership diagnostics.
 - FreeRTOS task attachment, `volatile`, atomics, and compiler-checked ISR or IRAM execution profiles.
@@ -224,7 +234,7 @@ These features are outside draft 0.7:
 - Nullable reference analysis.
 - Reflection and dynamic binding.
 - Async methods and tasks.
-- Named, optional, `ref`, `in`, `out`, and parameter-array arguments.
+- Named, optional, implicit by-reference, reference-return, reference-local, and parameter-array arguments.
 - Multidimensional and jagged arrays.
 - String interpolation and raw or verbatim strings.
 - Weak references, cycle collection, finalizers, and automatic disposal.
@@ -232,7 +242,7 @@ These features are outside draft 0.7:
 
 ## Release gate
 
-A draft 0.7 release requires:
+A draft 0.8 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -242,4 +252,4 @@ A draft 0.7 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.7 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.
+Draft 0.8 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The Draft 0.8 compiler, editor, cross-build, and T-CAN485 acceptance gates are complete.

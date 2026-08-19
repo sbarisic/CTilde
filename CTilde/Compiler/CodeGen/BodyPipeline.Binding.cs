@@ -1,4 +1,3 @@
-using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 
@@ -6,116 +5,6 @@ namespace CTilde;
 
 internal sealed partial class BodyPipeline
 {
-    private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, SyntaxNode syntax)
-    {
-        var matches = candidates
-            .Where(candidate => candidate.Parameters.Length == arguments.Count)
-            .Where(candidate => candidate.Parameters
-                .Select((parameter, index) => CanConvertExpression(arguments[index], parameter.Type))
-                .All(valid => valid))
-            .ToArray();
-        if (matches.Length == 0)
-        {
-            Report("CT2122", $"No overload of '{name}' accepts the supplied argument types.", syntax);
-            return null;
-        }
-        var winners = matches.Where(candidate => matches.All(other =>
-            ReferenceEquals(candidate, other) || IsBetterCandidate(candidate, other, arguments))).ToArray();
-        if (winners.Length != 1)
-        {
-            Report("CT2123", $"Call to '{name}' is ambiguous.", syntax);
-            return null;
-        }
-        return winners[0];
-    }
-
-    private static bool IsBetterCandidate(MethodSymbol candidate, MethodSymbol other, IReadOnlyList<LoweredExpression> arguments)
-    {
-        var better = false;
-        for (var index = 0; index < arguments.Count; index++)
-        {
-            var comparison = CompareConversion(arguments[index].Type, candidate.Parameters[index].Type, other.Parameters[index].Type);
-            if (comparison > 0)
-                return false;
-            better |= comparison < 0;
-        }
-        return better;
-    }
-
-    private static int CompareConversion(CType source, CType leftTarget, CType rightTarget)
-    {
-        if (leftTarget == rightTarget)
-            return 0;
-        if (source == leftTarget)
-            return -1;
-        if (source == rightTarget)
-            return 1;
-        var leftToRight = TypeFacts.CanImplicitlyConvert(leftTarget, rightTarget);
-        var rightToLeft = TypeFacts.CanImplicitlyConvert(rightTarget, leftTarget);
-        if (leftToRight != rightToLeft)
-            return leftToRight ? -1 : 1;
-        if (source.IsIntegral && leftTarget.IsIntegral && rightTarget.IsIntegral)
-        {
-            var leftSigned = leftTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
-            var rightSigned = rightTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
-            if (leftSigned != rightSigned)
-                return leftSigned ? -1 : 1;
-        }
-        return 0;
-    }
-
-    private static bool CanConvertExpression(LoweredExpression expression, CType target) =>
-        expression.MethodGroup is { } group
-            ? target.Kind == CTypeKind.Delegate && FindDelegateMethod(group, target.Symbol!) is not null
-            : TypeFacts.CanImplicitlyConvert(expression.Type, target);
-
-    private static MethodSymbol? FindDelegateMethod(MethodGroupBinding group, TypeSymbol delegateType)
-    {
-        var matches = group.Candidates.Where(candidate =>
-            candidate.ReturnType == delegateType.DelegateReturnType &&
-            candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(delegateType.DelegateParameters.Select(parameter => parameter.Type))).ToArray();
-        return matches.Length == 1 ? matches[0] : null;
-    }
-
-    private (List<string> Prelude, List<string> Codes) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ExpressionSyntax> syntax)
-    {
-        var prelude = new List<string>();
-        var codes = new List<string>();
-        for (var index = 0; index < arguments.Count; index++)
-        {
-            var converted = Convert(arguments[index], parameters[index].Type, syntax[index], false);
-            prelude.AddRange(converted.Prelude);
-            if (converted.Type.Kind == CTypeKind.Void)
-            {
-                codes.Add(converted.Code);
-                continue;
-            }
-            var temp = NewTemp();
-            prelude.Add($"{_emitter.CDeclaration(converted.Type, temp)} = {converted.Code};");
-            if (parameters[index].IsRetained)
-                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
-            codes.Add(temp);
-        }
-        return (prelude, codes);
-    }
-
-    private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ExpressionSyntax> syntax)
-    {
-        var prelude = new List<string>();
-        var codes = new List<string>();
-        for (var index = 0; index < arguments.Count; index++)
-        {
-            var converted = Convert(arguments[index], parameters[index].Type, syntax[index], false);
-            prelude.AddRange(converted.Prelude);
-            var slot = $"ct_df_{_deferId}_arg_{index}";
-            AddCapturedSlot(prelude, converted.Type, slot, converted.Code);
-            codes.Add(parameters[index].IsRetained
-                ? $"(ct_retain((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
-                : Durable(slot));
-        }
-        return (prelude, codes);
-    }
-
     private LoweredExpression LowerCast(CastExpressionSyntax syntax)
     {
         var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
@@ -192,6 +81,11 @@ internal sealed partial class BodyPipeline
                 Report("CT2125", "The dereference operator requires a pointer.", syntax.Operand);
                 return ErrorExpression(pointer.Prelude);
             }
+            if (pointer.Type.ElementType == CType.Void)
+            {
+                Report("CT2180", "void* cannot be dereferenced.", syntax);
+                return ErrorExpression(pointer.Prelude);
+            }
             var dereferenceCode = $"*({pointer.Code})";
             return new LoweredExpression
             {
@@ -233,7 +127,7 @@ internal sealed partial class BodyPipeline
             return ErrorExpression(operandExpression.Prelude);
         }
         var promoted = operandExpression.Type.Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char ? CType.Int : operandExpression.Type;
-        if (syntax.OperatorKind == SyntaxKind.MinusToken && promoted.Kind is CTypeKind.Uint or CTypeKind.Ulong)
+        if (syntax.OperatorKind == SyntaxKind.MinusToken && promoted.Kind is CTypeKind.Uint or CTypeKind.Ulong or CTypeKind.Nuint)
         {
             Report("CT2145", "Unary minus requires a signed numeric operand.", syntax);
             return ErrorExpression(operandExpression.Prelude);
@@ -244,6 +138,7 @@ internal sealed partial class BodyPipeline
             SyntaxKind.PlusToken => operandValue.Code,
             SyntaxKind.MinusToken when promoted == CType.Int => $"ct_i32_neg({operandValue.Code})",
             SyntaxKind.MinusToken when promoted == CType.Long => $"ct_i64_neg({operandValue.Code})",
+            SyntaxKind.MinusToken when promoted == CType.Nint => $"ct_ni_neg({operandValue.Code})",
             SyntaxKind.MinusToken => $"-({operandValue.Code})",
             SyntaxKind.TildeToken => $"~({operandValue.Code})",
             _ => operandValue.Code,
@@ -365,6 +260,10 @@ internal sealed partial class BodyPipeline
                 SyntaxKind.GreaterGreaterToken when common == CType.Long => $"ct_i64_shr({left.Code}, {right.Code})",
                 SyntaxKind.LessLessToken when common == CType.Ulong => $"({left.Code} << ((uint32_t){right.Code} & 63u))",
                 SyntaxKind.GreaterGreaterToken when common == CType.Ulong => $"({left.Code} >> ((uint32_t){right.Code} & 63u))",
+                SyntaxKind.LessLessToken when common == CType.Nint => $"ct_ni_shl({left.Code}, {right.Code})",
+                SyntaxKind.GreaterGreaterToken when common == CType.Nint => $"ct_ni_shr({left.Code}, {right.Code})",
+                SyntaxKind.LessLessToken when common == CType.Nuint => $"({left.Code} << ((uint32_t){right.Code} & (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u)))",
+                SyntaxKind.GreaterGreaterToken when common == CType.Nuint => $"({left.Code} >> ((uint32_t){right.Code} & (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u)))",
                 SyntaxKind.LessLessToken => $"({left.Code} << ((uint32_t){right.Code} & 31u))",
                 SyntaxKind.GreaterGreaterToken => $"({left.Code} >> ((uint32_t){right.Code} & 31u))",
                 _ => $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})",
@@ -372,13 +271,26 @@ internal sealed partial class BodyPipeline
             return new LoweredExpression { Type = common, Code = code, Prelude = prelude };
         }
 
-        if (left.Type.Kind == CTypeKind.Pointer && right.Type.IsIntegral && syntax.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken)
+        if (left.Type.Kind == CTypeKind.Pointer && right.Type.Kind is CTypeKind.Int or CTypeKind.Nint && syntax.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken)
+        {
+            RequireUnsafe(syntax);
+            if (left.Type.ElementType == CType.Void)
+            {
+                Report("CT2180", "void* does not support pointer arithmetic.", syntax);
+                return ErrorExpression(left.Prelude.Concat(right.Prelude));
+            }
+            left = Materialize(left, syntax.Left);
+            right = Materialize(Convert(right, right.Type, syntax.Right, false), syntax.Right);
+            var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
+            return new LoweredExpression { Type = left.Type, Code = $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})", Prelude = prelude };
+        }
+        if (left.Type.Kind == CTypeKind.Pointer && right.Type == left.Type && syntax.OperatorKind == SyntaxKind.MinusToken)
         {
             RequireUnsafe(syntax);
             left = Materialize(left, syntax.Left);
-            right = Materialize(Convert(right, CType.Int, syntax.Right, false), syntax.Right);
+            right = Materialize(right, syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
-            return new LoweredExpression { Type = left.Type, Code = $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})", Prelude = prelude };
+            return new LoweredExpression { Type = CType.Nint, Code = $"(intptr_t)({left.Code} - {right.Code})", Prelude = prelude };
         }
 
         if (!left.Type.IsNumeric || !right.Type.IsNumeric)
@@ -548,6 +460,8 @@ internal sealed partial class BodyPipeline
 
     private void ValidateAssignmentTarget(LoweredLValue lvalue, SyntaxNode syntax)
     {
+        if (lvalue.Parameter?.PassingKind == ParameterPassingKind.In)
+            Report("CT2173", $"In parameter '{lvalue.Parameter.Name}' is read-only.", syntax);
         if (lvalue.Local is { IsConst: true })
             Report("CT2134", $"Const local '{lvalue.Local.Name}' cannot be assigned.", syntax);
         if (lvalue.Local is { IsReadonly: true } readonlyLocal &&
@@ -574,6 +488,14 @@ internal sealed partial class BodyPipeline
             _assignedFields.Add(lvalue.Field);
             _fieldAssignmentCounts[lvalue.Field] = _fieldAssignmentCounts.GetValueOrDefault(lvalue.Field) + 1;
         }
+        if (lvalue.Parameter?.PassingKind == ParameterPassingKind.Out)
+            _assignedOutParameters.Add(lvalue.Parameter);
+    }
+
+    private void ValidateOutParameters(SyntaxNode syntax)
+    {
+        foreach (var parameter in _method.Parameters.Where(parameter => parameter.PassingKind == ParameterPassingKind.Out && !_assignedOutParameters.Contains(parameter)))
+            Report("CT2175", $"Out parameter '{parameter.Name}' must be assigned on every normal return.", syntax);
     }
 
     private string NumericOperation(SyntaxKind operation, CType type, string left, string right, SyntaxNode syntax)
@@ -620,6 +542,27 @@ internal sealed partial class BodyPipeline
                 _ => $"({left} {OperatorText(operation)} {right})",
             };
         }
+        if (type == CType.Nint)
+        {
+            return operation switch
+            {
+                SyntaxKind.PlusToken => $"ct_ni_add({left}, {right})",
+                SyntaxKind.MinusToken => $"ct_ni_sub({left}, {right})",
+                SyntaxKind.StarToken => $"ct_ni_mul({left}, {right})",
+                SyntaxKind.SlashToken => $"ct_ni_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_ni_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                _ => $"({left} {OperatorText(operation)} {right})",
+            };
+        }
+        if (type == CType.Nuint)
+        {
+            return operation switch
+            {
+                SyntaxKind.SlashToken => $"ct_nu_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_nu_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                _ => $"({left} {OperatorText(operation)} {right})",
+            };
+        }
         return $"({left} {OperatorText(operation)} {right})";
     }
 
@@ -640,8 +583,15 @@ internal sealed partial class BodyPipeline
                 ConstantValue = expression.ConstantValue,
                 Ownership = expression.Ownership,
             };
+        if (expression.Type.Kind == CTypeKind.NativeBuffer && target.Kind == CTypeKind.ReadOnlyNativeBuffer && expression.Type.ElementType == target.ElementType)
+            return new LoweredExpression
+            {
+                Type = target,
+                Code = $"({_emitter.CTypeName(target)}){{ ({expression.Code}).Data, ({expression.Code}).Length }}",
+                Prelude = expression.Prelude,
+            };
         var sourceType = expression.Type;
-        var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(sourceType, target) : TypeFacts.CanImplicitlyConvert(sourceType, target);
+        var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(sourceType, target) : TypeFacts.CanImplicitlyConvert(sourceType, target) || CanImplicitNativeConstant(expression, target);
         if (!valid)
         {
             Report("CT2137", $"Cannot {(explicitConversion ? "cast" : "implicitly convert")} '{expression.Type.DisplayName}' to '{target.DisplayName}'.", syntax);
@@ -693,7 +643,8 @@ internal sealed partial class BodyPipeline
         var signature = target.FunctionPointer!;
         var matches = expression.MethodGroup!.Candidates.Where(candidate =>
             candidate.IsStatic && candidate.ReturnType == signature.ReturnType &&
-            candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(signature.ParameterTypes)).ToArray();
+            candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(signature.ParameterTypes) &&
+            candidate.Parameters.Select(parameter => parameter.PassingKind).SequenceEqual(signature.PassingKinds)).ToArray();
         if (matches.Length != 1)
         {
             Report("CT2163", "Method address is not uniquely compatible with the unmanaged function-pointer signature.", syntax);
@@ -822,5 +773,5 @@ internal sealed partial class BodyPipeline
     }
 
     private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type) => type.BaseTypesAndSelf();
-    private static string MethodSignatureKey(MethodSymbol method) => $"{method.Name}:{string.Join(',', method.Parameters.Select(parameter => NameMangler.TypeCode(parameter.Type)))}:{method.IsStatic}";
+    private static string MethodSignatureKey(MethodSymbol method) => $"{method.Name}:{string.Join(',', method.Parameters.Select(parameter => $"{parameter.PassingKind}:{NameMangler.TypeCode(parameter.Type)}"))}:{method.IsStatic}";
 }

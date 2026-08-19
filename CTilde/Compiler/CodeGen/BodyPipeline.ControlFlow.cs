@@ -18,6 +18,7 @@ internal sealed partial class BodyPipeline
             Report("CT3106", "A constructor cannot contain a return statement in draft 0.7.", syntax);
             return;
         }
+        ValidateOutParameters(syntax);
         if (_method.ReturnType == CType.Void)
         {
             if (syntax.Expression is not null)
@@ -507,7 +508,8 @@ internal sealed partial class BodyPipeline
     private AssignmentSnapshot SnapshotAssignments() => new(
         ActiveLocals().ToDictionary(local => local, local => (local.IsAssigned, local.AssignmentCount)),
         [.. _assignedFields],
-        new Dictionary<FieldSymbol, int>(_fieldAssignmentCounts));
+        new Dictionary<FieldSymbol, int>(_fieldAssignmentCounts),
+        [.. _assignedOutParameters]);
 
     private void RestoreAssignments(AssignmentSnapshot snapshot)
     {
@@ -521,6 +523,8 @@ internal sealed partial class BodyPipeline
         _fieldAssignmentCounts.Clear();
         foreach (var pair in snapshot.FieldCounts)
             _fieldAssignmentCounts[pair.Key] = pair.Value;
+        _assignedOutParameters.Clear();
+        _assignedOutParameters.UnionWith(snapshot.OutParameters);
     }
 
     private static AssignmentSnapshot MergeAssignments(AssignmentSnapshot before, AssignmentSnapshot thenState, AssignmentSnapshot elseState)
@@ -535,7 +539,9 @@ internal sealed partial class BodyPipeline
         var fieldCounts = thenState.FieldCounts.Keys.Concat(elseState.FieldCounts.Keys).Distinct().ToDictionary(
             field => field,
             field => Math.Max(thenState.FieldCounts.GetValueOrDefault(field), elseState.FieldCounts.GetValueOrDefault(field)));
-        return new AssignmentSnapshot(locals, fields, fieldCounts);
+        var outParameters = new HashSet<ParameterSymbol>(thenState.OutParameters);
+        outParameters.IntersectWith(elseState.OutParameters);
+        return new AssignmentSnapshot(locals, fields, fieldCounts, outParameters);
     }
 
     private void EmitExceptionFrameStorage(ILoweringWriter writer)
@@ -565,7 +571,7 @@ internal sealed partial class BodyPipeline
     {
         if (_durableParameters.Count == 0)
             return;
-        foreach (var parameter in _method.Parameters)
+        foreach (var parameter in _method.Parameters.Where(_durableParameters.ContainsKey))
         {
             var storage = _durableParameters[parameter];
             var parameterName = NameMangler.Identifier(parameter.Name);
@@ -642,7 +648,10 @@ internal sealed partial class BodyPipeline
         var fieldCounts = states.SelectMany(state => state.FieldCounts.Keys).Distinct().ToDictionary(
             field => field,
             field => states.Max(state => state.FieldCounts.GetValueOrDefault(field)));
-        return new AssignmentSnapshot(locals, fields, fieldCounts);
+        var outParameters = new HashSet<ParameterSymbol>(first.OutParameters);
+        foreach (var state in states.Skip(1))
+            outParameters.IntersectWith(state.OutParameters);
+        return new AssignmentSnapshot(locals, fields, fieldCounts, outParameters);
     }
 
     private static AssignmentSnapshot ApplyFinallyAssignments(AssignmentSnapshot protectedState, AssignmentSnapshot before, AssignmentSnapshot finallyState)
@@ -662,7 +671,9 @@ internal sealed partial class BodyPipeline
             field => field,
             field => protectedState.FieldCounts.GetValueOrDefault(field) +
                 Math.Max(0, finallyState.FieldCounts.GetValueOrDefault(field) - before.FieldCounts.GetValueOrDefault(field)));
-        return new AssignmentSnapshot(locals, fields, fieldCounts);
+        var outParameters = new HashSet<ParameterSymbol>(protectedState.OutParameters);
+        outParameters.UnionWith(finallyState.OutParameters);
+        return new AssignmentSnapshot(locals, fields, fieldCounts, outParameters);
     }
 
     private void ValidateFinallyReadonlyAssignments(AssignmentSnapshot protectedState, AssignmentSnapshot before, AssignmentSnapshot finallyState, FinallyClauseSyntax syntax)
@@ -711,7 +722,8 @@ internal sealed partial class BodyPipeline
     private sealed record AssignmentSnapshot(
         Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount)> Locals,
         HashSet<FieldSymbol> Fields,
-        Dictionary<FieldSymbol, int> FieldCounts);
+        Dictionary<FieldSymbol, int> FieldCounts,
+        HashSet<ParameterSymbol> OutParameters);
 
     private sealed record ActiveHandler(string Name, int BreakDepth, int ContinueDepth);
     private sealed record FinallyContext(int TryId, string CleanupLabel, int HandlerDepth, int BreakDepth, int ContinueDepth, string? BreakTarget, string? ContinueTarget);

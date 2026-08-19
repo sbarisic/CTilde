@@ -128,7 +128,15 @@ public sealed partial class LanguageServiceSnapshot
         foreach (var syntax in index.Nodes.OfType<TypeSyntax>())
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var type = _model.ResolveType(syntax, tree, false).Symbol;
+            var resolved = _model.ResolveType(syntax, tree, false);
+            if (resolved.IsNativeBuffer)
+            {
+                var intrinsic = IdentifierTokens(tree, syntax.Span).FirstOrDefault();
+                if (intrinsic is not null)
+                    Add(result, intrinsic.Span, LanguageSemanticTokenKind.Struct, LanguageSemanticTokenModifiers.DefaultLibrary);
+                continue;
+            }
+            var type = resolved.Symbol;
             if (type is null)
                 continue;
             var identifiers = IdentifierTokens(tree, syntax.Span).ToArray();

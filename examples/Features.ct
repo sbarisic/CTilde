@@ -1,4 +1,5 @@
 using System;
+using System.Runtime;
 
 namespace Examples;
 
@@ -74,6 +75,17 @@ public static class Program
     }
 
     [NoAlloc]
+    private static void UpdateNative(ref int value, in int delta, out uint result)
+    {
+        value = value + delta;
+        result = (uint)value;
+    }
+
+    [Extern("ct_native_buffer_sum")]
+    [NoAlloc]
+    private static unsafe uint NativeBufferSum(ReadOnlyNativeBuffer<byte> buffer);
+
+    [NoAlloc]
     private static void ShowDeferredCleanup()
     {
         defer Console.WriteLine("deferred");
@@ -143,6 +155,25 @@ public static class Program
         Console.WriteLine(unsignedBoundary);
         LongTransformer transformer = TransformLong;
         Console.WriteLine(transformer(41L));
+
+        nint nativeValue = 40;
+        nuint nativeDelta = 2U;
+        Console.WriteLine(nativeValue + (nint)nativeDelta);
+
+        int updated = 40;
+        readonly int delta = 2;
+        uint updateResult;
+        UpdateNative(ref updated, in delta, out updateResult);
+        Console.WriteLine(updateResult);
+
+        unsafe
+        {
+            NativeBuffer<byte> buffer = stackalloc byte[2];
+            buffer[0] = (byte)40;
+            buffer[1] = (byte)2;
+            ReadOnlyNativeBuffer<byte> readable = buffer;
+            Console.WriteLine(NativeBufferSum(readable));
+        }
 
         ShowDeferredCleanup();
     }

@@ -1,12 +1,12 @@
 # C~ language specification
 
-Specification version: draft 0.7
+Specification version: draft 0.8
 
 ## Status
 
-This document is the normative specification for C~ draft 0.7.
+This document is the normative specification for C~ draft 0.8.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.7 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.8 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -101,7 +101,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.7 has no aliases and no `using static`.
+Draft 0.8 has no aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -125,12 +125,12 @@ catch     char       class      const      continue   default
 defer     delegate   do         else       enum       false
 finally   float      for        foreach    get        if
 in        int        internal   is         long       namespace
-new       null       object     override   private    protected
-public    readonly   return     sbyte      sealed     set
-short     static     string     struct     switch     this
-throw     true       try        uint       ulong      unmanaged
-unsafe    ushort     using      var        virtual   void
-while
+new       nint       nuint      null       object     out
+override  private    protected  public     readonly   ref
+return    sbyte      sealed     set        short      stackalloc
+static    string     struct     switch     this       throw
+true      try        uint       ulong      unmanaged  unsafe
+ushort    using      var        virtual    void       while
 ```
 
 `get` and `set` are meaningful only in property declarations. `default` is a switch label.
@@ -171,7 +171,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.7 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.8 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -199,6 +199,8 @@ Every expression has a compile-time type before C emission.
 | `uint` | Unsigned value | 4 bytes |
 | `long` | Signed value | 8 bytes |
 | `ulong` | Unsigned value | 8 bytes |
+| `nint` | Signed value | Target pointer width |
+| `nuint` | Unsigned value | Target pointer width |
 | `float` | IEEE-754 binary32 value | 4 bytes |
 | `string` | Managed reference | Target pointer width |
 | `object` | Managed root reference | Target pointer width |
@@ -206,7 +208,7 @@ Every expression has a compile-time type before C emission.
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.7 has no `double`, `decimal`, `nint`, or `nuint`.
+Draft 0.8 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -226,13 +228,15 @@ byte[] data = new byte[256];
 
 Every array has a read-only `Length` property of type `int`. Indexing starts at zero and checks the receiver, index, and length.
 
-Draft 0.7 has no multidimensional or jagged arrays.
+Draft 0.8 has no multidimensional or jagged arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
 `T*` is a native pointer to `T`. Pointer syntax and operations require an `unsafe` method or block.
 
 Pointer arithmetic scales by the pointed element size. Dereference and pointer indexing do not perform managed null or bounds checks.
+
+Pointer addition and subtraction accept `int` or `nint` offsets. Subtracting compatible pointers produces `nint`. `void*` represents an untyped data pointer: every data pointer converts to it implicitly, conversion back requires an explicit cast, and it cannot be dereferenced, indexed, or used in pointer arithmetic. Function pointers and managed references do not convert to `void*`.
 
 Every type that recursively contains a pointer requires an unsafe context. This rule includes arrays such as `T*[]`.
 
@@ -245,7 +249,22 @@ delegate* unmanaged<int, int> callback = &Transform;
 delegate* unmanaged<void> notify = &Notify;
 ```
 
-The final type is the return type; `delegate* unmanaged<void>` has no parameters and returns `void`. Signature elements are limited to `void` as a return, Boolean, numeric, enum, and unsafe-pointer types. Declarations, address acquisition, storage, casts, comparisons, and calls require an unsafe context. `&StaticMethod` creates a translation-unit-local C ABI trampoline; `&ExternMethod` uses the declared native symbol. Instance methods and managed signature elements are rejected. Function pointers compare only with the same function-pointer type or `null`; they have no arithmetic or dereference operations.
+The final type is the return type; `delegate* unmanaged<void>` has no parameters and returns `void`. Parameters can use `ref`, `in`, or `out`. Signature elements are limited to `void` as a return, Boolean, numeric, enum, unsafe-pointer, and intrinsic native-buffer types. By-reference native elements must be unmanaged ABI-safe. Declarations, address acquisition, storage, casts, comparisons, and calls require an unsafe context. `&StaticMethod` creates a translation-unit-local C ABI trampoline; `&ExternMethod` uses the declared native symbol. Instance methods and managed signature elements are rejected. Function pointers compare only with the same function-pointer type or `null`; they have no arithmetic or dereference operations.
+
+### Native buffers and stack allocation
+
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic scoped value types. They are the only generic forms in draft 0.8. `T` must be a complete unmanaged type and cannot be `void`, an array, a managed reference, a delegate, or a reference-bearing structure.
+
+Both views expose `nuint Length` and `T* Pointer`. Writable buffers have checked read/write indexing; read-only buffers have checked read-only indexing. Indexes use `nuint`. Writable-to-read-only conversion is implicit. Constructing a view from `(T* pointer, nuint length)` requires an unsafe context.
+
+```csharp
+NativeBuffer<byte> data = stackalloc byte[128];
+ReadOnlyNativeBuffer<byte> input = data;
+```
+
+`stackalloc T[count]` returns `NativeBuffer<T>`. The count is `int` or `nuint`; negative `int` values fail, zero produces `{ null, 0 }`, and size multiplication is checked before aligned compiler alloca storage is requested. Lexical stack allocation inside a loop is rejected because the storage lasts until method return. It is permitted in `[NoAlloc]` code.
+
+Buffers can be locals and value parameters and can pass through nested synchronous calls. They cannot escape through fields, properties, arrays, boxing, managed structures, static storage, returns, delegates, or by-reference parameters. At every C ABI boundary a buffer parameter expands to adjacent pointer and `size_t` length parameters; read-only data pointers are `const`.
 
 ### Enumerations
 
@@ -269,7 +288,7 @@ Identity conversions are implicit.
 
 An implicit numeric conversion is valid when the target range contains every source value. Integral values can also convert implicitly to `float` because the range fits, although precision can change.
 
-Binary numeric promotion first selects `float` when either operand is floating-point. `ulong` combines only with unsigned integral types. `long` combines with every integral type except `ulong`. `uint` combined with a signed integral type promotes to `long`. Remaining small integers promote to `int` or `uint`.
+Binary numeric promotion first selects `float` when either operand is floating-point. `nint` with signed types through `int` produces `nint`, while `nint` with `long` produces `long`. `nuint` with unsigned types through `uint` produces `nuint`, while `nuint` with `ulong` produces `ulong`. Mixing `nint` with `uint`, `nuint`, or `ulong`, or mixing `nuint` with a signed type, requires an explicit cast. `ulong` otherwise combines only with unsigned integral types. `long` combines with every non-native integral type except `ulong`. `uint` combined with a signed integral type promotes to `long`. Remaining small integers promote to `int` or `uint`.
 
 All other numeric conversions require a cast. Explicit numeric conversions truncate high bits. There is no checked-overflow context.
 
@@ -279,7 +298,7 @@ Every class, array, and string converts implicitly to `object`. A value type con
 
 Pointer boxing requires an unsafe context. Boxing creates a new managed object and copies the value.
 
-An explicit cast can convert between integral and enum types. An unsafe explicit cast can convert one raw pointer type to another.
+An explicit cast can convert between numeric types and between fixed-width integral and enum types. `nint` and `nuint` cannot underlie an enum. An unsafe explicit cast can convert one raw pointer type to another.
 
 An explicit cast can downcast a class reference or unbox an exact value type. A failed cast terminates with a stable runtime error.
 
@@ -336,7 +355,7 @@ public delegate int Transformer(int value);
 
 A compatible method group converts contextually to that delegate. Overload resolution uses the delegate's exact parameter and return types. Static, instance, inherited, virtual, and `base` method groups are supported. An instance delegate retains its receiver; virtual invocation dispatches against the captured receiver, while `base.Method` remains a direct base call.
 
-Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation reports `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.7 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
+Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation reports `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.8 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
 
 ### Classes
 
@@ -443,7 +462,11 @@ The compiler compares candidates for each argument. Identity is better than wide
 
 A candidate must be no worse for every argument. It must also be better for at least one argument. Otherwise, the call reports `CT2123`.
 
-Draft 0.7 has no optional, named, `ref`, `in`, `out`, or parameter-array arguments.
+Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site must use the same modifier, and passing kind is part of overload and delegate/function-pointer signature matching. `ref` requires an assigned writable variable, `in` requires an assigned addressable variable and is read-only in the callee, and `out` is unreadable until assigned and must be assigned on every normal return. Properties, constants, literals, and temporaries are not by-reference arguments. Readonly storage can be passed only with `in`.
+
+An `out` call releases and zeroes an existing managed/reference-bearing destination before transfer. Normal return assigns the caller slot; exceptional control does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
+
+Draft 0.8 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### Evaluation order
 
@@ -477,13 +500,13 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 ### Native calls and callbacks
 
-Extern methods and unmanaged function pointers cover direct calls from C~ to exact C symbols and signatures. They do not provide native header imports, native-sized integers, opaque native handles, native UTF-8 and buffer views, `ref`/`in`/`out` arguments, exported C~ methods, or retained callbacks.
+Extern methods and unmanaged function pointers cover direct calls from C~ to exact C symbols and signatures, including native-sized scalars, unmanaged `ref`/`in`/`out`, and flattened native-buffer parameters. They do not provide native header imports, opaque native handles, native UTF-8 strings, exported C~ methods, or retained callbacks.
 
 Ordinary parameters are borrowed for the duration of a call. `[Retained]` accepts no arguments and is valid only on a direct class, array, or string parameter of an extern method. The compiler retains that argument immediately before the call and transfers the additional ownership count to native code. Invalid uses report `CT1234`.
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.7 supports a C~ static-method trampoline passed as an unmanaged function pointer to native code and invoked synchronously on the current C~ task. An exception escaping that callback runs C~ cleanup and terminates with `CTE0003`; it never unwinds through native frames. Cross-task, retained, ISR, and exported callbacks remain unsupported.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.8 supports a C~ static-method trampoline passed as an unmanaged function pointer to native code and invoked synchronously on the current C~ task. An exception escaping that callback runs C~ cleanup and terminates with `CTE0003`; it never unwinds through native frames. Cross-task, retained, ISR, and exported callbacks remain unsupported.
 
 ### NoAlloc
 
@@ -497,7 +520,7 @@ Allocating operations are class and array construction, boxing, delegate creatio
 
 The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.7 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
+Draft 0.8 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
 
 ## Object and array creation
 
@@ -559,7 +582,7 @@ References, delegates, and pointers can compare with `null`. String equality com
 
 Integral types and enums support `~`, `&`, `|`, `^`, `<<`, and `>>`. Binary enum bitwise operands must have the same enum type.
 
-A shift count uses its low six bits for `long` and `ulong`, and its low five bits for 32-bit and smaller integral values, after conversion to `int`.
+A shift count uses its low six bits for `long` and `ulong`, its low five bits for fixed 32-bit and smaller integral values, and the low five or six bits for `nint` and `nuint` according to the target pointer width, after conversion to `int`.
 
 ### Assignment
 
@@ -583,7 +606,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.7 has no pattern cases and no `goto case`.
+Draft 0.8 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -605,7 +628,7 @@ Constructors do not use a C~ return statement.
 
 `defer Call(args);` schedules one method invocation for the end of the containing braced block. The receiver and converted arguments are evaluated in source order and copied into hidden durable automatic storage when execution reaches the statement. A returned value is discarded. A non-call expression reports `CT2156`.
 
-Deferred calls run in reverse registration order on fallthrough, `return`, `break`, `continue`, and C~ exception propagation. A defer in a loop block registers once for each executed iteration. `defer` must be a direct member of a braced block; an `if`, loop, or switch section must add braces around it. Invalid placement reports `CT3111`.
+Deferred calls run in reverse registration order on fallthrough, `return`, `break`, `continue`, and C~ exception propagation. A deferred by-reference call can refer to a local that remains in the enclosing lexical scope; it runs before that local's ownership cleanup. A defer in a loop block registers once for each executed iteration. `defer` must be a direct member of a braced block; an `if`, loop, or switch section must add braces around it. Invalid placement reports `CT3111`.
 
 If cleanup throws, older enclosing defers still run. The final cleanup exception replaces an earlier exception or pending return, matching nested `finally` behavior. Fatal runtime failures, `Environment.Exit`, native `abort`, reset, and power loss do not run deferred calls.
 
@@ -646,7 +669,7 @@ Exceptions are unchecked. Every call can complete by throwing. A throw from a ca
 
 A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
-Exception filters, inner exceptions, stack traces, specialized exception subclasses, and automatic disposal are not part of draft 0.7. An exception that escapes a supported synchronous unmanaged callback becomes fatal `CTE0003`; general exception propagation across native boundaries is unsupported.
+Exception filters, inner exceptions, stack traces, specialized exception subclasses, and automatic disposal are not part of draft 0.8. An exception that escapes a supported synchronous unmanaged callback becomes fatal `CTE0003`; general exception propagation across native boundaries is unsupported.
 
 ## Unsafe code
 
@@ -662,15 +685,15 @@ public static unsafe void Clear(byte* address, int length)
 }
 ```
 
-Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, pointer casts, unmanaged function-pointer declarations, method-address acquisition, comparisons, casts, and invocation. It does not disable normal type checking.
+Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, pointer casts, unmanaged function-pointer declarations, method-address acquisition, native-buffer construction, stack allocation, comparisons, casts, and invocation. It does not disable normal type checking.
 
-Draft 0.7 has no inline assembly.
+Draft 0.8 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.7 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.8 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.
 
-Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.7.
+Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.8.
 
 `System.Runtime.Memory.Retain` and `Release` manipulate an additional untracked ownership count. `null` is a no-op. They are unsafe APIs: unbalanced use can leak, dangle, or double-release a value. Calling any unsafe method requires an unsafe method or block and otherwise reports `CT2139`.
 
@@ -695,7 +718,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.7 when:
+A compiler conforms to draft 0.8 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -703,15 +726,15 @@ A compiler conforms to draft 0.7 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.7 has no second backend.
+The canonical backend is GNU C23. Draft 0.8 has no second backend.
 
 ## Deliberate differences from C#
 
 - `char` is one UTF-8 code unit, not UTF-16.
-- References and pointers use the target C ABI width.
+- References, pointers, `nint`, and `nuint` use the target C ABI width.
 - Signed integer overflow is always wrapping.
 - `readonly` locals permit one delayed assignment.
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.7 defers interfaces, abstract types, generics, weak references, cycle collection, exception filters, inner exceptions, stack traces, specialized exception subclasses, lambdas and closures, multicast delegates, exported methods, retained or cross-task callbacks, native handles and buffer views, native-sized integers, `ref`/`in`/`out` arguments, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, general native-boundary unwinding, volatile and atomic access, and thread-safe exception handlers.
+Draft 0.8 defers interfaces, abstract types, general generics, weak references, cycle collection, exception filters, inner exceptions, stack traces, specialized exception subclasses, lambdas and closures, multicast delegates, exported methods, retained or cross-task callbacks, opaque native handles, native strings, reference returns and locals, origin-sensitive buffer escape analysis, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, general native-boundary unwinding, volatile and atomic access, and thread-safe exception handlers.

@@ -11,6 +11,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly HashSet<CType> _arrayTypes = [];
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<CType> _functionPointerTypes = [];
+    private readonly HashSet<CType> _nativeBufferTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
     private readonly Dictionary<(CType Type, MethodSymbol Method), string> _functionPointerTrampolines = [];
@@ -18,6 +19,8 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private bool _usesExceptions;
+    private bool _usesNativeIntegers;
+    private bool _usesDraft08;
 
     public CEmitter(CompilationModel model, CompilationTarget target)
     {
@@ -34,7 +37,10 @@ internal sealed partial class CEmitter : ILoweringServices
             {
                 RegisterType(method.ReturnType);
                 foreach (var parameter in method.Parameters)
+                {
                     RegisterType(parameter.Type);
+                    _usesDraft08 |= parameter.PassingKind != ParameterPassingKind.Value;
+                }
             }
         }
     }
@@ -203,6 +209,8 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Uint => "uint32_t",
         CTypeKind.Long => "int64_t",
         CTypeKind.Ulong => "uint64_t",
+        CTypeKind.Nint => "intptr_t",
+        CTypeKind.Nuint => "uintptr_t",
         CTypeKind.Float => "float",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
@@ -211,6 +219,7 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
+        CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"ct_{NameMangler.TypeCode(type)}",
         CTypeKind.Null => "void*",
         _ => "int32_t",
     };
@@ -222,6 +231,26 @@ internal sealed partial class CEmitter : ILoweringServices
         var signature = type.FunctionPointer!;
         return $"{CTypeName(signature.ReturnType)} (*{name})({FunctionPointerParameters(signature)})";
     }
+
+    public string CParameterDeclaration(ParameterSymbol parameter, string name) => parameter.PassingKind switch
+    {
+        _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}* {name}_data, size_t {name}_length",
+        ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}* {name}",
+        ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}* {name}",
+        _ => CDeclaration(parameter.Type, name),
+    };
+
+    private string ParameterTypeName(ParameterSymbol parameter) => parameter.PassingKind switch
+    {
+        _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}*, size_t",
+        ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}*",
+        ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}*",
+        _ => CTypeName(parameter.Type),
+    };
+
+    private static IEnumerable<string> ParameterArgumentNames(ParameterSymbol parameter, string name) => parameter.Type.IsNativeBuffer
+        ? [$"{name}_data", $"{name}_length"]
+        : [name];
 
     public string CCastType(CType type)
     {
@@ -242,19 +271,34 @@ internal sealed partial class CEmitter : ILoweringServices
 
     private string FunctionPointerParameters(FunctionPointerSignature signature) => signature.ParameterTypes.Length == 0
         ? "void"
-        : string.Join(", ", signature.ParameterTypes.Select(CTypeName));
+        : string.Join(", ", signature.ParameterTypes.Select((type, index) => type.IsNativeBuffer
+            ? $"{(type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(type.ElementType!)}*, size_t"
+            : signature.PassingKinds[index] switch
+            {
+                ParameterPassingKind.In => $"const {CTypeName(type)}*",
+                ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(type)}*",
+                _ => CTypeName(type),
+            }));
 
     public string DefaultValue(CType type) => type.Kind switch
     {
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
+        CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         _ => "0",
     };
 
     public void RegisterType(CType type)
     {
+        if (type.Kind is CTypeKind.Nint or CTypeKind.Nuint)
+        {
+            _usesNativeIntegers = true;
+            _usesDraft08 = true;
+        }
+        if (type.Kind == CTypeKind.Pointer && type.ElementType == CType.Void)
+            _usesDraft08 = true;
         if (type.Kind == CTypeKind.Array)
         {
             _arrayTypes.Add(type);
@@ -270,6 +314,13 @@ internal sealed partial class CEmitter : ILoweringServices
             foreach (var parameter in type.FunctionPointer!.ParameterTypes)
                 RegisterType(parameter);
             RegisterType(type.FunctionPointer.ReturnType);
+        }
+        else if (type.IsNativeBuffer)
+        {
+            _nativeBufferTypes.Add(type);
+            _usesNativeIntegers = true;
+            _usesDraft08 = true;
+            RegisterType(type.ElementType!);
         }
     }
 
@@ -364,6 +415,8 @@ internal sealed partial class CEmitter : ILoweringServices
     {
         CTypeKind.Uint => $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})",
         CTypeKind.Ulong => $"UINT64_C({value.ToString(CultureInfo.InvariantCulture)})",
+        CTypeKind.Nuint => $"((uintptr_t)UINT64_C({value.ToString(CultureInfo.InvariantCulture)}))",
+        CTypeKind.Nint => $"((intptr_t){(value < 0 ? "-" : string.Empty)}UINT64_C({BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture)}))",
         CTypeKind.Long when value == long.MinValue => "INT64_MIN",
         CTypeKind.Long when value < 0 => $"(-INT64_C({BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture)}))",
         CTypeKind.Long => $"INT64_C({value.ToString(CultureInfo.InvariantCulture)})",
@@ -408,7 +461,7 @@ internal sealed partial class CEmitter : ILoweringServices
         if (!method.IsStatic && !method.IsConstructor)
             parameters.Add($"{NameMangler.Type(method.ContainingType)}* ct_self");
         foreach (var parameter in method.Parameters)
-            parameters.Add(CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name)));
+            parameters.Add(CParameterDeclaration(parameter, NameMangler.Identifier(parameter.Name)));
         var storage = method.ExternName is not null ? "extern " : "static ";
         var signature = storage + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;

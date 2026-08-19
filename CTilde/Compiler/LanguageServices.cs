@@ -51,8 +51,8 @@ public sealed partial class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
-    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "this", "base", "true", "false", "null", "var"];
-    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "float", "string", "object"];
+    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
+    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
     private readonly ImmutableArray<SyntaxTree> _allTrees;
@@ -68,7 +68,8 @@ public sealed partial class LanguageServiceSnapshot
     {
         _userTrees = syntaxTrees.ToImmutableArray();
         Options = options;
-        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target).AddRange(_userTrees);
+        var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
+        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target, nativeIntegers).AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
@@ -126,9 +127,15 @@ public sealed partial class LanguageServiceSnapshot
     {
         if (!TryGetTree(filePath, out var tree))
             return null;
-        var token = IdentifierTokenAt(tree, position);
+        var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
+        if (token.Kind != SyntaxKind.IdentifierToken)
+        {
+            var builtIn = TypeFacts.BuiltIn(token.Text);
+            if (builtIn is not null)
+                return new LanguageHover(builtIn.DisplayName, token.Span);
+        }
         var context = CreateContext(tree, position);
         var symbols = ResolveToken(context, token).ToArray();
         if (symbols.Length == 0)
@@ -166,7 +173,7 @@ public sealed partial class LanguageServiceSnapshot
                     activeParameter++;
             }
         }
-        var signatures = methods.Select(method => new LanguageSignature(FormatMethod(method), [.. method.Parameters.Select(parameter => new LanguageParameter($"{parameter.Type.DisplayName} {parameter.Name}"))])).ToImmutableArray();
+        var signatures = methods.Select(method => new LanguageSignature(FormatMethod(method), [.. method.Parameters.Select(parameter => new LanguageParameter(FormatParameter(parameter)))])).ToImmutableArray();
         var activeSignature = Array.FindIndex(methods, method => method.Parameters.Length > activeParameter);
         return new LanguageSignatureHelp(signatures, Math.Max(0, activeSignature), activeParameter);
     }
@@ -277,6 +284,8 @@ public sealed partial class LanguageServiceSnapshot
             Add(keyword, LanguageCompletionKind.Keyword, "keyword", "0");
         foreach (var builtIn in BuiltInTypes)
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
+        Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1");
+        Add("ReadOnlyNativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.ReadOnlyNativeBuffer<T>", "1");
 
         foreach (var type in VisibleTypes(context.Tree))
             Add(type.Name, CompletionKind(type), $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}", "2");
@@ -334,6 +343,11 @@ public sealed partial class LanguageServiceSnapshot
             return;
         if (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array)
             Add("Length", LanguageCompletionKind.Property, "int Length", "0");
+        if (receiver.Type.IsNativeBuffer)
+        {
+            Add("Length", LanguageCompletionKind.Property, "nuint Length", "0");
+            Add("Pointer", LanguageCompletionKind.Property, $"{receiver.Type.ElementType!.DisplayName}* Pointer", "0");
+        }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.IsValueType || receiver.Type.Kind is CTypeKind.String or CTypeKind.Array))
             type = _model.Types.GetValueOrDefault("System.Object");
@@ -456,6 +470,8 @@ public sealed partial class LanguageServiceSnapshot
                 return InferExpression(context, parenthesized.Expression);
             case NewExpressionSyntax @new:
                 return new(_model.ResolveType(@new.Type, context.Tree, false), null);
+            case StackAllocExpressionSyntax stackAlloc:
+                return new(new CType(CTypeKind.NativeBuffer, ElementType: _model.ResolveType(stackAlloc.ElementType, context.Tree, false)), null);
             case CastExpressionSyntax cast:
                 return new(_model.ResolveType(cast.Type, context.Tree, false), null);
             case IndexExpressionSyntax index:
@@ -563,6 +579,12 @@ public sealed partial class LanguageServiceSnapshot
 
     private static SyntaxToken? IdentifierTokenAt(SyntaxTree tree, int position) => tree.Tokens
         .Where(token => token.Kind == SyntaxKind.IdentifierToken && !token.IsMissing)
+        .Where(token => position >= token.Span.Start && position <= token.Span.End)
+        .OrderBy(token => token.Span.Length)
+        .FirstOrDefault();
+
+    private static SyntaxToken? HoverTokenAt(SyntaxTree tree, int position) => tree.Tokens
+        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || TypeFacts.BuiltIn(token.Text) is not null))
         .Where(token => position >= token.Span.Start && position <= token.Span.End)
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();
@@ -675,14 +697,14 @@ public sealed partial class LanguageServiceSnapshot
 
     private static string FormatSymbol(object symbol) => symbol switch
     {
-        TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(parameter => $"{parameter.Type.DisplayName} {parameter.Name}"))})",
+        TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(FormatParameter))})",
         TypeSymbol type => $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}",
         FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}",
         PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
         MethodSymbol method => FormatMethod(method),
-        ParameterSymbol parameter => $"{parameter.Type.DisplayName} {parameter.Name}",
+        ParameterSymbol parameter => FormatParameter(parameter),
         LocalSymbol local => $"{local.Type.DisplayName} {local.Name}",
-        ParameterSyntax parameter => $"{parameter.Type} {parameter.Name}",
+        ParameterSyntax parameter => FormatParameter(parameter),
         LocalDeclarationStatementSyntax local => $"{local.Type} {local.Name}",
         LocalSemanticSymbol local => $"{local.Type} {local.Name}",
         EnumValueSymbol value => $"{value.Name} = {value.Value}",
@@ -690,7 +712,11 @@ public sealed partial class LanguageServiceSnapshot
     };
 
     private static string FormatMethod(MethodSymbol method) =>
-        $"{AccessibilityText(method.Accessibility)}{(method.IsStatic ? "static " : string.Empty)}{(method.IsConstructor ? string.Empty : method.ReturnType.DisplayName + " ")}{method.ContainingType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(parameter => $"{parameter.Type.DisplayName} {parameter.Name}"))})";
+        $"{AccessibilityText(method.Accessibility)}{(method.IsStatic ? "static " : string.Empty)}{(method.IsConstructor ? string.Empty : method.ReturnType.DisplayName + " ")}{method.ContainingType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(FormatParameter))})";
+
+    private static string FormatParameter(ParameterSymbol parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type.DisplayName} {parameter.Name}";
+    private static string FormatParameter(ParameterSyntax parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type} {parameter.Name}";
+    private static string PassingPrefix(ParameterPassingKind kind) => kind == ParameterPassingKind.Value ? string.Empty : kind.ToString().ToLowerInvariant() + " ";
 
     private static string AccessibilityText(Accessibility accessibility) => accessibility.ToString().ToLowerInvariant() + " ";
 
@@ -724,8 +750,8 @@ public sealed partial class LanguageServiceSnapshot
     {
         FieldDeclarationSyntax field => field.Type.ToString(),
         PropertyDeclarationSyntax property => property.Type.ToString(),
-        MethodDeclarationSyntax method => $"{method.ReturnType}({string.Join(", ", method.Parameters.Select(parameter => parameter.Type.ToString()))})",
-        ConstructorDeclarationSyntax constructor => $"({string.Join(", ", constructor.Parameters.Select(parameter => parameter.Type.ToString()))})",
+        MethodDeclarationSyntax method => $"{method.ReturnType}({string.Join(", ", method.Parameters.Select(FormatParameter))})",
+        ConstructorDeclarationSyntax constructor => $"({string.Join(", ", constructor.Parameters.Select(FormatParameter))})",
         _ => string.Empty,
     };
 

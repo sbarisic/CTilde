@@ -43,19 +43,53 @@ internal sealed class CompilationModel
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
+        if (!syntax.TypeArguments.IsDefaultOrEmpty)
+        {
+            var bufferKind = syntax.Name is "NativeBuffer" or "System.Runtime.NativeBuffer"
+                ? CTypeKind.NativeBuffer
+                : syntax.Name is "ReadOnlyNativeBuffer" or "System.Runtime.ReadOnlyNativeBuffer"
+                    ? CTypeKind.ReadOnlyNativeBuffer
+                    : CTypeKind.Error;
+            if (bufferKind == CTypeKind.Error || syntax.TypeArguments.Length != 1)
+            {
+                if (report)
+                    Diagnostics.Add("CT2176", "Only the intrinsic NativeBuffer<T> and ReadOnlyNativeBuffer<T> generic forms are supported.", syntax.Source, syntax.Span);
+                return CType.Error;
+            }
+            var element = ResolveType(syntax.TypeArguments[0], tree, report);
+            if (!IsCompleteUnmanagedType(element))
+            {
+                if (report)
+                    Diagnostics.Add("CT2177", $"Native-buffer element type '{element.DisplayName}' must be a complete unmanaged type.", syntax.Source, syntax.Span);
+                return CType.Error;
+            }
+            if (syntax.PointerDepth != 0 || syntax.IsArray)
+            {
+                if (report)
+                    Diagnostics.Add("CT2178", "Native-buffer views cannot be pointer or array element types.", syntax.Source, syntax.Span);
+                return CType.Error;
+            }
+            return new CType(bufferKind, ElementType: element);
+        }
         if (syntax.FunctionPointer is not null)
         {
-            var elements = syntax.FunctionPointer.Elements.Select(element => ResolveType(element, tree, report)).ToImmutableArray();
+            var elements = syntax.FunctionPointer.Elements.Select(element => ResolveType(element.Type, tree, report)).ToImmutableArray();
             if (elements.Length == 0)
                 return CType.Error;
             var returnType = elements[^1];
             var parameters = elements.RemoveAt(elements.Length - 1);
+            var passingKinds = syntax.FunctionPointer.Elements.RemoveAt(syntax.FunctionPointer.Elements.Length - 1).Select(element => element.PassingKind).ToImmutableArray();
             foreach (var parameter in parameters.Where(parameter => !IsUnmanagedFunctionPointerElement(parameter, allowVoid: false)))
                 if (report)
                     Diagnostics.Add("CT2162", $"Function-pointer parameter type '{parameter.DisplayName}' is not unmanaged.", syntax.Source, syntax.Span);
+            for (var index = 0; index < parameters.Length; index++)
+                if (parameters[index].IsNativeBuffer && passingKinds[index] != ParameterPassingKind.Value && report)
+                    Diagnostics.Add("CT2187", "Native-buffer function-pointer parameters cannot use ref, in, or out.", syntax.Source, syntax.FunctionPointer.Elements[index].Span);
             if (!IsUnmanagedFunctionPointerElement(returnType, allowVoid: true) && report)
                 Diagnostics.Add("CT2162", $"Function-pointer return type '{returnType.DisplayName}' is not unmanaged.", syntax.Source, syntax.Span);
-            return new CType(CTypeKind.FunctionPointer, FunctionPointer: new FunctionPointerSignature(parameters, returnType));
+            if (syntax.FunctionPointer.Elements[^1].PassingKind != ParameterPassingKind.Value && report)
+                Diagnostics.Add("CT2166", "A function-pointer return type cannot have a passing modifier.", syntax.Source, syntax.FunctionPointer.Elements[^1].Span);
+            return new CType(CTypeKind.FunctionPointer, FunctionPointer: new FunctionPointerSignature(parameters, passingKinds, returnType));
         }
         var baseType = syntax.Name == "object" && Types.TryGetValue("System.Object", out var objectType)
             ? objectType.Type
@@ -79,7 +113,7 @@ internal sealed class CompilationModel
             baseType = type.Type;
         }
 
-        if (baseType == CType.Void && (syntax.PointerDepth > 0 || syntax.IsArray))
+        if (baseType == CType.Void && syntax.IsArray)
         {
             Diagnostics.Add("CT2101", "void cannot be used as an element or pointed type.", syntax.Source, syntax.Span);
             return CType.Error;
@@ -95,7 +129,16 @@ internal sealed class CompilationModel
     private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
         type.Kind == CTypeKind.Void ? allowVoid :
         type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer;
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
+
+    private static bool IsCompleteUnmanagedType(CType type) => type.Kind switch
+    {
+        CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+        CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
+        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
+        CTypeKind.Struct => !type.ContainsManagedReferences,
+        _ => false,
+    };
 
     public TypeSymbol? ResolveNamedType(string name, SyntaxTree tree)
     {
@@ -308,6 +351,8 @@ internal sealed class CompilationModel
                         IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
                         Initializer = field.Initializer,
                     };
+                    if (symbol.Type.IsNativeBuffer)
+                        Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
                     if (symbol.IsConst && field.Initializer is null)
                         Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
                     if (symbol.IsConst && symbol.IsReadonly)
@@ -325,6 +370,8 @@ internal sealed class CompilationModel
                     if (property.Getter is null && property.Setter is null)
                         Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
                     var propertyType = ResolveType(property.Type, tree);
+                    if (propertyType.IsNativeBuffer)
+                        Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in properties.", property.Source, property.Span);
                     if (property.Getter is not null)
                         ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
                     if (property.Setter is not null)
@@ -419,6 +466,8 @@ internal sealed class CompilationModel
                     else if (method.Body is null)
                         Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
                     var returnType = ResolveType(method.ReturnType, tree);
+                    if (returnType.IsNativeBuffer)
+                        Diagnostics.Add("CT2186", "Native-buffer views cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
                     var methodParameters = DeclareParameters(method.Parameters, tree, external is not null);
                     if (returnsBorrowed is not null &&
                         (returnsBorrowed.Arguments.Length != 0 || external is null || !returnType.IsReference))
@@ -464,6 +513,10 @@ internal sealed class CompilationModel
             ValidateAttributes(parameter.Attributes, parameter, ["Retained"]);
             var type = ResolveType(parameter.Type, tree);
             var retained = FindAttribute(parameter.Attributes, "Retained");
+            if (type.IsNativeBuffer && parameter.PassingKind != ParameterPassingKind.Value)
+                Diagnostics.Add("CT2187", "Native-buffer parameters cannot use ref, in, or out.", parameter.Source, parameter.Span);
+            if (isExtern && parameter.PassingKind != ParameterPassingKind.Value && !IsCompleteUnmanagedType(type))
+                Diagnostics.Add("CT2188", $"Extern by-reference parameter type '{type.DisplayName}' is not unmanaged ABI-safe.", parameter.Source, parameter.Span);
             if (retained is not null && (retained.Arguments.Length != 0 || !isExtern || !type.IsReference))
                 Diagnostics.Add("CT1234", "Retained accepts no arguments and is valid only on a managed-reference parameter of an extern method.", retained.Source, retained.Span);
             result.Add(new ParameterSymbol
@@ -471,7 +524,8 @@ internal sealed class CompilationModel
                 Name = parameter.Name,
                 Type = type,
                 Syntax = parameter,
-                IsRetained = retained is not null && retained.Arguments.Length == 0 && isExtern && type.IsReference,
+                PassingKind = parameter.PassingKind,
+                IsRetained = retained is not null && retained.Arguments.Length == 0 && isExtern && type.IsReference && parameter.PassingKind == ParameterPassingKind.Value,
             });
         }
         return result.ToImmutable();
@@ -608,7 +662,7 @@ internal sealed class CompilationModel
     }
 
     private static bool HaveSameSourceSignature(MethodSymbol left, MethodSymbol right) =>
-        left.Name == right.Name && left.Parameters.Select(parameter => parameter.Type).SequenceEqual(right.Parameters.Select(parameter => parameter.Type));
+        left.Name == right.Name && left.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind)).SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind)));
 
     private void ValidateExternalSymbols()
     {
@@ -619,9 +673,11 @@ internal sealed class CompilationModel
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
             "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
             "ct_u64_div", "ct_u64_mod", "ct_i64_shl", "ct_i64_shr",
+            "ct_ni_bits", "ct_ni_add", "ct_ni_sub", "ct_ni_mul", "ct_ni_neg", "ct_ni_div", "ct_ni_mod", "ct_nu_div", "ct_nu_mod", "ct_ni_shl", "ct_ni_shr",
             "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
             "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
             "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
+            "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_stack_bytes",
             "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
             "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
             "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
@@ -700,8 +756,8 @@ internal sealed class CompilationModel
     private static bool HaveSameAbiSignature(MethodSymbol left, MethodSymbol right) =>
         left.ReturnType == right.ReturnType &&
         left.ReturnsBorrowed == right.ReturnsBorrowed &&
-        left.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained))
-            .SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained)));
+        left.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind, parameter.IsRetained))
+            .SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind, parameter.IsRetained)));
 
     private static bool FitsEnumValue(BigInteger value, CType underlying) => underlying.Kind switch
     {
@@ -741,7 +797,9 @@ internal sealed class CompilationModel
 
     private void AddMethod(List<MethodSymbol> methods, MethodSymbol method)
     {
-        var existing = methods.FirstOrDefault(candidate => candidate.Name == method.Name && candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(method.Parameters.Select(parameter => parameter.Type)));
+        var existing = methods.FirstOrDefault(candidate => candidate.Name == method.Name &&
+            candidate.Parameters.Select(parameter => (parameter.Type, NormalizePassingKind(parameter.PassingKind)))
+                .SequenceEqual(method.Parameters.Select(parameter => (parameter.Type, NormalizePassingKind(parameter.PassingKind)))));
         if (existing is not null)
         {
             Diagnostics.Add("CT1105", $"Method '{method.Name}' with the same parameter types is already declared.", method.Syntax!.Source, method.Syntax.Span, existing.Syntax?.Source.GetLocation(existing.Syntax.Span));
@@ -749,6 +807,8 @@ internal sealed class CompilationModel
         }
         methods.Add(method);
     }
+
+    private static ParameterPassingKind NormalizePassingKind(ParameterPassingKind kind) => kind == ParameterPassingKind.Out ? ParameterPassingKind.Ref : kind;
 
     private Accessibility GetAccessibility(ImmutableArray<string> modifiers, SyntaxNode syntax, Accessibility fallback)
     {

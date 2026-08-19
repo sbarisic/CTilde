@@ -87,6 +87,8 @@ internal sealed partial class BodyPipeline
         if (!left.Type.IsNumeric || !right.Type.IsNumeric)
             return false;
         var common = TypeFacts.PromoteNumeric(left.Type, right.Type);
+        if (common.Kind is CTypeKind.Nint or CTypeKind.Nuint)
+            return false;
         if (!TryConvertConstant(left, common, out left) || !TryConvertConstant(right, common, out right))
             return false;
         var comparison = syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken or SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken;
@@ -328,6 +330,30 @@ internal sealed partial class BodyPipeline
                     _ => unchecked(System.Convert.ToUInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, FormatUInt64(value));
+                return true;
+            }
+            if (target == CType.Nint)
+            {
+                var value = expression.ConstantValue switch
+                {
+                    ulong unsigned => unchecked((long)unsigned),
+                    float floating => unchecked((long)floating),
+                    _ => unchecked(System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
+                };
+                result = Constant(target, value, $"((intptr_t){FormatInt64(value)})");
+                return true;
+            }
+            if (target == CType.Nuint)
+            {
+                var value = expression.ConstantValue switch
+                {
+                    ulong unsigned => unsigned,
+                    long signed => unchecked((ulong)signed),
+                    int signed => unchecked((ulong)signed),
+                    float floating => unchecked((ulong)floating),
+                    _ => unchecked(System.Convert.ToUInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
+                };
+                result = Constant(target, value, $"((uintptr_t){FormatUInt64(value)})");
                 return true;
             }
             var signedValue = expression.ConstantValue switch

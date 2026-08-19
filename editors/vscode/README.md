@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.7 syntax and semantic classification for `long`, `ulong`, named delegate declarations, method groups, and `delegate* unmanaged<...>` signatures.
+- Draft 0.8 syntax and semantic classification for native integers, `ref`/`in`/`out`, `void*`, `stackalloc`, intrinsic native buffers, named delegates, method groups, and `delegate* unmanaged<...>` signatures.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
 - Live compiler diagnostics with related locations.
@@ -51,5 +51,28 @@ npm run package
 The extension requires an installed .NET 10 runtime. Set `ctilde.languageServer.dotnetPath` when `dotnet` is not on `PATH`. Semantic highlighting follows VS Code's `editor.semanticHighlighting.enabled` setting and the active theme; TextMate highlighting remains available for lexical and unresolved syntax. Use **C~: Show Language Server Output**, **C~: Restart Language Server**, or `ctilde.trace.server` when troubleshooting.
 
 To try the extension, run `npm run build`, open `editors/vscode` in Visual Studio Code, and press F5. In the Extension Development Host, open a `.ct` file and request completion after `Console.`.
+
+### Use a development compiler from an installed extension
+
+The packaged extension normally runs its bundled language server. During compiler development, point the installed extension at the language-server build in this repository instead. When the repository root is the VS Code workspace, add:
+
+```json
+{
+  "ctilde.languageServer.serverPath": "${workspaceFolder}/CTilde.LanguageServer/bin/Debug/net10.0/CTilde.LanguageServer.dll",
+  "ctilde.languageServer.restartOnServerChange": true
+}
+```
+
+When `editors/vscode` is the workspace, use `${workspaceFolder}/../../CTilde.LanguageServer/bin/Debug/net10.0/CTilde.LanguageServer.dll` instead. Absolute paths and paths relative to the first workspace folder are also accepted.
+
+Build after changing the compiler or language server:
+
+```powershell
+dotnet build .\CTilde.LanguageServer\CTilde.LanguageServer.csproj
+```
+
+The incremental build updates both `CTilde.LanguageServer.dll` and `CTilde.Compiler.dll`. The extension watches those files, waits for the build writes to settle, and restarts the server automatically. This workflow does not require rebuilding the TypeScript client, repackaging the VSIX, or reinstalling the extension. Clear `ctilde.languageServer.serverPath` to return to the bundled server.
+
+The extension always starts a built assembly with `dotnet <server.dll> --stdio`. Do not configure `dotnet run` as the server command because build or console output on standard output would corrupt the LSP protocol stream.
 
 The extension uses the same Unlicense terms as the repository root.

@@ -62,6 +62,14 @@ int64_t ct_esp_invoke_i64(int64_t (*callback)(int64_t), int64_t value)
     return callback(value);
 }
 
+uint32_t ct_esp_fill_buffer(uint8_t* data, size_t length)
+{
+    if (data == NULL || length == 0u)
+        return 0u;
+    data[0] = 42u;
+    return 42u;
+}
+
 bool ct_esp_gpio_configure_input(int32_t pin)
 {
     if (!GPIO_IS_VALID_GPIO(pin))

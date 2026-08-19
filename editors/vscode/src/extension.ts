@@ -1,84 +1,195 @@
-import * as path from 'path';
+import { existsSync } from 'fs';
 import * as vscode from 'vscode';
 import {
     LanguageClient,
     LanguageClientOptions,
     ServerOptions,
 } from 'vscode-languageclient/node';
+import {
+    DevelopmentServerWatchManager,
+    resolveServerLaunch,
+    RestartCoordinator,
+    ServerLaunchConfiguration,
+    serverPathError,
+} from './serverDevelopment';
 
-let client: LanguageClient | undefined;
-let watchers: vscode.FileSystemWatcher[] | undefined;
+let controller: LanguageServerController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const provider = new StandardLibraryContentProvider();
-    context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('ctilde-stdlib', provider));
-    context.subscriptions.push(vscode.commands.registerCommand('ctilde.languageServer.restart', async () => {
-        await stopClient();
-        client = createClient(context);
-        provider.attach(client);
-        await startClient(client);
-    }));
-    context.subscriptions.push(vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => client?.outputChannel.show(true)));
-
-    client = createClient(context);
-    provider.attach(client);
-    await startClient(client);
+    controller = new LanguageServerController(context, provider);
+    context.subscriptions.push(
+        vscode.workspace.registerTextDocumentContentProvider('ctilde-stdlib', provider),
+        vscode.commands.registerCommand('ctilde.languageServer.restart', () => controller?.restart()),
+        vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => controller?.showOutput()),
+        vscode.workspace.onDidChangeConfiguration(event => controller?.configurationChanged(event)),
+    );
+    await controller.start();
 }
 
 export async function deactivate(): Promise<void> {
-    await stopClient();
+    const current = controller;
+    controller = undefined;
+    await current?.shutdown();
 }
 
-function createClient(context: vscode.ExtensionContext): LanguageClient {
-    const configuration = vscode.workspace.getConfiguration('ctilde.languageServer');
-    const dotnetPath = configuration.get<string>('dotnetPath', 'dotnet');
-    const serverDll = context.asAbsolutePath(path.join('server', 'CTilde.LanguageServer.dll'));
-    const serverOptions: ServerOptions = {
-        command: dotnetPath,
-        args: [serverDll, '--stdio'],
-        options: { cwd: context.extensionPath },
-    };
-    if (watchers === undefined) {
-        watchers = [
+class LanguageServerController {
+    private readonly sourceWatchers: vscode.FileSystemWatcher[];
+    private readonly restartCoordinator: RestartCoordinator;
+    private readonly developmentWatchers: DevelopmentServerWatchManager;
+    private client: LanguageClient | undefined;
+    private launch: ServerLaunchConfiguration | undefined;
+    private shuttingDown = false;
+
+    public constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly provider: StandardLibraryContentProvider,
+    ) {
+        this.sourceWatchers = [
             vscode.workspace.createFileSystemWatcher('**/*.ct'),
             vscode.workspace.createFileSystemWatcher('**/ctilde.json'),
         ];
-        context.subscriptions.push(...watchers);
+        context.subscriptions.push(...this.sourceWatchers);
+        this.restartCoordinator = new RestartCoordinator(
+            () => this.restartNow(),
+            750,
+            error => this.reportUnexpectedRestartError(error),
+        );
+        this.developmentWatchers = new DevelopmentServerWatchManager(
+            (directory, fileName) => vscode.workspace.createFileSystemWatcher(
+                new vscode.RelativePattern(directory, fileName)),
+            this.restartCoordinator,
+        );
     }
-    const clientOptions: LanguageClientOptions = {
-        documentSelector: [
-            { scheme: 'file', language: 'ctilde' },
-        ],
-        synchronize: {
-            fileEvents: watchers,
-        },
-        markdown: { isTrusted: false, supportHtml: false },
-    };
-    return new LanguageClient('ctilde', 'C~ Language Server', serverOptions, clientOptions);
-}
 
-async function startClient(languageClient: LanguageClient): Promise<void> {
-    try {
-        await languageClient.start();
-    } catch (error) {
-        languageClient.outputChannel.appendLine(`Failed to start C~ language server: ${String(error)}`);
-        void vscode.window.showErrorMessage('C~ language server could not start. Install the .NET 10 runtime or configure ctilde.languageServer.dotnetPath.');
-        throw error;
+    public start(): Promise<void> {
+        return this.restartCoordinator.run();
     }
-}
 
-async function stopClient(): Promise<void> {
-    const current = client;
-    client = undefined;
-    if (current !== undefined) {
-        await current.stop();
+    public restart(): Promise<void> {
+        this.restartCoordinator.cancelScheduled();
+        return this.restartCoordinator.run();
+    }
+
+    public showOutput(): void {
+        this.client?.outputChannel.show(true);
+    }
+
+    public configurationChanged(event: vscode.ConfigurationChangeEvent): void {
+        if (event.affectsConfiguration('ctilde.languageServer.serverPath')
+            || event.affectsConfiguration('ctilde.languageServer.dotnetPath')) {
+            void this.restart().catch(error => this.reportUnexpectedRestartError(error));
+            return;
+        }
+        if (event.affectsConfiguration('ctilde.languageServer.restartOnServerChange'))
+            this.configureDevelopmentWatchers(this.launch);
+    }
+
+    public async shutdown(): Promise<void> {
+        this.shuttingDown = true;
+        this.developmentWatchers.dispose();
+        await this.restartCoordinator.dispose();
+        await this.stopClient();
+    }
+
+    private async restartNow(): Promise<void> {
+        if (this.shuttingDown)
+            return;
+
+        let launch: ServerLaunchConfiguration;
+        try {
+            launch = this.readLaunchConfiguration();
+        } catch (error) {
+            this.launch = undefined;
+            this.developmentWatchers.configure(undefined, false);
+            void vscode.window.showErrorMessage(String(error instanceof Error ? error.message : error));
+            return;
+        }
+
+        this.launch = launch;
+        this.configureDevelopmentWatchers(launch);
+        const pathError = serverPathError(launch, existsSync);
+        if (pathError !== undefined) {
+            void vscode.window.showErrorMessage(pathError);
+            return;
+        }
+
+        await this.stopClient();
+        const languageClient = this.createClient(launch);
+        this.client = languageClient;
+        this.provider.attach(languageClient);
+        languageClient.outputChannel.appendLine(launch.isExternal
+            ? `Using development language server: ${launch.serverDll}`
+            : `Using bundled language server: ${launch.serverDll}`);
+        try {
+            await languageClient.start();
+        } catch (error) {
+            languageClient.outputChannel.appendLine(`Failed to start C~ language server: ${String(error)}`);
+            void vscode.window.showErrorMessage(
+                'C~ language server could not start. Check the configured server path and .NET 10 host.');
+            if (this.client === languageClient) {
+                this.client = undefined;
+                this.provider.attach(undefined);
+            }
+            await languageClient.dispose();
+        }
+    }
+
+    private readLaunchConfiguration(): ServerLaunchConfiguration {
+        const configuration = vscode.workspace.getConfiguration('ctilde.languageServer');
+        const configuredPath = configuration.get<string>('serverPath', '');
+        const workspaceFolderPath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return resolveServerLaunch(configuredPath, this.context.extensionPath, workspaceFolderPath);
+    }
+
+    private configureDevelopmentWatchers(launch: ServerLaunchConfiguration | undefined): void {
+        const enabled = vscode.workspace.getConfiguration('ctilde.languageServer')
+            .get<boolean>('restartOnServerChange', true);
+        this.developmentWatchers.configure(
+            launch?.isExternal === true ? launch.serverDll : undefined,
+            enabled,
+        );
+    }
+
+    private createClient(launch: ServerLaunchConfiguration): LanguageClient {
+        const configuration = vscode.workspace.getConfiguration('ctilde.languageServer');
+        const dotnetPath = configuration.get<string>('dotnetPath', 'dotnet');
+        const serverOptions: ServerOptions = {
+            command: dotnetPath,
+            args: [launch.serverDll, '--stdio'],
+            options: { cwd: launch.workingDirectory },
+        };
+        const clientOptions: LanguageClientOptions = {
+            documentSelector: [
+                { scheme: 'file', language: 'ctilde' },
+            ],
+            synchronize: {
+                fileEvents: this.sourceWatchers,
+            },
+            markdown: { isTrusted: false, supportHtml: false },
+        };
+        return new LanguageClient('ctilde', 'C~ Language Server', serverOptions, clientOptions);
+    }
+
+    private async stopClient(): Promise<void> {
+        const current = this.client;
+        this.client = undefined;
+        this.provider.attach(undefined);
+        if (current !== undefined)
+            await current.dispose();
+    }
+
+    private reportUnexpectedRestartError(error: unknown): void {
+        const message = `C~ language server restart failed: ${String(error)}`;
+        this.client?.outputChannel.appendLine(message);
+        void vscode.window.showErrorMessage(message);
     }
 }
 
 class StandardLibraryContentProvider implements vscode.TextDocumentContentProvider {
     private languageClient: LanguageClient | undefined;
 
-    public attach(languageClient: LanguageClient): void {
+    public attach(languageClient: LanguageClient | undefined): void {
         this.languageClient = languageClient;
     }
 

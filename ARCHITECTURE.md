@@ -60,7 +60,7 @@ The .NET 10 language server runs out of process over LSP 3.17 and header-delimit
 
 The server applies versioned incremental document changes to in-memory text. Open buffers override disk sources. A 150 ms cancellable debounce publishes diagnostics and requests semantic-token refresh from the newest project snapshot. File and manifest changes invalidate cached snapshots. Semantic tokens use LSP UTF-16 delta encoding and full-document responses; range and delta-result protocols are deferred. One process owns all workspace folders and manifest-defined projects.
 
-The VS Code client starts `dotnet CTilde.LanguageServer.dll`, synchronizes `.ct` and `ctilde.json` changes, maps embedded declarations to the read-only `ctilde-stdlib:` scheme, and contributes the project schema. The packaged extension includes a bundled JavaScript client and framework-dependent server assemblies; the .NET 10 runtime remains an external requirement.
+The VS Code client starts `dotnet CTilde.LanguageServer.dll`, synchronizes `.ct` and `ctilde.json` changes, maps embedded declarations to the read-only `ctilde-stdlib:` scheme, and contributes the project schema. The packaged extension includes a bundled JavaScript client and framework-dependent server assemblies; the .NET 10 runtime remains an external requirement. A window-scoped development override can select an external built server. The client watches that server and its adjacent compiler assembly, debounces build writes, and serially restarts the language-server process without rebuilding or reinstalling the extension.
 
 ### Test
 
@@ -115,7 +115,7 @@ The semantic model owns:
 - Single-base class hierarchies, virtual slots, exact overrides, sealed slots, and constructor initializer targets.
 - Static and instance membership.
 - Accessibility.
-- Fixed-width built-in types through 64 bits, arrays, managed delegates, structural unmanaged function pointers, unsafe pointers, and target-width references.
+- Fixed-width built-in types through 64 bits, native-sized integers, arrays, managed delegates, structural unmanaged function pointers, unsafe pointers, scoped native buffers, and target-width references.
 - Automatically imported declarations from the bundled C~ standard-library sources.
 
 Overload resolution filters by name, context, argument count, and implicit conversions. It compares candidates per argument. A winner must be no worse for every argument. It must be better for at least one.
@@ -160,7 +160,7 @@ The emitter assembles one translation unit in this order:
 2. String literal data.
 3. User-type forward declarations.
 4. Enum, object, class, structure, and delegate layouts.
-5. Array, box, delegate, and structural function-pointer support.
+5. Array, box, delegate, structural function-pointer, by-reference ABI, and native-buffer support.
 6. Static fields.
 7. Function, constructor-initializer, and accessor prototypes.
 8. Runtime descriptors, vtables, delegate thunks, and unmanaged callback trampolines.
@@ -184,9 +184,9 @@ The current ESP target uses handwritten fixed-width shims. The intended next lay
 
 This design follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Private and example-only headers remain outside generated bindings by default.
 
-The language-side ABI now has exact 64-bit scalars. It still needs native-sized scalars, opaque handles, `ref`/`in`/`out`, scoped native strings, and explicit pointer-plus-length buffers before it attempts broad API coverage. Ownership metadata and `defer` will describe release obligations without making native resources managed objects.
+The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, and scoped pointer-plus-length native buffers. The compiler flattens buffer parameters and renders qualified pointer declarators from structured types rather than text templates. Opaque handles, scoped native strings, ownership metadata, and generated header adapters remain before broad ESP-IDF API coverage. `defer` will describe native release obligations without making native resources managed objects.
 
-Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.7 emits static-method C trampolines for synchronous callbacks on the current C~ task and converts an escaping exception to fatal `CTE0003`. Exported/context trampolines, retained lifetimes, task attachment, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.8 emits static-method C trampolines for synchronous callbacks on the current C~ task and converts an escaping exception to fatal `CTE0003`. Exported/context trampolines, retained lifetimes, task attachment, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
 
 ## Runtime ownership
 
@@ -213,7 +213,7 @@ Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` a
 
 A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, identity hash, reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the normal cleanup stack.
 
-Unsafe pointers lower to native C pointers. Unmanaged function pointers lower to exact C function-pointer signatures. Unsafe operations bypass managed null and bounds checks but remain statically typed.
+Unsafe pointers lower to native C pointers. `nint` and `nuint` lower to `intptr_t` and `uintptr_t`. Unmanaged function pointers lower to exact C function-pointer signatures, and `ref`/`out` versus `in` lower to writable versus const pointers. Native-buffer locals are scoped pointer-plus-length structures, while ABI parameters flatten to adjacent pointer and `size_t` values. Stack allocation uses checked compiler alloca support. Raw pointer operations bypass managed checks; native-buffer indexing remains bounds-checked.
 
 ## Diagnostics
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.7. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.8. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 ## Object
 
@@ -63,6 +63,8 @@ public static class Console
     public static void Write(uint value);
     public static void Write(long value);
     public static void Write(ulong value);
+    public static void Write(nint value);
+    public static void Write(nuint value);
     public static void Write(float value);
     public static void Write(bool value);
     public static void Write(object value);
@@ -74,6 +76,8 @@ public static class Console
     public static void WriteLine(uint value);
     public static void WriteLine(long value);
     public static void WriteLine(ulong value);
+    public static void WriteLine(nint value);
+    public static void WriteLine(nuint value);
     public static void WriteLine(float value);
     public static void WriteLine(bool value);
     public static void WriteLine(object value);
@@ -115,6 +119,24 @@ public static class Memory
 ```
 
 `Retain` and `Release` manipulate an additional untracked ARC ownership count. `null` is a no-op. These methods require an unsafe method or block. Unbalanced calls can leak memory, create dangling references, or double-release an object. Normal C~ code does not need them.
+
+## Runtime native buffers
+
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target but do not enable user-defined generic types.
+
+```csharp
+NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);
+ReadOnlyNativeBuffer<byte> readable = writable;
+
+nuint count = readable.Length;
+byte* address = writable.Pointer;
+byte value = readable[0];
+writable[0] = value;
+```
+
+Construction, pointer access, and `stackalloc` use require an unsafe context. Elements must be complete unmanaged types. Indexing is bounds-checked and uses `nuint`; failures report `CTB0001`. Negative runtime `int` stack counts report `CTB0002`, and count-by-element-size overflow reports `CTB0003`. Zero length is represented by a null pointer and zero count.
+
+Views can be local values and synchronous value parameters. They cannot be stored in managed state, boxed, returned, or passed by `ref`, `in`, or `out`. Native ABI parameters flatten to a data pointer followed by `size_t` length; read-only views use a `const` data pointer.
 
 ## ESP-IDF
 
@@ -172,8 +194,8 @@ The following built-in values provide an intrinsic, zero-argument `ToString()` m
 
 | Receiver | Result |
 | --- | --- |
-| `byte`, `ushort`, `uint`, `ulong` | Unsigned decimal text |
-| `sbyte`, `short`, `int`, `long` | Signed decimal text |
+| `byte`, `ushort`, `uint`, `ulong`, `nuint` | Unsigned decimal text |
+| `sbyte`, `short`, `int`, `long`, `nint` | Signed decimal text |
 | `float` | Nine-significant-digit binary32 text |
 | `bool` | `True` or `False` |
 | `char` | A one-code-unit string |
@@ -211,7 +233,7 @@ Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.7.
+Other runtime failures remain fatal and are not catchable in draft 0.8.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
@@ -219,4 +241,4 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
 
-ESP-IDF interop can add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 and buffer views, and release operations designed for `defer`. These library types still depend on native-sized scalars, `ref`/`in`/`out`, exports, retained-callback lifetime rules, and task-safe runtime entry. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.
+ESP-IDF interop can next add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 views, and release operations designed for `defer`. Native-sized scalars, by-reference arguments, and scoped byte buffers are now available; exports, retained-callback lifetime rules, ownership attributes, and task-safe runtime entry remain prerequisites for broader bindings. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

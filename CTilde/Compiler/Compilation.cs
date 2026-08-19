@@ -58,7 +58,8 @@ public sealed class Compilation
                 return;
             var diagnostics = new DiagnosticBag();
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
-            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target).AddRange(SyntaxTrees);
+            var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
+            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)

@@ -64,6 +64,7 @@ internal sealed partial class BodyPipeline
     private readonly Dictionary<DeferStatementSyntax, LoweredExpression> _deferredCalls = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
     private readonly Dictionary<FieldSymbol, int> _fieldAssignmentCounts = [];
+    private readonly HashSet<ParameterSymbol> _assignedOutParameters = [];
     private readonly HashSet<FieldSymbol> _constantFieldsBeingEvaluated = [];
     private readonly Dictionary<SyntaxNode, BoundSemanticEntry> _semanticEntries = [];
     private int _localId;
@@ -98,7 +99,8 @@ internal sealed partial class BodyPipeline
         if (_tryCount != 0)
         {
             for (var index = 0; index < method.Parameters.Length; index++)
-                _durableParameters[method.Parameters[index]] = $"ct_pp_{index}";
+                if (method.Parameters[index].PassingKind == ParameterPassingKind.Value)
+                    _durableParameters[method.Parameters[index]] = $"ct_pp_{index}";
         }
         if (_tryCount != 0 || ContainsThrow(method.Body))
             _emitter.RegisterExceptions();
@@ -118,7 +120,16 @@ internal sealed partial class BodyPipeline
             if (!_method.IsStatic && !_method.IsConstructor)
                 body.WriteLine("(void)ct_self;");
             foreach (var parameter in _method.Parameters)
-                body.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
+            {
+                var name = NameMangler.Identifier(parameter.Name);
+                if (parameter.Type.IsNativeBuffer)
+                {
+                    body.WriteLine($"(void){name}_data;");
+                    body.WriteLine($"(void){name}_length;");
+                }
+                else
+                    body.WriteLine($"(void){name};");
+            }
             EmitInstanceFieldInitializers(body);
             if (_property is not null && _method.Body is null)
                 EmitAutomaticAccessor(body);
@@ -127,6 +138,8 @@ internal sealed partial class BodyPipeline
                 var flow = EmitStatements(body, _method.Body.Statements);
                 if (!_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
                     Report("CT3100", $"Not every reachable path returns a value from '{_method.Name}'.", _method.Syntax ?? _method.Body);
+                if (flow.FallsThrough)
+                    ValidateOutParameters(_method.Body);
             }
 
             if (_method.IsConstructor)
@@ -170,7 +183,7 @@ internal sealed partial class BodyPipeline
         }
         writer.WriteLine();
         var initializerParameters = new[] { $"{typeName}* ct_self" }
-            .Concat(_method.Parameters.Select(parameter => _emitter.CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name))));
+            .Concat(_method.Parameters.Select(parameter => _emitter.CParameterDeclaration(parameter, NameMangler.Identifier(parameter.Name))));
         var body = CreateWriter();
         {
             body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
@@ -179,7 +192,16 @@ internal sealed partial class BodyPipeline
             EmitExceptionFrameStorage(body);
             EmitDurableParameterStorage(body);
             foreach (var parameter in _method.Parameters)
-                body.WriteLine($"(void){NameMangler.Identifier(parameter.Name)};");
+            {
+                var name = NameMangler.Identifier(parameter.Name);
+                if (parameter.Type.IsNativeBuffer)
+                {
+                    body.WriteLine($"(void){name}_data;");
+                    body.WriteLine($"(void){name}_length;");
+                }
+                else
+                    body.WriteLine($"(void){name};");
+            }
             var delegatesToThis = EmitConstructorInitializer(body);
             if (!delegatesToThis)
                 EmitInstanceFieldInitializers(body);
@@ -236,8 +258,8 @@ internal sealed partial class BodyPipeline
         if (targetType is null)
             return false;
         var argumentSyntax = syntax?.Arguments ?? [];
-        var arguments = argumentSyntax.Select(LowerExpression).ToArray();
-        var target = SelectOverload(targetType.Constructors, targetType.Name, arguments, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
+        var arguments = argumentSyntax.Select(LowerArgument).ToArray();
+        var target = SelectOverload(targetType.Constructors, targetType.Name, arguments, argumentSyntax, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
         if (target is null)
             return syntax?.Kind == ConstructorInitializerKind.This;
         CheckAccess(target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);

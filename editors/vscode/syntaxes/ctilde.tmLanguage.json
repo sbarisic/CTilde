@@ -371,13 +371,13 @@
         },
         {
           "name": "storage.type.builtin.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|long|ulong|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|long|ulong|nint|nuint|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },
     "modifiers": {
       "name": "storage.modifier.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override|ref|out)(?![_\\p{L}\\p{Nd}])"
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
@@ -391,7 +391,7 @@
         },
         {
           "name": "keyword.operator.new.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])new(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:new|stackalloc)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "keyword.other.accessor.ctilde",

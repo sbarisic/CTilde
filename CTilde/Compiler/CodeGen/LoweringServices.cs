@@ -10,6 +10,7 @@ internal interface ILoweringServices
 
     string CTypeName(CType type);
     string CDeclaration(CType type, string name);
+    string CParameterDeclaration(ParameterSymbol parameter, string name);
     string CCastType(CType type);
     string DefaultValue(CType type);
     string RetainValueStatement(CType type, string address);

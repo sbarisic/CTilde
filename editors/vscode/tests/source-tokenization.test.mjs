@@ -48,14 +48,14 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.7 keyword receives its intended scope", () => {
+test("every draft 0.8 keyword receives its intended scope", () => {
   const groups = [
     {
-      words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "float", "string", "object", "void"],
+      words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
       scope: "storage.type.builtin.ctilde"
     },
     {
-      words: ["public", "internal", "protected", "private", "static", "sealed", "readonly", "const", "unsafe", "virtual", "override"],
+      words: ["public", "internal", "protected", "private", "static", "sealed", "readonly", "const", "unsafe", "virtual", "override", "ref", "out"],
       scope: "storage.modifier.ctilde"
     },
     {
@@ -87,6 +87,7 @@ test("every draft 0.7 keyword receives its intended scope", () => {
 
   expectScope("var", "var", "storage.type.inferred.ctilde");
   expectScope("new", "new", "keyword.operator.new.ctilde");
+  expectScope("stackalloc", "stackalloc", "keyword.operator.new.ctilde");
   expectScope("delegate", "delegate", "storage.type.declaration.ctilde");
   expectScope("unmanaged", "unmanaged", "keyword.other.calling-convention.ctilde");
   expectScope("using System;", "using", "keyword.control.import.ctilde");
@@ -109,7 +110,7 @@ test("representative repository sources finish in the root grammar state", async
     "examples/ObjectModel.ct",
     "examples/Exceptions.ct",
     ...await collectCtFiles(path.join(repositoryRoot, "CTilde", "StandardLibrary")),
-    ...await collectCtFiles(path.join(repositoryRoot, "examples", "Esp32Blink"))
+    ...await collectCtFiles(path.join(repositoryRoot, "examples", "TCan485"))
   ];
 
   for (const sourceFile of sourceFiles) {

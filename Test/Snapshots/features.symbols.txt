@@ -32,6 +32,7 @@ static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
 static int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value);
+static void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result);
 static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void);
 static void ct_m__16_Examples_2EProgram_4_Main(void);
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
@@ -44,6 +45,8 @@ static void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value);
 static void ct_m__14_System_2EConsole_9_WriteLine_i64(int64_t u_5_value);
 static void ct_m__14_System_2EConsole_9_WriteLine_u64(uint64_t u_5_value);
 static void ct_m__14_System_2EConsole_9_WriteLine_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_ni(intptr_t u_5_value);
+static void ct_m__14_System_2EConsole_9_WriteLine_nu(uintptr_t u_5_value);
 static ct_t_6_System_9_Exception* ct_ctor__16_System_2EException_9_Exception(void);
 static ct_t_6_System_9_Exception* ct_ctor__16_System_2EException_9_Exception_str(ct_string* u_7_message);
 static ct_string* ct_m__16_System_2EException_8_ToString(ct_t_6_System_9_Exception* ct_self);
@@ -64,6 +67,7 @@ static int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
 static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
 static int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value)
+static void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result)
 static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void)
 static void ct_m__16_Examples_2EProgram_4_Main(void)
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
@@ -76,6 +80,8 @@ static void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value)
 static void ct_m__14_System_2EConsole_9_WriteLine_i64(int64_t u_5_value)
 static void ct_m__14_System_2EConsole_9_WriteLine_u64(uint64_t u_5_value)
 static void ct_m__14_System_2EConsole_9_WriteLine_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_ni(intptr_t u_5_value)
+static void ct_m__14_System_2EConsole_9_WriteLine_nu(uintptr_t u_5_value)
 static ct_t_6_System_9_Exception* ct_ctor__16_System_2EException_9_Exception(void)
 static ct_t_6_System_9_Exception* ct_ctor__16_System_2EException_9_Exception_str(ct_string* u_7_message)
 static ct_string* ct_m__16_System_2EException_8_ToString(ct_t_6_System_9_Exception* ct_self)

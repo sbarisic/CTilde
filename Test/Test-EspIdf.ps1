@@ -31,7 +31,9 @@ New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
 try {
     Push-Location $repositoryDirectory
     try {
-        Invoke-Checked "dotnet" @("build", ".\CTilde.sln", "--nologo")
+        # Build the compiler, CLI, and conformance project needed by this gate. The
+        # editor may have the language-server output loaded while this script runs.
+        Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "--nologo")
 
         $hello = Join-Path $temporaryDirectory "hello.c"
         $exceptions = Join-Path $temporaryDirectory "exceptions.c"

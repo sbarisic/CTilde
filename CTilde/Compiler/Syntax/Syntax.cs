@@ -78,20 +78,25 @@ public enum SyntaxKind
     InternalKeyword,
     IsKeyword,
     LongKeyword,
+    NintKeyword,
+    NuintKeyword,
     NamespaceKeyword,
     NewKeyword,
     NullKeyword,
     ObjectKeyword,
     OverrideKeyword,
+    OutKeyword,
     PrivateKeyword,
     ProtectedKeyword,
     PublicKeyword,
     ReadonlyKeyword,
+    RefKeyword,
     ReturnKeyword,
     SbyteKeyword,
     SealedKeyword,
     ShortKeyword,
     StaticKeyword,
+    StackallocKeyword,
     StringKeyword,
     StructKeyword,
     SwitchKeyword,
@@ -278,6 +283,8 @@ public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Na
 
 public enum TypeDeclarationKind { Class, Struct, Enum, Delegate }
 
+public enum ParameterPassingKind { Value, Ref, In, Out }
+
 public sealed record TypeDeclarationSyntax(
     SourceText Source,
     TextSpan Span,
@@ -296,12 +303,17 @@ public sealed record EnumMemberSyntax(SourceText Source, TextSpan Span, string N
 
 public sealed record AttributeSyntax(SourceText Source, TextSpan Span, string Name, ImmutableArray<ExpressionSyntax> Arguments) : SyntaxNode(Source, Span);
 
-public sealed record FunctionPointerSignatureSyntax(SourceText Source, TextSpan Span, ImmutableArray<TypeSyntax> Elements) : SyntaxNode(Source, Span);
+public sealed record FunctionPointerElementSyntax(SourceText Source, TextSpan Span, ParameterPassingKind PassingKind, TypeSyntax Type) : SyntaxNode(Source, Span)
+{
+    public override string ToString() => PassingKind == ParameterPassingKind.Value ? Type.ToString() : $"{PassingKind.ToString().ToLowerInvariant()} {Type}";
+}
 
-public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false, FunctionPointerSignatureSyntax? FunctionPointer = null) : SyntaxNode(Source, Span)
+public sealed record FunctionPointerSignatureSyntax(SourceText Source, TextSpan Span, ImmutableArray<FunctionPointerElementSyntax> Elements) : SyntaxNode(Source, Span);
+
+public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false, FunctionPointerSignatureSyntax? FunctionPointer = null, ImmutableArray<TypeSyntax> TypeArguments = default) : SyntaxNode(Source, Span)
 {
     public override string ToString() => FunctionPointer is null
-        ? Name + new string('*', PointerDepth) + (IsArray ? "[]" : string.Empty)
+        ? Name + (TypeArguments.IsDefaultOrEmpty ? string.Empty : $"<{string.Join(", ", TypeArguments)}>") + new string('*', PointerDepth) + (IsArray ? "[]" : string.Empty)
         : $"delegate* unmanaged<{string.Join(", ", FunctionPointer.Elements)}>";
 }
 
@@ -320,6 +332,7 @@ public sealed record ParameterSyntax(
     SourceText Source,
     TextSpan Span,
     ImmutableArray<AttributeSyntax> Attributes,
+    ParameterPassingKind PassingKind,
     TypeSyntax Type,
     string Name) : SyntaxNode(Source, Span);
 
@@ -349,7 +362,7 @@ public sealed record ConstructorInitializerSyntax(
     SourceText Source,
     TextSpan Span,
     ConstructorInitializerKind Kind,
-    ImmutableArray<ExpressionSyntax> Arguments) : SyntaxNode(Source, Span);
+    ImmutableArray<ArgumentSyntax> Arguments) : SyntaxNode(Source, Span);
 
 public sealed record AccessorSyntax(
     SourceText Source,
@@ -393,6 +406,7 @@ public sealed record SwitchSectionSyntax(SourceText Source, TextSpan Span, Immut
 public sealed record SwitchLabelSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Value) : SyntaxNode(Source, Span);
 
 public abstract record ExpressionSyntax(SourceText Source, TextSpan Span) : SyntaxNode(Source, Span);
+public sealed record ArgumentSyntax(SourceText Source, TextSpan Span, ParameterPassingKind PassingKind, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
 public sealed record LiteralExpressionSyntax(SourceText Source, TextSpan Span, object? Value, SyntaxKind LiteralKind) : ExpressionSyntax(Source, Span);
 public sealed record NameExpressionSyntax(SourceText Source, TextSpan Span, string Name) : ExpressionSyntax(Source, Span);
 public sealed record ThisExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
@@ -402,9 +416,10 @@ public sealed record UnaryExpressionSyntax(SourceText Source, TextSpan Span, Syn
 public sealed record BinaryExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Left, SyntaxKind OperatorKind, ExpressionSyntax Right) : ExpressionSyntax(Source, Span);
 public sealed record AssignmentExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Left, SyntaxKind OperatorKind, ExpressionSyntax Right) : ExpressionSyntax(Source, Span);
 public sealed record MemberAccessExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, string Name) : ExpressionSyntax(Source, Span);
-public sealed record CallExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Target, ImmutableArray<ExpressionSyntax> Arguments) : ExpressionSyntax(Source, Span);
+public sealed record CallExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Target, ImmutableArray<ArgumentSyntax> Arguments) : ExpressionSyntax(Source, Span);
 public sealed record IndexExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, ExpressionSyntax Index) : ExpressionSyntax(Source, Span);
-public sealed record NewExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ImmutableArray<ExpressionSyntax> Arguments, ExpressionSyntax? ArrayLength) : ExpressionSyntax(Source, Span);
+public sealed record NewExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ImmutableArray<ArgumentSyntax> Arguments, ExpressionSyntax? ArrayLength) : ExpressionSyntax(Source, Span);
 public sealed record CastExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ExpressionSyntax Expression) : ExpressionSyntax(Source, Span);
 public sealed record TypeTestExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record SafeCastExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);
+public sealed record StackAllocExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax ElementType, ExpressionSyntax Count) : ExpressionSyntax(Source, Span);

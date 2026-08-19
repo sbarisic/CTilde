@@ -1,4 +1,5 @@
 using System;
+using System.Runtime;
 using Esp.Idf;
 
 namespace Examples.TCan485;
@@ -9,6 +10,13 @@ public static class NativeCallback
 {
     [Extern("ct_esp_invoke_i64")]
     public static unsafe long Invoke(delegate* unmanaged<long, long> callback, long value);
+}
+
+public static class NativeBufferApi
+{
+    [Extern("ct_esp_fill_buffer")]
+    [NoAlloc]
+    public static unsafe uint Fill(NativeBuffer<byte> buffer);
 }
 
 public class Probe
@@ -70,7 +78,7 @@ public static class Program
         return value * 2L;
     }
 
-    private static void RunManagedSelfTests()
+    private static unsafe void RunManagedSelfTests()
     {
         Console.WriteLine("C~ ESP-IDF hardware test");
 
@@ -96,6 +104,12 @@ public static class Program
             Console.WriteLine("timer64: ok");
         else
             Console.WriteLine("TIMER64_FAILED");
+
+        NativeBuffer<byte> nativeBuffer = stackalloc byte[1];
+        if (NativeBufferApi.Fill(nativeBuffer) == 42U && nativeBuffer[0] == (byte)42)
+            Console.WriteLine("native buffer: 42");
+        else
+            Console.WriteLine("NATIVE_BUFFER_FAILED");
 
         object boxed = 7;
         Console.Write("boxed: ");
@@ -130,7 +144,7 @@ public static class Program
     }
 
     [EntryPoint]
-    public static void Main()
+    public static unsafe void Main()
     {
         if (!Ws2812.Configure(Ws2812Pin, 1u) || !Ws2812.Clear())
         {

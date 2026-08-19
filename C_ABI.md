@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.7. Draft 0.7 generated C is ABI-incompatible with draft 0.6 because it adds exact 64-bit scalar encodings, managed delegate layouts, and unmanaged callback trampolines.
+This document defines the generated C contract for C~ draft 0.8. Draft 0.8 generated C is ABI-incompatible with draft 0.7 when a program uses native-sized integers, by-reference parameters, or flattened native-buffer views. Existing draft 0.7 programs retain byte-identical generated C.
 
 The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -14,10 +14,12 @@ The generated file includes only C standard-library headers. Compile-time assert
 - Exact `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int32_t`, `uint32_t`, `int64_t`, and `uint64_t` types when used.
 - Two's-complement `int32_t`.
 - Two's-complement `int64_t`.
+- `intptr_t` and `uintptr_t` matching data-pointer width when native-sized integers are used.
+- `size_t` representable by `uintptr_t` when native buffers are used.
 - A four-byte IEEE-754 binary32 `float`.
 - C23 language support. The native test driver first uses `-std=gnu23`. It retries with `-std=gnu2x` only after an option error. `CTILDE_C_STANDARD` selects an explicit dialect and disables this retry.
 
-References and unsafe pointers use native C pointer width. A 64-bit C target therefore uses 64-bit references and pointers. C~ scalar integer sizes do not change with the target.
+References, unsafe pointers, `nint`, and `nuint` use native C pointer width. A 64-bit C target therefore uses 64-bit values for all four. Fixed-width C~ scalar sizes do not change with the target.
 
 The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde_esp_shim.h`. ESP-IDF selects the concrete Xtensa or RISC-V compiler; C~ has no per-chip backend.
 
@@ -34,11 +36,14 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 | `uint` | `uint32_t` |
 | `long` | `int64_t` |
 | `ulong` | `uint64_t` |
+| `nint` | `intptr_t` |
+| `nuint` | `uintptr_t` |
 | `float` | `float` |
 | `T*` | the mapped C type followed by `*` |
+| `void*` | `void*` |
 | `delegate* unmanaged<P..., R>` | exact `R (*)(P...)` function pointer |
 
-Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.7 defines two's-complement wrapping.
+Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.8 defines two's-complement wrapping for fixed and native-width signed integers. Native shifts derive their mask from `sizeof(uintptr_t) * CHAR_BIT`.
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
@@ -74,7 +79,7 @@ Generated prefixes identify symbol kinds:
 | `ct_eh_` | Lexical exception handler frame |
 | `ct_ep_`, `ct_ex_`, `ct_er_` | Pending cleanup action, exception, and return payload |
 
-Method names append a structural code for every parameter type. Overloads therefore have distinct C symbols without hashes.
+Method names append a structural code for every parameter type. `nint` and `nuint` use `ni` and `nu`. A non-value parameter prefixes its type code with `ref`, `in`, or `out`; existing value-parameter names are unchanged. Overloads therefore have distinct C symbols without hashes.
 
 All generated user definitions have translation-unit-local linkage. `public` and `internal` are C~ access rules; they do not export a native symbol. The exceptions are C `main` and declarations created by `[Extern]`.
 
@@ -130,7 +135,33 @@ Unmanaged function-pointer types are structural. The emitter owns a C declarator
 int32_t (*callback)(int32_t);
 ```
 
-Locals, fields, parameters, results, casts, extern prototypes, and trampolines use the correctly parenthesized form; deterministic structural typedefs remain available for internal composite layouts. Taking the address of an extern method uses the native symbol directly. Taking the address of a C~ static method emits a translation-unit-local C ABI trampoline. A callback trampoline installs a C~ handler boundary; an escaping exception is cleaned up and reported as fatal `CTE0003` instead of unwinding into native code. This contract is valid only for synchronous invocation on the current C~ task.
+Locals, fields, parameters, results, casts, extern prototypes, and trampolines use the correctly parenthesized form; deterministic structural typedefs remain available for internal composite layouts. By-reference signature elements use `T*` for `ref` and `out` and `const T*` for `in`. Taking the address of an extern method uses the native symbol directly. Taking the address of a C~ static method emits a translation-unit-local C ABI trampoline. A callback trampoline installs a C~ handler boundary; an escaping exception is cleaned up and reported as fatal `CTE0003` instead of unwinding into native code. This contract is valid only for synchronous invocation on the current C~ task.
+
+## By-reference parameters
+
+C~ methods, constructors, delegates, externs, and unmanaged function pointers use the same mappings:
+
+| C~ parameter | C parameter |
+| --- | --- |
+| `T value` | `T value` |
+| `ref T value` | `T* value` |
+| `in T value` | `const T* value` |
+| `out T value` | `T* value` |
+
+C~ calls pass an address. An `out` destination containing managed references is dropped and zeroed before the call. The callee uses normal strong-slot replacement and must assign every `out` parameter on normal return. Extern and unmanaged-function-pointer by-reference element types must be unmanaged ABI-safe.
+
+## Native buffers and stack allocation
+
+Each used intrinsic buffer type has a local value representation containing `Data` and `Length`, where `Length` is `size_t`. A writable view stores `T*`; a read-only view stores `const T*`. Buffer values never cross the C ABI as structures. One C~ value parameter expands in place:
+
+```c
+/* NativeBuffer<T> */         T* name_data, size_t name_length
+/* ReadOnlyNativeBuffer<T> */ const T* name_data, size_t name_length
+```
+
+The same adjacent expansion applies to C~ calls, extern prototypes, delegate thunks, and unmanaged function pointers. Buffer parameters cannot be `ref`, `in`, or `out`, and buffer returns are prohibited.
+
+`stackalloc` computes and validates `count * sizeof(T)`, reports `CTB0002` for a negative runtime `int` count and `CTB0003` for size overflow, and then uses `_alloca` on MSVC or compiler alloca support on GCC/Clang. It does not use a C variable-length array or the managed heap. A zero count produces a null data pointer. Checked indexing reports `CTB0001`.
 
 ## Enumerations
 
@@ -232,23 +263,23 @@ An extern declaration is linked only when generated code calls it. The compiler 
 
 An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. A generated same-task synchronous callback trampoline catches escaping C~ exceptions and terminates with `CTE0003`. Other exception propagation across native boundaries is unsupported.
 
-Parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns.
+Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
 The runtime exports `ct_retain(ct_object*)` and `ct_release(ct_object*)`. Both accept null. A native owner must eventually balance every owned or retained reference. Retain overflow terminates with `CTM0002`; invalid release or underflow terminates with `CTM0003`.
 
-ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, `int64_t`, and `void`; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards the monotonic `esp_timer_get_time()` result. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
+ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses scalar types plus an explicit `uint8_t*`/`size_t` buffer pair; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards the monotonic `esp_timer_get_time()` result. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
 
 ## Future native interop constraints
 
-This section records post-draft constraints and does not extend the draft 0.7 ABI.
+This section records post-draft constraints and does not extend the draft 0.8 ABI.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
 
-The extended scalar ABI still needs native-sized integer types for `size_t` and pointer-sized values. Native strings and buffers must use explicit pointer, element, length, mutability, and lifetime information. Managed C~ strings and arrays retain their runtime layouts and do not become implicit `char*` or flat C arrays.
+Native-sized integers and scoped pointer-plus-length buffers now cover synchronous byte-oriented calls. Native strings still need explicit encoding, termination, mutability, ownership, and lifetime information. Managed C~ strings and arrays retain their runtime layouts and do not become implicit `char*` or flat C arrays.
 
-Opaque handles will be distinct C~ value types whose generated C representation uses the native typedef from its owning header. Ownership metadata must distinguish borrowed, created, consumed, nullable, and retained values. `ref`, `in`, and `out` arguments will map to native pointers only after definite-assignment, mutability, and escape checks succeed.
+Opaque handles will be distinct C~ value types whose generated C representation uses the native typedef from its owning header. Ownership metadata must distinguish borrowed, created, consumed, nullable, and retained values. Draft 0.8 by-reference arguments already enforce definite assignment and mutability; later escape and ownership annotations must extend that base without weakening it.
 
-Delegates remain ABI-incompatible with unmanaged function pointers. Future delegate-to-native adapters require an exported trampoline and a user-context pointer. Retained callbacks require explicit registration and unregistration lifetime; draft 0.7 supports only static-method function pointers invoked synchronously on the current task.
+Delegates remain ABI-incompatible with unmanaged function pointers. Future delegate-to-native adapters require an exported trampoline and a user-context pointer. Retained callbacks require explicit registration and unregistration lifetime; draft 0.8 supports only static-method function pointers invoked synchronously on the current task.
 
 No native call or callback may unwind a C~ exception through C frames. A callback trampoline must attach to defined per-task runtime state before it uses exceptions, managed allocation, virtual dispatch, or other task-sensitive services. ISR entry points additionally require compiler-checked allocation, throwing, blocking, and IRAM/DRAM reachability restrictions.
 
@@ -264,7 +295,7 @@ typedef struct ct_exception_frame {
 } ct_exception_frame;
 ```
 
-One process-global pointer identifies the active handler, one process-global `ct_object*` owns the currently thrown exception, and one process-global pointer identifies the top automatic cleanup record. Draft 0.7 handler and ARC state are single-threaded.
+One process-global pointer identifies the active handler, one process-global `ct_object*` owns the currently thrown exception, and one process-global pointer identifies the top automatic cleanup record. Draft 0.8 handler and ARC state are single-threaded.
 
 Each invocation of a method that contains `try` or `defer` creates its `jmp_buf` values and handler frames on the C stack. Parameters, C~ locals, caught exceptions, pending actions, return payloads, and defer captures that can survive `longjmp` are fields in one compiler-generated `volatile` automatic method-state aggregate. This avoids indeterminate modified C automatic values without calling `ct_alloc` for control state.
 
@@ -297,6 +328,9 @@ The runtime prints one line to standard error. Hosted output exits with `EXIT_FA
 | `CTO0003` | Boxed type mismatch |
 | `CTE0001` | Unhandled C~ exception |
 | `CTE0002` | Null thrown reference |
+| `CTB0001` | Native-buffer index out of range |
+| `CTB0002` | Negative stack-allocation count |
+| `CTB0003` | Stack-allocation size overflow |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 

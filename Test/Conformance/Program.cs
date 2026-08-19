@@ -4,6 +4,7 @@ var suite = new ConformanceSuite();
 ConformanceTests.RegisterPart1(suite);
 ConformanceTests.RegisterPart2(suite);
 ConformanceTests.RegisterPart3(suite);
+ConformanceTests.RegisterPart4(suite);
 return suite.Complete();
 
 internal sealed class ConformanceSuite

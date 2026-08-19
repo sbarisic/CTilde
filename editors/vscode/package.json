@@ -37,12 +37,13 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true});require('fs').rmSync('server',{recursive:true,force:true})\"",
-    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
+    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/serverDevelopment.ts --bundle --platform=node --format=cjs --outfile=./out/serverDevelopment.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
     "build:server": "dotnet publish ../../CTilde.LanguageServer/CTilde.LanguageServer.csproj -c Release --no-self-contained -o ./server",
     "build": "npm run compile && npm run build:server",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies",
-    "test": "npm run compile && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run test:server",
+    "test": "npm run compile && npm run test:client && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run test:server",
+    "test:client": "node --test ./tests/server-development.test.mjs",
     "test:metadata": "node --test ./tests/metadata.test.mjs",
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
     "test:sources": "node --test ./tests/source-tokenization.test.mjs",
@@ -82,6 +83,18 @@
           "default": "dotnet",
           "scope": "machine",
           "description": "Path to the .NET 10 host used to run the C~ language server."
+        },
+        "ctilde.languageServer.serverPath": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Development override for the C~ language-server DLL. Accepts an absolute path, a workspace-relative path, or ${workspaceFolder}. Leave empty to use the server bundled with the extension."
+        },
+        "ctilde.languageServer.restartOnServerChange": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Automatically restart an external development language server when its DLL or adjacent CTilde.Compiler.dll changes."
         },
         "ctilde.trace.server": {
           "type": "string",

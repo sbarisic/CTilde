@@ -25,6 +25,7 @@ internal sealed partial class BodyPipeline
             CastExpressionSyntax cast => LowerCast(cast),
             TypeTestExpressionSyntax typeTest => LowerTypeTest(typeTest),
             SafeCastExpressionSyntax safeCast => LowerSafeCast(safeCast),
+            StackAllocExpressionSyntax stackAlloc => LowerStackAlloc(stackAlloc),
             _ => ErrorExpression(),
         };
         return RecordSemantic(syntax, result);
@@ -47,6 +48,10 @@ internal sealed partial class BodyPipeline
             valueCategory);
         return expression;
     }
+
+    private LoweredExpression LowerArgument(ArgumentSyntax argument) => argument.PassingKind == ParameterPassingKind.Out
+        ? LowerAssignable(argument.Expression)
+        : LowerExpression(argument.Expression);
 
     private LoweredExpression LowerLiteral(LiteralExpressionSyntax syntax)
     {
@@ -98,14 +103,20 @@ internal sealed partial class BodyPipeline
         {
             if (parameter.Type.ContainsPointer)
                 RequireUnsafe(syntax);
+            if (!forWrite && parameter.PassingKind == ParameterPassingKind.Out && !_assignedOutParameters.Contains(parameter))
+                Report("CT2174", $"Out parameter '{parameter.Name}' is read before it is assigned.", syntax);
             var name = _durableParameters.TryGetValue(parameter, out var storage)
                 ? Durable(storage)
                 : NameMangler.Identifier(parameter.Name);
+            var byReference = parameter.PassingKind != ParameterPassingKind.Value;
+            var code = parameter.Type.IsNativeBuffer
+                ? $"({_emitter.CTypeName(parameter.Type)}){{ {name}_data, {name}_length }}"
+                : byReference ? $"*({name})" : name;
             return new LoweredExpression
             {
                 Type = parameter.Type,
-                Code = name,
-                LValue = new LoweredLValue { Store = value => $"{name} = {value}", Address = $"&{name}", Parameter = parameter },
+                Code = code,
+                LValue = parameter.Type.IsNativeBuffer ? null : new LoweredLValue { Store = value => $"{code} = {value}", Address = byReference ? name : $"&{name}", Parameter = parameter },
                 Symbol = parameter,
             };
         }
@@ -198,6 +209,14 @@ internal sealed partial class BodyPipeline
             receiver = Materialize(receiver, syntax.Receiver);
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
+        }
+        if (receiver.Type.IsNativeBuffer && syntax.Name is "Length" or "Pointer")
+        {
+            RequireUnsafe(syntax);
+            receiver = Materialize(receiver, syntax.Receiver);
+            return syntax.Name == "Length"
+                ? new LoweredExpression { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.Length", Prelude = receiver.Prelude }
+                : new LoweredExpression { Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType), Code = $"{receiver.Code}.Data", Prelude = receiver.Prelude };
         }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
@@ -333,7 +352,8 @@ internal sealed partial class BodyPipeline
     private LoweredExpression LowerIndex(IndexExpressionSyntax syntax, bool forWrite)
     {
         var receiver = Materialize(LowerExpression(syntax.Receiver), syntax.Receiver);
-        var index = Materialize(Convert(LowerExpression(syntax.Index), CType.Int, syntax.Index, false), syntax.Index);
+        var indexType = receiver.Type.IsNativeBuffer ? CType.Nuint : CType.Int;
+        var index = Materialize(Convert(LowerExpression(syntax.Index), indexType, syntax.Index, false), syntax.Index);
         var prelude = new List<string>(receiver.Prelude);
         prelude.AddRange(index.Prelude);
         if (receiver.Type.Kind == CTypeKind.Array)
@@ -355,9 +375,30 @@ internal sealed partial class BodyPipeline
             prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
         }
+        if (receiver.Type.IsNativeBuffer)
+        {
+            RequireUnsafe(syntax);
+            prelude.Add($"ct_native_bounds((size_t){index.Code}, {receiver.Code}.Length, {_emitter.SourceArgument(syntax)});");
+            var code = $"{receiver.Code}.Data[(size_t){index.Code}]";
+            var writable = receiver.Type.Kind == CTypeKind.NativeBuffer;
+            if (forWrite && !writable)
+                Report("CT2179", "ReadOnlyNativeBuffer<T> indexing is read-only.", syntax);
+            return new LoweredExpression
+            {
+                Type = receiver.Type.ElementType!,
+                Code = code,
+                Prelude = prelude,
+                LValue = writable ? new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" } : null,
+            };
+        }
         if (receiver.Type.Kind == CTypeKind.Pointer)
         {
             RequireUnsafe(syntax);
+            if (receiver.Type.ElementType == CType.Void)
+            {
+                Report("CT2180", "void* cannot be indexed.", syntax);
+                return ErrorExpression(prelude);
+            }
             var code = $"{receiver.Code}[{index.Code}]";
             return new LoweredExpression { Type = receiver.Type.ElementType!, Code = code, Prelude = prelude, LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" } };
         }
@@ -380,13 +421,28 @@ internal sealed partial class BodyPipeline
             var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
             return OwnResult(type, code, length.Prelude);
         }
+        if (type.IsNativeBuffer)
+        {
+            RequireUnsafe(syntax);
+            _emitter.RegisterType(type);
+            if (syntax.Arguments.Length != 2 || syntax.Arguments.Any(argument => argument.PassingKind != ParameterPassingKind.Value))
+            {
+                Report("CT2181", "Native-buffer construction requires a pointer and a length.", syntax);
+                return ErrorExpression();
+            }
+            var pointerType = new CType(CTypeKind.Pointer, ElementType: type.ElementType);
+            var pointer = Materialize(Convert(LowerExpression(syntax.Arguments[0].Expression), pointerType, syntax.Arguments[0], false), syntax.Arguments[0]);
+            var length = Materialize(Convert(LowerExpression(syntax.Arguments[1].Expression), CType.Nuint, syntax.Arguments[1], false), syntax.Arguments[1]);
+            var prelude = new List<string>(pointer.Prelude); prelude.AddRange(length.Prelude);
+            return new LoweredExpression { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer.Code}, (size_t){length.Code} }}", Prelude = prelude };
+        }
         if (type.Kind is not CTypeKind.Class and not CTypeKind.Struct)
         {
             Report("CT2119", $"new cannot construct '{type.DisplayName}'.", syntax);
             return ErrorExpression();
         }
-        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
-        var constructor = SelectOverload(type.Symbol!.Constructors, type.Symbol.Name, arguments, syntax);
+        var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
+        var constructor = SelectOverload(type.Symbol!.Constructors, type.Symbol.Name, arguments, syntax.Arguments, syntax);
         if (constructor is null)
             return ErrorExpression(arguments.SelectMany(argument => argument.Prelude));
         CheckAccess(constructor, syntax);
@@ -398,6 +454,31 @@ internal sealed partial class BodyPipeline
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
         var construction = $"{constructor.CName}({string.Join(", ", lowered.Codes)})";
         return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude, symbol: constructor) : new LoweredExpression { Type = type, Code = construction, Prelude = lowered.Prelude, Symbol = constructor };
+    }
+
+    private LoweredExpression LowerStackAlloc(StackAllocExpressionSyntax syntax)
+    {
+        RequireUnsafe(syntax);
+        if (_repeatableLoopDepth > 0)
+            Report("CT2182", "stackalloc is not permitted lexically inside a loop.", syntax);
+        var element = _model.ResolveType(syntax.ElementType, TreeFor(syntax));
+        var type = new CType(CTypeKind.NativeBuffer, ElementType: element);
+        _emitter.RegisterType(type);
+        var count = LowerExpression(syntax.Count);
+        if (count.Type.Kind is not CTypeKind.Int and not CTypeKind.Nuint)
+        {
+            Report("CT2183", "A stackalloc count must have type int or nuint.", syntax.Count);
+            return ErrorExpression(count.Prelude);
+        }
+        if (count.IsConstant && count.ConstantValue is int signed && signed < 0)
+            Report("CT2184", "A stackalloc count cannot be negative.", syntax.Count);
+        count = Materialize(count, syntax.Count);
+        var prelude = new List<string>(count.Prelude);
+        if (count.Type == CType.Int)
+            prelude.Add($"if ({count.Code} < 0) ct_fail(\"CTB0002\", {_emitter.SourceArgument(syntax)});");
+        var bytes = $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
+        var pointer = $"((size_t){count.Code} == 0u ? NULL : ({_emitter.CTypeName(element)}*)CT_ALLOCA({bytes}))";
+        return new LoweredExpression { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
     }
 
     private TypeSymbol? TryResolveTypeExpression(ExpressionSyntax expression)
@@ -476,7 +557,7 @@ internal sealed partial class BodyPipeline
             return ErrorExpression(receiver?.Prelude);
         }
 
-        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
         var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => method.Name == methodName && method.IsStatic == requireStatic)
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
         if (!requireStatic && receiver is not null && receiver.Type.IsValueType)
@@ -491,7 +572,7 @@ internal sealed partial class BodyPipeline
             if (allCandidates.Length > 0)
                 candidates = allCandidates;
         }
-        var selected = SelectOverload(candidates, methodName, arguments, syntax);
+        var selected = SelectOverload(candidates, methodName, arguments, syntax.Arguments, syntax);
         if (selected is null)
             return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
         if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer))
@@ -593,7 +674,7 @@ internal sealed partial class BodyPipeline
     {
         var delegateType = target.Type.Symbol!;
         var parameters = delegateType.DelegateParameters;
-        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
         if (arguments.Length != parameters.Length)
         {
             Report("CT2160", $"Delegate '{delegateType.FullName}' expects {parameters.Length} argument(s).", syntax);
@@ -617,8 +698,8 @@ internal sealed partial class BodyPipeline
     {
         RequireUnsafe(syntax);
         var signature = target.Type.FunctionPointer!;
-        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
-        if (arguments.Length != signature.ParameterTypes.Length || arguments.Where((argument, index) => index < signature.ParameterTypes.Length && argument.Type != signature.ParameterTypes[index]).Any())
+        var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
+        if (arguments.Length != signature.ParameterTypes.Length || arguments.Where((argument, index) => index < signature.ParameterTypes.Length && (argument.Type != signature.ParameterTypes[index] || syntax.Arguments[index].PassingKind != signature.PassingKinds[index])).Any())
         {
             Report("CT2164", "Function-pointer invocation requires exact argument types.", syntax);
             return ErrorExpression(target.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
@@ -628,9 +709,41 @@ internal sealed partial class BodyPipeline
         var codes = new List<string>();
         for (var index = 0; index < arguments.Length; index++)
         {
-            var argument = Materialize(arguments[index], syntax.Arguments[index]);
-            prelude.AddRange(argument.Prelude);
-            codes.Add(argument.Code);
+            if (signature.PassingKinds[index] != ParameterPassingKind.Value)
+            {
+                var argument = arguments[index];
+                prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Address is not { } address)
+                {
+                    Report("CT2171", "A by-reference function-pointer argument must be addressable.", syntax.Arguments[index]);
+                    codes.Add("NULL");
+                }
+                else
+                {
+                    if (signature.PassingKinds[index] is ParameterPassingKind.Ref or ParameterPassingKind.Out && IsReadonly(argument.LValue))
+                        Report("CT2172", "Readonly storage can be passed only with 'in'.", syntax.Arguments[index]);
+                    if (signature.PassingKinds[index] == ParameterPassingKind.Out)
+                    {
+                        if (argument.Type.ContainsManagedReferences)
+                            prelude.Add(_emitter.DropValueStatement(argument.Type, address));
+                        prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
+                        MarkAssigned(argument.LValue);
+                    }
+                    codes.Add(address);
+                }
+            }
+            else
+            {
+                var argument = Materialize(arguments[index], syntax.Arguments[index].Expression);
+                prelude.AddRange(argument.Prelude);
+                if (argument.Type.IsNativeBuffer)
+                {
+                    codes.Add($"({argument.Code}).Data");
+                    codes.Add($"({argument.Code}).Length");
+                }
+                else
+                    codes.Add(argument.Code);
+            }
         }
         prelude.Add($"(void)ct_require_nonnull((void*){target.Code}, {_emitter.SourceArgument(syntax.Target)});");
         _emitter.AllocationEffects.RecordDirect(_method, syntax, "unmanaged function-pointer invocation");
@@ -639,11 +752,11 @@ internal sealed partial class BodyPipeline
 
     private static bool SupportsBuiltInToString(CType type) => type.Kind is
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
-        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float or CTypeKind.String;
+        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.String;
 
     private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver, bool captureForDefer = false)
     {
-        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
         if (arguments.Length != 0)
         {
             Report("CT2122", "No overload of 'ToString' accepts the supplied argument types.", syntax);
@@ -676,6 +789,8 @@ internal sealed partial class BodyPipeline
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int",
             CTypeKind.Long => "ct_to_string_long",
             CTypeKind.Ulong => "ct_to_string_ulong",
+            CTypeKind.Nint => "ct_to_string_nint",
+            CTypeKind.Nuint => "ct_to_string_nuint",
             CTypeKind.Float => "ct_to_string_float",
             _ => throw new InvalidOperationException($"Unsupported ToString receiver '{receiver.Type.DisplayName}'."),
         };

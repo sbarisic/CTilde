@@ -23,7 +23,15 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(manifest.main, "./out/extension.js");
   assert.deepEqual(manifest.activationEvents, ["onLanguage:ctilde", "onUri:ctilde-stdlib"]);
   assert.equal(manifest.dependencies["vscode-languageclient"], "9.0.1");
-  assert.equal(manifest.contributes.configuration.properties["ctilde.languageServer.dotnetPath"].default, "dotnet");
+  const configuration = manifest.contributes.configuration.properties;
+  assert.equal(configuration["ctilde.languageServer.dotnetPath"].default, "dotnet");
+  assert.equal(configuration["ctilde.languageServer.dotnetPath"].scope, "machine");
+  assert.equal(configuration["ctilde.languageServer.serverPath"].default, "");
+  assert.equal(configuration["ctilde.languageServer.serverPath"].scope, "window");
+  assert.match(configuration["ctilde.languageServer.serverPath"].description, /\$\{workspaceFolder\}/);
+  assert.equal(configuration["ctilde.languageServer.restartOnServerChange"].default, true);
+  assert.equal(configuration["ctilde.languageServer.restartOnServerChange"].scope, "window");
+  assert.match(configuration["ctilde.languageServer.restartOnServerChange"].description, /CTilde\.Compiler\.dll/);
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   const semanticScopes = manifest.contributes.semanticTokenScopes[0];
   assert.equal(semanticScopes.language, "ctilde");

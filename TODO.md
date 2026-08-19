@@ -17,7 +17,7 @@
 
 ## Compiler architecture completion
 
-Draft 0.7 now has the release pipeline required by the architecture:
+Draft 0.8 uses the release pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.
@@ -26,7 +26,7 @@ Draft 0.7 now has the release pipeline required by the architecture:
 - [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and line classifier.
 - [x] Split non-generated C# implementation and conformance files below 900 physical lines.
 
-The migration retains 74 conformance checks and byte-identical hosted and ESP-IDF C baselines.
+The migration retained the original 74 conformance checks and byte-identical hosted and ESP-IDF C baselines. Draft 0.8 adds four native-ABI checks without changing generated C for draft 0.7 programs.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 
@@ -53,13 +53,13 @@ The hardware MVP has removed the entry-point, failure, process-exit, and symbol-
 These limits remain:
 
 - The CLI emits C but does not duplicate ESP-IDF linking, flashing, or monitoring.
-- `[Extern]` supports simple C ABI calls but not callbacks or exported C~ methods.
+- `[Extern]` supports synchronous scalar, by-reference, and flattened native-buffer calls but not exported C~ methods or retained callbacks.
 - Managed allocation uses single-threaded deterministic ARC; cycles leak.
 - Exception-handler state supports one C~ execution task.
 - `defer` provides deterministic block cleanup without heap registration.
 - `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
-The draft 0.7 object, ARC, and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
+The draft 0.8 language-side synchronous ABI now adds native-sized integers, by-reference parameters, `void*`, and scoped native buffers to the draft 0.7 object, ARC, and exception runtime. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when later ESP work changes runtime and emitter files.
 
 ### Design rules
 
@@ -247,9 +247,9 @@ The first target can use synchronous APIs from the C~ entry task. Full ESP-IDF u
 #### Phase 7a: Complete the synchronous C ABI
 
 - [x] Add signed and unsigned 64-bit integers for ESP-IDF time and counter APIs.
-- [ ] Add native-sized signed and unsigned integers for `intptr_t`, `uintptr_t`, and `size_t`.
-- [ ] Add `ref`, `in`, and definitely assigned `out` parameters with exact pointer ABI mappings.
-- [ ] Add unsafe `void*`, stack allocation, and explicit pointer-plus-length native buffer views.
+- [x] Add native-sized signed and unsigned integers for `intptr_t`, `uintptr_t`, and `size_t`.
+- [x] Add `ref`, `in`, and definitely assigned `out` parameters with exact pointer ABI mappings.
+- [x] Add unsafe `void*`, stack allocation, and explicit pointer-plus-length native buffer views.
 - [ ] Add scoped native UTF-8 string views. Do not pass a managed C~ `string` as `const char*` implicitly.
 - [ ] Add distinct opaque native handle types instead of representing every handle as an integer or unrestricted pointer.
 - [ ] Add ownership metadata for borrowed, created, consumed, nullable, and retained handles or pointers.
@@ -305,6 +305,9 @@ Do not call general C~ allocation, console, or virtual dispatch from an interrup
 - [x] Verify 64-bit literal, promotion, wrapping, formatting, boxing, enum, switch, and ABI behavior.
 - [x] Verify named delegate selection, ARC receiver lifetime, virtual/base dispatch, identity, exceptions, and null invocation.
 - [x] Verify unmanaged function-pointer signatures, unsafe enforcement, exact native calls, and the `CTE0003` callback boundary.
+- [x] Verify native-sized promotions, portable constants, wrapping, formatting, mangling, and target-width shifts.
+- [x] Verify `ref`/`in`/`out` addressability, readonly and definite-assignment flow, callable signatures, ARC replacement, and native pointer mappings.
+- [x] Verify native-buffer element restrictions, construction, conversion, bounds, stack-count checks, loop and escape rejection, flattening, and `[NoAlloc]` use.
 
 #### Toolchain tests
 
@@ -333,6 +336,15 @@ The stale `bin/hello.c` artifact currently fails both installed cross-compilers 
 - [x] Record fresh Draft 0.7 heap and stack readings and reconfirm the GPIO4 WS2812 cycle without watchdog resets.
 
 The 2026-08-19 Draft 0.7 run reported 298,012 bytes of free heap, a 295,468-byte minimum, and 6,960 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812 and returning from the managed self-tests. UART completed more than ten `ws2812: on/off` cycles on GPIO4 without a watchdog reset; the same path was previously confirmed by a person to blink the onboard LED green. The failure image printed `CTN0001`, called `abort()`, and restarted with `SW_CPU_RESET`. The self-test was reflashed and rechecked as the final board state. The earlier GPIO2 run remains command-level validation only because GPIO2 is microSD MISO, not a visible LED.
+
+#### Draft 0.8 closure
+
+- [x] Build and size the updated `esp32` and `esp32c3` native-buffer self-test firmware.
+- [x] Flash Draft 0.8 on `COM4` and confirm `native buffer: 42` plus every existing ARC, delegate, function-pointer, timer, and success marker.
+- [x] Observe the GPIO4 WS2812 cycles without watchdog resets and record fresh heap and stack readings after the managed self-tests return.
+- [x] Flash `RuntimeFailure.ct`, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore and recheck the Draft 0.8 self-test as the final board state.
+
+The 2026-08-19 Draft 0.8 run produced a 151,008-byte `esp32` binary and a 154,496-byte `esp32c3` binary. The T-CAN485 reported 297,964 bytes of free heap, a 295,420-byte minimum, and 6,960 bytes of stack high-water headroom. All Draft 0.8 markers passed, more than ten GPIO4 WS2812 cycles ran without a watchdog reset, the failure image produced the required abort/reset sequence, and the self-test was restored and rechecked as the final board state.
 
 ### First-release acceptance criteria
 

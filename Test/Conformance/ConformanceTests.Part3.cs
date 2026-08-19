@@ -12,9 +12,18 @@ internal static partial class ConformanceTests
         suite.Run("complete feature example", () =>
         {
             var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
-            var result = CompileAndRun(source);
+            const string native = """
+
+                uint32_t ct_native_buffer_sum(const uint8_t* data, size_t length)
+                {
+                    uint32_t result = 0;
+                    for (size_t index = 0; index < length; index++) result += data[index];
+                    return result;
+                }
+                """;
+            var result = CompileAndRun(source, nativeSuffix: native);
             Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\n42\n-9223372036854775808\n18446744073709551615\n42\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
+            Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\n42\n-9223372036854775808\n18446744073709551615\n42\n42\n42\n42\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
         });
 
         suite.Run("object model example", () =>

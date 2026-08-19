@@ -14,6 +14,11 @@ export function run(): Promise<void> {
 async function extensionSmokeTest(): Promise<void> {
     const extension = vscode.extensions.getExtension('ctilde.ctilde-language');
     assert.ok(extension, 'C~ development extension was not discovered.');
+    const externalServer = process.env.CTILDE_TEST_EXTERNAL_SERVER;
+    assert.ok(externalServer, 'External C~ test language server was not configured.');
+    const languageServerConfiguration = vscode.workspace.getConfiguration('ctilde.languageServer');
+    await languageServerConfiguration.update('serverPath', externalServer, vscode.ConfigurationTarget.Global);
+    await languageServerConfiguration.update('restartOnServerChange', true, vscode.ConfigurationTarget.Global);
     await extension.activate();
     const directory = await mkdtemp(path.join(os.tmpdir(), 'ctilde-vscode-'));
     const filePath = path.join(directory, 'Program.ct');
@@ -30,6 +35,13 @@ async function extensionSmokeTest(): Promise<void> {
             value => value.items.some(item => item.label === 'WriteLine'),
             value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
         assert.ok(completions.items.some(item => item.label === 'WriteLine'));
+
+        await vscode.commands.executeCommand('ctilde.languageServer.restart');
+        const restartedCompletions = await waitFor(
+            async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, completionPosition, '.'),
+            value => value.items.some(item => item.label === 'WriteLine'),
+            value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
+        assert.ok(restartedCompletions.items.some(item => item.label === 'WriteLine'));
 
         const definitionPosition = document.positionAt(source.indexOf('Console') + 1);
         const definitions = await vscode.commands.executeCommand<Array<vscode.Location | vscode.LocationLink>>(

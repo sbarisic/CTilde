@@ -118,6 +118,8 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Uint => "uint32_t",
         CTypeKind.Long => "int64_t",
         CTypeKind.Ulong => "uint64_t",
+        CTypeKind.Nint => "intptr_t",
+        CTypeKind.Nuint => "uintptr_t",
         CTypeKind.Float => "float",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class or CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
@@ -125,6 +127,7 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
+        CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"ct_{NameMangler.TypeCode(type)}",
         CTypeKind.Null => "void*",
         _ => "int32_t",
     };
@@ -136,6 +139,14 @@ internal sealed class AnalysisServices : ILoweringServices
         var signature = type.FunctionPointer!;
         return $"{CTypeName(signature.ReturnType)} (*{name})({FunctionPointerParameters(signature)})";
     }
+
+    public string CParameterDeclaration(ParameterSymbol parameter, string name) => parameter.PassingKind switch
+    {
+        _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}* {name}_data, size_t {name}_length",
+        ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}* {name}",
+        ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}* {name}",
+        _ => CDeclaration(parameter.Type, name),
+    };
 
     public string CCastType(CType type)
     {
@@ -150,6 +161,7 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
+        CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         _ => "0",
     };
@@ -170,6 +182,8 @@ internal sealed class AnalysisServices : ILoweringServices
                 RegisterType(parameter);
             RegisterType(type.FunctionPointer.ReturnType);
         }
+        else if (type.IsNativeBuffer)
+            RegisterType(type.ElementType!);
     }
 
     public void RegisterBox(CType type)
@@ -240,7 +254,7 @@ internal sealed class AnalysisServices : ILoweringServices
         if (!method.IsStatic && !method.IsConstructor)
             parameters.Add($"{NameMangler.Type(method.ContainingType)}* ct_self");
         foreach (var parameter in method.Parameters)
-            parameters.Add(CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name)));
+            parameters.Add(CParameterDeclaration(parameter, NameMangler.Identifier(parameter.Name)));
         var storage = method.ExternName is not null ? "extern " : "static ";
         var arguments = parameters.Count == 0 ? "void" : string.Join(", ", parameters);
         var declaration = returnType.Kind == CTypeKind.FunctionPointer
@@ -252,5 +266,12 @@ internal sealed class AnalysisServices : ILoweringServices
 
     private string FunctionPointerParameters(FunctionPointerSignature signature) => signature.ParameterTypes.Length == 0
         ? "void"
-        : string.Join(", ", signature.ParameterTypes.Select(CTypeName));
+        : string.Join(", ", signature.ParameterTypes.Select((type, index) => type.IsNativeBuffer
+            ? $"{(type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(type.ElementType!)}*, size_t"
+            : signature.PassingKinds[index] switch
+            {
+                ParameterPassingKind.In => $"const {CTypeName(type)}*",
+                ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(type)}*",
+                _ => CTypeName(type),
+            }));
 }

@@ -2,7 +2,7 @@ using System.Collections.Immutable;
 
 namespace CTilde;
 
-internal sealed class Parser
+internal sealed partial class Parser
 {
     private static readonly HashSet<SyntaxKind> ModifierKinds =
     [
@@ -205,7 +205,7 @@ internal sealed class Parser
                     NextToken();
                 else
                     Match(SyntaxKind.BaseKeyword);
-                var initializerArguments = ParseArguments(out var initializerEnd);
+                var initializerArguments = ParseCallArguments(out var initializerEnd);
                 constructorInitializer = new ConstructorInitializerSyntax(_source, TextSpan.FromBounds(initializerStart, initializerEnd), initializerKind, initializerArguments);
             }
             var body = ParseBlock();
@@ -293,9 +293,10 @@ internal sealed class Parser
         {
             var start = Current.Span.Start;
             var attributes = ParseAttributes();
+            var passingKind = ParsePassingKind();
             var type = ParseType();
             var name = Match(SyntaxKind.IdentifierToken);
-            parameters.Add(new ParameterSyntax(_source, TextSpan.FromBounds(start, name.Span.End), attributes, type, name.Text));
+            parameters.Add(new ParameterSyntax(_source, TextSpan.FromBounds(start, name.Span.End), attributes, passingKind, type, name.Text));
             if (Current.Kind != SyntaxKind.CommaToken)
                 break;
             NextToken();
@@ -618,7 +619,7 @@ internal sealed class Parser
             }
             else if (Current.Kind == SyntaxKind.OpenParenToken)
             {
-                var arguments = ParseArguments(out var end);
+                var arguments = ParseCallArguments(out var end);
                 expression = new CallExpressionSyntax(_source, TextSpan.FromBounds(expression.Span.Start, end), expression, arguments);
             }
             else if (Current.Kind == SyntaxKind.OpenBracketToken)
@@ -650,6 +651,8 @@ internal sealed class Parser
                 return new ParenthesizedExpressionSyntax(_source, TextSpan.FromBounds(open.Span.Start, close.Span.End), nested);
             case SyntaxKind.NewKeyword:
                 return ParseNew();
+            case SyntaxKind.StackallocKeyword:
+                return ParseStackAlloc();
             case SyntaxKind.ThisKeyword:
                 NextToken();
                 return new ThisExpressionSyntax(_source, token.Span);
@@ -691,11 +694,53 @@ internal sealed class Parser
             type = type with { IsArray = true, Span = TextSpan.FromBounds(type.Span.Start, close.Span.End) };
             return new NewExpressionSyntax(_source, TextSpan.FromBounds(start, close.Span.End), type, [], length);
         }
-        var arguments = ParseArguments(out var end);
+        var arguments = ParseCallArguments(out var end);
         return new NewExpressionSyntax(_source, TextSpan.FromBounds(start, end), type, arguments, null);
     }
 
-    private ImmutableArray<ExpressionSyntax> ParseArguments(out int end)
+    private StackAllocExpressionSyntax ParseStackAlloc()
+    {
+        var start = NextToken().Span.Start;
+        var elementType = ParseType();
+        Match(SyntaxKind.OpenBracketToken);
+        var count = ParseExpression();
+        var close = Match(SyntaxKind.CloseBracketToken);
+        return new StackAllocExpressionSyntax(_source, TextSpan.FromBounds(start, close.Span.End), elementType, count);
+    }
+
+    private ImmutableArray<ArgumentSyntax> ParseCallArguments(out int end)
+    {
+        Match(SyntaxKind.OpenParenToken);
+        var arguments = ImmutableArray.CreateBuilder<ArgumentSyntax>();
+        while (Current.Kind is not SyntaxKind.CloseParenToken and not SyntaxKind.EndOfFileToken)
+        {
+            var start = Current.Span.Start;
+            var passingKind = ParsePassingKind();
+            var expression = ParseExpression();
+            arguments.Add(new ArgumentSyntax(_source, TextSpan.FromBounds(start, expression.Span.End), passingKind, expression));
+            if (Current.Kind != SyntaxKind.CommaToken)
+                break;
+            NextToken();
+        }
+        end = Match(SyntaxKind.CloseParenToken).Span.End;
+        return arguments.ToImmutable();
+    }
+
+    private ParameterPassingKind ParsePassingKind()
+    {
+        var kind = Current.Kind switch
+        {
+            SyntaxKind.RefKeyword => ParameterPassingKind.Ref,
+            SyntaxKind.InKeyword => ParameterPassingKind.In,
+            SyntaxKind.OutKeyword => ParameterPassingKind.Out,
+            _ => ParameterPassingKind.Value,
+        };
+        if (kind != ParameterPassingKind.Value)
+            NextToken();
+        return kind;
+    }
+
+    private ImmutableArray<ExpressionSyntax> ParseAttributeArguments(out int end)
     {
         Match(SyntaxKind.OpenParenToken);
         var arguments = ImmutableArray.CreateBuilder<ExpressionSyntax>();
@@ -719,7 +764,7 @@ internal sealed class Parser
             var name = ParseQualifiedName();
             ImmutableArray<ExpressionSyntax> arguments = [];
             if (Current.Kind == SyntaxKind.OpenParenToken)
-                arguments = ParseArguments(out _);
+                arguments = ParseAttributeArguments(out _);
             var close = Match(SyntaxKind.CloseBracketToken);
             attributes.Add(new AttributeSyntax(_source, TextSpan.FromBounds(start, close.Span.End), name, arguments));
         }
@@ -734,126 +779,7 @@ internal sealed class Parser
         return modifiers.ToImmutable();
     }
 
-    private TypeSyntax ParseType(bool allowVar = false)
-    {
-        var start = Current.Span.Start;
-        if (Current.Kind == SyntaxKind.DelegateKeyword)
-            return ParseFunctionPointerType();
-        string name;
-        if (IsBuiltInType(Current.Kind) || allowVar && Current.Kind == SyntaxKind.VarKeyword)
-            name = NextToken().Text;
-        else
-            name = ParseQualifiedName();
-        var pointerDepth = 0;
-        while (Current.Kind == SyntaxKind.StarToken)
-        {
-            pointerDepth++;
-            NextToken();
-        }
-        var isArray = false;
-        if (Current.Kind == SyntaxKind.OpenBracketToken && Peek(1).Kind == SyntaxKind.CloseBracketToken)
-        {
-            NextToken();
-            NextToken();
-            isArray = true;
-        }
-        return new TypeSyntax(_source, TextSpan.FromBounds(start, Peek(-1).Span.End), name, pointerDepth, isArray);
-    }
-
-    private TypeSyntax ParseFunctionPointerType()
-    {
-        var start = Match(SyntaxKind.DelegateKeyword).Span.Start;
-        Match(SyntaxKind.StarToken);
-        Match(SyntaxKind.UnmanagedKeyword);
-        Match(SyntaxKind.LessToken);
-        var elements = ImmutableArray.CreateBuilder<TypeSyntax>();
-        while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
-        {
-            elements.Add(ParseType());
-            if (Current.Kind != SyntaxKind.CommaToken)
-                break;
-            NextToken();
-        }
-        var close = Match(SyntaxKind.GreaterToken);
-        if (elements.Count == 0)
-            Report("CT0110", "A function-pointer signature requires a return type.", close);
-        var signature = new FunctionPointerSignatureSyntax(_source, TextSpan.FromBounds(start, close.Span.End), elements.ToImmutable());
-        return new TypeSyntax(_source, signature.Span, "delegate*", FunctionPointer: signature);
-    }
-
-    private string ParseQualifiedName()
-    {
-        var first = Match(SyntaxKind.IdentifierToken);
-        var parts = new List<string> { first.Text };
-        while (Current.Kind == SyntaxKind.DotToken && Peek(1).Kind == SyntaxKind.IdentifierToken)
-        {
-            NextToken();
-            parts.Add(NextToken().Text);
-        }
-        return string.Join('.', parts);
-    }
-
-    private bool LooksLikeLocalDeclaration()
-    {
-        var index = _position;
-        if (_tokens[index].Kind is SyntaxKind.ConstKeyword or SyntaxKind.ReadonlyKeyword)
-            index++;
-        if (index >= _tokens.Length)
-            return false;
-        if (!ScanType(ref index, allowVar: true))
-            return false;
-        return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.IdentifierToken;
-    }
-
-    private bool LooksLikeCast()
-    {
-        var index = _position + 1;
-        if (index >= _tokens.Length)
-            return false;
-        if (!ScanType(ref index, allowVar: false))
-            return false;
-        return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.CloseParenToken;
-    }
-
-    private bool ScanType(ref int index, bool allowVar)
-    {
-        if (index >= _tokens.Length)
-            return false;
-        if (_tokens[index].Kind == SyntaxKind.DelegateKeyword)
-        {
-            if (index + 3 >= _tokens.Length || _tokens[index + 1].Kind != SyntaxKind.StarToken ||
-                _tokens[index + 2].Kind != SyntaxKind.UnmanagedKeyword || _tokens[index + 3].Kind != SyntaxKind.LessToken)
-                return false;
-            index += 4;
-            var depth = 1;
-            while (index < _tokens.Length && depth != 0)
-            {
-                if (_tokens[index].Kind == SyntaxKind.LessToken)
-                    depth++;
-                else if (_tokens[index].Kind == SyntaxKind.GreaterToken)
-                    depth--;
-                index++;
-            }
-            return depth == 0;
-        }
-        if (IsBuiltInType(_tokens[index].Kind) || allowVar && _tokens[index].Kind == SyntaxKind.VarKeyword)
-            index++;
-        else if (_tokens[index].Kind == SyntaxKind.IdentifierToken)
-        {
-            index++;
-            while (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.DotToken && _tokens[index + 1].Kind == SyntaxKind.IdentifierToken)
-                index += 2;
-        }
-        else
-            return false;
-        while (index < _tokens.Length && _tokens[index].Kind == SyntaxKind.StarToken)
-            index++;
-        if (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.OpenBracketToken && _tokens[index + 1].Kind == SyntaxKind.CloseBracketToken)
-            index += 2;
-        return true;
-    }
-
-    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.LongKeyword or SyntaxKind.UlongKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
+    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.LongKeyword or SyntaxKind.UlongKeyword or SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
     private static bool IsAssignment(SyntaxKind kind) => kind is SyntaxKind.EqualsToken or SyntaxKind.PlusEqualsToken or SyntaxKind.MinusEqualsToken or SyntaxKind.StarEqualsToken or SyntaxKind.SlashEqualsToken or SyntaxKind.PercentEqualsToken;
     private static int GetUnaryPrecedence(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.BangToken or SyntaxKind.TildeToken or SyntaxKind.PlusPlusToken or SyntaxKind.MinusMinusToken or SyntaxKind.StarToken or SyntaxKind.AmpersandToken ? 12 : 0;
     private static int GetBinaryPrecedence(SyntaxKind kind) => kind switch

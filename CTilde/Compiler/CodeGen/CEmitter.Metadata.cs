@@ -97,7 +97,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("    int32_t (*GetHashCode)(ct_object*);");
         foreach (var method in virtualMethods)
         {
-            var parameters = string.Concat(method.Parameters.Select(parameter => $", {CTypeName(parameter.Type)}"));
+            var parameters = string.Concat(method.Parameters.Select(parameter => $", {ParameterTypeName(parameter)}"));
             writer.WriteLine($"    {CTypeName(method.ReturnType)} (*{VirtualSlotName(method)})(ct_object*{parameters});");
         }
         foreach (var property in virtualProperties)
@@ -175,7 +175,7 @@ internal sealed partial class CEmitter
     {
         foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
-            var parameters = string.Concat(type.DelegateParameters.Select(parameter => $", {CTypeName(parameter.Type)}"));
+            var parameters = string.Concat(type.DelegateParameters.Select(parameter => $", {ParameterTypeName(parameter)}"));
             writer.WriteLine($"static {NameMangler.Type(type)}* {DelegateFactoryName(type)}(ct_object* target, {CTypeName(type.DelegateReturnType!)} (*invoke)(ct_object*{parameters}), const char* file, int line)");
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)ct_alloc(sizeof({NameMangler.Type(type)}), file, line);");
@@ -189,12 +189,12 @@ internal sealed partial class CEmitter
 
         foreach (var ((delegateType, method, virtualDispatch), name) in _delegateThunks.OrderBy(pair => pair.Value, StringComparer.Ordinal))
         {
-            var parameters = delegateType.DelegateParameters.Select((parameter, index) => $"{CTypeName(parameter.Type)} ct_arg_{index}").ToArray();
+            var parameters = delegateType.DelegateParameters.Select((parameter, index) => CParameterDeclaration(parameter, $"ct_arg_{index}")).ToArray();
             var signatureParameters = string.Join(", ", new[] { "ct_object* ct_target" }.Concat(parameters));
             writer.WriteLine($"static {CTypeName(delegateType.DelegateReturnType!)} {name}({signatureParameters})");
             writer.WriteLine("{");
             writer.WriteLine("    (void)ct_target;");
-            var arguments = Enumerable.Range(0, parameters.Length).Select(index => $"ct_arg_{index}").ToList();
+            var arguments = delegateType.DelegateParameters.SelectMany((parameter, index) => ParameterArgumentNames(parameter, $"ct_arg_{index}")).ToList();
             string call;
             if (method.IsStatic)
                 call = $"{method.CName}({string.Join(", ", arguments)})";
@@ -217,7 +217,13 @@ internal sealed partial class CEmitter
         foreach (var ((type, method), name) in _functionPointerTrampolines.OrderBy(pair => pair.Value, StringComparer.Ordinal))
         {
             var signature = type.FunctionPointer!;
-            var parameters = signature.ParameterTypes.Select((parameter, index) => $"{CTypeName(parameter)} ct_arg_{index}").ToArray();
+            var parameters = signature.ParameterTypes.Select((parameter, index) => signature.PassingKinds[index] switch
+            {
+                _ when parameter.IsNativeBuffer => $"{(parameter.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.ElementType!)}* ct_arg_{index}_data, size_t ct_arg_{index}_length",
+                ParameterPassingKind.In => $"const {CTypeName(parameter)}* ct_arg_{index}",
+                ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter)}* ct_arg_{index}",
+                _ => $"{CTypeName(parameter)} ct_arg_{index}",
+            }).ToArray();
             writer.WriteLine($"static {CTypeName(signature.ReturnType)} {name}({(parameters.Length == 0 ? "void" : string.Join(", ", parameters))})");
             writer.WriteLine("{");
             writer.WriteLine("    jmp_buf ct_callback_jump;");
@@ -228,7 +234,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("        ct_exception_top = ct_callback_frame.Previous;");
             writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-callback>\", 0);");
             writer.WriteLine("    }");
-            var call = $"{method.CName}({string.Join(", ", Enumerable.Range(0, parameters.Length).Select(index => $"ct_arg_{index}"))})";
+            var callArguments = method.Parameters.SelectMany((parameter, index) => ParameterArgumentNames(parameter, $"ct_arg_{index}"));
+            var call = $"{method.CName}({string.Join(", ", callArguments)})";
             if (signature.ReturnType == CType.Void)
             {
                 writer.WriteLine($"    {call};");
@@ -361,7 +368,7 @@ internal sealed partial class CEmitter
         var objectSlot = VirtualSlotName(method);
         var parameters = method.Parameters.Select((parameter, index) => objectSlot == "Equals"
             ? $"ct_object* a{index}"
-            : $"{CTypeName(parameter.Type)} a{index}").ToArray();
+            : CParameterDeclaration(parameter, $"a{index}")).ToArray();
         var signatureParameters = string.Join(", ", new[] { "ct_object* self" }.Concat(parameters));
         var arguments = string.Join(", ", new[] { $"({NameMangler.Type(method.ContainingType)}*)(void*)self" }.Concat(method.Parameters.Select((parameter, index) => objectSlot == "Equals"
             ? $"({CTypeName(parameter.Type)})(void*)a{index}"
@@ -426,6 +433,8 @@ internal sealed partial class CEmitter
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int((int32_t)box->Value, \"<runtime>\", 0)",
             CTypeKind.Long => "ct_to_string_long(box->Value, \"<runtime>\", 0)",
             CTypeKind.Ulong => "ct_to_string_ulong(box->Value, \"<runtime>\", 0)",
+            CTypeKind.Nint => "ct_to_string_nint(box->Value, \"<runtime>\", 0)",
+            CTypeKind.Nuint => "ct_to_string_nuint(box->Value, \"<runtime>\", 0)",
             CTypeKind.Float => "ct_to_string_float(box->Value, \"<runtime>\", 0)",
             _ => $"ct_string_from_bytes((const uint8_t*)\"{EscapeCString(type.DisplayName)}\", {Encoding.UTF8.GetByteCount(type.DisplayName)}, \"<runtime>\", 0)",
         };
@@ -553,6 +562,16 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("    (void)&ct_throw;");
             writer.WriteLine("    (void)&ct_unhandled_exception;");
+        }
+        if (_usesNativeIntegers)
+        {
+            foreach (var name in new[] { "ct_ni_bits", "ct_ni_add", "ct_ni_sub", "ct_ni_mul", "ct_ni_neg", "ct_ni_div", "ct_ni_mod", "ct_nu_div", "ct_nu_mod", "ct_ni_shl", "ct_ni_shr", "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint" })
+                writer.WriteLine($"    (void)&{name};");
+        }
+        if (_nativeBufferTypes.Count != 0)
+        {
+            writer.WriteLine("    (void)&ct_native_bounds;");
+            writer.WriteLine("    (void)&ct_stack_bytes;");
         }
         writer.WriteLine("    (void)&ct_default_vtable;");
         foreach (var literal in _stringLiterals.Values.Order())

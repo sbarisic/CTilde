@@ -1,0 +1,189 @@
+using System.Collections.Immutable;
+using System.Numerics;
+
+namespace CTilde;
+
+internal sealed partial class BodyPipeline
+{
+    private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
+    {
+        var matches = candidates
+            .Where(candidate => candidate.Parameters.Length == arguments.Count)
+            .Where(candidate => candidate.Parameters.Select((parameter, index) => parameter.PassingKind == argumentSyntax[index].PassingKind).All(matches => matches))
+            .Where(candidate => candidate.Parameters
+                .Select((parameter, index) => CanConvertExpression(arguments[index], parameter.Type))
+                .All(valid => valid))
+            .ToArray();
+        if (matches.Length == 0)
+        {
+            Report("CT2122", $"No overload of '{name}' accepts the supplied argument types.", syntax);
+            return null;
+        }
+        var winners = matches.Where(candidate => matches.All(other =>
+            ReferenceEquals(candidate, other) || IsBetterCandidate(candidate, other, arguments))).ToArray();
+        if (winners.Length != 1)
+        {
+            Report("CT2123", $"Call to '{name}' is ambiguous.", syntax);
+            return null;
+        }
+        return winners[0];
+    }
+
+    private static bool IsBetterCandidate(MethodSymbol candidate, MethodSymbol other, IReadOnlyList<LoweredExpression> arguments)
+    {
+        var better = false;
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var comparison = CompareConversion(arguments[index].Type, candidate.Parameters[index].Type, other.Parameters[index].Type);
+            if (comparison > 0)
+                return false;
+            better |= comparison < 0;
+        }
+        return better;
+    }
+
+    private static int CompareConversion(CType source, CType leftTarget, CType rightTarget)
+    {
+        if (leftTarget == rightTarget)
+            return 0;
+        if (source == leftTarget)
+            return -1;
+        if (source == rightTarget)
+            return 1;
+        var leftToRight = TypeFacts.CanImplicitlyConvert(leftTarget, rightTarget);
+        var rightToLeft = TypeFacts.CanImplicitlyConvert(rightTarget, leftTarget);
+        if (leftToRight != rightToLeft)
+            return leftToRight ? -1 : 1;
+        if (source.IsIntegral && leftTarget.IsIntegral && rightTarget.IsIntegral)
+        {
+            var leftSigned = leftTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
+            var rightSigned = rightTarget.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int;
+            if (leftSigned != rightSigned)
+                return leftSigned ? -1 : 1;
+        }
+        return 0;
+    }
+
+    private static bool CanConvertExpression(LoweredExpression expression, CType target) =>
+        expression.MethodGroup is { } group
+            ? target.Kind == CTypeKind.Delegate && FindDelegateMethod(group, target.Symbol!) is not null
+            : TypeFacts.CanImplicitlyConvert(expression.Type, target) || CanImplicitNativeConstant(expression, target);
+
+    private static bool CanImplicitNativeConstant(LoweredExpression expression, CType target)
+    {
+        if (!expression.IsConstant || target.Kind is not CTypeKind.Nint and not CTypeKind.Nuint || !TryIntegralConstant(expression.ConstantValue, out var value))
+            return false;
+        return target == CType.Nint
+            ? value >= int.MinValue && value <= int.MaxValue
+            : value >= uint.MinValue && value <= uint.MaxValue;
+    }
+
+    private static bool TryIntegralConstant(object? value, out BigInteger result)
+    {
+        switch (value)
+        {
+            case byte item: result = item; return true;
+            case sbyte item: result = item; return true;
+            case short item: result = item; return true;
+            case ushort item: result = item; return true;
+            case int item: result = item; return true;
+            case uint item: result = item; return true;
+            case long item: result = item; return true;
+            case ulong item: result = item; return true;
+            case BigInteger item: result = item; return true;
+            default: result = default; return false;
+        }
+    }
+
+    private static MethodSymbol? FindDelegateMethod(MethodGroupBinding group, TypeSymbol delegateType)
+    {
+        var matches = group.Candidates.Where(candidate =>
+            candidate.ReturnType == delegateType.DelegateReturnType &&
+            candidate.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind)).SequenceEqual(delegateType.DelegateParameters.Select(parameter => (parameter.Type, parameter.PassingKind)))).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    private (List<string> Prelude, List<string> Codes) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    {
+        var prelude = new List<string>();
+        var codes = new List<string>();
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            var parameter = parameters[index];
+            var argumentSyntax = syntax[index];
+            if (parameter.PassingKind != ParameterPassingKind.Value)
+            {
+                var argument = arguments[index];
+                prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Address is not { } address || argument.Type != parameter.Type)
+                {
+                    Report("CT2171", $"A '{parameter.PassingKind.ToString().ToLowerInvariant()}' argument must be an addressable variable of exact type '{parameter.Type.DisplayName}'.", argumentSyntax);
+                    codes.Add("NULL");
+                    continue;
+                }
+                if (parameter.PassingKind is ParameterPassingKind.Ref or ParameterPassingKind.Out && IsReadonly(argument.LValue))
+                    Report("CT2172", "Readonly storage can be passed only with 'in'.", argumentSyntax);
+                if (parameter.PassingKind == ParameterPassingKind.Out)
+                {
+                    if (argument.Type.ContainsManagedReferences)
+                        prelude.Add(_emitter.DropValueStatement(argument.Type, address));
+                    prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
+                    MarkAssigned(argument.LValue);
+                }
+                codes.Add(address);
+                continue;
+            }
+            var converted = Convert(arguments[index], parameter.Type, argumentSyntax.Expression, false);
+            prelude.AddRange(converted.Prelude);
+            if (converted.Type.Kind == CTypeKind.Void)
+            {
+                codes.Add(converted.Code);
+                continue;
+            }
+            var temp = NewTemp();
+            prelude.Add($"{_emitter.CDeclaration(converted.Type, temp)} = {converted.Code};");
+            if (parameter.IsRetained)
+                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
+            if (converted.Type.IsNativeBuffer)
+            {
+                codes.Add($"{temp}.Data");
+                codes.Add($"{temp}.Length");
+            }
+            else
+                codes.Add(temp);
+        }
+        return (prelude, codes);
+    }
+
+    private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    {
+        var prelude = new List<string>();
+        var codes = new List<string>();
+        for (var index = 0; index < arguments.Count; index++)
+        {
+            if (parameters[index].PassingKind != ParameterPassingKind.Value)
+            {
+                var argument = arguments[index];
+                prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Address is not { } address || argument.Type != parameters[index].Type)
+                {
+                    Report("CT2171", "Deferred by-reference arguments must remain addressable in the enclosing scope.", syntax[index]);
+                    codes.Add("NULL");
+                }
+                else
+                    codes.Add(address);
+                continue;
+            }
+            var converted = Convert(arguments[index], parameters[index].Type, syntax[index].Expression, false);
+            prelude.AddRange(converted.Prelude);
+            var slot = $"ct_df_{_deferId}_arg_{index}";
+            AddCapturedSlot(prelude, converted.Type, slot, converted.Code);
+            codes.Add(parameters[index].IsRetained
+                ? $"(ct_retain((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
+                : Durable(slot));
+        }
+        return (prelude, codes);
+    }
+
+    private static bool IsReadonly(LoweredLValue lvalue) => lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
+}

@@ -9,6 +9,7 @@ typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
 typedef struct ct_t_6_System_7_Console ct_t_6_System_7_Console;
 typedef struct ct_t_6_System_11_Environment ct_t_6_System_11_Environment;
 typedef struct ct_t_6_System_9_Exception ct_t_6_System_9_Exception;
+typedef struct ct_t_6_System_4_Math ct_t_6_System_4_Math;
 typedef struct ct_t_6_System_6_Object ct_t_6_System_6_Object;
 typedef struct ct_t_6_System_13_ObjectRuntime ct_t_6_System_13_ObjectRuntime;
 typedef struct ct_t_14_System_2ERuntime_6_Memory ct_t_14_System_2ERuntime_6_Memory;
@@ -25,6 +26,7 @@ struct ct_t_8_Examples_7_Program
 struct ct_t_6_System_7_Console
 struct ct_t_6_System_11_Environment
 struct ct_t_6_System_9_Exception
+struct ct_t_6_System_4_Math
 struct ct_t_6_System_13_ObjectRuntime
 struct ct_t_14_System_2ERuntime_6_Memory
 struct ct_t_14_System_2ERuntime_16_NativeUtf8String

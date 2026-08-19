@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using CTilde;
 
 namespace CTilde.Tests;
@@ -49,12 +51,42 @@ internal static partial class ConformanceTests
             Assert(Compile(reserved).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A hosted runtime symbol conflict was not diagnosed.");
         });
 
-        suite.Run("hosted console and file native round trip", () =>
+        suite.Run("hosted ray tracer native render", () =>
         {
             var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "HostedIo.Program.ct"));
-            var result = CompileAndRun(source, standardInput: "hello hosted\r\n");
-            Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == "Enter text: Saved and reloaded: hello hosted\nHOSTED_IO_OK\n", result.StandardOutput);
+            var generated = Emit(source);
+            Assert(generated.Contains("ct_math_sqrt(", StringComparison.Ordinal), "The ray tracer did not emit its square-root dependency.");
+            Assert(generated.Contains("ct_math_min(", StringComparison.Ordinal) && generated.Contains("ct_math_max(", StringComparison.Ordinal), "The ray tracer did not emit its color-clamping dependencies.");
+            Assert(generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The ray tracer did not emit hosted file output.");
+            Assert(!generated.Contains("ct_console_read()", StringComparison.Ordinal) && !generated.Contains("ct_console_read_line()", StringComparison.Ordinal), "The ray tracer unexpectedly reads console input.");
+
+            var first = CompileAndRun(source, captureFile: "image.ppm");
+            var second = CompileAndRun(source, captureFile: "image.ppm");
+            Assert(first.ExitCode == 0, first.StandardError);
+            Assert(second.ExitCode == 0, second.StandardError);
+            Assert(Normalize(first.StandardOutput) == "Rendering image.ppm...\nDone: 256x144.\n", first.StandardOutput);
+            Assert(Normalize(second.StandardOutput) == Normalize(first.StandardOutput), second.StandardOutput);
+            var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first ray-tracer run did not produce image.ppm.");
+            var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second ray-tracer run did not produce image.ppm.");
+            Assert(firstImage.SequenceEqual(secondImage), "Repeated renders were not byte-identical.");
+
+            var tokens = Encoding.ASCII.GetString(firstImage).Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+            Assert(tokens.Length == 4 + 256 * 144 * 3, $"The PPM contained {tokens.Length} tokens instead of {4 + 256 * 144 * 3}.");
+            Assert(tokens[0] == "P3" && tokens[1] == "256" && tokens[2] == "144" && tokens[3] == "255", "The PPM header was incorrect.");
+
+            var components = new int[256 * 144 * 3];
+            for (var index = 0; index < components.Length; index++)
+            {
+                Assert(int.TryParse(tokens[index + 4], NumberStyles.None, CultureInfo.InvariantCulture, out components[index]), $"PPM component {index} was not an integer.");
+                Assert(components[index] is >= 0 and <= 255, $"PPM component {index} was outside 0 through 255.");
+            }
+
+            var sky = ReadPixel(components, 256, 128, 0);
+            Assert(sky.Blue == 255 && sky.Blue > sky.Green && sky.Green > sky.Red, "The top-center pixel did not contain the expected blue sky gradient.");
+            var sphere = ReadPixel(components, 256, 128, 72);
+            Assert(sphere.Red is >= 110 and <= 145 && sphere.Green is >= 110 and <= 145 && sphere.Blue is >= 240 and <= 255, "The center pixel did not contain the expected sphere-normal color.");
+            var ground = ReadPixel(components, 256, 128, 120);
+            Assert(ground.Green >= 240 && ground.Red is >= 110 and <= 145 && ground.Blue is >= 110 and <= 145, "The lower-center pixel did not contain the expected ground-normal color.");
         });
 
         suite.Run("hosted console EOF and I/O exceptions", () =>
@@ -211,5 +243,11 @@ internal static partial class ConformanceTests
                 Assert(!esp.Contains(symbol, StringComparison.Ordinal), $"Hosted I/O symbol '{symbol}' changed ESP output.");
             }
         });
+    }
+
+    private static (int Red, int Green, int Blue) ReadPixel(int[] components, int width, int x, int y)
+    {
+        var offset = (y * width + x) * 3;
+        return (components[offset], components[offset + 1], components[offset + 2]);
     }
 }

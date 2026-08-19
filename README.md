@@ -102,7 +102,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is an interactive hosted console project that writes and rereads a UTF-8-named file through an owned handle. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
+See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a hosted ray tracer that uses `System.Math`, value-type geometry, and an owned file handle to render a PPM image. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
 
 ## Public compiler API
 
@@ -164,7 +164,7 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
 | `examples` | Checked draft 0.10 programs |
-| `examples/HostedIo` | Hosted console-input and owned binary-file example |
+| `examples/HostedIo` | Hosted PPM ray tracer with value-type geometry and owned file output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 

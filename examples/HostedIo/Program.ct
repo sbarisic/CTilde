@@ -1,61 +1,170 @@
 using System;
 using System.IO;
-using System.Runtime;
 
 namespace HostedIoExample;
 
-public static class Program
+public struct Vec3
 {
-    private static void Save(string value)
+    public float X;
+    public float Y;
+    public float Z;
+
+    public Vec3(float x, float y, float z)
     {
-        FileHandle file = File.Open("ctilde-hosted-π.txt", FileMode.Create, FileAccess.Write);
-        defer File.Close(file);
-        File.Write(file, value);
+        X = x;
+        Y = y;
+        Z = z;
     }
 
-    private static unsafe void PrintSavedFile()
+    public Vec3 Add(Vec3 other)
     {
-        FileHandle file = File.Open("ctilde-hosted-π.txt", FileMode.Open, FileAccess.Read);
-        defer File.Close(file);
+        return new Vec3(X + other.X, Y + other.Y, Z + other.Z);
+    }
 
-        NativeBuffer<byte> buffer = stackalloc byte[64];
-        while (true)
+    public Vec3 Subtract(Vec3 other)
+    {
+        return new Vec3(X - other.X, Y - other.Y, Z - other.Z);
+    }
+
+    public Vec3 Scale(float factor)
+    {
+        return new Vec3(X * factor, Y * factor, Z * factor);
+    }
+
+    public float Dot(Vec3 other)
+    {
+        return X * other.X + Y * other.Y + Z * other.Z;
+    }
+
+    public float LengthSquared()
+    {
+        return Dot(this);
+    }
+
+    public Vec3 Unit()
+    {
+        return Scale(1.0f / Math.Sqrt(LengthSquared()));
+    }
+}
+
+public struct Ray
+{
+    public Vec3 Origin;
+    public Vec3 Direction;
+
+    public Ray(Vec3 origin, Vec3 direction)
+    {
+        Origin = origin;
+        Direction = direction;
+    }
+
+    public Vec3 At(float distance)
+    {
+        return Origin.Add(Direction.Scale(distance));
+    }
+}
+
+public static class Program
+{
+    private const int ImageWidth = 256;
+    private const int ImageHeight = 144;
+
+    private static float HitSphere(Ray ray, Vec3 center, float radius)
+    {
+        Vec3 originToCenter = ray.Origin.Subtract(center);
+        float a = ray.Direction.LengthSquared();
+        float halfB = originToCenter.Dot(ray.Direction);
+        float c = originToCenter.LengthSquared() - radius * radius;
+        float discriminant = halfB * halfB - a * c;
+
+        if (discriminant < 0.0f)
+            return -1.0f;
+
+        return (-halfB - Math.Sqrt(discriminant)) / a;
+    }
+
+    private static Vec3 SurfaceColor(Ray ray, Vec3 center, float distance)
+    {
+        Vec3 normal = ray.At(distance).Subtract(center).Unit();
+        return normal.Add(new Vec3(1.0f, 1.0f, 1.0f)).Scale(0.5f);
+    }
+
+    private static Vec3 RayColor(Ray ray)
+    {
+        Vec3 sphereCenter = new Vec3(0.0f, 0.0f, -1.0f);
+        Vec3 groundCenter = new Vec3(0.0f, -100.5f, -1.0f);
+        float sphereDistance = HitSphere(ray, sphereCenter, 0.5f);
+        float groundDistance = HitSphere(ray, groundCenter, 100.0f);
+
+        if (sphereDistance > 0.001f &&
+            (groundDistance <= 0.001f || sphereDistance < groundDistance))
         {
-            nuint count = File.Read(file, buffer);
-            if (count == 0u)
-                break;
-
-            nuint index = 0u;
-            while (index < count)
-            {
-                Console.Write((char)buffer[index]);
-                index++;
-            }
+            return SurfaceColor(ray, sphereCenter, sphereDistance);
         }
+
+        if (groundDistance > 0.001f)
+            return SurfaceColor(ray, groundCenter, groundDistance);
+
+        Vec3 unitDirection = ray.Direction.Unit();
+        float blend = 0.5f * (unitDirection.Y + 1.0f);
+        Vec3 white = new Vec3(1.0f, 1.0f, 1.0f);
+        Vec3 blue = new Vec3(0.5f, 0.7f, 1.0f);
+        return white.Scale(1.0f - blend).Add(blue.Scale(blend));
+    }
+
+    private static int ToColorByte(float value)
+    {
+        float clamped = Math.Min(Math.Max(value, 0.0f), 0.999f);
+        return (int)(256.0f * clamped);
+    }
+
+    private static void WriteColor(FileHandle image, Vec3 color)
+    {
+        int red = ToColorByte(color.X);
+        int green = ToColorByte(color.Y);
+        int blue = ToColorByte(color.Z);
+        string line = red.ToString() + " " + green.ToString() + " " + blue.ToString() + "\n";
+        File.Write(image, line);
     }
 
     [EntryPoint]
-    public static unsafe void Main()
+    public static void Main()
     {
-        string line = null;
-        while (true) {
-            Console.Write("> ");
-            line = Console.ReadLine();
-            Console.WriteLine("You wrote: " + line);
-        }
+        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
+        defer File.Close(image);
 
-        /*Console.Write("Enter text: ");
-        string line = Console.ReadLine();
-        if (line == null)
+        Console.WriteLine("Rendering image.ppm...");
+        File.Write(image, "P3\n256 144\n255\n");
+
+        float focalLength = 1.0f;
+        float viewportHeight = 2.0f;
+        float viewportWidth = viewportHeight * ((float)ImageWidth / (float)ImageHeight);
+        Vec3 cameraCenter = new Vec3(0.0f, 0.0f, 0.0f);
+        Vec3 viewportU = new Vec3(viewportWidth, 0.0f, 0.0f);
+        Vec3 viewportV = new Vec3(0.0f, -viewportHeight, 0.0f);
+        Vec3 pixelDeltaU = viewportU.Scale(1.0f / (float)ImageWidth);
+        Vec3 pixelDeltaV = viewportV.Scale(1.0f / (float)ImageHeight);
+
+        Vec3 viewportUpperLeft = cameraCenter.Subtract(new Vec3(0.0f, 0.0f, focalLength));
+        viewportUpperLeft = viewportUpperLeft.Subtract(viewportU.Scale(0.5f));
+        viewportUpperLeft = viewportUpperLeft.Subtract(viewportV.Scale(0.5f));
+        Vec3 pixel00Location = viewportUpperLeft.Add(pixelDeltaU.Add(pixelDeltaV).Scale(0.5f));
+
+        int row = 0;
+        while (row < ImageHeight)
         {
-            Console.WriteLine("No input was available.");
-            return;
+            int column = 0;
+            while (column < ImageWidth)
+            {
+                Vec3 pixelCenter = pixel00Location.Add(pixelDeltaU.Scale((float)column));
+                pixelCenter = pixelCenter.Add(pixelDeltaV.Scale((float)row));
+                Ray ray = new Ray(cameraCenter, pixelCenter.Subtract(cameraCenter));
+                WriteColor(image, RayColor(ray));
+                column++;
+            }
+            row++;
         }
 
-        Save(line);
-        Console.Write("Saved and reloaded: ");
-        PrintSavedFile();
-        Console.WriteLine();
-        Console.WriteLine("HOSTED_IO_OK");*/
+        Console.WriteLine("Done: 256x144.");
     }
 }

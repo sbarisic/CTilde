@@ -18,7 +18,7 @@ internal static partial class ConformanceTests
         return writer.ToString();
     }
 
-    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null)
+    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
@@ -29,7 +29,18 @@ internal static partial class ConformanceTests
             File.WriteAllText(cPath, Emit(source) + nativeSuffix, new UTF8Encoding(false));
             var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads);
             Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
-            return RunCompiledProgram(executablePath, standardInput, standardInputBytes, standardInput is null && standardInputBytes is null ? null : directory);
+            var workingDirectory = standardInput is null && standardInputBytes is null && captureFile is null ? null : directory;
+            var result = RunCompiledProgram(executablePath, standardInput, standardInputBytes, workingDirectory);
+            if (captureFile is null)
+                return result;
+
+            Assert(!Path.IsPathFullyQualified(captureFile), "A captured native-test file must use a relative path.");
+            var capturedPath = Path.GetFullPath(Path.Combine(directory, captureFile));
+            var directoryPrefix = Path.GetFullPath(directory) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            Assert(capturedPath.StartsWith(directoryPrefix, comparison), "A captured native-test file cannot leave its temporary directory.");
+            Assert(File.Exists(capturedPath), $"The native program did not create '{captureFile}'.");
+            return result with { CapturedFile = File.ReadAllBytes(capturedPath) };
         }
         finally
         {
@@ -210,4 +221,4 @@ internal static partial class ConformanceTests
     }
 }
 
-internal sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError);
+internal sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, byte[]? CapturedFile = null);

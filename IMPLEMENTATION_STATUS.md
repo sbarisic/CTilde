@@ -22,7 +22,7 @@ The current workspace passes:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 92 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. The `System.Math` checks pass under MSVC, WSL GCC, and WSL Clang. A complete current conformance run is blocked because the HostedIo fixture executes the example's nonterminating console loop; the runner reaches that fixture after the math and core runtime checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 92 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs pass under MSVC, WSL GCC, and WSL Clang, including `System.Math` behavior and the HostedIo ray tracer's deterministic PPM output.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 

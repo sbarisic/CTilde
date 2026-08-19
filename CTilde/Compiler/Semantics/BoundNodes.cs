@@ -52,6 +52,7 @@ internal enum BoundStatementKind
     Finally,
     Defer,
     Unsafe,
+    InlineAssembly,
 }
 
 internal sealed record BoundSemanticEntry(
@@ -103,7 +104,8 @@ internal sealed record BoundProgram(
     ImmutableDictionary<SyntaxNode, BoundSemanticEntry> SemanticMap,
     ImmutableArray<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses,
     ImmutableHashSet<string> DynamicGeneratedSymbols,
-    bool UsesExceptions);
+    bool UsesExceptions,
+    bool UsesInlineAssembly);
 
 internal static class BoundTreeFactory
 {
@@ -130,10 +132,12 @@ internal static class BoundTreeFactory
 
     private static BoundStatement CreateStatement(SyntaxNode syntax, ImmutableDictionary<SyntaxNode, BoundSemanticEntry> semantics)
     {
-        var expressions = syntax.ChildNodesAndTokens()
+        var expressions = (syntax is InlineAssemblyStatementSyntax assembly
+                ? assembly.Operands.Select(operand => (ExpressionSyntax)operand.Variable)
+                : syntax.ChildNodesAndTokens()
             .Where(child => child.IsNode)
             .Select(child => child.Node)
-            .OfType<ExpressionSyntax>()
+            .OfType<ExpressionSyntax>())
             .Select(expression => CreateExpression(expression, semantics))
             .ToImmutableArray();
         var children = syntax switch
@@ -171,6 +175,7 @@ internal static class BoundTreeFactory
             FinallyClauseSyntax => BoundStatementKind.Finally,
             DeferStatementSyntax => BoundStatementKind.Defer,
             UnsafeStatementSyntax => BoundStatementKind.Unsafe,
+            InlineAssemblyStatementSyntax => BoundStatementKind.InlineAssembly,
             _ => BoundStatementKind.Block,
         };
         return new BoundStatement(

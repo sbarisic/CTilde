@@ -1,10 +1,10 @@
 # Implementation status
 
-Last reviewed: 2026-08-19
+Last reviewed: 2026-08-20
 
 ## Current state
 
-C~ draft 0.12 has one compiler path:
+C~ draft 0.13 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> hosted or ESP-IDF GNU C23
@@ -198,6 +198,8 @@ Binding now produces immutable bound bodies and per-document semantic maps. Boun
 
 Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. Draft 0.12 adds a reachability optimizer, direct-defer cleanup facts, leaf cleanup elision, durable-state liveness, fused scalar string builds, and user metadata pruning. The rendered-line classifier and `MethodLowerer` are gone. The remaining `BodyPipeline` function renderer still walks syntax with bound semantic hints, so instruction-only C body emission and removal of `LoweredExpression` remain open architecture work. `GetDiagnostics()` is analysis-only and constructs no `CEmitter`, `CWriter`, typed IR, or generated C.
 
+Draft 0.13 adds full-fidelity raw `asm` blocks. Binding resolves scalar local and parameter operands, applies definite-assignment and `[NoAlloc]` rules, and records a side-effecting typed-IR instruction. C emission converts standalone operand names to GNU symbolic operands, preserves raw target instructions, and emits volatile extended asm with explicit constraints and clobbers. Language services classify and navigate operand references inside the raw body. Hosted GCC and Clang and both ESP-IDF toolchains are supported; the CLI rejects hosted MSVC native builds containing `asm`.
+
 Every dynamic string helper now stores a trailing zero byte. A fused concatenation flattens nested string additions, formats supported built-in scalars into bounded automatic buffers, checks aggregate length, and allocates exactly one managed string object and one byte buffer. User-defined `ToString()` remains an ordinary owned call.
 
 Both targets omit `ct_keep_symbols`. Reachability starts from entrypoints, exports, module initializers, address-taken methods, delegate/callback and virtual targets, then closes over bound and IR calls. Unreachable user functions, layouts, descriptors, and thunks are omitted; a conservative common runtime remains annotated as unused until helper-level pruning is complete.
@@ -245,7 +247,7 @@ The optimized Draft 0.12 firmware was built with ESP-IDF 6.0.2 and GCC 15.2.0 fo
 
 ## Deliberately deferred
 
-These features are outside draft 0.12:
+These features are outside draft 0.13:
 
 - Interfaces and abstract types.
 - General user-defined generics; only intrinsic native-buffer forms exist.
@@ -269,14 +271,14 @@ These features are outside draft 0.12:
 
 ## Release gate
 
-A draft 0.12 release requires:
+A draft 0.13 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
 - Byte-identical repeated output.
 - GNU C23 compilation with warnings as errors.
-- MSVC latest-C compatibility compilation with warnings as errors.
+- MSVC latest-C compatibility compilation with warnings as errors for programs without inline assembly, plus a focused rejection check for programs containing `asm`.
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.12 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The vector standard-library addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI and the draft 0.11 operator lowering. The Draft 0.12 dual-core Xtensa hardware sequence above closes the cleanup, reachability, exception, threading, heap-recovery, and failure/reset acceptance gate. Instruction-only function-body emission remains an architecture blocker rather than a hardware blocker.
+Draft 0.13 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. The inline-assembly addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI, draft 0.11 operator lowering, and draft 0.12 vectors and optimizer. The Draft 0.12 dual-core Xtensa hardware sequence remains the current hardware baseline; draft 0.13 requires dual-architecture compilation and linking but no new flash gate. Instruction-only function-body emission remains an architecture blocker rather than a hardware blocker.

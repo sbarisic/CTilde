@@ -60,7 +60,7 @@ public sealed partial class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "opaque", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "operator", "void"];
-    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
+    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
@@ -138,6 +138,13 @@ public sealed partial class LanguageServiceSnapshot
             AddMemberCompletions(results, context, member, replacement);
         else
             AddContextCompletions(results, context, replacement);
+        foreach (var assembly in context.Nodes.OfType<InlineAssemblyStatementSyntax>()
+                     .Where(assembly => position >= assembly.BodySpan.Start && position <= assembly.BodySpan.End)
+                     .OrderBy(assembly => assembly.Span.Length).Take(1))
+        {
+            foreach (var operand in assembly.Operands)
+                results.Add(new LanguageCompletion(operand.Name, LanguageCompletionKind.Variable, "inline assembly operand", operand.Name, replacement, "0"));
+        }
         return [.. results
             .Where(item => replacement.Length == 0 || item.Label.StartsWith(tree.Text.Slice(replacement), StringComparison.OrdinalIgnoreCase))
             .GroupBy(item => (item.Label, item.Detail, item.Kind))
@@ -151,6 +158,13 @@ public sealed partial class LanguageServiceSnapshot
     {
         if (!TryGetTree(filePath, out var tree))
             return null;
+        if (InlineAssemblyReferenceAt(tree, position) is { } assemblyReference &&
+            _boundProgram.SemanticMap.TryGetValue(assemblyReference, out var assemblySemantic) &&
+            assemblySemantic.Symbol is { } assemblySymbol)
+        {
+            var section = new LanguageDocumentedSignature(FormatSymbol(assemblySymbol), _model.Documentation.GetDocumentation(assemblySymbol));
+            return new LanguageHover(section.Signature, assemblyReference.Span, [section]);
+        }
         var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
@@ -219,6 +233,10 @@ public sealed partial class LanguageServiceSnapshot
     {
         if (!TryGetTree(filePath, out var tree))
             return null;
+        if (InlineAssemblyReferenceAt(tree, position) is { } assemblyReference &&
+            _boundProgram.SemanticMap.TryGetValue(assemblyReference, out var assemblySemantic) &&
+            assemblySemantic.Symbol is { } assemblySymbol && SymbolSyntax(assemblySymbol) is { } assemblyDeclaration)
+            return new LanguageDefinition(assemblyDeclaration.Source.FilePath, SelectionSpan(assemblyDeclaration, SymbolName(assemblySymbol)));
         var token = NavigationTokenAt(tree, position);
         if (token is null)
             return null;
@@ -650,6 +668,20 @@ public sealed partial class LanguageServiceSnapshot
         .Where(token => position >= token.Span.Start && position <= token.Span.End)
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();
+
+    private static InlineAssemblyReferenceSyntax? InlineAssemblyReferenceAt(SyntaxTree tree, int position) => DescendantInlineAssemblyReferences(tree.Root)
+        .Where(reference => position >= reference.Span.Start && position <= reference.Span.End)
+        .OrderBy(reference => reference.Span.Length)
+        .FirstOrDefault();
+
+    private static IEnumerable<InlineAssemblyReferenceSyntax> DescendantInlineAssemblyReferences(SyntaxNode node)
+    {
+        if (node is InlineAssemblyReferenceSyntax reference)
+            yield return reference;
+        foreach (var child in node.ChildNodesAndTokens().Where(item => item.IsNode).Select(item => item.Node!))
+            foreach (var descendant in DescendantInlineAssemblyReferences(child))
+                yield return descendant;
+    }
 
     private static SyntaxToken? HoverTokenAt(SyntaxTree tree, int position) => tree.Tokens
         .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || TypeFacts.BuiltIn(token.Text) is not null || OperatorFacts.IsSupported(token.Kind)))

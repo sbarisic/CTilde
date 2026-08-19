@@ -19,6 +19,14 @@ public sealed class Compilation
 
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
     public CompilationOptions Options { get; }
+    public bool UsesInlineAssembly
+    {
+        get
+        {
+            EnsureAnalyzed();
+            return _boundProgram!.UsesInlineAssembly;
+        }
+    }
 
     public static Compilation Create(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions? options = null)
     {

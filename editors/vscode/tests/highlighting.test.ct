@@ -1,4 +1,4 @@
-// SYNTAX TEST "source.ctilde" "C~ draft 0.12 highlighting"
+// SYNTAX TEST "source.ctilde" "C~ draft 0.13 highlighting"
 
 /// <summary>Uses <paramref name="value"/>.</summary>
 
@@ -62,6 +62,22 @@ public sealed class Demo
 //                                      ^^ keyword.operator.comparison.ctilde
             Console.WriteLine(text);
 //                  ^^^^^^^^^ entity.name.function.call.ctilde
+
+        unsafe
+        {
+            [NoAlloc] asm (in bits, out recovered, clobber("cc")) {
+//                    ^^^ keyword.control.asm.ctilde
+//                         ^^ storage.modifier.asm-operand.ctilde
+//                                  ^^^ storage.modifier.asm-operand.ctilde
+//                                                 ^^^^^^^ keyword.other.asm-clobber.ctilde
+//                                                                ^ punctuation.section.block.begin.asm.ctilde
+                addl bits, recovered
+//              ^^^^^^^^^^^^^^^^^^^^ meta.embedded.block.asm.ctilde
+                push {r0-r3}
+//                   ^ punctuation.section.block.begin.asm.ctilde
+            }
+//          ^ punctuation.section.block.end.asm.ctilde
+        }
     }
 }
 

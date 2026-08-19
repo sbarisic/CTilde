@@ -364,6 +364,13 @@ internal sealed partial class Parser
 
     private StatementSyntax ParseStatement()
     {
+        if (Current.Kind == SyntaxKind.OpenBracketToken)
+        {
+            var attributes = ParseAttributes();
+            if (Current.Kind == SyntaxKind.AsmKeyword)
+                return ParseInlineAssembly(attributes);
+            Report("CT0109", "Statement attributes are supported only on asm statements.", Current);
+        }
         return Current.Kind switch
         {
             SyntaxKind.OpenBraceToken => ParseBlock(),
@@ -380,6 +387,7 @@ internal sealed partial class Parser
             SyntaxKind.ReturnKeyword => ParseReturn(),
             SyntaxKind.ThrowKeyword => ParseThrow(),
             SyntaxKind.TryKeyword => ParseTry(),
+            SyntaxKind.AsmKeyword => ParseInlineAssembly([]),
             SyntaxKind.UnsafeKeyword when Peek(1).Kind == SyntaxKind.OpenBraceToken => ParseUnsafe(),
             _ when LooksLikeLocalDeclaration() => ParseLocalDeclaration(true),
             _ => ParseExpressionStatement(),

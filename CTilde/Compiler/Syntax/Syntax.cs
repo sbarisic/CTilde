@@ -10,6 +10,7 @@ public enum SyntaxKind
     NumberToken,
     StringToken,
     CharacterToken,
+    AsmTextToken,
 
     OpenParenToken,
     CloseParenToken,
@@ -52,11 +53,13 @@ public enum SyntaxKind
 
     BoolKeyword,
     AsKeyword,
+    AsmKeyword,
     BaseKeyword,
     BreakKeyword,
     ByteKeyword,
     CaseKeyword,
     CatchKeyword,
+    ClobberKeyword,
     CharKeyword,
     ClassKeyword,
     ConstKeyword,
@@ -414,6 +417,24 @@ public sealed record TryStatementSyntax(SourceText Source, TextSpan Span, BlockS
 public sealed record CatchClauseSyntax(SourceText Source, TextSpan Span, TypeSyntax? Type, string? Name, BlockStatementSyntax Body) : SyntaxNode(Source, Span);
 public sealed record FinallyClauseSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body) : SyntaxNode(Source, Span);
 public sealed record UnsafeStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body) : StatementSyntax(Source, Span);
+public enum InlineAssemblyOperandKind { Input, Output, InputOutput }
+public sealed record InlineAssemblyOperandSyntax(
+    SourceText Source,
+    TextSpan Span,
+    InlineAssemblyOperandKind Kind,
+    string? Constraint,
+    NameExpressionSyntax Variable,
+    string Name) : SyntaxNode(Source, Span);
+public sealed record InlineAssemblyReferenceSyntax(SourceText Source, TextSpan Span, string Name, int OperandIndex) : SyntaxNode(Source, Span);
+public sealed record InlineAssemblyStatementSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ImmutableArray<AttributeSyntax> Attributes,
+    ImmutableArray<InlineAssemblyOperandSyntax> Operands,
+    ImmutableArray<string> Clobbers,
+    TextSpan BodySpan,
+    string Body,
+    ImmutableArray<InlineAssemblyReferenceSyntax> References) : StatementSyntax(Source, Span);
 public sealed record SwitchStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, ImmutableArray<SwitchSectionSyntax> Sections) : StatementSyntax(Source, Span);
 public sealed record SwitchSectionSyntax(SourceText Source, TextSpan Span, ImmutableArray<SwitchLabelSyntax> Labels, ImmutableArray<StatementSyntax> Statements) : SyntaxNode(Source, Span);
 public sealed record SwitchLabelSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Value) : SyntaxNode(Source, Span);

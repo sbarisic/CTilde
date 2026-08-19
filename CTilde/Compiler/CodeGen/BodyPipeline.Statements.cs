@@ -173,10 +173,168 @@ internal sealed partial class BodyPipeline
                 var unsafeFlow = EmitStatement(writer, unsafeStatement.Body);
                 _unsafeDepth--;
                 return unsafeFlow;
+            case InlineAssemblyStatementSyntax assembly:
+                EmitInlineAssembly(writer, assembly);
+                return FlowResult.None;
             default:
                 return FlowResult.None;
         }
     }
+
+    private void EmitInlineAssembly(ILoweringWriter writer, InlineAssemblyStatementSyntax syntax)
+    {
+        if (_unsafeDepth == 0)
+            Report("CT2190", "Inline assembly requires an unsafe method or block.", syntax);
+
+        var noAllocAttributes = syntax.Attributes.Where(attribute => attribute.Name == "NoAlloc").ToArray();
+        foreach (var attribute in syntax.Attributes.Where(attribute => attribute.Name != "NoAlloc"))
+            Report("CT2191", $"Attribute '{attribute.Name}' is not valid on an asm statement.", attribute);
+        if (noAllocAttributes.Length > 1)
+            Report("CT2191", "An asm statement cannot repeat the NoAlloc attribute.", noAllocAttributes[1]);
+        if (noAllocAttributes.FirstOrDefault() is { Arguments.Length: > 0 } invalidNoAlloc)
+            Report("CT1233", "NoAlloc does not accept arguments.", invalidNoAlloc);
+        var trustedNoAlloc = noAllocAttributes.Length == 1 && noAllocAttributes[0].Arguments.IsEmpty;
+        if (!trustedNoAlloc)
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, "inline assembly has no NoAlloc assertion");
+
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        var symbols = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        var lowered = new List<(InlineAssemblyOperandSyntax Syntax, LoweredExpression Expression, string Constraint)>();
+        for (var index = 0; index < syntax.Operands.Length; index++)
+        {
+            var operand = syntax.Operands[index];
+            if (!aliases.Add(operand.Name))
+                Report("CT2192", $"Inline assembly operand name '{operand.Name}' is already declared.", operand);
+
+            var expression = operand.Kind switch
+            {
+                InlineAssemblyOperandKind.Output => LowerAssignable(operand.Variable),
+                _ => LowerExpression(operand.Variable),
+            };
+            var symbol = (object?)expression.LValue?.Local ?? expression.LValue?.Parameter;
+            if (symbol is null)
+                Report("CT2193", $"Inline assembly operand '{operand.Variable.Name}' must name a local variable or parameter.", operand.Variable);
+            else if (!symbols.Add(symbol))
+                Report("CT2194", $"Variable '{operand.Variable.Name}' is bound more than once; use ref for a read/write operand.", operand.Variable);
+
+            if (!IsInlineAssemblyType(expression.Type))
+                Report("CT2195", $"Type '{expression.Type.DisplayName}' is not a supported inline assembly operand type.", operand.Variable);
+            if (operand.Constraint is null && expression.Type == CType.Float)
+                Report("CT2196", "A float inline assembly operand requires an explicit GNU constraint.", operand);
+
+            var constraint = operand.Constraint ?? "r";
+            if (constraint.Length == 0 || constraint.Contains('\0') || constraint.Contains('\r') || constraint.Contains('\n'))
+                Report("CT2197", "An inline assembly constraint must be a non-empty single-line string.", operand);
+            if (constraint.Contains('=') || constraint.Contains('+'))
+                Report("CT2197", "Inline assembly constraints omit '=' and '+'; the operand role supplies the direction marker.", operand);
+
+            if (operand.Kind is InlineAssemblyOperandKind.Output or InlineAssemblyOperandKind.InputOutput)
+            {
+                if (expression.LValue is null)
+                    Report("CT2198", $"Inline assembly {Role(operand.Kind)} operand '{operand.Variable.Name}' is not assignable.", operand.Variable);
+                else
+                {
+                    if (expression.LValue.Local is { IsConst: true } or { IsReadonly: true } ||
+                        expression.LValue.Parameter?.PassingKind == ParameterPassingKind.In)
+                        Report("CT2198", $"Inline assembly {Role(operand.Kind)} operand '{operand.Variable.Name}' must be mutable.", operand.Variable);
+                    ValidateAssignmentTarget(expression.LValue, operand.Variable);
+                    MarkAssigned(expression.LValue);
+                }
+            }
+
+            var emittedConstraint = operand.Kind switch
+            {
+                InlineAssemblyOperandKind.Output => $"={constraint}",
+                InlineAssemblyOperandKind.InputOutput => $"+{constraint}",
+                _ => constraint,
+            };
+            lowered.Add((operand, expression, emittedConstraint));
+
+            if (_semanticEntries.TryGetValue(operand.Variable, out var semantic))
+            {
+                foreach (var reference in syntax.References.Where(reference => reference.OperandIndex == index))
+                    _semanticEntries[reference] = semantic with { Syntax = reference };
+            }
+        }
+
+        var clobbers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var clobber in syntax.Clobbers)
+        {
+            if (clobber.Length == 0 || clobber.Contains('\0') || clobber.Contains('\r') || clobber.Contains('\n'))
+                Report("CT2199", "An inline assembly clobber must be a non-empty single-line string.", syntax);
+            else if (!clobbers.Add(clobber))
+                Report("CT2199", $"Inline assembly clobber '{clobber}' is duplicated.", syntax);
+        }
+
+        if (_analysisOnly)
+            return;
+
+        writer.WriteLine("__asm__ volatile (");
+        writer.WriteLine($"    \"{BuildInlineAssemblyTemplate(syntax)}\"");
+        var outputs = lowered.Select((item, index) => (item, index))
+            .Where(pair => pair.item.Syntax.Kind is InlineAssemblyOperandKind.Output or InlineAssemblyOperandKind.InputOutput)
+            .Select(pair => $"[ct_asm_{pair.index}] \"{EscapeInlineAssemblyCString(pair.item.Constraint)}\" ({pair.item.Expression.Code})");
+        var inputs = lowered.Select((item, index) => (item, index))
+            .Where(pair => pair.item.Syntax.Kind == InlineAssemblyOperandKind.Input)
+            .Select(pair => $"[ct_asm_{pair.index}] \"{EscapeInlineAssemblyCString(pair.item.Constraint)}\" ({pair.item.Expression.Code})");
+        writer.WriteLine($"    : {string.Join(", ", outputs)}");
+        writer.WriteLine($"    : {string.Join(", ", inputs)}");
+        writer.WriteLine($"    : {string.Join(", ", syntax.Clobbers.Select(clobber => $"\"{EscapeInlineAssemblyCString(clobber)}\""))});");
+    }
+
+    private static bool IsInlineAssemblyType(CType type) => type.Kind is
+        CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+        CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
+        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
+
+    private static string Role(InlineAssemblyOperandKind kind) => kind == InlineAssemblyOperandKind.Output ? "out" : "ref";
+
+    private static string BuildInlineAssemblyTemplate(InlineAssemblyStatementSyntax syntax)
+    {
+        var result = new System.Text.StringBuilder();
+        var position = 0;
+        foreach (var reference in syntax.References.OrderBy(reference => reference.Span.Start))
+        {
+            var relative = reference.Span.Start - syntax.BodySpan.Start;
+            AppendInlineAssemblyRaw(result, syntax.Body.AsSpan(position, relative - position));
+            result.Append("%[ct_asm_").Append(reference.OperandIndex).Append(']');
+            position = relative + reference.Span.Length;
+        }
+        AppendInlineAssemblyRaw(result, syntax.Body.AsSpan(position));
+        return result.ToString();
+    }
+
+    private static void AppendInlineAssemblyRaw(System.Text.StringBuilder result, ReadOnlySpan<char> text)
+    {
+        for (var index = 0; index < text.Length; index++)
+        {
+            switch (text[index])
+            {
+                case '\r' when index + 1 < text.Length && text[index + 1] == '\n':
+                    break;
+                case '\r':
+                case '\n':
+                    result.Append("\\n\\t");
+                    break;
+                case '\\':
+                    result.Append("\\\\");
+                    break;
+                case '"':
+                    result.Append("\\\"");
+                    break;
+                case '%':
+                    result.Append("%%");
+                    break;
+                default:
+                    result.Append(text[index]);
+                    break;
+            }
+        }
+    }
+
+    private static string EscapeInlineAssemblyCString(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\"", "\\\"", StringComparison.Ordinal);
 
     private void EmitLocal(ILoweringWriter writer, LocalDeclarationStatementSyntax syntax)
     {

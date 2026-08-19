@@ -5,18 +5,20 @@ namespace CTilde.Cli;
 
 internal static class NativeBuildDriver
 {
-    public static Task<int> BuildAsync(BuildRequest request, CancellationToken cancellationToken) =>
+    public static Task<int> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken) =>
         request.Target == CompilationTarget.Hosted
-            ? HostedBuildDriver.BuildAsync(request, cancellationToken)
+            ? HostedBuildDriver.BuildAsync(request, usesInlineAssembly, cancellationToken)
             : EspIdfBuildDriver.BuildAsync(request, cancellationToken);
 }
 
 internal static class HostedBuildDriver
 {
-    public static async Task<int> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
+    public static async Task<int> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(request.ExecutablePath!)!);
         var compiler = await ResolveCompilerAsync(request.Compiler, request.RootDirectory, cancellationToken);
+        if (usesInlineAssembly && compiler.Kind == HostedCompilerKind.Msvc)
+            throw new NativeBuildException("Inline assembly requires a GNU-compatible GCC or Clang compiler; MSVC is not supported for programs containing asm.");
         if (request.Trace)
             Console.Error.WriteLine($"trace: native compiler {compiler.Command}");
         var result = compiler.Kind == HostedCompilerKind.Msvc

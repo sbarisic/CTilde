@@ -4,6 +4,9 @@
   "scopeName": "source.ctilde",
   "patterns": [
     {
+      "include": "#inline-assembly"
+    },
+    {
       "include": "#comments"
     },
     {
@@ -56,6 +59,55 @@
     }
   ],
   "repository": {
+    "inline-assembly": {
+      "name": "meta.inline-assembly.ctilde",
+      "begin": "(?<![@_\\p{L}\\p{Nd}])(asm)(?![_\\p{L}\\p{Nd}])",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.control.asm.ctilde"
+        }
+      },
+      "end": "(?<=\\})",
+      "patterns": [
+        {
+          "name": "storage.modifier.asm-operand.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:in|out|ref)(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.other.asm-clobber.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])clobber(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#inline-assembly-block"
+        }
+      ]
+    },
+    "inline-assembly-block": {
+      "name": "meta.embedded.block.asm.ctilde",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.section.block.begin.asm.ctilde"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.block.end.asm.ctilde"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#inline-assembly-block"
+        }
+      ]
+    },
     "comments": {
       "patterns": [
         {
@@ -421,7 +473,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
     },
     "other-keywords": {
       "patterns": [

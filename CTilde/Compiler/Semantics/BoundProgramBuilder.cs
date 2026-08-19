@@ -45,7 +45,8 @@ internal static class BoundProgramBuilder
             semanticMap.ToImmutable(),
             services.ExternUses.ToImmutableArray(),
             services.DynamicGeneratedSymbols.ToImmutableHashSet(StringComparer.Ordinal),
-            services.UsesExceptions);
+            services.UsesExceptions,
+            model.UserSyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.AsmKeyword));
     }
 
     private static void AnalyzeBody(

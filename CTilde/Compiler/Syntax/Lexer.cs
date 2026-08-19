@@ -21,11 +21,13 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
     {
         ["bool"] = SyntaxKind.BoolKeyword,
         ["as"] = SyntaxKind.AsKeyword,
+        ["asm"] = SyntaxKind.AsmKeyword,
         ["base"] = SyntaxKind.BaseKeyword,
         ["break"] = SyntaxKind.BreakKeyword,
         ["byte"] = SyntaxKind.ByteKeyword,
         ["case"] = SyntaxKind.CaseKeyword,
         ["catch"] = SyntaxKind.CatchKeyword,
+        ["clobber"] = SyntaxKind.ClobberKeyword,
         ["char"] = SyntaxKind.CharKeyword,
         ["class"] = SyntaxKind.ClassKeyword,
         ["const"] = SyntaxKind.ConstKeyword,
@@ -91,15 +93,24 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 
     private int _position;
     private ImmutableArray<SyntaxTrivia> _leadingTrivia = [];
+    private bool _pendingAsmBody;
+    private bool _scanAsmBody;
 
     public ImmutableArray<SyntaxToken> Lex()
     {
         var tokens = ImmutableArray.CreateBuilder<SyntaxToken>();
         while (true)
         {
+            if (_scanAsmBody)
+            {
+                _leadingTrivia = [];
+                tokens.Add(LexAsmText());
+                _scanAsmBody = false;
+                continue;
+            }
             _leadingTrivia = LexTrivia(stopAfterEndOfLine: false);
             var token = LexToken();
-            if (token.Kind != SyntaxKind.EndOfFileToken)
+            if (token.Kind != SyntaxKind.EndOfFileToken && !_scanAsmBody)
                 token = token with { TrailingTrivia = LexTrivia(stopAfterEndOfLine: true) };
             tokens.Add(token);
             if (token.Kind == SyntaxKind.EndOfFileToken)
@@ -126,7 +137,10 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         {
             ReadIdentifierRunes();
             var text = source.Text[start.._position];
-            return Token(Keywords.GetValueOrDefault(text, SyntaxKind.IdentifierToken), start, _position - start, text);
+            var kind = Keywords.GetValueOrDefault(text, SyntaxKind.IdentifierToken);
+            if (kind == SyntaxKind.AsmKeyword)
+                _pendingAsmBody = true;
+            return Token(kind, start, _position - start, text);
         }
 
         if (char.IsAsciiDigit(current))
@@ -175,9 +189,61 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             _ => SyntaxKind.BadToken,
         };
 
+        if (_pendingAsmBody && single == SyntaxKind.OpenBraceToken)
+            _scanAsmBody = true;
+        else if (_pendingAsmBody && single is SyntaxKind.SemicolonToken or SyntaxKind.CloseBraceToken)
+            _pendingAsmBody = false;
+
         if (single == SyntaxKind.BadToken)
             diagnostics.Add("CT0001", $"Invalid character U+{(int)current:X4}.", source, new TextSpan(start, 1));
         return Token(single, start, 1);
+    }
+
+    private SyntaxToken LexAsmText()
+    {
+        var start = _position;
+        var depth = 0;
+        char quote = '\0';
+        var escaped = false;
+        while (_position < source.Length)
+        {
+            var current = source[_position];
+            if (quote != '\0')
+            {
+                _position++;
+                if (escaped)
+                    escaped = false;
+                else if (current == '\\')
+                    escaped = true;
+                else if (current == quote)
+                    quote = '\0';
+                continue;
+            }
+            if (current is '\'' or '"')
+            {
+                quote = current;
+                _position++;
+                continue;
+            }
+            if (current == '{')
+            {
+                depth++;
+                _position++;
+                continue;
+            }
+            if (current == '}')
+            {
+                if (depth == 0)
+                    break;
+                depth--;
+                _position++;
+                continue;
+            }
+            _position++;
+        }
+        _pendingAsmBody = false;
+        var text = source.Text[start.._position];
+        return Token(SyntaxKind.AsmTextToken, start, _position - start, text);
     }
 
     private static readonly (string Text, SyntaxKind Kind)[] MultiCharacterTokens =

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits one GNU C23 translation unit, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.12. It adds allocation-free `System.Vec2`, `System.Vec3`, and `System.Vec4` values on top of draft 0.11 user-defined arithmetic operators. It retains draft 0.10 atomic ARC, per-thread exception and cleanup state, native thread attachment, object layout, and native ABI unchanged. It does not require a CLR or C# runtime.
+The current language is draft 0.13. It adds unsafe GNU inline assembly with typed scalar operands, explicit constraints, and explicit clobbers. It retains draft 0.12 allocation-free vectors, draft 0.11 arithmetic operators, and the draft 0.10 atomic ARC and native ABI unchanged. It does not require a CLR or C# runtime.
 
 ```csharp
 public static Vector3 operator +(Vector3 left, Vector3 right) { ... }
@@ -15,6 +15,17 @@ The standard library uses those declarations directly:
 Vec3 direction = (Vec3.UnitX + Vec3.UnitY).Normalize();
 Vec3 normal = Vec3.UnitX.Cross(Vec3.UnitY);
 ```
+
+GNU builds can use raw inline instructions without wrapping each line in a string:
+
+```csharp
+[NoAlloc]
+asm (in value, out result, clobber("cc")) {
+    leal 1(value), result
+}
+```
+
+Inline assembly requires `unsafe`. GCC and Clang support it for hosted and ESP-IDF targets; native MSVC builds reject programs that contain `asm`.
 
 ## Quick start
 
@@ -178,7 +189,7 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.12 programs |
+| `examples` | Checked draft 0.13 programs |
 | `examples/HostedIo` | Deterministic hosted path tracer with materials, defocus blur, and owned PPM output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
@@ -205,7 +216,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.12 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.13 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

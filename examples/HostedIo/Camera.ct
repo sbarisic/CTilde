@@ -59,6 +59,7 @@ public sealed class Camera
         File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString() + "\n255\n");
 
         int row = 0;
+        int lastProgressPercent = 0;
         while (row < imageHeight)
         {
             int column = 0;
@@ -78,7 +79,14 @@ public sealed class Camera
 
             int completed = row + 1;
             if (ProgressRows > 0 && (completed % ProgressRows == 0 || completed == imageHeight))
-                Console.WriteLine("Rendered rows: " + completed.ToString() + "/" + imageHeight.ToString() + ".");
+            {
+                int percent = completed * 100 / imageHeight;
+                if (percent > lastProgressPercent)
+                {
+                    Console.WriteLine("Progress: " + percent.ToString() + "%.");
+                    lastProgressPercent = percent;
+                }
+            }
             row++;
         }
     }

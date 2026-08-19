@@ -66,7 +66,7 @@ public static class Scene
         camera.Up = Vec3.UnitY;
         camera.DefocusAngle = 0.6f;
         camera.FocusDistance = 10.0f;
-        camera.ProgressRows = 25;
+        camera.ProgressRows = 1;
         return camera;
     }
 }

@@ -23,6 +23,7 @@ internal enum IrCleanupActionKind { EnterScope, LeaveScope, EnterExceptionRegion
 internal sealed record IrCheck(SyntaxNode Syntax, IrCheckKind Kind, ImmutableArray<IrValue> Inputs) : IrInstruction(null, Syntax, Inputs);
 internal sealed record IrOwnershipAction(SyntaxNode Syntax, IrOwnershipActionKind Kind, IrValue Value) : IrInstruction(null, Syntax, [Value]);
 internal sealed record IrCleanupAction(SyntaxNode Syntax, IrCleanupActionKind Kind) : IrInstruction(null, Syntax, []);
+internal sealed record IrInlineAssembly(InlineAssemblyStatementSyntax Assembly, ImmutableArray<IrValue> Operands) : IrInstruction(null, Assembly, Operands);
 
 internal abstract record IrTerminator;
 internal sealed record IrFallThrough : IrTerminator;
@@ -214,6 +215,14 @@ internal sealed class TypedIrLowerer(BoundProgram program)
             }
             if (statement.CreatesLexicalScope)
                 instructions.Add(new IrCleanupAction(statement.Syntax, IrCleanupActionKind.LeaveScope));
+            if (statement.Syntax is InlineAssemblyStatementSyntax assembly)
+            {
+                var operands = statement.Expressions.SelectMany(BoundExpressions)
+                    .Select(expression => values.GetValueOrDefault(expression))
+                    .Where(value => value.Type is not null)
+                    .ToImmutableArray();
+                instructions.Add(new IrInlineAssembly(assembly, operands));
+            }
             blocks.Add(new IrBasicBlock(statementIndex, instructions.ToImmutable(), Terminator(statement, statementIndex)));
         }
         return new IrFunction(method, body, property, isGetter, blocks.ToImmutable());

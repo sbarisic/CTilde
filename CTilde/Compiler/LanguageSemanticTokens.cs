@@ -43,6 +43,14 @@ public sealed partial class LanguageServiceSnapshot
         AddDeclarationTokens(tree, index, result, cancellationToken);
         AddTypeReferenceTokens(tree, index, result, cancellationToken);
 
+        foreach (var reference in index.Nodes.OfType<InlineAssemblyReferenceSyntax>())
+        {
+            if (!_boundProgram.SemanticMap.TryGetValue(reference, out var semantic) || semantic.Symbol is null)
+                continue;
+            if (ClassifySymbol(semantic.Symbol) is { } classification)
+                Add(result, reference.Span, classification.Kind, classification.Modifiers);
+        }
+
         foreach (var token in tree.Tokens)
         {
             cancellationToken.ThrowIfCancellationRequested();

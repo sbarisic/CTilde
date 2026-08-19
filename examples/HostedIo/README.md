@@ -15,14 +15,14 @@ dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --projec
 Pop-Location
 ```
 
-The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The executable reports progress every 25 completed rows:
+The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The executable reports every newly reached whole percentage without printing duplicate percentages:
 
 ```text
 Rendering image.ppm...
-Rendered rows: 25/675.
-Rendered rows: 50/675.
+Progress: 1%.
+Progress: 2%.
 ...
-Rendered rows: 675/675.
+Progress: 100%.
 Done: 1200x675.
 ```
 

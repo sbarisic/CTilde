@@ -40,6 +40,14 @@
 - [x] Add documentation, editor navigation, hosted native tests, ESP cross-build coverage, and the HostedIo migration.
 - [ ] Add interpolation, clamping, distance, swizzles, conversions, or SIMD-specific lowering only when applications require them.
 
+## Draft 0.13 GNU inline assembly
+
+- [x] Add full-fidelity raw `asm` blocks with optional typed `in`, `out`, and `ref` operands.
+- [x] Add GNU constraints, explicit clobbers, volatile emission, unsafe enforcement, definite assignment, and trusted statement-level `[NoAlloc]`.
+- [x] Preserve operand bindings in bound bodies and typed IR, and expose body references to editor semantic tokens, hover, and definition.
+- [x] Support GCC and Clang on hosted and ESP-IDF targets and reject hosted MSVC native builds containing inline assembly.
+- [ ] Add architecture-specific instruction validation only if C~ gains a distinct native backend; the GNU C backend deliberately delegates it to the assembler.
+
 ## Draft 0.12 typed-IR and C optimization
 
 - [x] Add an optimization stage between typed-IR lowering and C emission.

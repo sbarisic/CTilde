@@ -205,7 +205,7 @@ internal static partial class ConformanceTests
             var second = CompileAndRun(sources, captureFile: "image.ppm");
             Assert(first.ExitCode == 0, first.StandardError);
             Assert(second.ExitCode == 0, second.StandardError);
-            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nRendered rows: 48/144.\nRendered rows: 96/144.\nRendered rows: 144/144.\nDone: 256x144.\n", first.StandardOutput);
+            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nProgress: 33%.\nProgress: 66%.\nProgress: 100%.\nDone: 256x144.\n", first.StandardOutput);
             Assert(Normalize(second.StandardOutput) == Normalize(first.StandardOutput), second.StandardOutput);
             var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first path-tracer run did not produce image.ppm.");
             var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second path-tracer run did not produce image.ppm.");

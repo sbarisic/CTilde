@@ -40,9 +40,9 @@ internal static class CTildeCommand
 
             await using var buildLock = request.BuildNative ? BuildLock.Acquire(request.LockDirectory) : null;
             var result = Compile(request);
-            if (result != 0 || !request.BuildNative)
-                return result;
-            return await NativeBuildDriver.BuildAsync(request, cancellation.Token);
+            if (result.ExitCode != 0 || !request.BuildNative)
+                return result.ExitCode;
+            return await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
         }
         catch (BuildLockException exception)
         {
@@ -65,7 +65,7 @@ internal static class CTildeCommand
         }
     }
 
-    private static int Compile(BuildRequest request)
+    private static CompilationOutcome Compile(BuildRequest request)
     {
         try
         {
@@ -89,14 +89,14 @@ internal static class CTildeCommand
             {
                 if (request.BuildNative)
                     RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath);
-                return 1;
+                return new CompilationOutcome(1, compilation.UsesInlineAssembly);
             }
 
             if (request.CheckOnly)
             {
                 if (request.Trace)
                     Console.Error.WriteLine("trace: semantic analysis complete");
-                return 0;
+                return new CompilationOutcome(0, compilation.UsesInlineAssembly);
             }
 
             WriteAtomically(request.GeneratedCPath!, generated.ToString());
@@ -109,14 +109,14 @@ internal static class CTildeCommand
                 if (request.GeneratedHeaderPath is not null)
                     Console.Error.WriteLine($"trace: wrote {request.GeneratedHeaderPath}");
             }
-            return 0;
+            return new CompilationOutcome(0, compilation.UsesInlineAssembly);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
             if (request.BuildNative)
                 RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath);
             Console.Error.WriteLine($"ctilde: {exception.Message}");
-            return 1;
+            return new CompilationOutcome(1, false);
         }
     }
 
@@ -143,7 +143,7 @@ internal static class CTildeCommand
                 var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
                 var request = new BuildRequest([input], options.Target, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
                     null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null);
-                if (Compile(request) != 0)
+                if (Compile(request).ExitCode != 0)
                 {
                     RemoveStaleGeneratedOutput(request.GeneratedCPath);
                     exitCode = 1;
@@ -180,6 +180,8 @@ internal static class CTildeCommand
 
     private static bool HasErrors(IEnumerable<Diagnostic> diagnostics) =>
         diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+
+    private readonly record struct CompilationOutcome(int ExitCode, bool UsesInlineAssembly);
 
     private static void WriteAtomically(string outputPath, string contents)
     {

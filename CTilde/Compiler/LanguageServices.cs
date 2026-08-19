@@ -18,13 +18,22 @@ public sealed record LanguageCompletion(
     string Detail,
     string InsertText,
     TextSpan ReplacementSpan,
-    string SortText);
+    string SortText,
+    string? DocumentationId = null);
 
-public sealed record LanguageHover(string Contents, TextSpan Span);
+public sealed record LanguageDocumentedSignature(string Signature, LanguageDocumentation? Documentation);
 
-public sealed record LanguageParameter(string Label);
+public sealed record LanguageHover(
+    string Contents,
+    TextSpan Span,
+    ImmutableArray<LanguageDocumentedSignature> Sections = default);
 
-public sealed record LanguageSignature(string Label, ImmutableArray<LanguageParameter> Parameters);
+public sealed record LanguageParameter(string Label, string? Documentation = null);
+
+public sealed record LanguageSignature(
+    string Label,
+    ImmutableArray<LanguageParameter> Parameters,
+    LanguageDocumentation? Documentation = null);
 
 public sealed record LanguageSignatureHelp(
     ImmutableArray<LanguageSignature> Signatures,
@@ -74,7 +83,7 @@ public sealed partial class LanguageServiceSnapshot
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
-        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics);
+        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
@@ -95,6 +104,12 @@ public sealed partial class LanguageServiceSnapshot
     public CompilationOptions Options { get; }
 
     public ImmutableArray<Diagnostic> Diagnostics => _diagnostics;
+
+    public LanguageDocumentation? GetDocumentation(string documentationId)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(documentationId);
+        return _model.Documentation.GetDocumentation(documentationId);
+    }
 
     public static LanguageServiceSnapshot Create(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions? options = null)
     {
@@ -141,7 +156,11 @@ public sealed partial class LanguageServiceSnapshot
         var symbols = ResolveToken(context, token).ToArray();
         if (symbols.Length == 0)
             return null;
-        return new LanguageHover(string.Join("\n\n", symbols.Select(FormatSymbol).Distinct(StringComparer.Ordinal)), token.Span);
+        var sections = symbols
+            .Select(symbol => new LanguageDocumentedSignature(FormatSymbol(symbol), _model.Documentation.GetDocumentation(symbol)))
+            .DistinctBy(section => section.Signature, StringComparer.Ordinal)
+            .ToImmutableArray();
+        return new LanguageHover(string.Join("\n\n", sections.Select(section => section.Signature)), token.Span, sections);
     }
 
     public LanguageSignatureHelp? GetSignatureHelp(string filePath, int position)
@@ -174,7 +193,16 @@ public sealed partial class LanguageServiceSnapshot
                     activeParameter++;
             }
         }
-        var signatures = methods.Select(method => new LanguageSignature(FormatMethod(method), [.. method.Parameters.Select(parameter => new LanguageParameter(FormatParameter(parameter)))])).ToImmutableArray();
+        var signatures = methods.Select(method =>
+        {
+            var documentation = _model.Documentation.GetDocumentation(method);
+            return new LanguageSignature(
+                FormatMethod(method),
+                [.. method.Parameters.Select(parameter => new LanguageParameter(
+                    FormatParameter(parameter),
+                    documentation?.Parameters.FirstOrDefault(item => item.Name == parameter.Name)?.Text))],
+                documentation);
+        }).ToImmutableArray();
         var activeSignature = Array.FindIndex(methods, method => method.Parameters.Length > activeParameter);
         return new LanguageSignatureHelp(signatures, Math.Max(0, activeSignature), activeParameter);
     }
@@ -285,13 +313,13 @@ public sealed partial class LanguageServiceSnapshot
             Add(keyword, LanguageCompletionKind.Keyword, "keyword", "0");
         foreach (var builtIn in BuiltInTypes)
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
-        Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1");
-        Add("ReadOnlyNativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.ReadOnlyNativeBuffer<T>", "1");
+        Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1", documentationId: "T:System.Runtime.NativeBuffer<T>");
+        Add("ReadOnlyNativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.ReadOnlyNativeBuffer<T>", "1", documentationId: "T:System.Runtime.ReadOnlyNativeBuffer<T>");
         if (!_model.Types.ContainsKey("System.Runtime.NativeUtf8String"))
-            Add("NativeUtf8String", LanguageCompletionKind.Struct, "System.Runtime.NativeUtf8String", "1");
+            Add("NativeUtf8String", LanguageCompletionKind.Struct, "System.Runtime.NativeUtf8String", "1", documentationId: "T:System.Runtime.NativeUtf8String");
 
         foreach (var type in VisibleTypes(context.Tree))
-            Add(type.Name, CompletionKind(type), $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}", "2");
+            Add(type.Name, CompletionKind(type), $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}", "2", type);
         foreach (var @namespace in _model.Types.Values.Select(type => type.Namespace).Where(value => !string.IsNullOrEmpty(value)).Select(value => value.Split('.')[0]).Distinct(StringComparer.Ordinal))
             Add(@namespace, LanguageCompletionKind.Namespace, "namespace", "2");
 
@@ -308,11 +336,11 @@ public sealed partial class LanguageServiceSnapshot
         {
             var requireStatic = IsStatic(context.MemberDeclaration);
             foreach (var field in Hierarchy(context.TypeSymbol).SelectMany(type => type.Fields).Where(field => field.Syntax is not null && (!requireStatic || field.IsStatic) && IsAccessible(field, context.TypeSymbol)))
-                Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "4");
+                Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "4", field);
             foreach (var property in Hierarchy(context.TypeSymbol).SelectMany(type => type.Properties).Where(property => !requireStatic || property.IsStatic).Where(property => IsAccessible(property, context.TypeSymbol)))
-                Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "4");
+                Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "4", property);
             foreach (var candidate in Hierarchy(context.TypeSymbol).SelectMany(type => type.Methods).Where(methodSymbol => !requireStatic || methodSymbol.IsStatic).Where(methodSymbol => IsAccessible(methodSymbol, context.TypeSymbol)))
-                Add(candidate.Name, LanguageCompletionKind.Method, FormatMethod(candidate), "5");
+                Add(candidate.Name, LanguageCompletionKind.Method, FormatMethod(candidate), "5", candidate);
             if (!requireStatic)
             {
                 Add("this", LanguageCompletionKind.Keyword, context.TypeSymbol.FullName, "0");
@@ -321,8 +349,8 @@ public sealed partial class LanguageServiceSnapshot
             }
         }
 
-        void Add(string label, LanguageCompletionKind kind, string detail, string order) =>
-            results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label));
+        void Add(string label, LanguageCompletionKind kind, string detail, string order, object? symbol = null, string? documentationId = null) =>
+            results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label, documentationId ?? (symbol is null ? null : _model.Documentation.GetId(symbol))));
     }
 
     private void AddMemberCompletions(List<LanguageCompletion> results, DocumentContext context, MemberAccessExpressionSyntax member, TextSpan replacement)
@@ -332,13 +360,13 @@ public sealed partial class LanguageServiceSnapshot
         {
             if (receiver.StaticType.Kind == DeclaredTypeKind.Enum)
                 foreach (var value in receiver.StaticType.EnumValues)
-                    Add(value.Name, LanguageCompletionKind.EnumMember, $"{receiver.StaticType.FullName}.{value.Name}", "0");
+                    Add(value.Name, LanguageCompletionKind.EnumMember, $"{receiver.StaticType.FullName}.{value.Name}", "0", value);
             foreach (var field in Hierarchy(receiver.StaticType).SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Syntax is not null && IsAccessible(field, context.TypeSymbol)))
-                Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1");
+                Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1", field);
             foreach (var property in Hierarchy(receiver.StaticType).SelectMany(type => type.Properties).Where(property => property.IsStatic && IsAccessible(property, context.TypeSymbol)))
-                Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1");
+                Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1", property);
             foreach (var method in Hierarchy(receiver.StaticType).SelectMany(type => type.Methods).Where(method => method.IsStatic && IsAccessible(method, context.TypeSymbol)))
-                Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2");
+                Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2", method);
             return;
         }
 
@@ -348,13 +376,14 @@ public sealed partial class LanguageServiceSnapshot
             Add("Length", LanguageCompletionKind.Property, "int Length", "0");
         if (receiver.Type.IsNativeBuffer)
         {
-            Add("Length", LanguageCompletionKind.Property, "nuint Length", "0");
-            Add("Pointer", LanguageCompletionKind.Property, $"{receiver.Type.ElementType!.DisplayName}* Pointer", "0");
+            var bufferType = receiver.Type.Kind == CTypeKind.NativeBuffer ? "NativeBuffer<T>" : "ReadOnlyNativeBuffer<T>";
+            Add("Length", LanguageCompletionKind.Property, "nuint Length", "0", documentationId: $"P:System.Runtime.{bufferType}.Length");
+            Add("Pointer", LanguageCompletionKind.Property, $"{receiver.Type.ElementType!.DisplayName}* Pointer", "0", documentationId: $"P:System.Runtime.{bufferType}.Pointer");
         }
         if (receiver.Type.IsNativeUtf8String)
         {
-            Add("ByteLength", LanguageCompletionKind.Property, "nuint ByteLength", "0");
-            Add("Pointer", LanguageCompletionKind.Property, "byte* Pointer", "0");
+            Add("ByteLength", LanguageCompletionKind.Property, "nuint ByteLength", "0", documentationId: "P:System.Runtime.NativeUtf8String.ByteLength");
+            Add("Pointer", LanguageCompletionKind.Property, "byte* Pointer", "0", documentationId: "P:System.Runtime.NativeUtf8String.Pointer");
         }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.IsValueType || receiver.Type.Kind is CTypeKind.String or CTypeKind.Array))
@@ -362,14 +391,14 @@ public sealed partial class LanguageServiceSnapshot
         if (type is null)
             return;
         foreach (var field in Hierarchy(type).SelectMany(candidate => candidate.Fields).Where(field => !field.IsStatic && field.Syntax is not null && IsAccessible(field, context.TypeSymbol)))
-            Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1");
+            Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1", field);
         foreach (var property in Hierarchy(type).SelectMany(candidate => candidate.Properties).Where(property => !property.IsStatic && IsAccessible(property, context.TypeSymbol)))
-            Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1");
+            Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1", property);
         foreach (var method in Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => !method.IsStatic && IsAccessible(method, context.TypeSymbol)))
-            Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2");
+            Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2", method);
 
-        void Add(string label, LanguageCompletionKind kind, string detail, string order) =>
-            results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label));
+        void Add(string label, LanguageCompletionKind kind, string detail, string order, object? symbol = null, string? documentationId = null) =>
+            results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label, documentationId ?? (symbol is null ? null : _model.Documentation.GetId(symbol))));
     }
 
     private IEnumerable<object> ResolveToken(DocumentContext context, SyntaxToken token)

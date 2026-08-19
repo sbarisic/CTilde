@@ -66,7 +66,7 @@ public sealed class Compilation
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
-            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics);
+            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;

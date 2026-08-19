@@ -1,5 +1,7 @@
 // SYNTAX TEST "source.ctilde" "C~ draft 0.9 highlighting"
 
+/// <summary>Uses <paramref name="value"/>.</summary>
+
 using System;
 // <--- keyword.control.import.ctilde
 //    ^^^^^^ entity.name.namespace.ctilde

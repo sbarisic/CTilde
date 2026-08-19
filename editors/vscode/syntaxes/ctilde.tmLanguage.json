@@ -59,6 +59,42 @@
     "comments": {
       "patterns": [
         {
+          "name": "comment.line.documentation.ctilde",
+          "begin": "///",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.definition.comment.documentation.ctilde"
+            }
+          },
+          "end": "(?=$)",
+          "patterns": [
+            {
+              "match": "(</?)(summary|param|returns|remarks|exception|see|paramref|inheritdoc)(?=\\s|/?>)",
+              "captures": {
+                "1": {
+                  "name": "punctuation.definition.tag.begin.documentation.ctilde"
+                },
+                "2": {
+                  "name": "entity.name.tag.documentation.ctilde"
+                }
+              }
+            },
+            {
+              "name": "entity.other.attribute-name.documentation.ctilde",
+              "match": "\\b(?:name|cref)(?=\\s*=)"
+            },
+            {
+              "name": "string.quoted.double.documentation.ctilde",
+              "begin": "\"",
+              "end": "\""
+            },
+            {
+              "name": "punctuation.definition.tag.end.documentation.ctilde",
+              "match": "/?>"
+            }
+          ]
+        },
+        {
           "name": "comment.line.double-slash.ctilde",
           "begin": "//",
           "beginCaptures": {

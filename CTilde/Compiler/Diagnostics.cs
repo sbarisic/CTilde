@@ -30,6 +30,9 @@ internal sealed class DiagnosticBag
     public void Add(string code, string message, SourceText source, TextSpan span, SourceLocation? related = null) =>
         _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Error, message, source.GetLocation(span), related));
 
+    public void AddWarning(string code, string message, SourceText source, TextSpan span, SourceLocation? related = null) =>
+        _diagnostics.Add(new Diagnostic(code, DiagnosticSeverity.Warning, message, source.GetLocation(span), related));
+
     public void Add(Diagnostic diagnostic) => _diagnostics.Add(diagnostic);
 
     public void AddRange(IEnumerable<Diagnostic> diagnostics) => _diagnostics.AddRange(diagnostics);

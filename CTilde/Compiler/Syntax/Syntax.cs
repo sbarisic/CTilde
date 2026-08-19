@@ -123,6 +123,7 @@ public enum SyntaxTriviaKind
 {
     Whitespace,
     EndOfLine,
+    DocumentationComment,
     SingleLineComment,
     BlockComment,
     SkippedTokens,

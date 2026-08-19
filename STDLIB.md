@@ -4,6 +4,8 @@
 
 This document is the canonical standard-library reference for C~ draft 0.9. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
+All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
+
 ## Object
 
 `object` is an alias for `System.Object`. Every class derives from this type.

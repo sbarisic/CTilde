@@ -9,6 +9,7 @@ internal sealed class WorkspaceState
     private readonly Dictionary<string, OpenDocument> _documents = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CachedProject> _projects = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly HashSet<string> _workspaceRoots = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private long _revision;
 
     public event Func<Task>? AnalysisChanged;
 
@@ -25,6 +26,7 @@ internal sealed class WorkspaceState
             else if (!string.IsNullOrWhiteSpace(rootUri))
                 _workspaceRoots.Add(UriHelpers.ToPath(rootUri));
             _projects.Clear();
+            _revision++;
         }
     }
 
@@ -37,6 +39,7 @@ internal sealed class WorkspaceState
             foreach (var added in change.Added)
                 _workspaceRoots.Add(UriHelpers.ToPath(added.Uri));
             _projects.Clear();
+            _revision++;
         }
         SignalChanged();
     }
@@ -47,6 +50,7 @@ internal sealed class WorkspaceState
         {
             _documents[document.Uri] = new OpenDocument(document.Uri, UriHelpers.ToPath(document.Uri), document.Version, document.Text);
             _projects.Clear();
+            _revision++;
         }
         SignalChanged();
     }
@@ -72,6 +76,7 @@ internal sealed class WorkspaceState
             }
             _documents[identifier.Uri] = document with { Version = identifier.Version, Text = text };
             _projects.Clear();
+            _revision++;
         }
         SignalChanged();
     }
@@ -82,6 +87,7 @@ internal sealed class WorkspaceState
         {
             _documents.Remove(uri);
             _projects.Clear();
+            _revision++;
         }
         SignalChanged();
     }
@@ -89,7 +95,10 @@ internal sealed class WorkspaceState
     public void FilesChanged()
     {
         lock (_gate)
+        {
             _projects.Clear();
+            _revision++;
+        }
         SignalChanged();
     }
 
@@ -179,7 +188,7 @@ internal sealed class WorkspaceState
             }
         }
         var service = LanguageServiceSnapshot.Create(trees, new CompilationOptions(target));
-        return new ProjectSnapshot(key, sourceFiles, target, service, projectError);
+        return new ProjectSnapshot(key, sourceFiles, target, service, projectError, _revision);
     }
 
     private void SignalChanged()
@@ -203,4 +212,4 @@ internal sealed class WorkspaceState
 }
 
 internal sealed record OpenDocument(string Uri, string Path, int Version, string Text);
-internal sealed record ProjectSnapshot(string Key, ImmutableArray<string> SourceFiles, CompilationTarget Target, LanguageServiceSnapshot LanguageService, string? ProjectError);
+internal sealed record ProjectSnapshot(string Key, ImmutableArray<string> SourceFiles, CompilationTarget Target, LanguageServiceSnapshot LanguageService, string? ProjectError, long Revision);

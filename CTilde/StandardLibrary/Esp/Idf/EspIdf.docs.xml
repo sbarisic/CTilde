@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="T:Esp.Idf.EspError"><summary>Represents an exact ESP-IDF <see cref="Esp.Idf.EspError.Code"/> result.</summary></member>
+  <member id="P:Esp.Idf.EspError.Code"><summary>Gets the native esp_err_t value.</summary></member>
+  <member id="P:Esp.Idf.EspError.IsSuccess"><summary>Gets whether the result is ESP_OK.</summary></member>
+  <member id="M:Esp.Idf.EspError.GetName()"><summary>Copies the symbolic ESP-IDF error name into an owned string.</summary><returns>An owned managed string.</returns><remarks>This method allocates.</remarks></member>
+  <member id="M:Esp.Idf.EspError.ThrowIfError()"><summary>Throws when the result is not ESP_OK.</summary><exception cref="System.Exception">The result represents an ESP-IDF error.</exception><remarks>The exception message contains the symbolic name and numeric code. This method is unavailable in NoAlloc code.</remarks></member>
+
+  <member id="T:Esp.Idf.FreeRtos"><summary>Provides same-task FreeRTOS timing and measurement operations.</summary></member>
+  <member id="M:Esp.Idf.FreeRtos.DelayMilliseconds(uint)"><summary>Blocks the current task while yielding to FreeRTOS.</summary><param name="milliseconds">The delay in milliseconds.</param></member>
+  <member id="M:Esp.Idf.FreeRtos.GetTickCount()"><summary>Gets the current FreeRTOS tick count.</summary><returns>The tick count.</returns></member>
+  <member id="M:Esp.Idf.FreeRtos.GetStackHighWaterMark()"><summary>Gets the current task stack high-water mark.</summary><returns>The minimum remaining stack measured in words.</returns></member>
+
+  <member id="T:Esp.Idf.EspSystem"><summary>Provides ESP system and heap operations.</summary></member>
+  <member id="M:Esp.Idf.EspSystem.Restart()"><summary>Restarts the ESP target.</summary></member>
+  <member id="M:Esp.Idf.EspSystem.GetFreeHeapSize()"><summary>Gets the current free heap size in bytes.</summary><returns>The current free heap size.</returns></member>
+  <member id="M:Esp.Idf.EspSystem.GetMinimumFreeHeapSize()"><summary>Gets the minimum free heap observed since boot.</summary><returns>The minimum free heap size.</returns></member>
+  <member id="T:Esp.Idf.EspTimer"><summary>Provides the monotonic ESP high-resolution timer.</summary></member>
+  <member id="M:Esp.Idf.EspTimer.GetTimeMicroseconds()"><summary>Gets microseconds elapsed since timer initialization.</summary><returns>A monotonic signed 64-bit timestamp.</returns></member>
+
+  <member id="T:Esp.Idf.Gpio"><summary>Provides checked ESP-IDF GPIO operations.</summary></member>
+  <member id="M:Esp.Idf.Gpio.ConfigureInput(int)"><summary>Configures a valid GPIO as an input.</summary><param name="pin">The GPIO number.</param><returns>The exact ESP-IDF result.</returns></member>
+  <member id="M:Esp.Idf.Gpio.ConfigureOutput(int)"><summary>Configures a valid GPIO as an output.</summary><param name="pin">The GPIO number.</param><returns>The exact ESP-IDF result.</returns></member>
+  <member id="M:Esp.Idf.Gpio.Write(int,bool)"><summary>Writes a level to a configured output.</summary><param name="pin">The GPIO number.</param><param name="high">The output level.</param><returns>The exact ESP-IDF result.</returns></member>
+  <member id="M:Esp.Idf.Gpio.Read(int)"><summary>Reads a successfully configured GPIO.</summary><param name="pin">The GPIO number.</param><returns>The current input level.</returns></member>
+
+  <member id="T:Esp.Idf.Ws2812"><summary>Controls the firmware-lifetime singleton WS2812 strip.</summary><remarks>Only one strip can be configured. RGB components must be from 0 through 255.</remarks></member>
+  <member id="M:Esp.Idf.Ws2812.Configure(int,uint)"><summary>Configures the singleton RMT-backed WS2812 strip.</summary><param name="pin">A valid output GPIO.</param><param name="ledCount">A nonzero LED count.</param><returns>ESP_OK for a new or identical configuration; otherwise the exact error.</returns></member>
+  <member id="M:Esp.Idf.Ws2812.SetPixel(uint,uint,uint,uint)"><summary>Updates one pixel in the native strip buffer.</summary><param name="index">The zero-based pixel index.</param><param name="red">The red component from 0 through 255.</param><param name="green">The green component from 0 through 255.</param><param name="blue">The blue component from 0 through 255.</param><returns>The exact ESP-IDF result.</returns></member>
+  <member id="M:Esp.Idf.Ws2812.Refresh()"><summary>Transmits the buffered pixel values.</summary><returns>The exact ESP-IDF result.</returns></member>
+  <member id="M:Esp.Idf.Ws2812.Clear()"><summary>Clears all pixels and refreshes the strip.</summary><returns>The exact ESP-IDF result.</returns></member>
+</doc>

@@ -26,6 +26,7 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
       capabilities: { workspace: { semanticTokens: { refreshSupport: true } } }
     });
     assert.equal(initialized.capabilities.completionProvider.triggerCharacters[0], ".");
+    assert.equal(initialized.capabilities.completionProvider.resolveProvider, true);
     assert.deepEqual(initialized.capabilities.semanticTokensProvider.legend.tokenTypes,
       ["namespace", "class", "struct", "enum", "enumMember", "parameter", "variable", "property", "method"]);
     assert.deepEqual(initialized.capabilities.semanticTokensProvider.legend.tokenModifiers,
@@ -38,7 +39,11 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     const dotOffset = source.indexOf("Console.") + "Console.".length;
     const dotPosition = positionAt(source, dotOffset);
     const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: dotPosition });
-    assert.ok(completion.items.some(item => item.label === "WriteLine"));
+    const writeLineCompletion = completion.items.find(item => item.label === "WriteLine");
+    assert.ok(writeLineCompletion);
+    assert.equal(writeLineCompletion.documentation, undefined);
+    const resolvedWriteLine = await client.request("completionItem/resolve", writeLineCompletion);
+    assert.match(resolvedWriteLine.documentation.value, /managed string followed by a line terminator|line terminator/);
 
     const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
     const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, source);
@@ -50,6 +55,7 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     const consolePosition = positionAt(source, source.indexOf("Console") + 1);
     const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: consolePosition });
     assert.match(hover.contents.value, /System\.Console/);
+    assert.match(hover.contents.value, /Writes formatted values/);
     const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: consolePosition });
     assert.match(definition.uri, /^ctilde-stdlib:\/\/\/System\/Console\.ct$/);
     const standardLibraryText = await client.request("ctilde/standardLibraryText", { uri: definition.uri });
@@ -74,6 +80,9 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     });
     const signature = await client.request("textDocument/signatureHelp", { textDocument: { uri }, position: { line: dotPosition.line, character: dotPosition.character + "WriteLine(".length } });
     assert.ok(signature.signatures.some(item => item.label.includes("WriteLine")));
+    assert.ok(signature.signatures.some(item => item.parameters.some(parameter => parameter.documentation?.value.includes("value to write"))));
+    const staleCompletion = await client.request("completionItem/resolve", writeLineCompletion);
+    assert.equal(staleCompletion.documentation, undefined);
     const changedSource = source.slice(0, dotOffset) + "WriteLine(" + source.slice(dotOffset);
     const changedSemantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
     const changedDecoded = decodeSemanticTokens(changedSemantic.data, initialized.capabilities.semanticTokensProvider.legend, changedSource);
@@ -92,6 +101,36 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     client.notify("$/cancelRequest", { id: canceledRequest.id });
     await assert.rejects(canceledRequest.promise);
 
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("ESP-only documentation resolves from the target sidecar", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-esp-"));
+  const programPath = path.join(directory, "Program.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { EspError error = Ws2812.Clear(); error.ThrowIfError(); error. } }";
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "esp-idf", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", { processId: process.pid, rootUri: pathToFileURL(directory).href, capabilities: {} });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+    const completionOffset = source.lastIndexOf("error.") + "error.".length;
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: positionAt(source, completionOffset) });
+    const throwIfError = completion.items.find(item => item.label === "ThrowIfError");
+    assert.ok(throwIfError);
+    const resolved = await client.request("completionItem/resolve", throwIfError);
+    assert.match(resolved.documentation.value, /Throws when the result is not ESP\\_OK/);
+    const hoverOffset = source.indexOf("ThrowIfError") + 1;
+    const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, hoverOffset) });
+    assert.match(hover.contents.value, /symbolic name and numeric code/);
     await client.request("shutdown");
     client.notify("exit");
     assert.equal(await client.exited, 0);

@@ -13,5 +13,6 @@
   <ItemGroup>
     <Compile Include="Compiler/**/*.cs" />
     <EmbeddedResource Include="StandardLibrary/**/*.ct" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="StandardLibrary/**/*.xml" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

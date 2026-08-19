@@ -1,5 +1,6 @@
 using CTilde;
 using StreamJsonRpc;
+using System.Text;
 
 namespace CTilde.LanguageServer;
 
@@ -25,12 +26,12 @@ internal sealed class LanguageServer
         return new InitializeResult(
             new ServerCapabilities(
                 new TextDocumentSyncOptions(true, 2, true),
-                new CompletionOptions(false, ["."]),
+                new CompletionOptions(true, ["."]),
                 new SignatureHelpOptions(["(", ","], [","]),
                 true, true, true, true,
                 new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true)),
                 new SemanticTokensOptions(new SemanticTokensLegend(SemanticTokenTypes, SemanticTokenModifiers), true, false)),
-            new ServerInfo("C~ Language Server", "0.2.0"));
+            new ServerInfo("C~ Language Server", "0.3.0"));
     }
 
     [JsonRpcMethod("initialized", UseSingleObjectParameterDeserialization = true)]
@@ -83,8 +84,22 @@ internal sealed class LanguageServer
         var offset = PositionToOffset(project, path, parameters.Position);
         var items = project.LanguageService.GetCompletions(path, offset).Select(item => new CompletionItem(
             item.Label, CompletionKind(item.Kind), item.Detail, item.SortText, item.Label,
-            new TextEdit(ToRange(project, path, item.ReplacementSpan), item.InsertText))).ToArray();
+            new TextEdit(ToRange(project, path, item.ReplacementSpan), item.InsertText),
+            Data: item.DocumentationId is null ? null : new CompletionItemData(parameters.TextDocument.Uri, item.DocumentationId, project.Revision))).ToArray();
         return new CompletionList(false, items);
+    }
+
+    [JsonRpcMethod("completionItem/resolve", UseSingleObjectParameterDeserialization = true)]
+    public CompletionItem ResolveCompletion(CompletionItem item, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (item.Data is not { } data || string.IsNullOrWhiteSpace(data.Uri) || string.IsNullOrWhiteSpace(data.DocumentationId))
+            return item;
+        var project = _workspace.GetProject(data.Uri);
+        if (project.Revision != data.Revision)
+            return item;
+        var documentation = project.LanguageService.GetDocumentation(data.DocumentationId);
+        return documentation is null ? item : item with { Documentation = new MarkupContent("markdown", RenderDocumentation(documentation)) };
     }
 
     [JsonRpcMethod("textDocument/hover", UseSingleObjectParameterDeserialization = true)]
@@ -94,7 +109,7 @@ internal sealed class LanguageServer
         var project = _workspace.GetProject(parameters.TextDocument.Uri);
         var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
         var hover = project.LanguageService.GetHover(path, PositionToOffset(project, path, parameters.Position));
-        return hover is null ? null : new Hover(new MarkupContent("markdown", $"```ctilde\n{hover.Contents}\n```"), ToRange(project, path, hover.Span));
+        return hover is null ? null : new Hover(new MarkupContent("markdown", RenderHover(hover)), ToRange(project, path, hover.Span));
     }
 
     [JsonRpcMethod("textDocument/signatureHelp", UseSingleObjectParameterDeserialization = true)]
@@ -105,7 +120,12 @@ internal sealed class LanguageServer
         var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
         var help = project.LanguageService.GetSignatureHelp(path, PositionToOffset(project, path, parameters.Position));
         return help is null ? null : new SignatureHelp(
-            [.. help.Signatures.Select(signature => new SignatureInformation(signature.Label, [.. signature.Parameters.Select(parameter => new ParameterInformation(parameter.Label))]))],
+            [.. help.Signatures.Select(signature => new SignatureInformation(
+                signature.Label,
+                [.. signature.Parameters.Select(parameter => new ParameterInformation(
+                    parameter.Label,
+                    parameter.Documentation is null ? null : new MarkupContent("markdown", parameter.Documentation)))],
+                signature.Documentation is null ? null : new MarkupContent("markdown", RenderDocumentation(signature.Documentation))))],
             help.ActiveSignature, help.ActiveParameter);
     }
 
@@ -275,6 +295,65 @@ internal sealed class LanguageServer
     };
 
     private static bool PathEquals(string left, string right) => (OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).Equals(Path.GetFullPath(left), Path.GetFullPath(right));
+
+    private static string RenderHover(LanguageHover hover)
+    {
+        var sections = hover.Sections.IsDefaultOrEmpty
+            ? [new LanguageDocumentedSignature(hover.Contents, null)]
+            : hover.Sections;
+        return string.Join("\n\n---\n\n", sections.Select(section =>
+            $"```ctilde\n{section.Signature}\n```" +
+            (section.Documentation is null ? string.Empty : "\n\n" + RenderDocumentation(section.Documentation))));
+    }
+
+    private static string RenderDocumentation(LanguageDocumentation documentation)
+    {
+        var result = new StringBuilder();
+        AppendText(documentation.Summary);
+        if (!documentation.Parameters.IsDefaultOrEmpty)
+        {
+            AppendHeading("Parameters");
+            foreach (var parameter in documentation.Parameters)
+                result.Append("- `").Append(parameter.Name).Append("`: ").Append(parameter.Text).Append('\n');
+        }
+        if (!string.IsNullOrEmpty(documentation.Returns))
+        {
+            AppendHeading("Returns");
+            result.Append(documentation.Returns);
+        }
+        if (!documentation.Exceptions.IsDefaultOrEmpty)
+        {
+            AppendHeading("Exceptions");
+            foreach (var exception in documentation.Exceptions)
+                result.Append("- `").Append(exception.TypeName).Append("`: ").Append(exception.Text).Append('\n');
+        }
+        if (!string.IsNullOrEmpty(documentation.Remarks))
+        {
+            AppendHeading("Remarks");
+            result.Append(documentation.Remarks);
+        }
+        return result.ToString().TrimEnd();
+
+        void AppendText(string? value)
+        {
+            if (string.IsNullOrEmpty(value))
+                return;
+            Separate();
+            result.Append(value);
+        }
+
+        void AppendHeading(string heading)
+        {
+            Separate();
+            result.Append("**").Append(heading).Append("**\n\n");
+        }
+
+        void Separate()
+        {
+            if (result.Length != 0)
+                result.Append("\n\n");
+        }
+    }
 
     private static bool SupportsSemanticTokenRefresh(System.Text.Json.JsonElement? capabilities)
     {

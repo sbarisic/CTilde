@@ -23,6 +23,21 @@ internal static class StandardLibrary
         return target == CompilationTarget.EspIdf ? common.AddRange(LazyEspIdfSyntaxTrees.Value) : common;
     }
 
+    public static ImmutableArray<string> GetDocumentationXml(CompilationTarget target)
+    {
+        var names = target == CompilationTarget.EspIdf
+            ? new[] { "System.docs.xml", "EspIdf.docs.xml" }
+            : new[] { "System.docs.xml" };
+        var assembly = typeof(StandardLibrary).Assembly;
+        return [.. names.Select(name =>
+        {
+            using var stream = assembly.GetManifestResourceStream($"CTilde.StandardLibrary.{name}") ??
+                throw new InvalidOperationException($"The embedded standard-library documentation resource '{name}' is missing.");
+            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true);
+            return reader.ReadToEnd();
+        })];
+    }
+
     private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(IReadOnlyList<string> files, bool includeNativeIntegers = false, bool includeNativeUtf8 = false)
     {
         var assembly = typeof(StandardLibrary).Assembly;

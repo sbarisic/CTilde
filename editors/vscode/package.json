@@ -2,7 +2,7 @@
   "name": "ctilde-language",
   "displayName": "C~ Language Support",
   "description": "C~ syntax and semantic highlighting, diagnostics, completion, and navigation.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "ctilde",
   "license": "Unlicense",
   "repository": {

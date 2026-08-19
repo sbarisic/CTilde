@@ -46,15 +46,18 @@ internal sealed record CompletionItem(
     string SortText,
     string FilterText,
     TextEdit TextEdit,
-    int InsertTextFormat = 1);
+    int InsertTextFormat = 1,
+    MarkupContent? Documentation = null,
+    CompletionItemData? Data = null);
+internal sealed record CompletionItemData(string Uri, string DocumentationId, long Revision);
 internal sealed record TextEdit(Range Range, string NewText);
 internal sealed record HoverParams(TextDocumentIdentifier TextDocument, Position Position);
 internal sealed record MarkupContent(string Kind, string Value);
 internal sealed record Hover(MarkupContent Contents, Range Range);
 internal sealed record SignatureHelpParams(TextDocumentIdentifier TextDocument, Position Position);
 internal sealed record SignatureHelp(SignatureInformation[] Signatures, int ActiveSignature, int ActiveParameter);
-internal sealed record SignatureInformation(string Label, ParameterInformation[] Parameters);
-internal sealed record ParameterInformation(string Label);
+internal sealed record SignatureInformation(string Label, ParameterInformation[] Parameters, MarkupContent? Documentation = null);
+internal sealed record ParameterInformation(string Label, MarkupContent? Documentation = null);
 internal sealed record DefinitionParams(TextDocumentIdentifier TextDocument, Position Position);
 internal sealed record Location(string Uri, Range Range);
 internal sealed record DocumentSymbolParams(TextDocumentIdentifier TextDocument);

@@ -704,6 +704,16 @@ Unsafe code remains statically typed. `unsafe` permits pointer declarations, add
 
 Draft 0.9 has no inline assembly.
 
+## XML documentation
+
+Three-slash comments immediately before a type, delegate, opaque type, field, property, constructor, method, or enum value attach XML documentation to that declaration. Attributes and modifiers can appear between the comment and the declaration. A blank line or ordinary comment breaks attachment. Unattached documentation reports warning `CT5006`; documentation warnings never prevent checking or C emission.
+
+The supported elements are `summary`, `param`, `returns`, `remarks`, `exception` with `cref`, inline `see` with `cref`, inline `paramref` with `name`, and `inheritdoc`. References use the current namespace and imports and can select a member overload with a C~-style parameter list. XML DTDs and external entities are prohibited. Raw Markdown, raw HTML, block documentation comments, and documentation-file emission are not supported.
+
+`inheritdoc` must be the only documentation element. It explicitly copies documentation from an overridden method or property, or from a base type. Override parameter descriptions are matched by ordinal so parameter names can differ. Documentation is never inherited automatically.
+
+Malformed XML (`CT5000`), unsupported structure (`CT5001`), duplicate sections (`CT5002`), unknown parameters (`CT5003`), unresolved references (`CT5004`), and invalid or cyclic inheritance (`CT5005`) are warnings. The compiler does not warn when a declaration has no documentation.
+
 ## Managed lifetime and failures
 
 C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.9 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.

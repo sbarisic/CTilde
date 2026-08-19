@@ -120,6 +120,10 @@ public static class Program
     [NoAlloc]
     private static unsafe uint NativeBufferSum(ReadOnlyNativeBuffer<byte> buffer);
 
+    /// <summary>Adds two values for managed and exported callers.</summary>
+    /// <param name="left">The first value.</param>
+    /// <param name="right">The second value.</param>
+    /// <returns>The sum of <paramref name="left"/> and <paramref name="right"/>.</returns>
     [Export("ctilde_add")]
     public static int Add(int left, int right)
     {

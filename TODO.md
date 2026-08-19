@@ -11,6 +11,7 @@
 - [x] Package the framework-dependent .NET 10 server and project schema.
 - [x] Add compiler, manifest, CLI, and end-to-end protocol checks.
 - [x] Add full-document compiler-aware semantic highlighting with TextMate fallback.
+- [x] Add C#-style `///` XML documentation, warning diagnostics, embedded API sidecars, and lazy completion documentation resolution.
 - [ ] Add references, rename, formatting, code actions, and auto-import completion edits.
 - [ ] Add semantic-token range requests, delta results, and result-ID caching if project sizes require them.
 - [ ] Publish self-contained server binaries when release distribution requires clients without .NET 10.

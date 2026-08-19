@@ -18,7 +18,7 @@ internal sealed partial class CompilationModel
     private readonly Dictionary<SyntaxTree, string> _namespaces = [];
     private readonly Dictionary<SyntaxTree, ImmutableArray<string>> _usings = [];
 
-    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics)
+    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target)
     {
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
@@ -29,6 +29,7 @@ internal sealed partial class CompilationModel
         ResolveBaseTypes();
         DeclareMembers();
         ValidateInheritanceMembers();
+        Documentation = DocumentationIndex.Build(this, target);
         ValidateRecursivePointerExposure();
         ValidateExternalSymbols();
         ValidateEntryPoint();
@@ -38,6 +39,7 @@ internal sealed partial class CompilationModel
     public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
     public DiagnosticBag Diagnostics { get; }
     public Dictionary<string, TypeSymbol> Types { get; }
+    public DocumentationIndex Documentation { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null).OrderBy(type => type.FullName, StringComparer.Ordinal);
     public MethodSymbol? EntryPoint { get; private set; }
 

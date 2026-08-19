@@ -387,6 +387,14 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
                 trivia.Add(Trivia(SyntaxTriviaKind.Whitespace, start));
                 continue;
             }
+            if (Matches("///") && (_position + 3 >= source.Length || source[_position + 3] != '/'))
+            {
+                _position += 3;
+                while (_position < source.Length && source[_position] is not '\r' and not '\n')
+                    _position++;
+                trivia.Add(Trivia(SyntaxTriviaKind.DocumentationComment, start));
+                continue;
+            }
             if (Matches("//"))
             {
                 _position += 2;

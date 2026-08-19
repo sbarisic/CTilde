@@ -22,7 +22,19 @@ async function extensionSmokeTest(): Promise<void> {
     await extension.activate();
     const directory = await mkdtemp(path.join(os.tmpdir(), 'ctilde-vscode-'));
     const filePath = path.join(directory, 'Program.ct');
-    const source = '// TextMate fallback\nusing System; public static class Program { [EntryPoint] public static void Main() { string text = "hello"; Console. } }';
+    const source = `// TextMate fallback
+using System;
+/// <summary>Provides documented overloads.</summary>
+public static class Docs
+{
+    /// <summary>Adds two integers.</summary>
+    /// <param name="left">The left integer.</param>
+    /// <param name="right">The right integer.</param>
+    /// <returns>The integer sum.</returns>
+    public static int Add(int left, int right) { return left + right; }
+    public static uint Add(uint left, uint right) { return left + right; }
+}
+public static class Program { [EntryPoint] public static void Main() { string text = "hello"; int sum = Docs.Add(1, 2); Console. } }`;
     await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['*.ct'] }));
     await writeFile(filePath, source);
     try {
@@ -31,10 +43,19 @@ async function extensionSmokeTest(): Promise<void> {
         const editor = await vscode.window.showTextDocument(document);
         const completionPosition = document.positionAt(source.indexOf('Console.') + 'Console.'.length);
         const completions = await waitFor(
-            async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, completionPosition, '.'),
+            async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, completionPosition, '.', 100),
             value => value.items.some(item => item.label === 'WriteLine'),
             value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
         assert.ok(completions.items.some(item => item.label === 'WriteLine'));
+        const documentedCompletion = completions.items.find(item => item.label === 'WriteLine' && documentationText(item.documentation).includes('line terminator'));
+        assert.ok(documentedCompletion, 'Resolved Console.WriteLine completion documentation was missing.');
+
+        const addPosition = document.positionAt(source.indexOf('Docs.Add(1') + 'Docs.'.length + 1);
+        const hovers = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, addPosition);
+        assert.ok(hovers.some(hover => hover.contents.some(content => documentationText(content).includes('Adds two integers.'))));
+        const signaturePosition = document.positionAt(source.indexOf(', 2') + 2);
+        const signature = await vscode.commands.executeCommand<vscode.SignatureHelp>('vscode.executeSignatureHelpProvider', document.uri, signaturePosition, ',');
+        assert.ok(signature?.signatures.some(item => item.parameters[1] !== undefined && documentationText(item.parameters[1].documentation).includes('right integer')));
 
         await vscode.commands.executeCommand('ctilde.languageServer.restart');
         const restartedCompletions = await waitFor(
@@ -110,6 +131,14 @@ interface DecodedSemanticToken {
     text: string;
     type: string;
     modifiers: string[];
+}
+
+function documentationText(value: vscode.MarkdownString | vscode.MarkedString | string | undefined): string {
+    if (value === undefined)
+        return '';
+    if (typeof value === 'string')
+        return value;
+    return value.value;
 }
 
 async function semanticTokens(document: vscode.TextDocument): Promise<DecodedSemanticToken[]> {

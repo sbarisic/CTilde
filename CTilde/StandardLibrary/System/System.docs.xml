@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="T:System.Object"><summary>Provides the root type for managed C~ values.</summary><remarks>Object instances use automatic reference counting. Reference cycles are not collected.</remarks></member>
+  <member id="M:System.Object.#ctor()"><summary>Initializes a new object.</summary></member>
+  <member id="M:System.Object.ToString()"><summary>Returns a managed string that describes this object.</summary><returns>An owned managed string.</returns></member>
+  <member id="M:System.Object.Equals(object)"><summary>Tests whether this object equals another object.</summary><param name="other">The object to compare.</param><returns><see cref="System.Boolean"/> when equal.</returns></member>
+  <member id="M:System.Object.GetHashCode()"><summary>Returns a deterministic hash code for this object.</summary><returns>A 32-bit hash code.</returns></member>
+  <member id="M:System.Object.Equals(object,object)"><summary>Tests two managed references for equality.</summary><param name="left">The first reference.</param><param name="right">The second reference.</param><returns><see cref="System.Boolean"/> when equal.</returns></member>
+  <member id="M:System.Object.ReferenceEquals(object,object)"><summary>Tests two managed references for identity.</summary><param name="left">The first reference.</param><param name="right">The second reference.</param><returns><see cref="System.Boolean"/> when both references identify the same object.</returns></member>
+
+  <member id="T:System.Exception"><summary>Represents a managed C~ exception.</summary></member>
+  <member id="M:System.Exception.#ctor()"><summary>Creates an exception with an empty message.</summary></member>
+  <member id="M:System.Exception.#ctor(string)"><summary>Creates an exception with a message.</summary><param name="message">The managed exception message.</param></member>
+  <member id="P:System.Exception.Message"><summary>Gets the exception message.</summary></member>
+  <member id="M:System.Exception.ToString()"><summary>Returns the exception type and message.</summary><returns>An owned managed string.</returns></member>
+
+  <member id="T:System.Console"><summary>Writes formatted values to the target console.</summary><remarks>Hosted output uses the process streams. ESP-IDF output uses the configured UART console.</remarks></member>
+  <member id="M:System.Console.WriteLine()"><summary>Writes a line terminator.</summary></member>
+  <member id="M:System.Console.Write(string)"><summary>Writes a managed string.</summary><param name="value">The string to write.</param></member>
+  <member id="M:System.Console.WriteLine(string)"><summary>Writes a managed string followed by a line terminator.</summary><param name="value">The string to write.</param></member>
+  <member id="M:System.Console.Write(char)"><summary>Writes a character.</summary><param name="value">The character to write.</param></member>
+  <member id="M:System.Console.WriteLine(char)"><summary>Writes a character followed by a line terminator.</summary><param name="value">The character to write.</param></member>
+  <member id="M:System.Console.Write(int)"><summary>Writes a signed 32-bit integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(int)"><summary>Writes a signed 32-bit integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(uint)"><summary>Writes an unsigned 32-bit integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(uint)"><summary>Writes an unsigned 32-bit integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(long)"><summary>Writes a signed 64-bit integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(long)"><summary>Writes a signed 64-bit integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(ulong)"><summary>Writes an unsigned 64-bit integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(ulong)"><summary>Writes an unsigned 64-bit integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(nint)"><summary>Writes a signed native-sized integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(nint)"><summary>Writes a signed native-sized integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(nuint)"><summary>Writes an unsigned native-sized integer.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(nuint)"><summary>Writes an unsigned native-sized integer followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(float)"><summary>Writes a single-precision value.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(float)"><summary>Writes a single-precision value followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(bool)"><summary>Writes a Boolean value.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.WriteLine(bool)"><summary>Writes a Boolean value followed by a line terminator.</summary><param name="value">The value to write.</param></member>
+  <member id="M:System.Console.Write(object)"><summary>Writes an object using <see cref="System.Object.ToString()"/>.</summary><param name="value">The object to write.</param><remarks>This overload can allocate.</remarks></member>
+  <member id="M:System.Console.WriteLine(object)"><summary>Writes an object followed by a line terminator.</summary><param name="value">The object to write.</param><remarks>This overload can allocate.</remarks></member>
+
+  <member id="T:System.Environment"><summary>Provides hosted process operations.</summary></member>
+  <member id="M:System.Environment.Exit(int)"><summary>Terminates a hosted process with an exit code.</summary><param name="exitCode">The process exit code.</param><remarks>This API is unavailable for ESP-IDF compilations.</remarks></member>
+  <member id="T:System.Memory"><summary>Provides unsafe manual ARC operations for native interoperation.</summary></member>
+  <member id="M:System.Memory.Retain(object)"><summary>Adds one owned reference.</summary><param name="value">The managed reference to retain.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
+  <member id="M:System.Memory.Release(object)"><summary>Releases one owned reference.</summary><param name="value">The managed reference to release.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
+
+  <member id="T:System.Runtime.NativeBuffer&lt;T&gt;"><summary>Represents a scoped writable pointer-and-length view.</summary><remarks>The element type must be unmanaged. The view cannot be stored on the managed heap or returned.</remarks></member>
+  <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Length"><summary>Gets the writable view length as an unsigned native-sized value.</summary></member>
+  <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Pointer"><summary>Gets the writable data pointer.</summary><remarks>Access requires an unsafe context.</remarks></member>
+  <member id="T:System.Runtime.ReadOnlyNativeBuffer&lt;T&gt;"><summary>Represents a scoped read-only pointer-and-length view.</summary><remarks>The element type must be unmanaged. Unsafe pointer access can bypass read-only indexing.</remarks></member>
+  <member id="P:System.Runtime.ReadOnlyNativeBuffer&lt;T&gt;.Length"><summary>Gets the read-only view length as an unsigned native-sized value.</summary></member>
+  <member id="P:System.Runtime.ReadOnlyNativeBuffer&lt;T&gt;.Pointer"><summary>Gets the data pointer.</summary><remarks>Access requires an unsafe context and can bypass read-only indexing.</remarks></member>
+  <member id="T:System.Runtime.NativeUtf8String"><summary>Represents a scoped borrowed UTF-8 C string.</summary><remarks>The view retains its managed string owner, performs no allocation, and cannot escape its scope.</remarks></member>
+  <member id="M:System.Runtime.NativeUtf8String.Borrow(string)"><summary>Borrows a managed string as UTF-8 for a synchronous native call.</summary><param name="value">A non-null string without embedded NUL characters.</param><returns>A scoped UTF-8 view.</returns><exception cref="System.Exception">The dynamic string contains an embedded NUL character.</exception></member>
+  <member id="P:System.Runtime.NativeUtf8String.Null"><summary>Gets a null UTF-8 view.</summary></member>
+  <member id="P:System.Runtime.NativeUtf8String.ByteLength"><summary>Gets the UTF-8 byte length without the terminator.</summary></member>
+  <member id="P:System.Runtime.NativeUtf8String.Pointer"><summary>Gets the borrowed null-terminated byte pointer.</summary><remarks>Access requires an unsafe context.</remarks></member>
+</doc>

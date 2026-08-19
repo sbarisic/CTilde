@@ -111,11 +111,11 @@ The full-fidelity syntax API intentionally breaks the prototype node API. Tokens
 
 Omit `CompilationOptions` to retain hosted output.
 
-`LanguageServiceSnapshot` provides editor-neutral completion, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same target-specific standard library as `Compilation`.
+`LanguageServiceSnapshot` provides editor-neutral completion, lazy symbol documentation, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. C#-style `///` XML comments supply summaries, parameter and return descriptions, exceptions, remarks, resolved references, and explicit inherited documentation. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same documented target-specific standard library as `Compilation`.
 
 ## Visual Studio Code
 
-The extension in [`editors/vscode`](editors/vscode) adds compiler-aware semantic highlighting, semantic completion, live compiler diagnostics, hover, signature help, go-to-definition, document/workspace symbols, and TextMate fallback highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
+The extension in [`editors/vscode`](editors/vscode) adds compiler-aware semantic highlighting, lazily documented completion, live compiler diagnostics, documented hover and signature help, go-to-definition, document/workspace symbols, and TextMate fallback highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
 
 Use `ctilde.json` when several files form one compilation:
 

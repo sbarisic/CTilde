@@ -105,6 +105,15 @@ test("escaped and Unicode identifiers remain identifiers", () => {
   assert.ok(!scopesAt("int @class = 1;", 5).some(scope => scope.startsWith("storage.type.class")));
 });
 
+test("XML documentation comments expose comment, tag, and attribute scopes", () => {
+  const line = '/// <summary>Uses <paramref name="value"/>.</summary>';
+  expectScope(line, "///", "comment.line.documentation.ctilde");
+  expectScope(line, "summary", "entity.name.tag.documentation.ctilde");
+  expectScope(line, "paramref", "entity.name.tag.documentation.ctilde");
+  expectScope(line, "name", "entity.other.attribute-name.documentation.ctilde");
+  expectScope(line, '"value"', "string.quoted.double.documentation.ctilde");
+});
+
 test("representative repository sources finish in the root grammar state", async () => {
   const sourceFiles = [
     "examples/Features.ct",

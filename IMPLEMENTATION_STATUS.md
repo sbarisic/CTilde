@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 80 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 82 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -195,11 +195,13 @@ Typed IR contains typed values, basic blocks, loads, stores, calls, allocations,
 
 ## Language server and VS Code
 
-The repository includes an LSP 3.17 server and VS Code client. The server supports incremental document synchronization, cancellable diagnostic publication, full-document semantic tokens, semantic completion, hover, signature help, go-to-definition, document symbols, workspace symbols, and read-only embedded standard-library navigation. Semantic tokens classify resolved identifiers with declaration, static, readonly, and default-library modifiers; TextMate remains responsible for lexical and unresolved syntax.
+The repository includes an LSP 3.17 server and VS Code client. The server supports incremental document synchronization, cancellable diagnostic publication, full-document semantic tokens, semantic completion with lazy documentation resolution, documented hover and signature help, go-to-definition, document symbols, workspace symbols, and read-only embedded standard-library navigation. Semantic tokens classify resolved identifiers with declaration, static, readonly, and default-library modifiers; TextMate remains responsible for lexical and unresolved syntax, including scoped `///` XML comments.
+
+Documentation analysis accepts summaries, parameters, returns, remarks, exception and inline references, parameter references, and explicit inheritance. Malformed, unsupported, duplicate, unresolved, invalid-inheritance, and orphan documentation reports warning codes `CT5000` through `CT5006` without blocking checking or C emission. Embedded `System`, compiler-intrinsic, and ESP-IDF descriptions live in XML sidecars, so standard-library source locations and existing generated C remain unchanged.
 
 `ctilde.json` defines deterministic source globs, exclusions, and a hosted or ESP-IDF target. The CLI and language server share the loader. Files without a manifest are analyzed as standalone hosted programs; files outside a manifest source set retain that manifest's target but do not join its compilation.
 
-The extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, completion, hover, signature help, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
+The 0.3.0 extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 

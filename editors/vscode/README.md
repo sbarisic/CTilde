@@ -12,11 +12,14 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Unicode identifiers and keyword identifiers escaped with `@`.
 - Draft 0.9 syntax and semantic classification for native integers, by-reference calls, buffers, `NativeUtf8String`, opaque declarations, native ownership attributes, exports, named delegates, callback adapters, and unmanaged function pointers.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
+- C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
 - Live compiler diagnostics with related locations.
 - Hover, signature help, go-to-definition, document symbols, and workspace symbols.
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` project manifests.
+
+Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `exception`, `see`, `paramref`, and sole-element `inheritdoc`. Documentation warnings remain non-blocking. Links, documentation-tag completion, XML output files, raw Markdown/HTML, and block documentation comments are not implemented.
 
 Rename, references, formatting, debugging, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
 

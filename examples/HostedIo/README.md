@@ -2,31 +2,19 @@
 
 This project reads one UTF-8 line, writes it to `ctilde-hosted-π.txt`, closes the owned file handle through `defer`, reopens the file, and prints its bytes. The generated program is an ordinary hosted console executable.
 
-Generate C from the repository root:
+Build the native executable from the repository root:
+
+```powershell
+dotnet run --project .\CTilde.Cli -c Release --no-launch-profile -- --project .\examples\HostedIo\ctilde.json --build
+.\examples\HostedIo\build\HostedIo.exe
+```
+
+Use `--configuration release` for optimized output or `--compiler clang`, `gcc`, or `msvc` to override discovery. Emit-only and manual native compilation remain available:
 
 ```powershell
 dotnet run --project .\CTilde.Cli -c Release --no-launch-profile -- --project .\examples\HostedIo\ctilde.json -o .\examples\HostedIo\program.c
-```
-
-Compile with MSVC from a Developer PowerShell:
-
-```powershell
 cl /nologo /std:clatest /O2 /W4 /WX /Fe:.\examples\HostedIo\program.exe .\examples\HostedIo\program.c
 .\examples\HostedIo\program.exe
-```
-
-Compile with GCC:
-
-```sh
-gcc -std=gnu23 -O2 -Wall -Wextra -Werror -o examples/HostedIo/program examples/HostedIo/program.c
-./examples/HostedIo/program
-```
-
-Compile with Clang:
-
-```sh
-clang -std=gnu23 -O2 -Wall -Wextra -Werror -o examples/HostedIo/program examples/HostedIo/program.c
-./examples/HostedIo/program
 ```
 
 Expected interaction:

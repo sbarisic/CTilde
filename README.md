@@ -1,6 +1,6 @@
 # C~
 
-C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
+C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits one GNU C23 translation unit, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
 
 The current language is draft 0.10. It adds atomic ARC, per-thread exception and cleanup state, and explicit native thread attachment to the draft 0.9 export and callback ABI. Native-created threads can call generated exports and synchronous callbacks after `ct_thread_attach()` and must call `ct_thread_detach()` before exit. It does not require a CLR or C# runtime.
 
@@ -12,20 +12,22 @@ Build the .NET 10 solution:
 dotnet build .\CTilde.sln
 ```
 
-Compile the example to C:
+Build the example as a hosted executable:
+
+```powershell
+dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct --build --native-output .\bin\hello.exe
+.\bin\hello.exe
+```
+
+Use `--compiler gcc`, `--compiler clang`, or `--compiler msvc` to select a toolchain. `auto` checks `CTILDE_CC` and then discovers an installed compiler. The equivalent emit-only and manual GCC flow remains available:
 
 ```powershell
 dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\bin\hello.c
-```
-
-Compile the generated file with GCC or Clang:
-
-```powershell
 gcc -std=gnu23 -Wall -Wextra -Werror -o .\bin\hello.exe .\bin\hello.c
 .\bin\hello.exe
 ```
 
-Older GCC and Clang versions can use `-std=gnu2x`. The conformance driver retries after an unsupported `gnu23` option.
+Older GCC and Clang versions can use `-std=gnu2x`. The CLI and conformance driver retry after an unsupported `gnu23` option.
 
 MSVC remains supported as a compatibility toolchain through its latest C mode:
 
@@ -44,21 +46,33 @@ The CLI accepts multiple input files as one compilation:
 
 ```text
 ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--check] [--trace]
-ctilde --project <ctilde.json> -o <program.c> [--header <exports.h>] [--check] [--trace]
+ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]
+ctilde --project <ctilde.json> [--build] [native build options] [--check] [--trace]
 ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 ```
 
 - `-o` selects the generated C file.
-- `--header` emits a deterministic C/C++-compatible header for `[Export]` methods. It requires `-o` and cannot be combined with `--check` or directory mode.
+- `--header` emits a deterministic C/C++-compatible header for `[Export]` methods. Direct emit-only mode requires `-o`; project and native-build modes have default generated paths. It cannot be combined with `--check` or directory mode.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
 - `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
 - `--project` loads deterministic source globs and the target from `ctilde.json`. It cannot be combined with direct inputs or `--target`.
+- `--build` emits C and a native header, then invokes MSVC/GCC/Clang for hosted projects or `idf.py build` for ESP-IDF projects.
+- `--configuration debug|release`, `--compiler`, and `--native-output` override hosted build settings. Debug is the default.
+- `--idf-project` and `--idf-path` select an ESP-IDF project and installation. Chip selection remains in the ESP-IDF project.
 - `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
 
 Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
 
-The compiler generates requested C and header text in memory before atomically replacing successful outputs. Directory mode removes stale generated output after an error. It identifies generated files by their banner and preserves handwritten C.
+The compiler generates requested C and header text in memory before atomically replacing successful outputs. Native builds lock their build directory and do not run after C~ errors. Directory mode removes stale generated output after an error. Generated-file checks preserve handwritten C.
+
+Publish a self-contained compiler that does not require an installed .NET runtime:
+
+```powershell
+.\CTilde.Cli\Publish.ps1 -Runtime win-x64
+```
+
+The archive still requires an external hosted C toolchain or ESP-IDF.
 
 ## Language example
 
@@ -127,11 +141,11 @@ Use `ctilde.json` when several files form one compilation:
 }
 ```
 
-Patterns are relative to the manifest and cannot leave its directory. Without a manifest, each `.ct` file is analyzed as a standalone hosted program. See the [extension documentation](editors/vscode/README.md) for building, tracing, and packaging.
+Patterns and optional build outputs are relative to the manifest and cannot leave its directory. Without a manifest, each `.ct` file is analyzed as a standalone hosted program. Use **C~: Check Project**, **C~: Build Project**, or the generated C~ tasks from **Tasks: Run Task**. See the [extension documentation](editors/vscode/README.md) for compiler overrides, building, tracing, and packaging.
 
 ## ESP-IDF quick start
 
-ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. The compiler does not select a chip, link, flash, or monitor; `idf.py` owns those operations.
+ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. `ctilde --build` invokes `idf.py build`; ESP-IDF still owns chip selection, component resolution, linking, flashing, and monitoring.
 
 ```powershell
 cd .\examples\TCan485

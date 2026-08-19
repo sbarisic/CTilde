@@ -12,7 +12,7 @@ C~ draft 0.10 has one compiler path:
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file and can independently emit a deterministic public header for `[Export]` methods and the native ARC/thread attachment ABI. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The compiler does not invoke a native compiler.
+The compiler emits one C file and can independently emit a deterministic public header for `[Export]` methods and the native ARC/thread attachment ABI. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission or invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain. Self-contained single-file CLI distributions bundle .NET but not native toolchains.
 
 ## Measured baseline
 

@@ -301,7 +301,7 @@ internal static partial class ConformanceTests
             Directory.CreateDirectory(Path.Combine(directory, "src", "generated"));
             try
             {
-                File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"]}");
+                File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"],\"build\":{\"generatedC\":\"out/program.c\",\"generatedHeader\":\"out/exports.h\",\"configuration\":\"release\",\"compiler\":\"auto\",\"executable\":\"out/program.exe\"}}");
                 File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
                 File.WriteAllText(Path.Combine(directory, "src", "Library.ct"), "public class Library { }");
                 File.WriteAllText(Path.Combine(directory, "src", "generated", "Ignored.ct"), "public class Ignored { }");
@@ -309,13 +309,31 @@ internal static partial class ConformanceTests
                 Assert(project.SourceFiles.Length == 2, "Project source globs or exclusions were not applied.");
                 Assert(project.SourceFiles.SequenceEqual(project.SourceFiles.OrderBy(path => path, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)), "Project sources were not deterministic.");
                 Assert(CTildeProjectFile.FindNearest(Path.Combine(directory, "src", "Program.ct")) == project.ManifestPath, "Nearest project discovery failed.");
+                Assert(project.Configuration.Build.Configuration == CTildeNativeBuildConfiguration.Release, "Project native configuration was not loaded.");
+                Assert(project.Configuration.Build.GeneratedCPath == Path.Combine(directory, "out", "program.c"), "Project generated-C path was not resolved.");
 
                 var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
                 var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
                 var check = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--check"]);
                 Assert(check.ExitCode == 0, $"Project CLI check failed: {check.StandardError}");
+                var build = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
+                Assert(build.ExitCode == 0, $"Project native build failed: {build.StandardOutput}{build.StandardError}");
+                Assert(File.Exists(Path.Combine(directory, "out", "program.c")) && File.Exists(Path.Combine(directory, "out", "exports.h")) && File.Exists(Path.Combine(directory, "out", "program.exe")), "Project native build outputs were missing.");
+                using (var buildLock = new FileStream(Path.Combine(directory, "out", ".ctilde-build.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
+                {
+                    var overlapping = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
+                    Assert(overlapping.ExitCode == 1 && overlapping.StandardError.Contains("Another C~ native build", StringComparison.Ordinal), "An overlapping project native build was not rejected.");
+                }
                 var conflict = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--target", "hosted", "--check"]);
                 Assert(conflict.ExitCode == 2, "Project and target were not rejected as conflicting CLI inputs.");
+                var incompatible = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--check", "--build"]);
+                Assert(incompatible.ExitCode == 2, "Check and native build were not rejected as conflicting CLI modes.");
+
+                File.WriteAllText(Path.Combine(directory, "invalid.json"), "{\"sources\":[\"src/**/*.ct\"],\"build\":{\"generatedC\":\"../outside.c\"}}");
+                var invalidRejected = false;
+                try { CTildeProjectFile.Load(Path.Combine(directory, "invalid.json")); }
+                catch (CTildeProjectException) { invalidRejected = true; }
+                Assert(invalidRejected, "A project build output escaping the project directory was accepted.");
             }
             finally
             {

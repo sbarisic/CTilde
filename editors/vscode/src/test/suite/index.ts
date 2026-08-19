@@ -1,6 +1,5 @@
 import * as assert from 'assert';
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
-import * as os from 'os';
+import { access, mkdir, writeFile } from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 
@@ -16,11 +15,17 @@ async function extensionSmokeTest(): Promise<void> {
     assert.ok(extension, 'C~ development extension was not discovered.');
     const externalServer = process.env.CTILDE_TEST_EXTERNAL_SERVER;
     assert.ok(externalServer, 'External C~ test language server was not configured.');
+    const externalCompiler = process.env.CTILDE_TEST_EXTERNAL_COMPILER;
+    assert.ok(externalCompiler, 'External C~ test compiler was not configured.');
+    const directory = process.env.CTILDE_TEST_WORKSPACE;
+    assert.ok(directory, 'C~ extension test workspace was not configured.');
     const languageServerConfiguration = vscode.workspace.getConfiguration('ctilde.languageServer');
     await languageServerConfiguration.update('serverPath', externalServer, vscode.ConfigurationTarget.Global);
     await languageServerConfiguration.update('restartOnServerChange', true, vscode.ConfigurationTarget.Global);
+    const compilerConfiguration = vscode.workspace.getConfiguration('ctilde.compiler');
+    await compilerConfiguration.update('compilerPath', externalCompiler, vscode.ConfigurationTarget.Global);
+    await compilerConfiguration.update('nativeCompiler', '', vscode.ConfigurationTarget.Global);
     await extension.activate();
-    const directory = await mkdtemp(path.join(os.tmpdir(), 'ctilde-vscode-'));
     const filePath = path.join(directory, 'Program.ct');
     const source = `// TextMate fallback
 using System;
@@ -44,7 +49,7 @@ public static class Program { [EntryPoint] public static void Main() { string te
         const completionPosition = document.positionAt(source.indexOf('Console.') + 'Console.'.length);
         const completions = await waitFor(
             async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, completionPosition, '.', 100),
-            value => value.items.some(item => item.label === 'WriteLine'),
+            value => value.items.some(item => item.label === 'WriteLine' && documentationText(item.documentation).includes('line terminator')),
             value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
         assert.ok(completions.items.some(item => item.label === 'WriteLine'));
         const documentedCompletion = completions.items.find(item => item.label === 'WriteLine' && documentationText(item.documentation).includes('line terminator'));
@@ -100,11 +105,40 @@ public static class Program { [EntryPoint] public static void Main() { string te
         assert.ok(esp.labels.includes('Ws2812'));
         assert.ok(!hosted.semantic.some(token => token.text === 'Ws2812'));
         assert.ok(esp.semantic.some(token => token.text === 'Ws2812' && token.type === 'class' && token.modifiers.includes('defaultLibrary')));
+
+        await nativeBuildFeatures(directory);
     } finally {
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await new Promise(resolve => setTimeout(resolve, 200));
-        await rm(directory, { recursive: true, force: true });
     }
+}
+
+async function nativeBuildFeatures(root: string): Promise<void> {
+    const directory = path.join(root, 'native-build');
+    const filePath = path.join(directory, 'Program.ct');
+    const source = 'public static class Program { [EntryPoint] public static void Main() { } }';
+    await mkdir(directory);
+    await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['Program.ct'] }));
+    await writeFile(filePath, source);
+    const document = await vscode.workspace.openTextDocument(filePath);
+    await vscode.window.showTextDocument(document);
+    await vscode.commands.executeCommand('ctilde.project.build');
+    const generated = path.join(directory, 'build', 'generated', 'ctilde_program.c');
+    const executable = path.join(directory, 'build', `native-build${process.platform === 'win32' ? '.exe' : ''}`);
+    await waitForFiles([generated, executable]);
+}
+
+async function waitForFiles(files: string[]): Promise<void> {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+        const present = await Promise.all(files.map(async file => {
+            try { await access(file); return true; } catch { return false; }
+        }));
+        if (present.every(Boolean))
+            return;
+        await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    throw new Error(`Timed out waiting for C~ build outputs: ${files.join(', ')}`);
 }
 
 async function hostedIoFeatures(root: string): Promise<{ labels: string[]; documentation: string }> {

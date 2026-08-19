@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from 'fs';
+import { existsSync, readFileSync, rmSync } from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -14,19 +14,151 @@ import {
     serverPathError,
     stageExternalServer,
 } from './serverDevelopment';
+import {
+    compilerArguments,
+    compilerPathError,
+    CTildeProjectTarget,
+    CTildeTaskMode,
+    findNearestProject,
+    resolveCompilerLaunch,
+    resolveTaskProjectPath,
+} from './projectBuild';
 
 let controller: LanguageServerController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const provider = new StandardLibraryContentProvider();
     controller = new LanguageServerController(context, provider);
+    const buildProvider = new CTildeTaskProvider(context);
     context.subscriptions.push(
         vscode.workspace.registerTextDocumentContentProvider('ctilde-stdlib', provider),
         vscode.commands.registerCommand('ctilde.languageServer.restart', () => controller?.restart()),
         vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => controller?.showOutput()),
+        vscode.commands.registerCommand('ctilde.project.check', () => buildProvider.runProject('check')),
+        vscode.commands.registerCommand('ctilde.project.build', () => buildProvider.runProject('build')),
+        vscode.tasks.registerTaskProvider('ctilde', buildProvider),
         vscode.workspace.onDidChangeConfiguration(event => controller?.configurationChanged(event)),
     );
     await controller.start();
+}
+
+interface CTildeTaskDefinition extends vscode.TaskDefinition {
+    readonly type: 'ctilde';
+    readonly project: string;
+    readonly mode: CTildeTaskMode;
+}
+
+class CTildeTaskProvider implements vscode.TaskProvider {
+    public constructor(private readonly context: vscode.ExtensionContext) {
+    }
+
+    public async provideTasks(): Promise<vscode.Task[]> {
+        const manifests = await this.discoverProjects();
+        return manifests.flatMap(manifest => [this.createTask(manifest, 'build'), this.createTask(manifest, 'check')]);
+    }
+
+    public resolveTask(task: vscode.Task): vscode.Task | undefined {
+        const definition = task.definition as Partial<CTildeTaskDefinition>;
+        if (typeof definition.project !== 'string' || (definition.mode !== 'build' && definition.mode !== 'check'))
+            return undefined;
+        const folder = typeof task.scope === 'object' ? task.scope : undefined;
+        try {
+            const project = resolveTaskProjectPath(definition.project, folder?.uri.fsPath);
+            return this.createTask(project, definition.mode, folder);
+        } catch (error) {
+            void vscode.window.showErrorMessage(String(error instanceof Error ? error.message : error));
+            return undefined;
+        }
+    }
+
+    public async runProject(mode: CTildeTaskMode): Promise<void> {
+        if (!await vscode.workspace.saveAll(false))
+            return;
+        const project = await this.selectProject();
+        if (project === undefined)
+            return;
+        let task: vscode.Task;
+        try {
+            task = this.createTask(project, mode);
+            const launch = this.readCompilerLaunch();
+            const error = compilerPathError(launch, existsSync);
+            if (error !== undefined) {
+                void vscode.window.showErrorMessage(error);
+                return;
+            }
+        } catch (error) {
+            void vscode.window.showErrorMessage(String(error instanceof Error ? error.message : error));
+            return;
+        }
+        await vscode.tasks.executeTask(task);
+    }
+
+    private createTask(project: string, mode: CTildeTaskMode, suppliedFolder?: vscode.WorkspaceFolder): vscode.Task {
+        const uri = vscode.Uri.file(project);
+        const folder = suppliedFolder ?? vscode.workspace.getWorkspaceFolder(uri);
+        const launch = this.readCompilerLaunch();
+        const configuration = vscode.workspace.getConfiguration('ctilde.compiler');
+        const target = this.readProjectTarget(project);
+        const args = compilerArguments(launch, project, mode, target, {
+            nativeCompiler: configuration.get<string>('nativeCompiler', ''),
+            idfPath: configuration.get<string>('idfPath', ''),
+        });
+        const definition: CTildeTaskDefinition = { type: 'ctilde', project, mode };
+        const projectName = path.basename(path.dirname(project));
+        const label = `${mode === 'build' ? 'Build' : 'Check'} ${projectName}`;
+        const execution = new vscode.ProcessExecution(launch.command, args, { cwd: path.dirname(project) });
+        const task = new vscode.Task(definition, folder ?? vscode.TaskScope.Workspace, label, 'C~', execution,
+            ['$ctilde', '$gcc', '$msCompile']);
+        task.group = mode === 'build' ? vscode.TaskGroup.Build : vscode.TaskGroup.Test;
+        task.runOptions = { reevaluateOnRerun: true, instanceLimit: 1 } as vscode.RunOptions & { instanceLimit: number };
+        return task;
+    }
+
+    private readCompilerLaunch() {
+        const configuration = vscode.workspace.getConfiguration('ctilde.compiler');
+        const compilerPath = configuration.get<string>('compilerPath', '');
+        const dotnetPath = configuration.get<string>('dotnetPath', 'dotnet');
+        const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+        return resolveCompilerLaunch(compilerPath, dotnetPath, this.context.extensionPath, workspacePath);
+    }
+
+    private readProjectTarget(project: string): CTildeProjectTarget {
+        try {
+            const document = JSON.parse(readFileSync(project, 'utf8')) as { target?: unknown };
+            return document.target === 'esp-idf' ? 'esp-idf' : document.target === undefined || document.target === 'hosted' ? 'hosted' : 'unknown';
+        } catch {
+            return 'unknown';
+        }
+    }
+
+    private async discoverProjects(): Promise<string[]> {
+        const uris = await vscode.workspace.findFiles('**/ctilde.json',
+            '**/{.git,bin,obj,build,node_modules,managed_components}/**');
+        return uris.map(uri => uri.fsPath).sort((left, right) => left.localeCompare(right));
+    }
+
+    private async selectProject(): Promise<string | undefined> {
+        const active = vscode.window.activeTextEditor?.document;
+        if (active?.uri.scheme === 'file' && active.languageId === 'ctilde') {
+            const nearest = findNearestProject(active.uri.fsPath, existsSync);
+            if (nearest !== undefined && vscode.workspace.getWorkspaceFolder(vscode.Uri.file(nearest)) !== undefined)
+                return nearest;
+        }
+
+        const projects = await this.discoverProjects();
+        if (projects.length === 0) {
+            void vscode.window.showErrorMessage('No ctilde.json project was found in this workspace.');
+            return undefined;
+        }
+        if (projects.length === 1)
+            return projects[0];
+        const choices = projects.map(project => ({
+            label: path.basename(path.dirname(project)),
+            description: vscode.workspace.asRelativePath(project),
+            project,
+        }));
+        return (await vscode.window.showQuickPick(choices, { placeHolder: 'Select the C~ project to build' }))?.project;
+    }
 }
 
 export async function deactivate(): Promise<void> {

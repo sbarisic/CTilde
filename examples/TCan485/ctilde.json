@@ -2,5 +2,10 @@
   "target": "esp-idf",
   "sources": [
     "Program.ct"
-  ]
+  ],
+  "build": {
+    "generatedC": "main/generated/ctilde_program.c",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": "."
+  }
 }

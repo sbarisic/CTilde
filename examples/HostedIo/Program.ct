@@ -37,7 +37,14 @@ public static class Program
     [EntryPoint]
     public static unsafe void Main()
     {
-        Console.Write("Enter text: ");
+        string line = null;
+        while (true) {
+            Console.Write("> ");
+            line = Console.ReadLine();
+            Console.WriteLine("You wrote: " + line);
+        }
+
+        /*Console.Write("Enter text: ");
         string line = Console.ReadLine();
         if (line == null)
         {
@@ -49,6 +56,6 @@ public static class Program
         Console.Write("Saved and reloaded: ");
         PrintSavedFile();
         Console.WriteLine();
-        Console.WriteLine("HOSTED_IO_OK");
+        Console.WriteLine("HOSTED_IO_OK");*/
     }
 }

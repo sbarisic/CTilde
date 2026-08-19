@@ -42,6 +42,7 @@ dlldata.c
 # DNX
 project.lock.json
 artifacts/
+/build/
 
 *_i.c
 *_p.c
@@ -187,6 +188,7 @@ node_modules/
 orleans.codegen.cs
 /editors/vscode/out/
 /editors/vscode/server/
+/editors/vscode/compiler/
 /editors/vscode/*.vsix
 /editors/vscode/.vscode-test/
 
@@ -206,6 +208,7 @@ orleans.codegen.cs
 /examples/TCan485/main/generated/*.h
 
 # Hosted I/O example output
+/examples/HostedIo/build/
 /examples/HostedIo/program.c
 /examples/HostedIo/program
 /examples/HostedIo/program.exe

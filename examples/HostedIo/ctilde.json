@@ -1,4 +1,9 @@
 {
   "target": "hosted",
-  "sources": ["Program.ct"]
+  "sources": ["Program.ct"],
+  "build": {
+    "generatedC": "build/generated/ctilde_program.c",
+    "generatedHeader": "build/generated/ctilde_exports.h",
+    "configuration": "debug"
+  }
 }

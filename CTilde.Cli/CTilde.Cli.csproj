@@ -16,6 +16,7 @@
   <ItemGroup>
     <None Update="data\programs\sample1.ct">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
     </None>
   </ItemGroup>
 </Project>

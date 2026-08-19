@@ -2,7 +2,7 @@
   "name": "ctilde-language",
   "displayName": "C~ Language Support",
   "description": "C~ syntax and semantic highlighting, diagnostics, completion, and navigation.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "publisher": "ctilde",
   "license": "Unlicense",
   "repository": {
@@ -16,7 +16,10 @@
   "main": "./out/extension.js",
   "activationEvents": [
     "onLanguage:ctilde",
-    "onUri:ctilde-stdlib"
+    "onUri:ctilde-stdlib",
+    "onTaskType:ctilde",
+    "onCommand:ctilde.project.check",
+    "onCommand:ctilde.project.build"
   ],
   "categories": [
     "Programming Languages"
@@ -33,17 +36,19 @@
     "syntaxes/ctilde.tmLanguage.json",
     "schemas/ctilde.schema.json",
     "out/extension.js",
-    "server/**"
+    "server/**",
+    "compiler/**"
   ],
   "scripts": {
-    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true});require('fs').rmSync('server',{recursive:true,force:true})\"",
-    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/serverDevelopment.ts --bundle --platform=node --format=cjs --outfile=./out/serverDevelopment.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
+    "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true});require('fs').rmSync('server',{recursive:true,force:true});require('fs').rmSync('compiler',{recursive:true,force:true})\"",
+    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/serverDevelopment.ts --bundle --platform=node --format=cjs --outfile=./out/serverDevelopment.js && esbuild ./src/projectBuild.ts --bundle --platform=node --format=cjs --outfile=./out/projectBuild.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
     "build:server": "dotnet publish ../../CTilde.LanguageServer/CTilde.LanguageServer.csproj -c Release --no-self-contained -o ./server",
-    "build": "npm run compile && npm run build:server",
+    "build:compiler": "dotnet publish ../../CTilde.Cli/CTilde.Cli.csproj -c Release --no-self-contained -o ./compiler",
+    "build": "npm run compile && npm run build:server && npm run build:compiler",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies",
-    "test": "npm run compile && npm run test:client && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run test:server",
-    "test:client": "node --test ./tests/server-development.test.mjs",
+    "test": "npm run compile && npm run test:client && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run build:compiler && npm run test:server",
+    "test:client": "node --test ./tests/server-development.test.mjs ./tests/project-build.test.mjs",
     "test:metadata": "node --test ./tests/metadata.test.mjs",
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
     "test:sources": "node --test ./tests/source-tokenization.test.mjs",
@@ -73,6 +78,14 @@
       {
         "command": "ctilde.languageServer.showOutput",
         "title": "C~: Show Language Server Output"
+      },
+      {
+        "command": "ctilde.project.check",
+        "title": "C~: Check Project"
+      },
+      {
+        "command": "ctilde.project.build",
+        "title": "C~: Build Project"
       }
     ],
     "configuration": {
@@ -106,9 +119,66 @@
           "default": "off",
           "scope": "window",
           "description": "Trace communication with the C~ language server."
+        },
+        "ctilde.compiler.compilerPath": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "C~ compiler executable or DLL. Accepts an absolute path, a workspace-relative path, or ${workspaceFolder}. Leave empty to use the compiler bundled with the extension."
+        },
+        "ctilde.compiler.dotnetPath": {
+          "type": "string",
+          "default": "dotnet",
+          "scope": "machine",
+          "description": "Path to the .NET 10 host used for a bundled or external C~ compiler DLL."
+        },
+        "ctilde.compiler.nativeCompiler": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Optional hosted C compiler override passed to project builds: auto, msvc, gcc, clang, or an executable path. Leave empty to use ctilde.json, CTILDE_CC, or platform discovery."
+        },
+        "ctilde.compiler.idfPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Optional ESP-IDF installation path used when idf.py is not already active."
         }
       }
     },
+    "taskDefinitions": [
+      {
+        "type": "ctilde",
+        "required": ["project", "mode"],
+        "properties": {
+          "project": {
+            "type": "string",
+            "description": "Path to ctilde.json."
+          },
+          "mode": {
+            "type": "string",
+            "enum": ["check", "build"],
+            "description": "Whether to check C~ semantics or produce native output."
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "ctilde",
+        "owner": "ctilde-build",
+        "fileLocation": "absolute",
+        "pattern": {
+          "regexp": "^(.*)\\((\\d+),(\\d+)\\):\\s+(error|warning|info)\\s+(CT\\d+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        }
+      }
+    ],
     "jsonValidation": [
       {
         "fileMatch": "**/ctilde.json",

@@ -44,13 +44,13 @@ Internal compiler phases share one `DiagnosticBag`. Public callers receive immut
 
 ### CTilde.Cli
 
-The CLI is a thin file-system adapter. It reads `.ct` files, creates syntax trees, and prints diagnostics. It writes C only after successful analysis. It atomically replaces the destination through a temporary file.
+The CLI is the file-system and native-build adapter. It reads `.ct` files, creates syntax trees, prints diagnostics, and writes C only after successful analysis. It atomically replaces generated outputs through temporary files.
 
 Directory mode checks the first line before it removes stale output. It removes only files with the C~ generated-file banner. It preserves handwritten C files.
 
-The CLI does not invoke a C compiler. This keeps C emission deterministic and leaves native toolchain selection to the caller.
+Emit-only mode stops at deterministic C. Native build mode locks the output directory and then delegates to an installed MSVC, GCC, Clang, or ESP-IDF toolchain. Hosted compiler discovery and ESP-IDF activation are CLI concerns; they do not enter syntax, binding, typed IR, C emission, or the generated ABI.
 
-`CTildeProjectFile` is shared with editor tooling. A `ctilde.json` manifest supplies source and exclusion globs plus one compilation target. Paths are confined to the manifest directory, deduplicated, and sorted before parsing.
+`CTildeProjectFile` is shared with editor tooling. A `ctilde.json` manifest supplies source and exclusion globs, one compilation target, and optional generated/native build settings. Paths are confined to the manifest directory, deduplicated, and sorted before parsing. Hosted builds directly compile the generated translation unit; advanced native sources and link graphs remain external build-system work. ESP-IDF builds always delegate their graph to CMake and `idf.py`.
 
 ### CTilde.LanguageServer
 
@@ -60,7 +60,7 @@ The .NET 10 language server runs out of process over LSP 3.17 and header-delimit
 
 The server applies versioned incremental document changes to in-memory text. Open buffers override disk sources. A 150 ms cancellable debounce publishes diagnostics and requests semantic-token refresh from the newest project snapshot. File and manifest changes invalidate cached snapshots. Completion items carry a documentation ID and snapshot revision; `completionItem/resolve` fetches Markdown only when that revision is still current. Hover and signature help include structured documentation immediately. Semantic tokens use LSP UTF-16 delta encoding and full-document responses; range and delta-result protocols are deferred. One process owns all workspace folders and manifest-defined projects.
 
-The VS Code client starts `dotnet CTilde.LanguageServer.dll`, synchronizes `.ct` and `ctilde.json` changes, maps embedded declarations to the read-only `ctilde-stdlib:` scheme, and contributes the project schema. The packaged extension includes a bundled JavaScript client and framework-dependent server assemblies; the .NET 10 runtime remains an external requirement. A window-scoped development override can select an external built server. The client watches that server and its adjacent compiler assembly, debounces build writes, and serially restarts the language-server process without rebuilding or reinstalling the extension.
+The VS Code client starts `dotnet CTilde.LanguageServer.dll`, synchronizes `.ct` and `ctilde.json` changes, maps embedded declarations to the read-only `ctilde-stdlib:` scheme, and contributes the project schema. It also discovers manifests and supplies Check and Build tasks that launch the short-lived CLI. The packaged extension includes framework-dependent server and compiler assemblies; the .NET 10 runtime remains an external requirement for the bundled copies. Window-scoped overrides can select external built server or compiler artifacts. Only the long-running development server needs shadow copying and restart coordination.
 
 ### Test
 

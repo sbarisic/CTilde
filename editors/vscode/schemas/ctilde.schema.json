@@ -34,6 +34,46 @@
         "minLength": 1
       },
       "description": "Source globs removed after the sources patterns are evaluated."
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional generated-output and native-build settings.",
+      "properties": {
+        "generatedC": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Generated C path relative to the project directory."
+        },
+        "generatedHeader": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Generated native header path relative to the project directory."
+        },
+        "configuration": {
+          "type": "string",
+          "enum": ["debug", "release"],
+          "default": "debug",
+          "description": "Hosted native build configuration."
+        },
+        "compiler": {
+          "type": "string",
+          "minLength": 1,
+          "default": "auto",
+          "description": "Hosted C compiler name or path."
+        },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Hosted executable path relative to the project directory."
+        },
+        "espIdfProjectDirectory": {
+          "type": "string",
+          "minLength": 1,
+          "default": ".",
+          "description": "ESP-IDF project directory relative to the C~ project directory."
+        }
+      }
     }
   }
 }

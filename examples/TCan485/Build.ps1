@@ -59,14 +59,15 @@ if ($activeIdfPath -ne $resolvedIdfPath -or $null -eq (Get-Command idf.py -Error
 
 Push-Location $projectDirectory
 try {
-    & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath -o $generatedPath --header $generatedHeaderPath --target esp-idf --trace
-    if ($LASTEXITCODE -ne 0) { throw "C~ compilation failed with exit code $LASTEXITCODE." }
-
     & idf.py set-target $Target
     if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed with exit code $LASTEXITCODE." }
 
-    & idf.py build
-    if ($LASTEXITCODE -ne 0) { throw "idf.py build failed with exit code $LASTEXITCODE." }
+    if ([IO.Path]::GetFullPath($sourcePath) -eq [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))) {
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- --project (Join-Path $projectDirectory "ctilde.json") --build --trace
+    } else {
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath -o $generatedPath --header $generatedHeaderPath --target esp-idf --build --idf-project $projectDirectory --trace
+    }
+    if ($LASTEXITCODE -ne 0) { throw "C~ native build failed with exit code $LASTEXITCODE." }
 
     if ($Flash) {
         & idf.py -p $Port flash

@@ -19,6 +19,7 @@
 - [x] Add compiler, manifest, CLI, and end-to-end protocol checks.
 - [x] Add full-document compiler-aware semantic highlighting with TextMate fallback.
 - [x] Add C#-style `///` XML documentation, warning diagnostics, embedded API sidecars, and lazy completion documentation resolution.
+- [x] Add target-aware native project builds, standalone CLI publishing, and VS Code Check/Build tasks.
 - [ ] Add references, rename, formatting, code actions, and auto-import completion edits.
 - [ ] Add semantic-token range requests, delta results, and result-ID caching if project sizes require them.
 - [ ] Publish self-contained server binaries when release distribution requires clients without .NET 10.

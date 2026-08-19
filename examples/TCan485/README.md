@@ -1,6 +1,6 @@
 # T-CAN485 WS2812 hardware test
 
-This ESP-IDF project compiles one C~ program into `main/generated/ctilde_program.c`, emits `main/generated/ctilde_exports.h`, links both through a native ESP shim, and leaves chip selection, linking, flashing, and monitoring to ESP-IDF. It targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
+This ESP-IDF project compiles one C~ program into `main/generated/ctilde_program.c`, emits `main/generated/ctilde_exports.h`, and uses the CLI's native build stage to invoke `idf.py build`. ESP-IDF still owns chip selection, component resolution, linking, flashing, and monitoring. The native shim is compiled by the component CMake project. It targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
 
 From PowerShell:
 

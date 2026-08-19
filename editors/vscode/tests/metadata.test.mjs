@@ -16,12 +16,18 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.3.1");
+  assert.equal(manifest.version, "0.4.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "Unlicense");
   assert.equal(manifest.repository.directory, "editors/vscode");
   assert.equal(manifest.main, "./out/extension.js");
-  assert.deepEqual(manifest.activationEvents, ["onLanguage:ctilde", "onUri:ctilde-stdlib"]);
+  assert.deepEqual(manifest.activationEvents, [
+    "onLanguage:ctilde",
+    "onUri:ctilde-stdlib",
+    "onTaskType:ctilde",
+    "onCommand:ctilde.project.check",
+    "onCommand:ctilde.project.build"
+  ]);
   assert.equal(manifest.dependencies["vscode-languageclient"], "9.0.1");
   const configuration = manifest.contributes.configuration.properties;
   assert.equal(configuration["ctilde.languageServer.dotnetPath"].default, "dotnet");
@@ -32,6 +38,17 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.languageServer.restartOnServerChange"].default, true);
   assert.equal(configuration["ctilde.languageServer.restartOnServerChange"].scope, "window");
   assert.match(configuration["ctilde.languageServer.restartOnServerChange"].description, /CTilde\.Compiler\.dll/);
+  assert.equal(configuration["ctilde.compiler.compilerPath"].default, "");
+  assert.equal(configuration["ctilde.compiler.compilerPath"].scope, "window");
+  assert.match(configuration["ctilde.compiler.compilerPath"].description, /\$\{workspaceFolder\}/);
+  assert.equal(configuration["ctilde.compiler.dotnetPath"].default, "dotnet");
+  assert.equal(configuration["ctilde.compiler.nativeCompiler"].default, "");
+  assert.equal(configuration["ctilde.compiler.idfPath"].default, "");
+  assert.deepEqual(manifest.contributes.taskDefinitions[0].required, ["project", "mode"]);
+  assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build"]);
+  assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
+  assert.equal(manifest.contributes.problemMatchers[0].owner, "ctilde-build");
+  assert.ok(manifest.files.includes("compiler/**"));
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   const semanticScopes = manifest.contributes.semanticTokenScopes[0];
   assert.equal(semanticScopes.language, "ctilde");
@@ -52,6 +69,15 @@ test("manifest registers the C~ language and grammar", async () => {
   await access(path.resolve(extensionRoot, language.configuration));
   await access(path.resolve(extensionRoot, grammar.path));
   await access(path.resolve(extensionRoot, "schemas/ctilde.schema.json"));
+});
+
+test("project schema includes native build configuration", async () => {
+  const schema = await readJson("schemas/ctilde.schema.json");
+  const build = schema.properties.build;
+  assert.equal(build.additionalProperties, false);
+  assert.deepEqual(build.properties.configuration.enum, ["debug", "release"]);
+  assert.equal(build.properties.compiler.default, "auto");
+  assert.equal(build.properties.espIdfProjectDirectory.default, ".");
 });
 
 test("grammar exposes the expected root scope and repositories", async () => {

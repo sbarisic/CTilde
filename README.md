@@ -2,7 +2,12 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits one GNU C23 translation unit, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.10. It adds atomic ARC, per-thread exception and cleanup state, and explicit native thread attachment to the draft 0.9 export and callback ABI. Native-created threads can call generated exports and synchronous callbacks after `ct_thread_attach()` and must call `ct_thread_detach()` before exit. It does not require a CLR or C# runtime.
+The current language is draft 0.11. It adds user-defined unary and binary arithmetic operators for classes and structures, including derived compound assignment. It retains draft 0.10 atomic ARC, per-thread exception and cleanup state, native thread attachment, object layout, and native ABI unchanged. It does not require a CLR or C# runtime.
+
+```csharp
+public static Vector3 operator +(Vector3 left, Vector3 right) { ... }
+public static Vector3 operator *(Vector3 value, float scale) { ... }
+```
 
 ## Quick start
 
@@ -163,8 +168,8 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.10 programs |
-| `examples/HostedIo` | Hosted PPM ray tracer with value-type geometry and owned file output |
+| `examples` | Checked draft 0.11 programs |
+| `examples/HostedIo` | Hosted PPM ray tracer with overloaded vector arithmetic and owned file output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -190,7 +195,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.10 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.11 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

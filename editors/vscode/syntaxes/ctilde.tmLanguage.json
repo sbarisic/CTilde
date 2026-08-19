@@ -368,6 +368,10 @@
         {
           "name": "keyword.control.import.ctilde",
           "match": "(?<![@_\\p{L}\\p{Nd}])using(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.declaration.operator.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])operator(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },

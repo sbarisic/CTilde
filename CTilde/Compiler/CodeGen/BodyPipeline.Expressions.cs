@@ -583,16 +583,16 @@ internal sealed partial class BodyPipeline
         }
 
         var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
-        var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => method.Name == methodName && method.IsStatic == requireStatic)
+        var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == methodName && method.IsStatic == requireStatic)
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
         if (!requireStatic && receiver is not null && receiver.Type.IsValueType)
-            candidates = containingType.Methods.Where(method => method.Name == methodName && !method.IsStatic)
+            candidates = containingType.Methods.Where(method => !method.IsOperator && method.Name == methodName && !method.IsStatic)
                 .Concat(_model.Types["System.Object"].Methods.Where(method => method.Name == methodName && !method.IsStatic))
                 .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First())
                 .ToArray();
         if (syntax.Target is NameExpressionSyntax && !_method.IsStatic)
         {
-            var allCandidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => method.Name == methodName)
+            var allCandidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == methodName)
                 .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
             if (allCandidates.Length > 0)
                 candidates = allCandidates;

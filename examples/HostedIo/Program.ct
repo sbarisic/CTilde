@@ -16,19 +16,39 @@ public struct Vec3
         Z = z;
     }
 
-    public Vec3 Add(Vec3 other)
+    public static Vec3 operator +(Vec3 left, Vec3 right)
     {
-        return new Vec3(X + other.X, Y + other.Y, Z + other.Z);
+        return new Vec3(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
     }
 
-    public Vec3 Subtract(Vec3 other)
+    public static Vec3 operator -(Vec3 left, Vec3 right)
     {
-        return new Vec3(X - other.X, Y - other.Y, Z - other.Z);
+        return new Vec3(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
     }
 
-    public Vec3 Scale(float factor)
+    public static Vec3 operator +(Vec3 value)
     {
-        return new Vec3(X * factor, Y * factor, Z * factor);
+        return value;
+    }
+
+    public static Vec3 operator -(Vec3 value)
+    {
+        return new Vec3(-value.X, -value.Y, -value.Z);
+    }
+
+    public static Vec3 operator *(Vec3 value, float scale)
+    {
+        return new Vec3(value.X * scale, value.Y * scale, value.Z * scale);
+    }
+
+    public static Vec3 operator *(float scale, Vec3 value)
+    {
+        return value * scale;
+    }
+
+    public static Vec3 operator /(Vec3 value, float scale)
+    {
+        return new Vec3(value.X / scale, value.Y / scale, value.Z / scale);
     }
 
     public float Dot(Vec3 other)
@@ -43,7 +63,7 @@ public struct Vec3
 
     public Vec3 Unit()
     {
-        return Scale(1.0f / Math.Sqrt(LengthSquared()));
+        return this / Math.Sqrt(LengthSquared());
     }
 }
 
@@ -60,7 +80,7 @@ public struct Ray
 
     public Vec3 At(float distance)
     {
-        return Origin.Add(Direction.Scale(distance));
+        return Origin + Direction * distance;
     }
 }
 
@@ -71,7 +91,7 @@ public static class Program
 
     private static float HitSphere(Ray ray, Vec3 center, float radius)
     {
-        Vec3 originToCenter = ray.Origin.Subtract(center);
+        Vec3 originToCenter = ray.Origin - center;
         float a = ray.Direction.LengthSquared();
         float halfB = originToCenter.Dot(ray.Direction);
         float c = originToCenter.LengthSquared() - radius * radius;
@@ -85,8 +105,8 @@ public static class Program
 
     private static Vec3 SurfaceColor(Ray ray, Vec3 center, float distance)
     {
-        Vec3 normal = ray.At(distance).Subtract(center).Unit();
-        return normal.Add(new Vec3(1.0f, 1.0f, 1.0f)).Scale(0.5f);
+        Vec3 normal = (ray.At(distance) - center).Unit();
+        return (normal + new Vec3(1.0f, 1.0f, 1.0f)) * 0.5f;
     }
 
     private static Vec3 RayColor(Ray ray)
@@ -109,7 +129,7 @@ public static class Program
         float blend = 0.5f * (unitDirection.Y + 1.0f);
         Vec3 white = new Vec3(1.0f, 1.0f, 1.0f);
         Vec3 blue = new Vec3(0.5f, 0.7f, 1.0f);
-        return white.Scale(1.0f - blend).Add(blue.Scale(blend));
+        return (1.0f - blend) * white + blue * blend;
     }
 
     private static int ToColorByte(float value)
@@ -140,15 +160,15 @@ public static class Program
         float viewportHeight = 2.0f;
         float viewportWidth = viewportHeight * ((float)ImageWidth / (float)ImageHeight);
         Vec3 cameraCenter = new Vec3(0.0f, 0.0f, 0.0f);
-        Vec3 viewportU = new Vec3(viewportWidth, 0.0f, 0.0f);
-        Vec3 viewportV = new Vec3(0.0f, -viewportHeight, 0.0f);
-        Vec3 pixelDeltaU = viewportU.Scale(1.0f / (float)ImageWidth);
-        Vec3 pixelDeltaV = viewportV.Scale(1.0f / (float)ImageHeight);
+        Vec3 viewportU = +new Vec3(viewportWidth, 0.0f, 0.0f);
+        Vec3 viewportV = -new Vec3(0.0f, viewportHeight, 0.0f);
+        Vec3 pixelDeltaU = viewportU / (float)ImageWidth;
+        Vec3 pixelDeltaV = viewportV / (float)ImageHeight;
 
-        Vec3 viewportUpperLeft = cameraCenter.Subtract(new Vec3(0.0f, 0.0f, focalLength));
-        viewportUpperLeft = viewportUpperLeft.Subtract(viewportU.Scale(0.5f));
-        viewportUpperLeft = viewportUpperLeft.Subtract(viewportV.Scale(0.5f));
-        Vec3 pixel00Location = viewportUpperLeft.Add(pixelDeltaU.Add(pixelDeltaV).Scale(0.5f));
+        Vec3 viewportUpperLeft = cameraCenter - new Vec3(0.0f, 0.0f, focalLength);
+        viewportUpperLeft -= viewportU * 0.5f;
+        viewportUpperLeft -= viewportV * 0.5f;
+        Vec3 pixel00Location = viewportUpperLeft + (pixelDeltaU + pixelDeltaV) * 0.5f;
 
         int row = 0;
         while (row < ImageHeight)
@@ -156,9 +176,9 @@ public static class Program
             int column = 0;
             while (column < ImageWidth)
             {
-                Vec3 pixelCenter = pixel00Location.Add(pixelDeltaU.Scale((float)column));
-                pixelCenter = pixelCenter.Add(pixelDeltaV.Scale((float)row));
-                Ray ray = new Ray(cameraCenter, pixelCenter.Subtract(cameraCenter));
+                Vec3 pixelCenter = pixel00Location + pixelDeltaU * (float)column;
+                pixelCenter += pixelDeltaV * (float)row;
+                Ray ray = new Ray(cameraCenter, pixelCenter - cameraCenter);
                 WriteColor(image, RayColor(ray));
                 column++;
             }

@@ -88,5 +88,5 @@ internal sealed class AllocationEffectRegistry
         return cause is null ? operation.Reason : $"{operation.Reason} -> {Explain(cause, mayAllocate, visited)}";
     }
 
-    private static string Display(MethodSymbol method) => $"{method.ContainingType.FullName}.{method.Name}";
+    private static string Display(MethodSymbol method) => $"{method.ContainingType.FullName}.{(method.IsOperator ? OperatorFacts.DisplayName(method.OperatorKind) : method.Name)}";
 }

@@ -137,7 +137,7 @@ internal sealed partial class BodyPipeline
             {
                 var flow = EmitStatements(body, _method.Body.Statements);
                 if (!_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
-                    Report("CT3100", $"Not every reachable path returns a value from '{_method.Name}'.", _method.Syntax ?? _method.Body);
+                    Report("CT3100", $"Not every reachable path returns a value from '{(_method.IsOperator ? OperatorFacts.DisplayName(_method.OperatorKind) : _method.Name)}'.", _method.Syntax ?? _method.Body);
                 if (flow.FallsThrough)
                 {
                     ValidateOutParameters(_method.Body);

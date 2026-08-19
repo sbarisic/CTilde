@@ -59,7 +59,7 @@ public sealed record LanguageWorkspaceSymbol(
 public sealed partial class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "opaque", "static", "sealed"];
-    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
+    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "operator", "void"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
@@ -146,7 +146,7 @@ public sealed partial class LanguageServiceSnapshot
         var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
-        if (token.Kind != SyntaxKind.IdentifierToken)
+        if (token.Kind != SyntaxKind.IdentifierToken && !OperatorFacts.IsSupported(token.Kind))
         {
             var builtIn = TypeFacts.BuiltIn(token.Text);
             if (builtIn is not null)
@@ -211,7 +211,7 @@ public sealed partial class LanguageServiceSnapshot
     {
         if (!TryGetTree(filePath, out var tree))
             return null;
-        var token = IdentifierTokenAt(tree, position);
+        var token = NavigationTokenAt(tree, position);
         if (token is null)
             return null;
         var context = CreateContext(tree, position);
@@ -219,7 +219,7 @@ public sealed partial class LanguageServiceSnapshot
         {
             var syntax = SymbolSyntax(symbol);
             if (syntax is not null)
-                return new LanguageDefinition(syntax.Source.FilePath, NameSpan(syntax, SymbolName(symbol)));
+                return new LanguageDefinition(syntax.Source.FilePath, SelectionSpan(syntax, SymbolName(symbol)));
         }
         return null;
     }
@@ -247,9 +247,10 @@ public sealed partial class LanguageServiceSnapshot
                     PropertyDeclarationSyntax property => property.Name,
                     ConstructorDeclarationSyntax constructor => constructor.Name,
                     MethodDeclarationSyntax method => method.Name,
+                    OperatorDeclarationSyntax @operator => OperatorFacts.DisplayName(@operator.OperatorToken.Kind),
                     _ => string.Empty,
                 };
-                children.Add(new LanguageDocumentSymbol(name, MemberDetail(member), kind, member.Span, NameSpan(member, name), []));
+                children.Add(new LanguageDocumentSymbol(name, MemberDetail(member), kind, member.Span, SelectionSpan(member, name), []));
             }
             foreach (var enumMember in type.EnumMembers)
                 children.Add(new LanguageDocumentSymbol(enumMember.Name, string.Empty, LanguageSymbolKind.EnumMember, enumMember.Span, NameSpan(enumMember, enumMember.Name), []));
@@ -290,7 +291,7 @@ public sealed partial class LanguageServiceSnapshot
         {
             if (query.Length != 0 && !name.Contains(query, StringComparison.OrdinalIgnoreCase))
                 return;
-            result.Add(new LanguageWorkspaceSymbol(name, container, kind, new LanguageDefinition(syntax.Source.FilePath, NameSpan(syntax, selection))));
+            result.Add(new LanguageWorkspaceSymbol(name, container, kind, new LanguageDefinition(syntax.Source.FilePath, SelectionSpan(syntax, selection))));
         }
     }
 
@@ -326,6 +327,9 @@ public sealed partial class LanguageServiceSnapshot
         if (context.MemberDeclaration is MethodDeclarationSyntax method)
             foreach (var parameter in method.Parameters)
                 Add(parameter.Name, LanguageCompletionKind.Parameter, $"{parameter.Type} {parameter.Name}", "3");
+        if (context.MemberDeclaration is OperatorDeclarationSyntax @operator)
+            foreach (var parameter in @operator.Parameters)
+                Add(parameter.Name, LanguageCompletionKind.Parameter, $"{parameter.Type} {parameter.Name}", "3");
         if (context.MemberDeclaration is ConstructorDeclarationSyntax constructor)
             foreach (var parameter in constructor.Parameters)
                 Add(parameter.Name, LanguageCompletionKind.Parameter, $"{parameter.Type} {parameter.Name}", "3");
@@ -339,7 +343,7 @@ public sealed partial class LanguageServiceSnapshot
                 Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "4", field);
             foreach (var property in Hierarchy(context.TypeSymbol).SelectMany(type => type.Properties).Where(property => !requireStatic || property.IsStatic).Where(property => IsAccessible(property, context.TypeSymbol)))
                 Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "4", property);
-            foreach (var candidate in Hierarchy(context.TypeSymbol).SelectMany(type => type.Methods).Where(methodSymbol => !requireStatic || methodSymbol.IsStatic).Where(methodSymbol => IsAccessible(methodSymbol, context.TypeSymbol)))
+            foreach (var candidate in Hierarchy(context.TypeSymbol).SelectMany(type => type.Methods).Where(methodSymbol => !methodSymbol.IsOperator && (!requireStatic || methodSymbol.IsStatic)).Where(methodSymbol => IsAccessible(methodSymbol, context.TypeSymbol)))
                 Add(candidate.Name, LanguageCompletionKind.Method, FormatMethod(candidate), "5", candidate);
             if (!requireStatic)
             {
@@ -365,7 +369,7 @@ public sealed partial class LanguageServiceSnapshot
                 Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1", field);
             foreach (var property in Hierarchy(receiver.StaticType).SelectMany(type => type.Properties).Where(property => property.IsStatic && IsAccessible(property, context.TypeSymbol)))
                 Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1", property);
-            foreach (var method in Hierarchy(receiver.StaticType).SelectMany(type => type.Methods).Where(method => method.IsStatic && IsAccessible(method, context.TypeSymbol)))
+            foreach (var method in Hierarchy(receiver.StaticType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.IsStatic && IsAccessible(method, context.TypeSymbol)))
                 Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2", method);
             return;
         }
@@ -394,7 +398,7 @@ public sealed partial class LanguageServiceSnapshot
             Add(field.Name, LanguageCompletionKind.Field, FormatSymbol(field), "1", field);
         foreach (var property in Hierarchy(type).SelectMany(candidate => candidate.Properties).Where(property => !property.IsStatic && IsAccessible(property, context.TypeSymbol)))
             Add(property.Name, LanguageCompletionKind.Property, FormatSymbol(property), "1", property);
-        foreach (var method in Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => !method.IsStatic && IsAccessible(method, context.TypeSymbol)))
+        foreach (var method in Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => !method.IsOperator && !method.IsStatic && IsAccessible(method, context.TypeSymbol)))
             Add(method.Name, LanguageCompletionKind.Method, FormatMethod(method), "2", method);
 
         void Add(string label, LanguageCompletionKind kind, string detail, string order, object? symbol = null, string? documentationId = null) =>
@@ -403,6 +407,20 @@ public sealed partial class LanguageServiceSnapshot
 
     private IEnumerable<object> ResolveToken(DocumentContext context, SyntaxToken token)
     {
+        if (OperatorFacts.IsSupported(token.Kind))
+        {
+            if (context.MemberDeclaration is OperatorDeclarationSyntax declaration && declaration.OperatorToken.Span == token.Span &&
+                context.TypeSymbol?.Methods.FirstOrDefault(method => method.IsOperator && ReferenceEquals(method.Syntax, declaration)) is { } declaredOperator)
+            {
+                yield return declaredOperator;
+                yield break;
+            }
+            if (TryGetBoundEntry(context.Tree, token.Span, out var entry) && entry.Symbol is MethodSymbol { IsOperator: true } boundOperator)
+            {
+                yield return boundOperator;
+                yield break;
+            }
+        }
         var tokenName = IdentifierValue(token);
         var member = context.Nodes.OfType<MemberAccessExpressionSyntax>()
             .Where(candidate => IdentifierEquals(candidate.Name, tokenName) && candidate.Receiver.Span.End <= token.Span.Start && candidate.Span.End >= token.Span.End)
@@ -475,14 +493,14 @@ public sealed partial class LanguageServiceSnapshot
     private IEnumerable<MethodSymbol> ResolveCallCandidates(DocumentContext context, CallExpressionSyntax call)
     {
         if (call.Target is NameExpressionSyntax name && context.TypeSymbol is not null)
-            return Hierarchy(context.TypeSymbol).SelectMany(type => type.Methods).Where(method => method.Name == name.Name);
+            return Hierarchy(context.TypeSymbol).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == name.Name);
         if (call.Target is not MemberAccessExpressionSyntax member)
             return [];
         var receiver = InferExpression(context, member.Receiver);
         var type = receiver.StaticType ?? receiver.Type?.Symbol;
         if (type is null && receiver.Type is { } valueType && (valueType.IsValueType || valueType.Kind is CTypeKind.String or CTypeKind.Array))
             type = _model.Types.GetValueOrDefault("System.Object");
-        return type is null ? [] : Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => method.Name == member.Name && method.IsStatic == (receiver.StaticType is not null));
+        return type is null ? [] : Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => !method.IsOperator && method.Name == member.Name && method.IsStatic == (receiver.StaticType is not null));
     }
 
     private InferredExpression InferExpression(DocumentContext context, ExpressionSyntax expression)
@@ -607,6 +625,7 @@ public sealed partial class LanguageServiceSnapshot
     private static IEnumerable<ParameterSyntax> Parameters(DocumentContext context) => context.MemberDeclaration switch
     {
         MethodDeclarationSyntax method => method.Parameters,
+        OperatorDeclarationSyntax @operator => @operator.Parameters,
         ConstructorDeclarationSyntax constructor => constructor.Parameters,
         _ => [],
     };
@@ -625,7 +644,13 @@ public sealed partial class LanguageServiceSnapshot
         .FirstOrDefault();
 
     private static SyntaxToken? HoverTokenAt(SyntaxTree tree, int position) => tree.Tokens
-        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || TypeFacts.BuiltIn(token.Text) is not null))
+        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || TypeFacts.BuiltIn(token.Text) is not null || OperatorFacts.IsSupported(token.Kind)))
+        .Where(token => position >= token.Span.Start && position <= token.Span.End)
+        .OrderBy(token => token.Span.Length)
+        .FirstOrDefault();
+
+    private static SyntaxToken? NavigationTokenAt(SyntaxTree tree, int position) => tree.Tokens
+        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || OperatorFacts.IsSupported(token.Kind)))
         .Where(token => position >= token.Span.Start && position <= token.Span.End)
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();
@@ -735,75 +760,6 @@ public sealed partial class LanguageServiceSnapshot
         MethodSymbol { IsConstructor: true } => LanguageSymbolKind.Constructor,
         _ => LanguageSymbolKind.Method,
     };
-
-    private static string FormatSymbol(object symbol) => symbol switch
-    {
-        TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(FormatParameter))})",
-        TypeSymbol type => $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}",
-        FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}",
-        PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
-        MethodSymbol method => FormatMethod(method),
-        ParameterSymbol parameter => FormatParameter(parameter),
-        LocalSymbol local => $"{local.Type.DisplayName} {local.Name}",
-        ParameterSyntax parameter => FormatParameter(parameter),
-        LocalDeclarationStatementSyntax local => $"{local.Type} {local.Name}",
-        LocalSemanticSymbol local => $"{local.Type} {local.Name}",
-        EnumValueSymbol value => $"{value.Name} = {value.Value}",
-        _ => string.Empty,
-    };
-
-    private static string FormatMethod(MethodSymbol method) =>
-        $"{AccessibilityText(method.Accessibility)}{(method.IsStatic ? "static " : string.Empty)}{(method.IsConstructor ? string.Empty : method.ReturnType.DisplayName + " ")}{method.ContainingType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(FormatParameter))})";
-
-    private static string FormatParameter(ParameterSymbol parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type.DisplayName} {parameter.Name}";
-    private static string FormatParameter(ParameterSyntax parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type} {parameter.Name}";
-    private static string PassingPrefix(ParameterPassingKind kind) => kind == ParameterPassingKind.Value ? string.Empty : kind.ToString().ToLowerInvariant() + " ";
-
-    private static string AccessibilityText(Accessibility accessibility) => accessibility.ToString().ToLowerInvariant() + " ";
-
-    private static SyntaxNode? SymbolSyntax(object symbol) => symbol switch
-    {
-        TypeSymbol type => type.Syntax,
-        MemberSymbol member => member.Syntax,
-        ParameterSymbol parameter => parameter.Syntax,
-        LocalSymbol local => local.Syntax,
-        ParameterSyntax parameter => parameter,
-        LocalDeclarationStatementSyntax local => local,
-        LocalSemanticSymbol local => local.Syntax,
-        EnumValueSymbol value => value.Syntax,
-        _ => null,
-    };
-
-    private static string SymbolName(object symbol) => symbol switch
-    {
-        TypeSymbol type => type.Name,
-        MemberSymbol member => member.Name,
-        ParameterSymbol parameter => parameter.Name,
-        LocalSymbol local => local.Name,
-        ParameterSyntax parameter => parameter.Name,
-        LocalDeclarationStatementSyntax local => local.Name,
-        LocalSemanticSymbol local => local.Name,
-        EnumValueSymbol value => value.Name,
-        _ => string.Empty,
-    };
-
-    private static string MemberDetail(MemberDeclarationSyntax member) => member switch
-    {
-        FieldDeclarationSyntax field => field.Type.ToString(),
-        PropertyDeclarationSyntax property => property.Type.ToString(),
-        MethodDeclarationSyntax method => $"{method.ReturnType}({string.Join(", ", method.Parameters.Select(FormatParameter))})",
-        ConstructorDeclarationSyntax constructor => $"({string.Join(", ", constructor.Parameters.Select(FormatParameter))})",
-        _ => string.Empty,
-    };
-
-    private static TextSpan NameSpan(SyntaxNode syntax, string name)
-    {
-        if (name.Length == 0)
-            return syntax.Span;
-        var source = syntax.Source.Text;
-        var start = source.IndexOf(name, syntax.Span.Start, Math.Min(syntax.Span.Length, source.Length - syntax.Span.Start), StringComparison.Ordinal);
-        return start < 0 ? syntax.Span : new TextSpan(start, name.Length);
-    }
 
     private sealed record InferredExpression(CType? Type, TypeSymbol? StaticType);
 

@@ -2,7 +2,7 @@
 
 This hosted C~ project renders a deterministic 256×144 ray-traced image to `image.ppm`. The scene contains a normal-shaded sphere above a ground sphere, with a white-to-blue sky behind them.
 
-The implementation is an original C~ adaptation of the introductory camera, ray, sphere, normal, and PPM concepts in [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html). It uses value-type vectors and rays, `System.Math`, nested render loops, automatic reference counting for temporary strings, and an owned file handle closed through `defer`.
+The implementation is an original C~ adaptation of the introductory camera, ray, sphere, normal, and PPM concepts in [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html). It uses value-type vectors and rays, draft 0.11 vector operator declarations, compound assignment, `System.Math`, nested render loops, automatic reference counting for temporary strings, and an owned file handle closed through `defer`.
 
 Build and run from the example directory so the image is written beside this README:
 

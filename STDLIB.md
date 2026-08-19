@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console output, single-precision math, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.11. Object, exception, console output, single-precision math, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.11 adds no standard-library APIs and retains the draft 0.10 native ABI.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -334,7 +334,7 @@ Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.10. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
+Other runtime failures remain fatal and are not catchable in draft 0.11. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 

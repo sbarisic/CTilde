@@ -93,7 +93,7 @@ public sealed partial class LanguageServiceSnapshot
                 var name = MemberName(member);
                 if (name.Length != 0 && FindDeclarationToken(tree, member, name) is { } memberToken)
                 {
-                    var kind = member is MethodDeclarationSyntax or ConstructorDeclarationSyntax ? LanguageSemanticTokenKind.Method : LanguageSemanticTokenKind.Property;
+                    var kind = member is MethodDeclarationSyntax or ConstructorDeclarationSyntax or OperatorDeclarationSyntax ? LanguageSemanticTokenKind.Method : LanguageSemanticTokenKind.Property;
                     Add(result, memberToken.Span, kind, DeclarationModifiers(memberSymbol, member));
                 }
                 foreach (var parameter in Parameters(member))
@@ -217,6 +217,7 @@ public sealed partial class LanguageServiceSnapshot
         FieldDeclarationSyntax field => field.Name,
         PropertyDeclarationSyntax property => property.Name,
         MethodDeclarationSyntax method => method.Name,
+        OperatorDeclarationSyntax @operator => OperatorFacts.DisplayName(@operator.OperatorToken.Kind),
         ConstructorDeclarationSyntax constructor => constructor.Name,
         _ => string.Empty,
     };
@@ -224,12 +225,15 @@ public sealed partial class LanguageServiceSnapshot
     private static IEnumerable<ParameterSyntax> Parameters(MemberDeclarationSyntax syntax) => syntax switch
     {
         MethodDeclarationSyntax method => method.Parameters,
+        OperatorDeclarationSyntax @operator => @operator.Parameters,
         ConstructorDeclarationSyntax constructor => constructor.Parameters,
         _ => [],
     };
 
     private static SyntaxToken? FindDeclarationToken(SyntaxTree tree, SyntaxNode syntax, string name)
     {
+        if (syntax is OperatorDeclarationSyntax @operator)
+            return @operator.OperatorToken;
         var candidates = IdentifierTokens(tree, syntax.Span).Where(token => IdentifierEquals(IdentifierValue(token), name));
         return syntax switch
         {

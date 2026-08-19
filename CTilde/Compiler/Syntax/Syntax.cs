@@ -85,6 +85,7 @@ public enum SyntaxKind
     NullKeyword,
     ObjectKeyword,
     OpaqueKeyword,
+    OperatorKeyword,
     OverrideKeyword,
     OutKeyword,
     PrivateKeyword,
@@ -345,6 +346,16 @@ public sealed record MethodDeclarationSyntax(
     ImmutableArray<AttributeSyntax> Attributes,
     TypeSyntax ReturnType,
     string Name,
+    ImmutableArray<ParameterSyntax> Parameters,
+    BlockStatementSyntax? Body) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+
+public sealed record OperatorDeclarationSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ImmutableArray<string> Modifiers,
+    ImmutableArray<AttributeSyntax> Attributes,
+    TypeSyntax ReturnType,
+    SyntaxToken OperatorToken,
     ImmutableArray<ParameterSyntax> Parameters,
     BlockStatementSyntax? Body) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 

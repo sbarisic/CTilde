@@ -203,6 +203,8 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsVirtual { get; init; }
     public bool IsOverride { get; init; }
     public bool IsSealedOverride { get; init; }
+    public bool IsOperator { get; init; }
+    public SyntaxKind OperatorKind { get; init; }
     public MethodSymbol? OverriddenMethod { get; set; }
     public ConstructorInitializerSyntax? ConstructorInitializer { get; init; }
     public MethodSymbol? ConstructorInitializerTarget { get; set; }
@@ -240,6 +242,8 @@ internal static class NameMangler
     public static string Method(MethodSymbol method)
     {
         var parameters = string.Concat(method.Parameters.Select(parameter => $"_{PassingCode(parameter.PassingKind)}{TypeCode(parameter.Type)}"));
+        if (method.IsOperator)
+            return $"ct_op_{Encode(method.ContainingType.FullName)}{Encode(OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length))}{parameters}";
         var prefix = method.IsConstructor ? "ct_ctor_" : "ct_m_";
         return $"{prefix}{Encode(method.ContainingType.FullName)}{Encode(method.Name)}{parameters}";
     }
@@ -403,4 +407,31 @@ internal static class TypeFacts
     }
 
     private static bool IsSignedIntegral(CType type) => type.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int or CTypeKind.Long;
+}
+
+internal static class OperatorFacts
+{
+    public static bool IsSupported(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken;
+
+    public static string Text(SyntaxKind kind) => kind switch
+    {
+        SyntaxKind.PlusToken => "+",
+        SyntaxKind.MinusToken => "-",
+        SyntaxKind.StarToken => "*",
+        SyntaxKind.SlashToken => "/",
+        _ => "?",
+    };
+
+    public static string MetadataName(SyntaxKind kind, int arity) => (kind, arity) switch
+    {
+        (SyntaxKind.PlusToken, 1) => "UnaryPlus",
+        (SyntaxKind.MinusToken, 1) => "UnaryNegation",
+        (SyntaxKind.PlusToken, 2) => "Addition",
+        (SyntaxKind.MinusToken, 2) => "Subtraction",
+        (SyntaxKind.StarToken, 2) => "Multiplication",
+        (SyntaxKind.SlashToken, 2) => "Division",
+        _ => "Invalid",
+    };
+
+    public static string DisplayName(SyntaxKind kind) => $"operator {Text(kind)}";
 }

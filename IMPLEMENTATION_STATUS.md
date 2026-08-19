@@ -4,7 +4,7 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.10 has one compiler path:
+C~ draft 0.11 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
@@ -22,7 +22,7 @@ The current workspace passes:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 92 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs pass under MSVC, WSL GCC, and WSL Clang, including `System.Math` behavior and the HostedIo ray tracer's deterministic PPM output.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 100 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs cover operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, and the HostedIo ray tracer's deterministic PPM output.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -103,6 +103,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Custom and automatic properties | Implemented | Native property tests |
 | Access modifiers | Implemented | Private member and setter diagnostics |
 | Method overloads | Implemented | Pairwise best-candidate and cross-argument ambiguity tests |
+| User-defined arithmetic operators | Implemented | Unary/binary declarations, scalar order, base lookup, ambiguity, ARC, evaluation order, compound targets, deterministic `ct_op_*` emission, and editor navigation tests |
 | `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
 | Definite assignment and reachability | Implemented | `do`, switch, read-only, constructor, and reachability tests |
 | Exact-width integers through `long`/`ulong` | Implemented | Suffix, boundary, promotion, wrapping, formatting, enum, boxing, and C ABI tests |
@@ -236,7 +237,7 @@ The Draft 0.10 firmware adds two attached FreeRTOS workers, cross-task delegate 
 
 ## Deliberately deferred
 
-These features are outside draft 0.10:
+These features are outside draft 0.11:
 
 - Interfaces and abstract types.
 - General user-defined generics; only intrinsic native-buffer forms exist.
@@ -252,6 +253,7 @@ These features are outside draft 0.10:
 - Reflection and dynamic binding.
 - Async methods and tasks.
 - Named, optional, implicit by-reference, reference-return, reference-local, and parameter-array arguments.
+- User-defined conversions and equality, comparison, bitwise, logical, remainder, increment, or decrement operator declarations.
 - Multidimensional and jagged arrays.
 - String interpolation and raw or verbatim strings.
 - Weak references, cycle collection, finalizers, and automatic disposal.
@@ -259,7 +261,7 @@ These features are outside draft 0.10:
 
 ## Release gate
 
-A draft 0.10 release requires:
+A draft 0.11 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -269,4 +271,4 @@ A draft 0.10 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.10 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. Hosted MSVC, GCC 13, and Clang 18 conformance pass for the atomic ARC and attached-thread runtime, including the Clang ThreadSanitizer fixture. Both ESP syntax cross-compilers and complete firmware links pass, and the connected dual-core Xtensa ESP32 passes the Draft 0.10 threading and heap-recovery acceptance sequence.
+Draft 0.11 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The full conformance suite passes under MSVC, WSL GCC, and WSL Clang, and generated C plus complete firmware builds pass for ESP32 Xtensa and ESP32-C3 RISC-V. The source-language addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI. The connected dual-core Xtensa ESP32 result above remains the historical Draft 0.10 threading and heap-recovery hardware acceptance sequence; no draft 0.11 firmware was flashed or monitored as part of the operator-only change.

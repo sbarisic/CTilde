@@ -489,6 +489,9 @@ internal sealed partial class CompilationModel
                     AddMethod(type.Constructors, symbol);
                     break;
                 }
+            case OperatorDeclarationSyntax @operator:
+                DeclareOperator(type, @operator, tree, accessibility, isStatic);
+                break;
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
@@ -724,6 +727,8 @@ internal sealed partial class CompilationModel
 
             foreach (var method in type.Methods)
             {
+                if (method.IsOperator)
+                    continue;
                 ValidateVirtualModifiers(method.IsStatic, method.IsVirtual, method.IsOverride, method.IsSealedOverride, method.Syntax!);
                 if (type.Kind == DeclaredTypeKind.Struct && method.IsVirtual && !method.IsOverride)
                     Diagnostics.Add("CT1228", "A structure can override only ToString, Equals(object), and GetHashCode.", method.Syntax!.Source, method.Syntax.Span);
@@ -805,7 +810,8 @@ internal sealed partial class CompilationModel
                 .SequenceEqual(method.Parameters.Select(parameter => (parameter.Type, NormalizePassingKind(parameter.PassingKind)))));
         if (existing is not null)
         {
-            Diagnostics.Add("CT1105", $"Method '{method.Name}' with the same parameter types is already declared.", method.Syntax!.Source, method.Syntax.Span, existing.Syntax?.Source.GetLocation(existing.Syntax.Span));
+            var displayName = method.IsOperator ? OperatorFacts.DisplayName(method.OperatorKind) : method.Name;
+            Diagnostics.Add("CT1105", $"Method '{displayName}' with the same parameter types is already declared.", method.Syntax!.Source, method.Syntax.Span, existing.Syntax?.Source.GetLocation(existing.Syntax.Span));
             return;
         }
         methods.Add(method);

@@ -113,7 +113,7 @@ The declaration pass creates all user types before it declares members. This per
 The semantic model owns:
 
 - Fully qualified namespace and type names.
-- Class, structure, enum, delegate, field, property, constructor, method, parameter, and local symbols.
+- Class, structure, enum, delegate, field, property, constructor, method, operator, parameter, and local symbols.
 - Single-base class hierarchies, virtual slots, exact overrides, sealed slots, and constructor initializer targets.
 - Static and instance membership.
 - Accessibility.
@@ -123,6 +123,8 @@ The semantic model owns:
 Overload resolution filters by name, context, argument count, and implicit conversions. It compares candidates per argument. A winner must be no worse for every argument. It must be better for at least one.
 
 Inherited accessible methods join the overload set. An override replaces its base implementation in the same slot. A different signature remains an overload.
+
+Arithmetic operator declarations are tagged static method symbols. Candidate lookup starts from both operand types and their class base chains, deduplicates shared declarations, and reuses the ordinary implicit-conversion and better-candidate rules. Selected operators lower as direct ARC-aware calls with dedicated `ct_op_*` names; they never enter virtual slots or ordinary member lookup.
 
 ## Flow and lowering
 
@@ -150,7 +152,7 @@ A bound expression contains:
 - Its non-owning, borrowed, owned, or immortal ownership classification.
 - Immutable bound child expressions.
 
-Generated temporaries hold receivers and operands with side effects. Calls evaluate the receiver first. Arguments evaluate from left to right. Compound assignments evaluate their target once. Short-circuit operators lower the right operand into a conditional block.
+Generated temporaries hold receivers and operands with side effects. Calls and overloaded operators evaluate inputs from left to right. Compound assignments evaluate their target once, preserve its old value through right-operand evaluation, and use normal strong-slot replacement. Short-circuit operators lower the right operand into a conditional block.
 
 Bound statements preserve lexical scopes, control-flow constructs, catches, finally regions, defers, and cleanup boundaries. Typed-IR lowering assigns typed values in source evaluation order and creates explicit blocks, checks, ownership operations, and terminators. The C emitter does not repeat name lookup, overload selection, type conversion, or diagnostic flow analysis.
 
@@ -172,6 +174,8 @@ The emitter assembles one translation unit in this order:
 12. Hosted C `main` or ESP-IDF `app_main` wrapper.
 
 Emission lazily lowers the already validated bound program to typed IR. `CEmitter` then renders function bodies from that structured program before it orders runtime sections, so array specializations and string literals are registered deterministically without storing rendered C inside IR. Calling `GetDiagnostics()` never initializes those backend artifacts.
+
+Draft 0.11 changes only source binding and generated function names for programs that declare operators. Programs without operator declarations remain on the existing emission path. The managed runtime, ARC header, exception/thread state, export ABI, and generated public-header contract remain draft 0.10 compatible.
 
 Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
 

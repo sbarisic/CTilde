@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.10 keyword receives its intended scope", () => {
+test("every draft 0.11 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
@@ -92,6 +92,7 @@ test("every draft 0.10 keyword receives its intended scope", () => {
   expectScope("unmanaged", "unmanaged", "keyword.other.calling-convention.ctilde");
   expectScope("using System;", "using", "keyword.control.import.ctilde");
   expectScope("namespace Examples;", "namespace", "keyword.declaration.namespace.ctilde");
+  expectScope("public static V operator +(V left, V right)", "operator", "keyword.declaration.operator.ctilde");
   expectScope("class Example", "class", "storage.type.class.ctilde");
   expectScope("struct Example", "struct", "storage.type.struct.ctilde");
   expectScope("enum Example", "enum", "storage.type.enum.ctilde");
@@ -119,6 +120,7 @@ test("representative repository sources finish in the root grammar state", async
     "examples/Features.ct",
     "examples/ObjectModel.ct",
     "examples/Exceptions.ct",
+    "examples/HostedIo/Program.ct",
     ...await collectCtFiles(path.join(repositoryRoot, "CTilde", "StandardLibrary")),
     ...await collectCtFiles(path.join(repositoryRoot, "examples", "TCan485"))
   ];

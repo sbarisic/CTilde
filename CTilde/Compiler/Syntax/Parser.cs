@@ -226,6 +226,35 @@ internal sealed partial class Parser
         }
 
         var type = ParseType();
+        if (Current.Kind == SyntaxKind.OperatorKeyword)
+        {
+            NextToken();
+            SyntaxToken operatorToken;
+            if (Current.Kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken)
+                operatorToken = NextToken();
+            else
+            {
+                Report("CT0108", "Expected one of +, -, *, or / in an operator declaration.", Current);
+                operatorToken = new SyntaxToken(SyntaxKind.BadToken, _source, new TextSpan(Current.Span.Start, 0), string.Empty) { IsMissing = true };
+                _missingTokens.Add(operatorToken);
+                if (Current.Kind is not SyntaxKind.OpenParenToken and not SyntaxKind.EndOfFileToken)
+                    SkipToken();
+            }
+            var parameters = ParseParameters();
+            BlockStatementSyntax? body;
+            int end;
+            if (Current.Kind == SyntaxKind.SemicolonToken)
+            {
+                end = NextToken().Span.End;
+                body = null;
+            }
+            else
+            {
+                body = ParseBlock();
+                end = body.Span.End;
+            }
+            return new OperatorDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, operatorToken, parameters, body);
+        }
         var memberName = Match(SyntaxKind.IdentifierToken);
         if (Current.Kind == SyntaxKind.OpenParenToken)
         {

@@ -116,6 +116,8 @@ internal sealed partial class BodyPipeline
         }
         if (operandExpression.IsConstant && TryFoldUnary(syntax, operandExpression, out var foldedUnary))
             return foldedUnary;
+        if (syntax.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken && HasUserDefinedOperatorOperand(operandExpression))
+            return LowerOperatorCall(syntax.OperatorKind, [operandExpression], [syntax.Operand], syntax);
         if (syntax.OperatorKind == SyntaxKind.BangToken)
         {
             var operand = RequireBoolean(operandExpression, syntax.Operand);
@@ -293,6 +295,12 @@ internal sealed partial class BodyPipeline
             return new LoweredExpression { Type = CType.Nint, Code = $"(intptr_t)({left.Code} - {right.Code})", Prelude = prelude };
         }
 
+        if (syntax.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken &&
+            HasUserDefinedOperatorOperand(left, right))
+        {
+            return LowerOperatorCall(syntax.OperatorKind, [left, right], [syntax.Left, syntax.Right], syntax);
+        }
+
         if (!left.Type.IsNumeric || !right.Type.IsNumeric)
         {
             Report("CT2130", "Arithmetic operators require numeric operands.", syntax);
@@ -411,11 +419,42 @@ internal sealed partial class BodyPipeline
             return new LoweredExpression { Type = target.Type, Code = temp, Prelude = prelude };
         }
 
+        var rawRight = LowerExpression(syntax.Right);
+        var operation = syntax.OperatorKind switch
+        {
+            SyntaxKind.PlusEqualsToken => SyntaxKind.PlusToken,
+            SyntaxKind.MinusEqualsToken => SyntaxKind.MinusToken,
+            SyntaxKind.StarEqualsToken => SyntaxKind.StarToken,
+            SyntaxKind.SlashEqualsToken => SyntaxKind.SlashToken,
+            SyntaxKind.PercentEqualsToken => SyntaxKind.PercentToken,
+            _ => SyntaxKind.PlusToken,
+        };
+        if (operation is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken &&
+            HasUserDefinedOperatorOperand(target, rawRight))
+        {
+            if (target.LValue.Property is { Getter: not null } overloadedProperty)
+            {
+                var getter = _emitter.GetAccessorMethod(overloadedProperty, getter: true);
+                _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Left, overloadedProperty.IsVirtual && !target.LValue.IsBaseReceiver);
+            }
+            var oldOperand = OwnResult(target.Type, target.Code, prelude, borrowed: target.Type.ContainsManagedReferences);
+            var operatorResult = LowerOperatorCall(operation, [oldOperand, rawRight], [syntax.Left, syntax.Right], syntax);
+            var convertedResult = Convert(operatorResult, target.Type, syntax, false);
+            var overloadedPrelude = new List<string>(convertedResult.Prelude);
+            var overloadedResult = NewTemp();
+            overloadedPrelude.Add($"{_emitter.CDeclaration(target.Type, overloadedResult)} = {convertedResult.Code};");
+            if (target.Type.ContainsManagedReferences)
+                AddStrongStore(overloadedPrelude, target, overloadedResult);
+            else
+                overloadedPrelude.Add(target.LValue.Store(overloadedResult) + ";");
+            MarkAssigned(target.LValue);
+            return new LoweredExpression { Type = target.Type, Code = overloadedResult, Prelude = overloadedPrelude };
+        }
+
         if (!target.Type.IsNumeric)
-            Report("CT2133", "Compound assignment requires a numeric target in draft 0.7.", syntax.Left);
+            Report("CT2133", "Compound assignment requires a numeric target or applicable user-defined operator.", syntax.Left);
         var old = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(target.Type, old)} = {target.Code};");
-        var rawRight = LowerExpression(syntax.Right);
         if (syntax.OperatorKind == SyntaxKind.PercentEqualsToken &&
             (!target.Type.IsIntegral || !rawRight.Type.IsIntegral) &&
             !target.Type.IsError && !rawRight.Type.IsError)
@@ -439,15 +478,6 @@ internal sealed partial class BodyPipeline
         prelude.AddRange(right.Prelude);
         var rightTemp = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(operationType, rightTemp)} = {right.Code};");
-        var operation = syntax.OperatorKind switch
-        {
-            SyntaxKind.PlusEqualsToken => SyntaxKind.PlusToken,
-            SyntaxKind.MinusEqualsToken => SyntaxKind.MinusToken,
-            SyntaxKind.StarEqualsToken => SyntaxKind.StarToken,
-            SyntaxKind.SlashEqualsToken => SyntaxKind.SlashToken,
-            SyntaxKind.PercentEqualsToken => SyntaxKind.PercentToken,
-            _ => SyntaxKind.PlusToken,
-        };
         var operationResult = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(operationType, operationResult)} = {NumericOperation(operation, operationType, $"({_emitter.CCastType(operationType)})({old})", rightTemp, syntax)};");
         var result = NewTemp();

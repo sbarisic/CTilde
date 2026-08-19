@@ -6,6 +6,28 @@ namespace CTilde;
 internal sealed partial class BodyPipeline
 {
     private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
+        => SelectOverload(candidates, arguments, argumentSyntax, syntax, "CT2122", "CT2123", $"No overload of '{name}' accepts the supplied argument types.", $"Call to '{name}' is ambiguous.");
+
+    private MethodSymbol? SelectOperatorOverload(IEnumerable<MethodSymbol> candidates, SyntaxKind operatorKind, IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
+        => SelectOverload(
+            candidates,
+            arguments,
+            argumentSyntax,
+            syntax,
+            "CT2167",
+            "CT2168",
+            $"No applicable '{OperatorFacts.DisplayName(operatorKind)}' exists for the operand types.",
+            $"The '{OperatorFacts.DisplayName(operatorKind)}' invocation is ambiguous.");
+
+    private MethodSymbol? SelectOverload(
+        IEnumerable<MethodSymbol> candidates,
+        IReadOnlyList<LoweredExpression> arguments,
+        ImmutableArray<ArgumentSyntax> argumentSyntax,
+        SyntaxNode syntax,
+        string noMatchCode,
+        string ambiguousCode,
+        string noMatchMessage,
+        string ambiguousMessage)
     {
         var matches = candidates
             .Where(candidate => candidate.Parameters.Length == arguments.Count)
@@ -16,14 +38,14 @@ internal sealed partial class BodyPipeline
             .ToArray();
         if (matches.Length == 0)
         {
-            Report("CT2122", $"No overload of '{name}' accepts the supplied argument types.", syntax);
+            Report(noMatchCode, noMatchMessage, syntax);
             return null;
         }
         var winners = matches.Where(candidate => matches.All(other =>
             ReferenceEquals(candidate, other) || IsBetterCandidate(candidate, other, arguments))).ToArray();
         if (winners.Length != 1)
         {
-            Report("CT2123", $"Call to '{name}' is ambiguous.", syntax);
+            Report(ambiguousCode, ambiguousMessage, syntax);
             return null;
         }
         return winners[0];

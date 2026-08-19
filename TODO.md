@@ -24,9 +24,18 @@
 - [ ] Add semantic-token range requests, delta results, and result-ID caching if project sizes require them.
 - [ ] Publish self-contained server binaries when release distribution requires clients without .NET 10.
 
+## User-defined arithmetic operators
+
+- [x] Add `operator` declarations for unary and binary `+` and `-`, and binary `*` and `/` on classes and structures.
+- [x] Reuse implicit conversions and better-candidate selection across both operand type hierarchies.
+- [x] Lower operator calls and `+=`, `-=`, `*=`, and `/=` through ARC-aware calls with single target evaluation.
+- [x] Add dedicated `ct_op_*` names, `[NoAlloc]` effects, diagnostics, editor symbols, hover, definition, and keyword highlighting.
+- [x] Rewrite HostedIo vector arithmetic to exercise both scalar orders, unary operators, division, and compound assignment.
+- [ ] Add user-defined conversions and additional operator families only with a separate language-design revision.
+
 ## Compiler architecture completion
 
-Draft 0.10 uses the release pipeline completed for draft 0.7:
+Draft 0.11 uses the release pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.

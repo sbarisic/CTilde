@@ -29,7 +29,7 @@ internal sealed partial class BodyPipeline
         }
         if (syntax.Expression is null)
         {
-            Report("CT2110", $"Method '{_method.Name}' must return '{_method.ReturnType.DisplayName}'.", syntax);
+            Report("CT2110", $"Method '{(_method.IsOperator ? OperatorFacts.DisplayName(_method.OperatorKind) : _method.Name)}' must return '{_method.ReturnType.DisplayName}'.", syntax);
             writer.WriteLine($"return {_emitter.DefaultValue(_method.ReturnType)};");
             return;
         }

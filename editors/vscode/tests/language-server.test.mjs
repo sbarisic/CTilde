@@ -110,6 +110,53 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
   }
 });
 
+test("language server exposes draft 0.11 operator declarations and usages", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-operator-"));
+  const programPath = path.join(directory, "Program.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = `public struct V
+{
+    public int X;
+    public static V operator +(V left, V right) { return left; }
+
+}
+public static class Program
+{
+    [EntryPoint] public static void Main() { V left = new V(); V right = new V(); V result = left + right; }
+}`;
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", { processId: process.pid, rootUri: pathToFileURL(directory).href, capabilities: {} });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+
+    const useOffset = source.lastIndexOf("+");
+    const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, useOffset) });
+    assert.match(hover.contents.value, /operator \+/);
+    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, useOffset) });
+    assert.equal(definition.uri, uri);
+    assert.deepEqual(definition.range.start, positionAt(source, source.indexOf("+")));
+
+    const documentSymbols = await client.request("textDocument/documentSymbol", { textDocument: { uri } });
+    assert.ok(documentSymbols.flatMap(symbol => symbol.children ?? []).some(symbol => symbol.name === "operator +"));
+    const workspaceSymbols = await client.request("workspace/symbol", { query: "operator +" });
+    assert.ok(workspaceSymbols.some(symbol => symbol.name === "operator +"));
+    const memberPosition = positionAt(source, source.indexOf("\n\n") + 1);
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: memberPosition });
+    assert.ok(completion.items.some(item => item.label === "operator"));
+
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("ESP-only documentation resolves from the target sidecar", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-esp-"));
   const programPath = path.join(directory, "Program.ct");

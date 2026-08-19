@@ -40,16 +40,20 @@ try {
         $arcHeap = Join-Path $temporaryDirectory "arc-heap.c"
         $mathSource = Join-Path $temporaryDirectory "math.ct"
         $math = Join-Path $temporaryDirectory "math.c"
+        $operatorsSource = Join-Path $temporaryDirectory "operators.ct"
+        $operators = Join-Path $temporaryDirectory "operators.c"
         [IO.File]::WriteAllText($mathSource, 'public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(Math.Sqrt(9.0f) + Math.Abs(-1.0f) + Math.Tan(0.0f) + Math.Min(1.0f, 2.0f) + Math.Max(1.0f, 2.0f) + Math.Sin(0.0f) + Math.Cos(0.0f) + Math.Floor(1.5f) + Math.Ceiling(1.5f) + Math.Pi); } }')
+        [IO.File]::WriteAllText($operatorsSource, 'public struct Vector2 { public float X; public float Y; public Vector2(float x, float y) { X = x; Y = y; } public static Vector2 operator +(Vector2 left, Vector2 right) { return new Vector2(left.X + right.X, left.Y + right.Y); } public static Vector2 operator *(Vector2 value, float scale) { return new Vector2(value.X * scale, value.Y * scale); } } public static class Program { [EntryPoint] public static void Main() { Vector2 value = new Vector2(1.0f, 2.0f); value += new Vector2(2.0f, 3.0f); Console.WriteLine((value * 2.0f).X); } }')
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Hello.ct", "-o", $hello, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Exceptions.ct", "-o", $exceptions, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\TCan485\Program.ct", "-o", $arcHeap, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $mathSource, "-o", $math, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $operatorsSource, "-o", $operators, "--target", "esp-idf")
 
         $xtensa = Find-Compiler (Join-Path $ToolsPath "xtensa-esp-elf") "xtensa-esp32-elf-gcc.exe"
         $riscv = Find-Compiler (Join-Path $ToolsPath "riscv32-esp-elf") "riscv32-esp-elf-gcc.exe"
         foreach ($compiler in @($xtensa, $riscv)) {
-            foreach ($source in @($hello, $exceptions, $arcHeap, $math)) {
+            foreach ($source in @($hello, $exceptions, $arcHeap, $math, $operators)) {
                 Invoke-Checked $compiler @(
                     "-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
                     "-I", (Join-Path $exampleDirectory "main"),

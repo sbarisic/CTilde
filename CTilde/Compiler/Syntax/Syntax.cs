@@ -306,7 +306,12 @@ public sealed record FieldDeclarationSyntax(
     string Name,
     ExpressionSyntax? Initializer) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 
-public sealed record ParameterSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string Name) : SyntaxNode(Source, Span);
+public sealed record ParameterSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ImmutableArray<AttributeSyntax> Attributes,
+    TypeSyntax Type,
+    string Name) : SyntaxNode(Source, Span);
 
 public sealed record MethodDeclarationSyntax(
     SourceText Source,

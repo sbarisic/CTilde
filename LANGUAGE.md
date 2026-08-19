@@ -1,12 +1,12 @@
 # C~ language specification
 
-Specification version: draft 0.5
+Specification version: draft 0.6
 
 ## Status
 
-This document is the normative specification for C~ draft 0.5.
+This document is the normative specification for C~ draft 0.6.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.5 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.6 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -447,6 +447,18 @@ The compiler rejects `main`, runtime names, and generated symbol names. Repeated
 
 Unknown attributes, invalid targets, duplicate attributes, and non-constant arguments are errors.
 
+### Future native calls and callbacks
+
+Draft 0.6 extern methods cover direct calls from C~ to fixed C symbols. They do not provide native header imports, native-sized or 64-bit integers, opaque native handles, native UTF-8 and buffer views, `ref`/`in`/`out` arguments, exported C~ methods, unmanaged function pointers, delegates, or callbacks.
+
+Ordinary parameters are borrowed for the duration of a call. `[Retained]` accepts no arguments and is valid only on a direct class, array, or string parameter of an extern method. The compiler retains that argument immediately before the call and transfers the additional ownership count to native code. Invalid uses report `CT1234`.
+
+Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
+
+Future unsafe function pointers will represent one raw native code address with an exact calling convention and signature. Future delegates will instead be managed callable values that can contain both a method and a target object. A delegate will not implicitly convert to a native function pointer. Passing it to C will require a generated callback trampoline, explicit user context, and a lifetime that covers every possible native invocation.
+
+Native code must not unwind a C~ exception through its stack frames. Callback entry also requires a defined task-attachment policy before it can use managed allocation, exception state, or other task-sensitive runtime services. These are post-draft design requirements, not draft 0.6 syntax.
+
 ### NoAlloc
 
 `[NoAlloc]` accepts no arguments. It can annotate a method, extern method, or property. A property contract applies to every accessor it declares. A virtual contract is inherited by overrides. Arguments report `CT1233`; a contract that may allocate reports `CT2155`.
@@ -459,7 +471,7 @@ Allocating operations are class and array construction, boxing, nonconstant stri
 
 The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.5 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
+Draft 0.6 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
 
 ## Object and array creation
 
@@ -608,7 +620,7 @@ Exceptions are unchecked. Every call can complete by throwing. A throw from a ca
 
 A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
-Exception filters, inner exceptions, stack traces, specialized exception subclasses, automatic disposal, and exceptions across native callback boundaries are not part of draft 0.5.
+Exception filters, inner exceptions, stack traces, specialized exception subclasses, automatic disposal, and exceptions across native callback boundaries are not part of draft 0.6.
 
 ## Unsafe code
 
@@ -626,11 +638,15 @@ public static unsafe void Clear(byte* address, int length)
 
 Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, and pointer casts. It does not disable normal type checking.
 
-Draft 0.5 has no inline assembly.
+Draft 0.6 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator. Draft 0.5 permits the runtime to retain all managed allocations until process exit. `[NoAlloc]` can prove that selected call paths do not add managed allocations.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.6 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.
+
+Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.6.
+
+`System.Runtime.Memory.Retain` and `Release` manipulate an additional untracked ownership count. `null` is a no-op. They are unsafe APIs: unbalanced use can leak, dangle, or double-release a value. Calling any unsafe method requires an unsafe method or block and otherwise reports `CT2139`.
 
 External resources require explicit release. `defer` provides deterministic block cleanup for user-defined native release calls; there is no language `using` statement or automatic `Dispose` convention.
 
@@ -653,7 +669,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.5 when:
+A compiler conforms to draft 0.6 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -661,7 +677,7 @@ A compiler conforms to draft 0.5 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.5 has no second backend.
+The canonical backend is GNU C23. Draft 0.6 has no second backend.
 
 ## Deliberate differences from C#
 
@@ -669,7 +685,7 @@ The canonical backend is GNU C23. Draft 0.5 has no second backend.
 - References and pointers use the target C ABI width.
 - Signed integer overflow is always wrapping.
 - `readonly` locals permit one delayed assignment.
-- Managed allocations can live until process exit; `[NoAlloc]` is the opt-in compile-time allocation boundary.
+- Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.5 defers interfaces, abstract types, generics, exception filters, inner exceptions, stack traces, specialized exception subclasses, delegates, lambdas, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, native-boundary unwinding, and thread-safe exception handlers.
+Draft 0.6 defers interfaces, abstract types, generics, weak references, cycle collection, exception filters, inner exceptions, stack traces, specialized exception subclasses, delegates, lambdas, unsafe function pointers, exported methods and callbacks, native handles and buffer views, 64-bit and native-sized integers, `ref`/`in`/`out` arguments, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, native-boundary unwinding, volatile and atomic access, and thread-safe exception handlers.

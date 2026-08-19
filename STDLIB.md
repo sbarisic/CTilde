@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.5. Object, exception, and console declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.6. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 ## Object
 
@@ -95,6 +95,23 @@ public static class Environment
 
 `Environment.Exit` is hosted-only. An ESP-IDF compilation that calls it reports `CT4105`. Firmware that intentionally needs a reset must call `Esp.Idf.EspSystem.Restart`.
 
+## Runtime memory
+
+`System.Runtime.Memory` exposes two unsafe interop operations:
+
+```csharp
+public static class Memory
+{
+    [NoAlloc]
+    public static unsafe void Retain(object value);
+
+    [NoAlloc]
+    public static unsafe void Release(object value);
+}
+```
+
+`Retain` and `Release` manipulate an additional untracked ARC ownership count. `null` is a no-op. These methods require an unsafe method or block. Unbalanced calls can leak memory, create dangling references, or double-release an object. Normal C~ code does not need them.
+
 ## ESP-IDF
 
 The ESP-IDF target adds fixed-width wrappers around FreeRTOS, system, heap, GPIO, and WS2812 operations:
@@ -178,16 +195,18 @@ These operations are compiler intrinsics rather than declarations in the bundled
 
 ## Runtime behavior
 
-The GNU C23 runtime is part of each generated translation unit. Managed allocations have program lifetime. On ESP-IDF they remain allocated until reset or power loss.
+The GNU C23 runtime is part of each generated translation unit. Managed allocations use single-threaded automatic reference counting and are reclaimed when the last owned reference is released. Static managed fields live until termination, static strings are immortal, and reference cycles leak. Fatal failures, `Environment.Exit`, abort, reset, and power loss do not promise ARC or defer cleanup.
 
 Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.5.
+Other runtime failures remain fatal and are not catchable in draft 0.6.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
 ## Non-normative roadmap
 
 Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
+
+ESP-IDF interop can add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 and buffer views, and release operations designed for `defer`. These library types depend on planned compiler support for 64-bit and native-sized scalars, `ref`/`in`/`out`, exports, unmanaged function pointers, delegates, callback trampolines, and task-safe runtime entry. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.5. It includes unchecked exceptions, deterministic `finally` and `defer` cleanup, and compiler-verified `[NoAlloc]` contracts. It does not require a CLR or C# runtime.
+The current language is draft 0.6. It includes deterministic automatic reference counting, unchecked exceptions, `finally` and `defer` cleanup, and compiler-verified `[NoAlloc]` contracts. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -145,7 +145,7 @@ The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 conf
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.5 programs |
+| `examples` | Checked draft 0.6 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -171,7 +171,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.5 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.6 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

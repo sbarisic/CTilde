@@ -29,6 +29,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public bool IsNumeric => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float;
     public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Enum;
     public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Array or CTypeKind.String;
+    public bool ContainsManagedReferences => ContainsManagedReferencesCore(this, []);
     public bool IsPointerLike => IsReference || Kind == CTypeKind.Pointer;
     public bool ContainsPointer => ContainsPointerCore(this, []);
     public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum;
@@ -51,6 +52,15 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
             return false;
         return type.Symbol.Fields.Any(field => ContainsPointerCore(field.Type, visited)) ||
             type.Symbol.Properties.Any(property => ContainsPointerCore(property.Type, visited));
+    }
+
+    private static bool ContainsManagedReferencesCore(CType type, HashSet<TypeSymbol> visited)
+    {
+        if (type.IsReference)
+            return true;
+        if (type.Kind != CTypeKind.Struct || type.Symbol is null || !visited.Add(type.Symbol))
+            return false;
+        return type.Symbol.Fields.Any(field => !field.IsStatic && ContainsManagedReferencesCore(field.Type, visited));
     }
 }
 
@@ -128,6 +138,7 @@ internal sealed class ParameterSymbol
     public required string Name { get; init; }
     public required CType Type { get; init; }
     public required ParameterSyntax? Syntax { get; init; }
+    public bool IsRetained { get; init; }
 }
 
 internal sealed class MethodSymbol : MemberSymbol
@@ -138,6 +149,8 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
     public bool IsNoAlloc { get; set; }
+    public bool IsUnsafe { get; init; }
+    public bool ReturnsBorrowed { get; init; }
     public string? ExternName { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }

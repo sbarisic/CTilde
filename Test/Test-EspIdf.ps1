@@ -35,13 +35,15 @@ try {
 
         $hello = Join-Path $temporaryDirectory "hello.c"
         $exceptions = Join-Path $temporaryDirectory "exceptions.c"
+        $arcHeap = Join-Path $temporaryDirectory "arc-heap.c"
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\Hello.ct", "-o", $hello, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\Exceptions.ct", "-o", $exceptions, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\TCan485\Program.ct", "-o", $arcHeap, "--target", "esp-idf")
 
         $xtensa = Find-Compiler (Join-Path $ToolsPath "xtensa-esp-elf") "xtensa-esp32-elf-gcc.exe"
         $riscv = Find-Compiler (Join-Path $ToolsPath "riscv32-esp-elf") "riscv32-esp-elf-gcc.exe"
         foreach ($compiler in @($xtensa, $riscv)) {
-            foreach ($source in @($hello, $exceptions)) {
+            foreach ($source in @($hello, $exceptions, $arcHeap)) {
                 Invoke-Checked $compiler @("-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-I", (Join-Path $exampleDirectory "main"), $source)
                 Write-Host "PASS $([IO.Path]::GetFileName($compiler)) $([IO.Path]::GetFileName($source))"
             }

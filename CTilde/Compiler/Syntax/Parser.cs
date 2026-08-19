@@ -267,9 +267,10 @@ internal sealed class Parser
         while (Current.Kind is not SyntaxKind.CloseParenToken and not SyntaxKind.EndOfFileToken)
         {
             var start = Current.Span.Start;
+            var attributes = ParseAttributes();
             var type = ParseType();
             var name = Match(SyntaxKind.IdentifierToken);
-            parameters.Add(new ParameterSyntax(_source, TextSpan.FromBounds(start, name.Span.End), type, name.Text));
+            parameters.Add(new ParameterSyntax(_source, TextSpan.FromBounds(start, name.Span.End), attributes, type, name.Text));
             if (Current.Kind != SyntaxKind.CommaToken)
                 break;
             NextToken();

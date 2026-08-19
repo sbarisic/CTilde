@@ -19,9 +19,43 @@ public sealed class DerivedProbe : Probe
     }
 }
 
+public class ArcNode
+{
+    public ArcNode Next;
+    public string Text;
+}
+
+public struct ArcHolder
+{
+    public ArcNode Node;
+    public string Text;
+}
+
 public static class Program
 {
     private const int Ws2812Pin = 4;
+
+    private static void ExerciseArc()
+    {
+        ArcNode head = null;
+        ArcHolder[] holders = new ArcHolder[8];
+        int index = 0;
+        while (index < 32)
+        {
+            ArcNode node = new ArcNode();
+            node.Next = head;
+            node.Text = index.ToString();
+            head = node;
+            if (index < 8)
+            {
+                holders[index].Node = node;
+                holders[index].Text = node.Text;
+            }
+            index++;
+        }
+        object boxed = holders[0];
+        string dynamicText = "arc " + head.Text;
+    }
 
     [EntryPoint]
     public static void Main()
@@ -44,6 +78,23 @@ public static class Program
         {
             Console.Write("exception: ");
             Console.WriteLine(exception.Message);
+        }
+
+        uint heapBeforeArc = EspSystem.GetFreeHeapSize();
+        int arcRound = 0;
+        while (arcRound < 50)
+        {
+            ExerciseArc();
+            arcRound++;
+        }
+        uint heapAfterArc = EspSystem.GetFreeHeapSize();
+        bool arcRecovered = heapAfterArc >= heapBeforeArc || heapBeforeArc - heapAfterArc <= 512u;
+        Console.Write("arc heap recovery: ");
+        Console.WriteLine(arcRecovered);
+        if (!arcRecovered)
+        {
+            int[] failure = null;
+            failure[0] = 1;
         }
 
         if (!Ws2812.Configure(Ws2812Pin, 1u) || !Ws2812.Clear())

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.5. The managed layout is not compatible with draft 0.4. `System.Exception`, exception metadata, and compiler-owned unwind state change standard-library type IDs and generated symbols.
+This document defines the generated C contract for C~ draft 0.6. Draft 0.6 generated objects and reference-returning functions are ABI-incompatible with draft 0.5 because object headers, descriptors, cleanup state, and ownership conventions changed.
 
 The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -34,7 +34,7 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 | `float` | `float` |
 | `T*` | the mapped C type followed by `*` |
 
-Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.5 defines two's-complement wrapping.
+Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.6 defines two's-complement wrapping.
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
@@ -63,7 +63,7 @@ Generated prefixes identify symbol kinds:
 | `ct_init_` | Non-allocating class constructor initializer |
 | `ct_box_`, `ct_unbox_` | Value box layout and conversion helper |
 | `ct_l_` | User local |
-| `ct_lp_`, `ct_pp_` | Heap-backed local and parameter slot used by exception lowering |
+| `ct_lp_`, `ct_pp_` | Durable automatic local and parameter slot used by exception lowering |
 | `ct_tmp_` | Lowering temporary |
 | `ct_eh_` | Lexical exception handler frame |
 | `ct_ep_`, `ct_ex_`, `ct_er_` | Pending cleanup action, exception, and return payload |
@@ -80,10 +80,12 @@ Every class, string, array, and box starts with this header:
 typedef struct ct_object {
     const ct_type_descriptor* Type;
     uint32_t IdentityHash;
+    uint32_t RefCount;
+    struct ct_object* ReleaseNext;
 } ct_object;
 ```
 
-The descriptor stores a type name, base descriptor, vtable, type ID, size, and value-type flag.
+The descriptor stores a type name, base descriptor, vtable, type ID, size, value-type flag, and generated `Drop` callback. Heap objects start with `RefCount == 1`; `UINT32_MAX` marks immortal static strings. `ReleaseNext` links zero-count objects into the allocation-free iterative release queue.
 
 The vtable contains typed function pointers. A generated thunk converts `ct_object*` to the method's declaring type.
 
@@ -210,9 +212,27 @@ External names cannot collide with `main`, runtime definitions, or generated sym
 
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
 
-An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.5 does not support exceptions across native callbacks or other native boundaries.
+An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.6 does not support exceptions across native callbacks or other native boundaries.
+
+Parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns.
+
+The runtime exports `ct_retain(ct_object*)` and `ct_release(ct_object*)`. Both accept null. A native owner must eventually balance every owned or retained reference. Retain overflow terminates with `CTM0002`; invalid release or underflow terminates with `CTM0003`.
 
 ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, and `void`; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
+
+## Future native interop constraints
+
+This section records post-draft constraints and does not extend the draft 0.6 ABI.
+
+Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
+
+The extended scalar ABI will need exact signed and unsigned 64-bit types plus native-sized integer types for `size_t` and pointer-sized values. Native strings and buffers must use explicit pointer, element, length, mutability, and lifetime information. Managed C~ strings and arrays retain their runtime layouts and do not become implicit `char*` or flat C arrays.
+
+Opaque handles will be distinct C~ value types whose generated C representation uses the native typedef from its owning header. Ownership metadata must distinguish borrowed, created, consumed, nullable, and retained values. `ref`, `in`, and `out` arguments will map to native pointers only after definite-assignment, mutability, and escape checks succeed.
+
+An unsafe unmanaged function pointer will lower to one C function pointer with an exact signature and calling convention. A delegate will be a managed callable containing a method and optional target, so it is not ABI-compatible with a C function pointer. Passing a delegate to native code requires an exported trampoline and a user-context pointer. Retained callbacks require explicit registration and unregistration lifetime; synchronous callbacks may use a call-scoped context.
+
+No native call or callback may unwind a C~ exception through C frames. A callback trampoline must attach to defined per-task runtime state before it uses exceptions, managed allocation, virtual dispatch, or other task-sensitive services. ISR entry points additionally require compiler-checked allocation, throwing, blocking, and IRAM/DRAM reachability restrictions.
 
 ## Exceptions
 
@@ -222,16 +242,17 @@ The compiler includes `<setjmp.h>` only when the program uses exception or `defe
 typedef struct ct_exception_frame {
     jmp_buf* Target;
     struct ct_exception_frame* Previous;
+    struct ct_cleanup_record* CleanupBoundary;
 } ct_exception_frame;
 ```
 
-One process-global pointer identifies the active handler, and one process-global `ct_object*` holds the currently thrown exception. Draft 0.5 handler state is single-threaded.
+One process-global pointer identifies the active handler, one process-global `ct_object*` owns the currently thrown exception, and one process-global pointer identifies the top automatic cleanup record. Draft 0.6 handler and ARC state are single-threaded.
 
 Each invocation of a method that contains `try` or `defer` creates its `jmp_buf` values and handler frames on the C stack. Parameters, C~ locals, caught exceptions, pending actions, return payloads, and defer captures that can survive `longjmp` are fields in one compiler-generated `volatile` automatic method-state aggregate. This avoids indeterminate modified C automatic values without calling `ct_alloc` for control state.
 
 Each lexical try statement or lowered defer cleanup region owns fixed handler storage for one invocation. A loop reuses that lexical frame. The compiler never copies a `jmp_buf`.
 
-The generated `setjmp` call is the controlling expression of an `if`. Normal and exceptional paths pop the active frame before a catch starts. Catch matching follows the runtime descriptor base chain. Rethrow passes the same `ct_object*` to the next active frame.
+The generated `setjmp` call is the controlling expression of an `if`. Normal and exceptional paths pop the active frame before a catch starts. Catch matching follows the runtime descriptor base chain. Throw retains the exception into the global slot, unwinds automatic cleanup records to the selected handler boundary, and then performs `longjmp`. A catch moves the global ownership into a cleanup-tracked slot. Rethrow establishes the next current-exception ownership before unwinding the caught slot.
 
 Finally lowering stores one pending action: normal completion, return, break, continue, or exception. Every exit that crosses the cleanup region goes to the finally block. Normal finally completion resumes the saved action. A throw from finally replaces it. `defer` captures its bound receiver and converted arguments before the protected remainder, then uses nested finally lowering to produce allocation-free LIFO cleanup without a runtime registration list.
 
@@ -248,6 +269,8 @@ The runtime prints one line to standard error. Hosted output exits with `EXIT_FA
 | `CTA0002` | Array allocation-size overflow |
 | `CTA0003` | Array or string index out of range |
 | `CTM0001` | Allocation failure |
+| `CTM0002` | Reference-count overflow or invalid retain |
+| `CTM0003` | Invalid release, underflow, or cleanup corruption |
 | `CTI0001` | Integer division or remainder by zero |
 | `CTS0001` | String length overflow |
 | `CTS0002` | Native scalar formatting failure |
@@ -263,6 +286,8 @@ The existing null, array, allocation, division, string, cast, and unboxing failu
 
 ## Lifetime
 
-Class instances, arrays, concatenated or scalar-formatted strings, exception objects, and their managed data use zero-initialized program-lifetime allocation. Exception frames, cleanup state, and defer captures use automatic storage and do not call `ct_alloc`. The generated runtime does not free managed objects. On ESP-IDF, permanent loops must keep allocation bounded or stay within compiler-verified `[NoAlloc]` paths.
+Class instances, arrays, dynamic strings, boxes, exception objects, and reference-bearing structure values use automatic reference counting. Strong-slot replacement retains the new value, moves out the old value, stores the new value, and releases the old value. Owned temporaries and locals register automatic cleanup records; transfer operations disarm the corresponding record. Parameters and `this` are borrowed, while managed and reference-bearing structure returns are owned.
 
-This preserves managed reference identity and removes use-after-free from safe C~ code. A future collector can replace the allocator without changing source semantics or object layouts described here.
+`ct_release` decrements to zero, enqueues through `ReleaseNext`, invokes the descriptor's generated `Drop`, frees owned payload storage, and frees the object. A drain already in progress only appends newly dead objects, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing elements and `Data`, dynamic strings free `Data`, and boxes and structures recursively drop nested references. Matching generated retain helpers preserve nested structure ownership during by-value copies.
+
+Exception frames, pending actions, defer captures, and ownership cleanup records use automatic storage and do not call `ct_alloc`. Static fields own their values until process termination; static and empty strings are immortal. Reference cycles leak. `CT_MEMORY_DIAGNOSTICS` enables conformance-only live-object and live-allocation counters without adding a production API or cost.

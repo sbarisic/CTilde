@@ -17,7 +17,7 @@
 
 ## Compiler architecture completion
 
-Draft 0.5 exception behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
+Draft 0.6 exception and ARC behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
 
 1. Bind method, accessor, constructor, and initializer bodies into immutable bound nodes.
 2. Move lookup, access checks, overload resolution, conversions, constants, and flow diagnostics out of `MethodLowerer`.
@@ -25,7 +25,7 @@ Draft 0.5 exception behavior is implemented, but the body pipeline remains trans
 4. Make `GetDiagnostics()` stop after declaration, binding, flow, and target validation. It must not construct rendered C fragments.
 5. Make the C emitter consume structured IR only.
 
-Retain the 63 conformance checks and byte-identical C output while this work proceeds.
+Retain the 69 conformance checks and byte-identical C output while this work proceeds.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 
@@ -53,12 +53,12 @@ These limits remain:
 
 - The CLI emits C but does not duplicate ESP-IDF linking, flashing, or monitoring.
 - `[Extern]` supports simple C ABI calls but not callbacks or exported C~ methods.
-- Managed allocation has program lifetime.
+- Managed allocation uses single-threaded deterministic ARC; cycles leak.
 - Exception-handler state supports one C~ execution task.
 - `defer` provides deterministic block cleanup without heap registration.
 - `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
-The draft 0.5 object and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
+The draft 0.6 object, ARC, and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
 
 ### Design rules
 
@@ -141,17 +141,25 @@ A microcontroller firmware image has no portable process exit code. The compiler
 
 #### Allocation
 
-- [x] Keep zeroed program-lifetime allocation for the first release.
+- [x] Replace program-lifetime allocation with single-threaded, non-moving ARC.
 - [x] Route allocation through one target hook.
+- [x] Add target-aware deallocation.
 - [x] Start with normal `calloc` or `heap_caps_calloc` using byte-addressable memory.
 - [x] Move exception handlers, durable locals, pending actions, and defer captures to automatic method storage.
+- [x] Add automatic ownership cleanup records and exception-handler cleanup boundaries.
+- [x] Generate class, array, string, box, and structure retain/drop helpers.
+- [x] Drain cascading releases iteratively without recursive C calls.
+- [x] Add borrowed parameters, owned returns, `[Retained]`, and `[ReturnsBorrowed]`.
+- [x] Add unsafe `System.Runtime.Memory.Retain` and `Release`.
 - [x] Add `[NoAlloc]` fixed-point effect inference for bounded permanent-loop paths.
 - [x] Add allocation-free LIFO `defer` lowering for explicit native resource cleanup.
 - [ ] Add allocation-failure tests on hardware.
-- [x] Document that allocated C~ objects do not return memory to the heap.
-- [ ] Add optional heap counters for development builds.
+- [x] Document deterministic reclamation and the cycle-leak limitation.
+- [x] Add `CT_MEMORY_DIAGNOSTICS`-guarded live allocation and object counters.
+- [x] Compile and link the ARC heap-recovery source for both ESP architectures.
+- [ ] Flash the draft 0.6 image and verify the ARC heap-recovery marker on hardware.
 
-Programs must not allocate strings, arrays, boxes, or objects without a bound inside permanent loops. Boxing is an allocation operation.
+Permanent loops can allocate temporary managed values when their ownership does not escape an iteration. Programs must still bound live ownership and avoid accumulating cycles. Boxing is an allocation operation.
 
 #### Stack and watchdogs
 
@@ -235,15 +243,48 @@ Keep the first shim ABI limited to fixed-width scalars and opaque values. Do not
 
 The first target can use synchronous APIs from the C~ entry task. Full ESP-IDF use needs more language and ABI work.
 
+#### Phase 7a: Complete the synchronous C ABI
+
+- [ ] Add signed and unsigned 64-bit integers for ESP-IDF time and counter APIs.
+- [ ] Add native-sized signed and unsigned integers for `intptr_t`, `uintptr_t`, and `size_t`.
+- [ ] Add `ref`, `in`, and definitely assigned `out` parameters with exact pointer ABI mappings.
+- [ ] Add unsafe `void*`, stack allocation, and explicit pointer-plus-length native buffer views.
+- [ ] Add scoped native UTF-8 string views. Do not pass a managed C~ `string` as `const char*` implicitly.
+- [ ] Add distinct opaque native handle types instead of representing every handle as an integer or unrestricted pointer.
+- [ ] Add ownership metadata for borrowed, created, consumed, nullable, and retained handles or pointers.
+- [ ] Expose `esp_err_t` as a value that preserves its numeric code, success test, and native error name instead of reducing every failure to `bool`.
+- [ ] Keep `defer` as the first deterministic release mechanism and diagnose discarded owned handles where practical.
+
+#### Phase 7b: Generate source-compatible ESP-IDF bindings
+
+- [ ] Add a binding manifest that names required ESP-IDF components and public headers.
+- [ ] Generate C~ declarations and C adapters against the installed ESP-IDF headers.
+- [ ] Generate adapters for configuration structures, designated initialization, default-initializer macros, static-inline functions, and function-like macros.
+- [ ] Import public constants, typedefs, flags, and enum names without baking unstable native structure layouts or enum numbers into reusable C~ artifacts.
+- [ ] Compile generated adapters as part of the owning ESP-IDF component and let ESP-IDF remain responsible for include paths, Kconfig, dependencies, and linking.
+- [ ] Reject private, `esp_private`, example-helper, preview, and experimental APIs unless a manifest explicitly opts into their weaker compatibility contract.
+
+ESP-IDF guarantees public API source compatibility but not binary layout compatibility between releases. Native configuration structures must therefore be initialized in generated or handwritten C compiled against the selected ESP-IDF headers. C~ must not treat a copied native layout as a stable managed ABI.
+
+#### Phase 7c: Export methods and support callbacks
+
 - [ ] Add an `[Export("symbol")]` attribute for C-callable C~ methods.
 - [ ] Generate a native header for exported symbols and shared runtime layouts.
-- [ ] Add callback trampolines with defined lifetime rules.
-- [ ] Add function or delegate types if trampolines are not sufficient.
-- [ ] Add opaque native handle types.
-- [ ] Add 64-bit integer types for ESP-IDF time and counter APIs.
+- [ ] Add unsafe unmanaged function-pointer types with exact calling convention, parameter, return, and nullability rules.
+- [ ] Add delegates as managed target-plus-method values. Delegates are not layout-compatible with unmanaged function pointers.
+- [ ] Add callback trampolines that pair an exported C entry point with an explicit `void*` user context.
+- [ ] Distinguish synchronous callbacks from retained callbacks and require explicit registration, unregistration, and rooted-lifetime rules for retained delegates.
+- [ ] Permit direct unmanaged function pointers only in `unsafe` code; require a trampoline to pass a delegate to C.
+- [ ] Define callback-thread attachment before a callback can allocate, throw, use virtual dispatch, or access managed runtime state.
+- [ ] Keep C~ exceptions from unwinding through ESP-IDF or other native frames. A callback trampoline must catch and translate, store, or terminate according to its declared policy.
+
+#### Phase 7d: FreeRTOS tasks, shared state, and interrupts
+
 - [ ] Add `volatile` and atomic access rules.
 - [ ] Define thread safety for static initialization and object identity hashes.
+- [ ] Move exception and current-callback state from process-global storage to attached-task storage.
 - [ ] Define which C~ operations are permitted in an interrupt service routine.
+- [ ] Add compiler-checked ISR effects such as no allocation, no throw, no blocking, and IRAM/DRAM-safe reachability.
 - [ ] Add separate task-stack configuration for exported task entry methods.
 
 Do not call general C~ allocation, console, or virtual dispatch from an interrupt until the runtime defines ISR-safe behavior.
@@ -306,3 +347,7 @@ ESP-IDF support is ready for its first release only when all these conditions ar
 - [ESP-IDF application startup](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/startup.html)
 - [ESP-IDF build system](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/build-system.html)
 - [ESP-IDF standard I/O](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/stdio.html)
+- [ESP-IDF API conventions and compatibility](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/api-conventions.html)
+- [ESP-IDF error handling](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/error-handling.html)
+- [ESP timer handles and callbacks](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/esp_timer.html)
+- [ESP-IDF memory and IRAM rules](https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-guides/memory-types.html)

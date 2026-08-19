@@ -106,7 +106,15 @@ internal sealed class TypedIrLowerer(CompilationModel model, CEmitter emitter)
                 model.Diagnostics.Add("CT2140", $"Const field '{field.Name}' does not have a constant initializer.", field.Initializer!.Source, field.Initializer.Span);
             foreach (var line in value.Prelude.Skip(expression.Prelude.Count))
                 writer.WriteLine("    " + line);
-            writer.WriteLine($"    {field.CName} = {value.Code};");
+            if (field.Type.ContainsManagedReferences)
+            {
+                writer.WriteLine($"    {emitter.CTypeName(field.Type)} ct_static_value_{initializerIndex} = {value.Code};");
+                if (value.Ownership != OwnershipKind.Owned)
+                    writer.WriteLine("    " + emitter.RetainValueStatement(field.Type, $"&ct_static_value_{initializerIndex}"));
+                writer.WriteLine($"    {field.CName} = ct_static_value_{initializerIndex};");
+            }
+            else
+                writer.WriteLine($"    {field.CName} = {value.Code};");
         }
         writer.WriteLine("}");
         return writer.ToString();

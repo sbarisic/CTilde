@@ -265,6 +265,12 @@ Run("full fidelity syntax round trip", () =>
     Assert(validTree.Tokens.Any(token => token.LeadingTrivia.Concat(token.TrailingTrivia).Any(trivia => trivia.Kind == SyntaxTriviaKind.BlockComment)), "Block comment trivia was not retained.");
     Assert(validTree.Tokens.Any(token => token.TrailingTrivia.Length > 0), "Trailing trivia was not retained.");
 
+    const string parameterAttribute = "public static class Native { [Extern(\"keep\")] public static void Keep([Retained] object value); }";
+    var attributeTree = SyntaxTree.ParseText(parameterAttribute, "parameter-attribute.ct");
+    var method = attributeTree.Root.Types.Single().Members.OfType<MethodDeclarationSyntax>().Single();
+    Assert(attributeTree.ToFullString() == parameterAttribute, "Parameter attributes did not round-trip exactly.");
+    Assert(method.Parameters.Single().Attributes.Single().Name == "Retained", "Parameter attributes were not preserved in the syntax tree.");
+
     const string invalid = "public static class Program { @ [EntryPoint] public static void Main( { } }";
     var invalidTree = SyntaxTree.ParseText(invalid, "invalid.ct");
     Assert(invalidTree.ToFullString() == invalid, "Invalid syntax did not round-trip exactly.");
@@ -1454,6 +1460,283 @@ Run("exception finally diagnostics and replacement", () =>
     Assert(Compile(readonlyFieldMerge).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT3131"), "Constructor readonly-field assignments in try and finally were not merged.");
 });
 
+Run("ARC ABI and ownership annotations", () =>
+{
+    var generated = Emit("public class Item { public Item Next; } public static class Program { [EntryPoint] public static void Main() { Item value = new Item(); } }");
+    Assert(generated.Contains("uint32_t RefCount;", StringComparison.Ordinal), "The object header does not contain a reference count.");
+    Assert(generated.Contains("ct_object* ReleaseNext;", StringComparison.Ordinal), "The object header does not contain the intrusive release link.");
+    Assert(generated.Contains("void (*Drop)(ct_object*);", StringComparison.Ordinal), "Type descriptors do not contain drop callbacks.");
+    Assert(generated.Contains("void ct_retain(ct_object* object)", StringComparison.Ordinal), "ct_retain was not exported.");
+    Assert(generated.Contains("void ct_release(ct_object* object)", StringComparison.Ordinal), "ct_release was not exported.");
+    Assert(generated.Contains("ct_cleanup_record", StringComparison.Ordinal), "Automatic cleanup records were not emitted.");
+
+    const string valid = "public static class Native { [Extern(\"keep\")] public static void Keep([Retained] object value); [Extern(\"borrow\")] [ReturnsBorrowed] public static object Borrow(); } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(!Compile(valid).GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Valid extern ownership annotations were rejected.");
+
+    const string invalidRetained = "public static class Native { public static void Managed([Retained] object value) { } [Extern(\"bad\")] public static void Bad([Retained(1)] int value); } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(invalidRetained).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1234") == 2, "Invalid Retained targets or arguments did not produce CT1234.");
+
+    const string invalidBorrowed = "public static class Native { [ReturnsBorrowed] public static object Managed() { return null; } [Extern(\"bad\")] [ReturnsBorrowed(1)] public static int Bad(); } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(invalidBorrowed).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1235") == 2, "Invalid ReturnsBorrowed targets or arguments did not produce CT1235.");
+
+    const string unsafeCall = "using System.Runtime; public static class Program { [EntryPoint] public static void Main() { Memory.Retain(null); } }";
+    Assert(Compile(unsafeCall).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT2139"), "Calling unsafe Memory.Retain outside an unsafe context was allowed.");
+
+    const string conflictingOwnership = "public static class A { [Extern(\"native_argument\")] public static void First(object value); [Extern(\"native_result\")] public static object Result(); } public static class B { [Extern(\"native_argument\")] public static void Second([Retained] object value); [Extern(\"native_result\")] [ReturnsBorrowed] public static object Result(); } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(conflictingOwnership).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4102") == 2, "Conflicting extern ownership contracts were accepted for one native symbol.");
+
+    const string reservedOwnershipHelper = "public static class Native { [Extern(\"ct_drop_object_fake\")] public static void Drop(); } public static class Program { [EntryPoint] public static void Main() { } }";
+    Assert(Compile(reservedOwnershipHelper).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated ARC helper prefix was available to user externs.");
+});
+
+Run("ARC deterministic lifetime", () =>
+{
+    const string source = """
+        using System;
+        public class Node { public Node Next; public string Name; }
+        public struct Holder { public Node Value; }
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                {
+                    Node first = new Node();
+                    Node alias = first;
+                    alias = alias;
+                    Node second = new Node();
+                    first.Next = second;
+                    first.Next = null;
+
+                    Node[] values = new Node[2];
+                    values[0] = first;
+                    values[0] = null;
+
+                    Holder holder = new Holder();
+                    holder.Value = first;
+                    object boxed = holder;
+                    boxed = null;
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
+});
+
+Run("ARC properties arrays virtual calls and defer captures", () =>
+{
+    const string source = """
+        using System;
+        public class Item { }
+        public struct Holder { public Item Value; }
+        public class Owner
+        {
+            private Item value;
+            public Item Automatic { get; set; }
+            public Item Explicit { get { return value; } set { this.value = value; } }
+        }
+        public class Base
+        {
+            public virtual Item Create() { return new Item(); }
+            public virtual Item Value { get { return new Item(); } set { } }
+        }
+        public class Derived : Base
+        {
+            public override Item Create() { return new Item(); }
+            public override Item Value { get { return new Item(); } set { } }
+        }
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+        public static class Program
+        {
+            private static void Observe(Item value) { }
+
+            [EntryPoint]
+            public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                {
+                    Item item = new Item();
+                    Holder[] holders = new Holder[2];
+                    holders[0].Value = item;
+                    holders[0].Value = null;
+
+                    Owner owner = new Owner();
+                    owner.Automatic = item;
+                    Item automatic = owner.Automatic;
+                    owner.Automatic = null;
+                    owner.Explicit = item;
+                    Item explicitValue = owner.Explicit;
+                    owner.Explicit = null;
+
+                    Base polymorphic = new Derived();
+                    Item created = polymorphic.Create();
+                    Item property = polymorphic.Value;
+                    polymorphic.Value = item;
+                    defer Observe(item);
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
+});
+
+Run("ARC returns exceptions and iterative destruction", () =>
+{
+    const string source = """
+        using System;
+        public class Node { public Node Next; }
+        public class Broken
+        {
+            public Node Value = new Node();
+            public Broken() { throw new Exception("broken"); }
+        }
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+        public static class Program
+        {
+            private static Node Echo(Node value) { return value; }
+            private static Node Make() { return new Node(); }
+
+            [EntryPoint]
+            public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                {
+                    Node made = Make();
+                    Node echoed = Echo(made);
+                    try { Broken value = new Broken(); }
+                    catch (Exception) { }
+
+                    Node head = null;
+                    int index = 0;
+                    while (index < 10000)
+                    {
+                        Node next = new Node();
+                        next.Next = head;
+                        head = next;
+                        index++;
+                    }
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
+});
+
+Run("ARC native ownership and unsafe manual counts", () =>
+{
+    const string source = """
+        using System;
+        using System.Runtime;
+        public class Item { }
+        public static class Native
+        {
+            [Extern("native_keep")]
+            [NoAlloc]
+            public static void Keep([Retained] object value);
+
+            [Extern("native_borrow")]
+            [ReturnsBorrowed]
+            [NoAlloc]
+            public static object Borrow();
+
+            [Extern("native_clear")]
+            [NoAlloc]
+            public static void Clear();
+        }
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static unsafe void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                {
+                    Item value = new Item();
+                    Memory.Retain(value);
+                    Memory.Release(value);
+                    Native.Keep(value);
+                    object borrowed = Native.Borrow();
+                    Native.Clear();
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    const string nativeSuffix = """
+
+        static ct_t_6_System_6_Object* native_saved = NULL;
+        void native_keep(ct_t_6_System_6_Object* value) { native_saved = value; }
+        ct_t_6_System_6_Object* native_borrow(void) { return native_saved; }
+        void native_clear(void) { ct_release((ct_object*)(void*)native_saved); native_saved = NULL; }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true, nativeSuffix: nativeSuffix);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
+});
+
+Run("ARC cycle limitation", () =>
+{
+    const string source = """
+        using System;
+        public class Node { public Node Next; }
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+        public static class Program
+        {
+            [EntryPoint]
+            public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                {
+                    Node left = new Node();
+                    Node right = new Node();
+                    left.Next = right;
+                    right.Next = left;
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline + 2u);
+            }
+        }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
+});
+
 Run("feature C symbol snapshot", () =>
 {
     var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
@@ -1592,7 +1875,7 @@ static string Emit(string source, CompilationOptions? options = null, string pat
     return writer.ToString();
 }
 
-static ProcessResult CompileAndRun(string source)
+static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "")
 {
     var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
     Directory.CreateDirectory(directory);
@@ -1600,8 +1883,8 @@ static ProcessResult CompileAndRun(string source)
     {
         var cPath = Path.Combine(directory, "program.c");
         var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
-        File.WriteAllText(cPath, Emit(source), new UTF8Encoding(false));
-        var compilerResult = RunCompiler(cPath, executablePath);
+        File.WriteAllText(cPath, Emit(source) + nativeSuffix, new UTF8Encoding(false));
+        var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics);
         Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
         return RunCompiledProgram(executablePath);
     }
@@ -1612,8 +1895,9 @@ static ProcessResult CompileAndRun(string source)
     }
 }
 
-static ProcessResult RunCompiler(string cPath, string executablePath)
+static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false)
 {
+    var diagnosticDefine = memoryDiagnostics ? "CT_MEMORY_DIAGNOSTICS" : null;
     var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
     if (!string.IsNullOrWhiteSpace(configured))
     {
@@ -1622,19 +1906,26 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
             var compiler = configured[4..];
             var linuxSource = WslPath(cPath);
             var linuxOutput = WslPath(executablePath);
-            return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput);
+            return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics);
         }
         var compilerName = Path.GetFileNameWithoutExtension(configured);
         var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
-            ? new[] { "/nologo", "/std:clatest", "/O2", "/W4", "/WX", "/wd4702", $"/Fe:{executablePath}", cPath }
+            ? new List<string> { "/nologo", "/std:clatest", "/O2", "/W4", "/WX", "/wd4702" }
             : null;
+        if (arguments is not null)
+        {
+            if (diagnosticDefine is not null)
+                arguments.Add($"/D{diagnosticDefine}");
+            arguments.Add($"/Fe:{executablePath}");
+            arguments.Add(cPath);
+        }
         return arguments is not null
             ? RunProcess(configured, arguments)
-            : RunGnuCompiler(configured, [], cPath, executablePath);
+            : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics);
     }
 
     if (!OperatingSystem.IsWindows())
-        return RunGnuCompiler("cc", [], cPath, executablePath);
+        return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics);
 
     var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
     Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -1643,18 +1934,20 @@ static ProcessResult RunCompiler(string cPath, string executablePath)
     var installation = discovery.StandardOutput.Trim();
     var vcVars = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
     var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
-    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702 /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
+    var defineArgument = diagnosticDefine is null ? "" : $" /D{diagnosticDefine}";
+    File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702{defineArgument} /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
     return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
 }
 
-static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath)
+static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false)
 {
     var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
     var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
-    var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+    var diagnosticArguments = memoryDiagnostics ? new[] { "-DCT_MEMORY_DIAGNOSTICS" } : [];
+    var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, "-o", executablePath, cPath]);
     if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
         return result;
-    return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", "-o", executablePath, cPath]);
+    return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, "-o", executablePath, cPath]);
 }
 
 static bool RejectedCStandard(ProcessResult result)

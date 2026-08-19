@@ -5,7 +5,7 @@ namespace CTilde;
 
 internal static class StandardLibrary
 {
-    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyCommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct"]));
+    private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyCommonSyntaxTrees = new(() => LoadSyntaxTrees(["Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct"]));
     private static readonly Lazy<ImmutableArray<SyntaxTree>> LazyEspIdfSyntaxTrees = new(() => LoadSyntaxTrees(["EspIdf.ct"]));
 
     public static ImmutableArray<SyntaxTree> GetSyntaxTrees(CompilationTarget target) => target == CompilationTarget.EspIdf

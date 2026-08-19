@@ -348,8 +348,8 @@ internal sealed class CompilationModel
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
                     ValidateAttributes(constructor.Attributes, constructor, []);
                     if (isStatic)
-                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.5.", constructor.Source, constructor.Span);
-                    var parameters = DeclareParameters(constructor.Parameters, tree);
+                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.6.", constructor.Source, constructor.Span);
+                    var parameters = DeclareParameters(constructor.Parameters, tree, isExtern: false);
                     var symbol = new MethodSymbol
                     {
                         Name = constructor.Name,
@@ -361,6 +361,7 @@ internal sealed class CompilationModel
                         Parameters = parameters,
                         Body = constructor.Body,
                         IsConstructor = true,
+                        IsUnsafe = constructor.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ConstructorInitializer = constructor.Initializer,
                     };
                     AddMethod(type.Constructors, symbol);
@@ -369,10 +370,11 @@ internal sealed class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NoAlloc"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NoAlloc", "ReturnsBorrowed"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
+                    var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
@@ -390,7 +392,10 @@ internal sealed class CompilationModel
                     else if (method.Body is null)
                         Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
                     var returnType = ResolveType(method.ReturnType, tree);
-                    var methodParameters = DeclareParameters(method.Parameters, tree);
+                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null);
+                    if (returnsBorrowed is not null &&
+                        (returnsBorrowed.Arguments.Length != 0 || external is null || !returnType.IsReference))
+                        Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern method with a managed-reference return type.", returnsBorrowed.Source, returnsBorrowed.Span);
                     var symbol = new MethodSymbol
                     {
                         Name = method.Name,
@@ -403,6 +408,8 @@ internal sealed class CompilationModel
                         Body = method.Body,
                         IsEntryPoint = entry is not null,
                         IsNoAlloc = noAlloc is not null,
+                        IsUnsafe = method.Modifiers.Contains("unsafe", StringComparer.Ordinal),
+                        ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && returnType.IsReference,
                         ExternName = externalName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
                         IsVirtual = method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
@@ -419,7 +426,7 @@ internal sealed class CompilationModel
         }
     }
 
-    private ImmutableArray<ParameterSymbol> DeclareParameters(ImmutableArray<ParameterSyntax> parameters, SyntaxTree tree)
+    private ImmutableArray<ParameterSymbol> DeclareParameters(ImmutableArray<ParameterSyntax> parameters, SyntaxTree tree, bool isExtern)
     {
         var result = ImmutableArray.CreateBuilder<ParameterSymbol>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -427,7 +434,18 @@ internal sealed class CompilationModel
         {
             if (!names.Add(parameter.Name))
                 Diagnostics.Add("CT1102", $"Parameter '{parameter.Name}' is already declared.", parameter.Source, parameter.Span);
-            result.Add(new ParameterSymbol { Name = parameter.Name, Type = ResolveType(parameter.Type, tree), Syntax = parameter });
+            ValidateAttributes(parameter.Attributes, parameter, ["Retained"]);
+            var type = ResolveType(parameter.Type, tree);
+            var retained = FindAttribute(parameter.Attributes, "Retained");
+            if (retained is not null && (retained.Arguments.Length != 0 || !isExtern || !type.IsReference))
+                Diagnostics.Add("CT1234", "Retained accepts no arguments and is valid only on a managed-reference parameter of an extern method.", retained.Source, retained.Span);
+            result.Add(new ParameterSymbol
+            {
+                Name = parameter.Name,
+                Type = type,
+                Syntax = parameter,
+                IsRetained = retained is not null && retained.Arguments.Length == 0 && isExtern && type.IsReference,
+            });
         }
         return result.ToImmutable();
     }
@@ -449,7 +467,7 @@ internal sealed class CompilationModel
             if (member.Value is LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken } && numeric.FloatingPoint is null && numeric.Integer >= long.MinValue && numeric.Integer <= long.MaxValue)
                 value = (long)numeric.Integer;
             else if (member.Value is not null)
-                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.5.", member.Source, member.Value.Span);
+                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.6.", member.Source, member.Value.Span);
             if (!FitsEnumValue(value, underlying))
                 Diagnostics.Add("CT1215", $"Enum value {value} does not fit underlying type '{underlying.DisplayName}'.", member.Source, member.Span);
             type.EnumValues.Add(new EnumValueSymbol(member.Name, value, member));
@@ -569,7 +587,7 @@ internal sealed class CompilationModel
     {
         var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)
         {
-            "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
+            "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_memory_retain", "ct_memory_release", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
             "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
             "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint",
@@ -581,6 +599,9 @@ internal sealed class CompilationModel
             "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals",
             "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",
             "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", "NAN", "INFINITY",
+            "ct_cleanup_record", "ct_cleanup_top", "ct_cleanup_push", "ct_cleanup_unwind_to", "ct_cleanup_disarm",
+            "ct_release_head", "ct_release_draining", "ct_retain_ref_value", "ct_drop_ref_value", "ct_drop_string",
+            "ct_memory_live_allocations", "ct_memory_live_objects",
             "ct_exception_frame", "ct_exception_top", "ct_current_exception", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
@@ -611,7 +632,7 @@ internal sealed class CompilationModel
             .ToArray();
         foreach (var method in externs.Where(method => !method.IsTrustedExtern))
         {
-            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!) || IsExceptionLoweringName(method.ExternName!))
+            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!) || IsExceptionLoweringName(method.ExternName!) || IsOwnershipLoweringName(method.ExternName!))
                 Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a compiler-owned or generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
         }
 
@@ -639,9 +660,19 @@ internal sealed class CompilationModel
         name.StartsWith("ct_after_finally_", StringComparison.Ordinal) ||
         name.StartsWith("ct_after_catch_", StringComparison.Ordinal);
 
+    private static bool IsOwnershipLoweringName(string name) =>
+        name.StartsWith("ct_drop_object_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_drop_array_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_drop_box_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_retain_value_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_drop_value_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_cleanup_", StringComparison.Ordinal);
+
     private static bool HaveSameAbiSignature(MethodSymbol left, MethodSymbol right) =>
         left.ReturnType == right.ReturnType &&
-        left.Parameters.Select(parameter => parameter.Type).SequenceEqual(right.Parameters.Select(parameter => parameter.Type));
+        left.ReturnsBorrowed == right.ReturnsBorrowed &&
+        left.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained))
+            .SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained)));
 
     private static bool FitsEnumValue(long value, CType underlying) => underlying.Kind switch
     {

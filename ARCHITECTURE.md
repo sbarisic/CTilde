@@ -33,7 +33,8 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `CompilationModel` owns namespaces, imports, declared symbols, types, overload signatures, attributes, and the bundled standard-library surface.
 - `MethodLowerer` currently combines name binding, access and conversion checks, overload resolution, flow analysis, and ordered C-fragment lowering.
 - The same pass tracks reachability, returns, loop and switch exits, definite assignment, and delayed read-only assignment.
-- Exception lowering owns automatic lexical handler frames, volatile durable method state, catch dispatch, rethrow, and pending finally/defer actions.
+- Ownership-aware lowering classifies values as non-owning, borrowed, owned, or immortal; emits strong-slot replacement, owned-result transfer, nested structure retain/drop helpers, and automatic cleanup records.
+- Exception lowering owns automatic lexical handler frames, volatile durable method state, catch dispatch, rethrow, pending finally/defer actions, and cleanup-stack boundaries.
 - `AllocationEffectRegistry` records direct allocation reasons and exact or virtual call edges during lowering, computes recursive effects to a fixed point, and verifies `[NoAlloc]` contracts with deterministic witnesses.
 - `TypedIrLowerer` currently classifies the rendered function lines into typed instruction categories. This is a transition adapter, not the final three-address IR design.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
@@ -173,11 +174,28 @@ Emission first lowers all bodies and initializers into memory. This discovers ev
 
 Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
 
+## Planned native interop layer
+
+The current ESP target uses handwritten fixed-width shims. The intended next layer keeps the compiler independent from ESP-IDF while reducing repetitive wrapper code:
+
+1. A binding manifest selects public component headers from the installed ESP-IDF project.
+2. A header-aware generator emits editor-visible C~ declarations and companion C adapters.
+3. The adapters include the real headers and perform designated initialization, default-macro expansion, static-inline or macro calls, and native error conversion.
+4. ESP-IDF compiles and links those adapters as ordinary component sources.
+
+This design follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Private and example-only headers remain outside generated bindings by default.
+
+The language-side ABI will add exact 64-bit and native-sized scalars, opaque handles, `ref`/`in`/`out`, scoped native strings, and explicit pointer-plus-length buffers before it attempts broad API coverage. Ownership metadata and `defer` will describe release obligations without making native resources managed objects.
+
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent managed method-and-target callables. Exported trampolines bridge the two and carry explicit user context, callback lifetime, task attachment, and exception-translation policy. FreeRTOS task entry and ISR entry remain distinct execution profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
+
 ## Runtime ownership
 
 The generated translation unit embeds a small runtime:
 
-- Zero-initialized program-lifetime allocation.
+- Zero-initialized allocation and target-aware deallocation.
+- Single-threaded, non-moving ARC with immortal static strings and an allocation-free iterative release queue.
+- Generated drop callbacks for classes, arrays, strings, boxes, and reference-bearing structures.
 - A common managed-object header, deterministic type descriptors, identity hashes, and typed virtual dispatch.
 - Checked reference casts, safe casts, type tests, boxing, and exact unboxing.
 - Array allocation and bounds checks.
@@ -186,14 +204,14 @@ The generated translation unit embeds a small runtime:
 - Two's-complement wrapping helpers for signed arithmetic.
 - Immutable UTF-8 strings and concatenation.
 - Console output and process exit.
-- A single-thread `setjmp` and `longjmp` handler stack for C~ exceptions.
+- A single-thread `setjmp` and `longjmp` handler stack plus automatic ownership cleanup stack for C~ exceptions.
 - One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
 
-Managed storage is not reclaimed before process exit. Exception/defer control state is stack-backed. C~ source has no `delete` operation.
+Managed storage is reclaimed when its reference count reaches zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed. C~ source has no `delete`, destructor, or finalizer operation.
 
 Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
 
-A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`. Strings, arrays, and boxes use the same header. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation.
+A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, identity hash, reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the normal cleanup stack.
 
 Unsafe pointers lower to native C pointers. Unsafe operations bypass managed null and bounds checks but remain statically typed.
 

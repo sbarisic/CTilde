@@ -9,7 +9,7 @@ From PowerShell:
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-`Program.ct` exercises construction, virtual dispatch, boxing, strings, exceptions, heap and stack diagnostics, FreeRTOS delay, and the onboard WS2812. The checked component manifest pins Espressif `led_strip` 3.0.3 and uses its non-DMA RMT backend. The permanent loop performs no C~ allocations.
+`Program.ct` exercises construction, virtual dispatch, boxing, strings, exceptions, ARC heap recovery, heap and stack diagnostics, FreeRTOS delay, and the onboard WS2812. The ARC test repeatedly creates and releases mixed linked objects, reference-bearing structures, arrays, boxes, and dynamic strings. Free heap must return to its baseline within 512 bytes. The checked component manifest pins Espressif `led_strip` 3.0.3 and uses its non-DMA RMT backend. The permanent loop performs no C~ allocations.
 
 To verify the fatal runtime boundary:
 
@@ -23,7 +23,7 @@ The monitor must show `CTILDE_ESP_FAILURE_TEST` followed by runtime code `CTN000
 
 An earlier 2026-08-18 run on an ESP32-D0WDQ6-V3 revision 3.1 at `COM4` established the managed-runtime, failure, heap, stack, and yielding-delay behavior. That firmware alternated ordinary GPIO2 commands, which did not constitute a visible blink test after the hardware was identified as T-CAN485: GPIO2 is the SD MISO signal and the onboard light is an addressable WS2812 on GPIO4.
 
-The corrected self-test reports the same managed markers followed by live resource measurements and an alternating LED command:
+The recorded 2026-08-18 pre-ARC self-test reported these managed markers followed by live resource measurements and an alternating LED command:
 
 ```text
 C~ ESP-IDF hardware test
@@ -41,4 +41,6 @@ ws2812: off
 
 The 2026-08-18 corrected run showed repeated 500 ms UART transitions without a watchdog reset, and the onboard RGB LED was confirmed to blink green in step with them. The failure image reported `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, called `abort()`, and rebooted with `SW_CPU_RESET`; `Program.ct` was then reflashed and its UART output rechecked as the final board state.
 
-The initial runtime uses program-lifetime allocation and one C~ execution task. The WS2812 API owns one native strip handle for firmware lifetime; identical configuration is idempotent and conflicting reconfiguration fails. Native callbacks, multiple C~ tasks or strips, interrupt execution, and automatic managed reclamation are not supported. Permanent loops must keep allocation bounded and call a yielding API such as `DelayMilliseconds`; a busy loop can trigger the ESP-IDF task watchdog.
+The draft 0.6 firmware now also requires `arc heap recovery: True` before `CTILDE_ESP_OK`. Both ESP cross-compilers and complete `esp32`/`esp32c3` firmware links pass. The revised ARC image has not yet been flashed for a new hardware measurement.
+
+Draft 0.6 uses single-threaded ARC; cycles leak and cleanup is not promised after fatal failures or reset. The WS2812 API owns one native strip handle for firmware lifetime; identical configuration is idempotent and conflicting reconfiguration fails. Native callbacks, multiple C~ tasks or strips, and interrupt execution are not supported. Permanent loops must keep live ownership bounded and call a yielding API such as `DelayMilliseconds`; a busy loop can trigger the ESP-IDF task watchdog.

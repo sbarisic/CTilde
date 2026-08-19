@@ -14,7 +14,10 @@ internal sealed class LoweredExpression
     public bool IsConstant { get; init; }
     public object? ConstantValue { get; init; }
     public bool IsBaseReceiver { get; init; }
+    public OwnershipKind Ownership { get; init; }
 }
+
+internal enum OwnershipKind { None, Borrowed, Owned, Immortal }
 
 internal sealed class LoweredLValue
 {
@@ -37,6 +40,10 @@ internal sealed class MethodLowerer
     private readonly bool _isGetter;
     private readonly string _temporaryPrefix;
     private readonly Stack<Dictionary<string, LocalSymbol>> _scopes = [];
+    private readonly Stack<string> _cleanupBoundaries = [];
+    private readonly Stack<string> _breakCleanupBoundaries = [];
+    private readonly Stack<string> _continueCleanupBoundaries = [];
+    private readonly HashSet<string> _cleanupRecords = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ParameterSymbol> _parameters;
     private readonly Dictionary<ParameterSymbol, string> _durableParameters = [];
     private readonly Dictionary<string, CType> _durableSlots = new(StringComparer.Ordinal);
@@ -59,6 +66,7 @@ internal sealed class MethodLowerer
     private int _repeatableLoopDepth;
     private int _tryId;
     private int _deferId;
+    private int _cleanupId;
     private readonly int _tryCount;
 
     public MethodLowerer(CEmitter emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "")
@@ -74,6 +82,7 @@ internal sealed class MethodLowerer
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
+        _cleanupBoundaries.Push("ct_cleanup_method");
         _tryCount = CountTryStatements(method.Body) + CountDeferStatements(method.Body);
         if (_tryCount != 0)
         {
@@ -90,6 +99,8 @@ internal sealed class MethodLowerer
             return EmitClassConstructorDefinition();
         var body = new CWriter();
         {
+            body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
+            body.WriteLine("(void)ct_cleanup_method;");
             EmitConstructorPrologue(body);
             EmitExceptionFrameStorage(body);
             EmitDurableParameterStorage(body);
@@ -110,10 +121,16 @@ internal sealed class MethodLowerer
             if (_method.IsConstructor)
             {
                 ValidateConstructorAssignments();
+                if (_method.ContainingType.Kind == DeclaredTypeKind.Struct && _method.ContainingType.Type.ContainsManagedReferences)
+                {
+                    body.WriteLine("ct_cleanup_disarm(&ct_cleanup_struct_constructor);");
+                    body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
+                }
                 body.WriteLine(_method.ContainingType.Kind == DeclaredTypeKind.Struct ? "return ct_value;" : "return ct_self;");
             }
             else if (_method.ReturnType == CType.Void && (_property is null || !_isGetter))
             {
+                body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
                 body.WriteLine("return;");
             }
         }
@@ -129,9 +146,15 @@ internal sealed class MethodLowerer
         using (writer.Block())
         {
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
+            writer.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
+            writer.WriteLine("(void)ct_cleanup_method;");
+            writer.WriteLine("ct_cleanup_record ct_cleanup_constructor = {0};");
             writer.WriteLine($"{typeName}* ct_self = ({typeName}*)ct_alloc(sizeof({typeName}), {_emitter.SourceArgument(source)});");
             writer.WriteLine($"ct_init_object(ct_self, &{CEmitter.DescriptorName(_method.ContainingType)});");
+            writer.WriteLine("ct_cleanup_push(&ct_cleanup_constructor, (void*)&ct_self, ct_drop_ref_value);");
             writer.WriteLine($"{CEmitter.ConstructorInitializerName(_method)}(ct_self{(parameterNames.Length == 0 ? string.Empty : ", " + string.Join(", ", parameterNames))});");
+            writer.WriteLine("ct_cleanup_disarm(&ct_cleanup_constructor);");
+            writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
             writer.WriteLine("return ct_self;");
         }
         writer.WriteLine();
@@ -139,6 +162,8 @@ internal sealed class MethodLowerer
             .Concat(_method.Parameters.Select(parameter => $"{_emitter.CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}"));
         var body = new CWriter();
         {
+            body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
+            body.WriteLine("(void)ct_cleanup_method;");
             body.WriteLine("(void)ct_self;");
             EmitExceptionFrameStorage(body);
             EmitDurableParameterStorage(body);
@@ -151,6 +176,7 @@ internal sealed class MethodLowerer
                 _ = EmitStatements(body, _method.Body.Statements);
             if (!delegatesToThis)
                 ValidateConstructorAssignments();
+            body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
             body.WriteLine("return;");
         }
         writer.WriteBlock(RenderFunction($"static void {CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})", body).TrimEnd().Split('\n'));
@@ -174,6 +200,8 @@ internal sealed class MethodLowerer
                 writer.WriteLine("ct_state = {0};");
                 writer.WriteLine("(void)ct_state;");
             }
+            foreach (var record in _cleanupRecords.Order(StringComparer.Ordinal))
+                writer.WriteLine($"ct_cleanup_record {record} = {{0}};");
             writer.WriteBlock(body.ToString().TrimEnd().Split('\n'));
         }
         writer.WriteLine();
@@ -181,6 +209,7 @@ internal sealed class MethodLowerer
     }
 
     private void RegisterDurableSlot(string name, CType type) => _durableSlots.TryAdd(name, type);
+    private void RegisterCleanupRecord(string name) => _cleanupRecords.Add(name);
     private static string Durable(string name) => $"ct_state.{name}";
 
     private bool EmitConstructorInitializer(CWriter writer)
@@ -199,6 +228,8 @@ internal sealed class MethodLowerer
         if (target is null)
             return syntax?.Kind == ConstructorInitializerKind.This;
         CheckAccess(target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
+        if (target.IsUnsafe)
+            RequireUnsafe(syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
         _method.ConstructorInitializerTarget = target;
         _emitter.AllocationEffects.RecordCall(_method, target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!, requiresContract: false);
         var lowered = LowerArguments(arguments, target.Parameters, argumentSyntax);
@@ -223,6 +254,9 @@ internal sealed class MethodLowerer
         {
             writer.WriteLine($"{typeName} ct_value = ({typeName}){{0}};");
             writer.WriteLine($"{typeName}* ct_self = &ct_value;");
+            writer.WriteLine("(void)ct_self;");
+            if (_method.ContainingType.Type.ContainsManagedReferences)
+                EmitActivateOwnedSlot(writer, _method.ContainingType.Type, "ct_value", "ct_cleanup_struct_constructor");
         }
         else
         {
@@ -237,9 +271,31 @@ internal sealed class MethodLowerer
         var field = _property!.BackingField!;
         var access = field.IsStatic ? field.CName : $"ct_self->{field.CName}";
         if (_isGetter)
-            writer.WriteLine($"return {access};");
+        {
+            if (field.Type.ContainsManagedReferences)
+            {
+                writer.WriteLine($"{_emitter.CTypeName(field.Type)} ct_result = {access};");
+                writer.WriteLine(_emitter.RetainValueStatement(field.Type, "&ct_result"));
+                writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
+                writer.WriteLine("return ct_result;");
+            }
+            else
+                writer.WriteLine($"return {access};");
+        }
         else
-            writer.WriteLine($"{access} = {NameMangler.Identifier("value")};");
+        {
+            var parameter = NameMangler.Identifier("value");
+            if (field.Type.ContainsManagedReferences)
+            {
+                writer.WriteLine($"{_emitter.CTypeName(field.Type)} ct_old = {access};");
+                writer.WriteLine($"{_emitter.CTypeName(field.Type)} ct_new = {parameter};");
+                writer.WriteLine(_emitter.RetainValueStatement(field.Type, "&ct_new"));
+                writer.WriteLine($"{access} = ct_new;");
+                writer.WriteLine(_emitter.DropValueStatement(field.Type, "&ct_old"));
+            }
+            else
+                writer.WriteLine($"{access} = {parameter};");
+        }
     }
 
     private void EmitInstanceFieldInitializers(CWriter writer)
@@ -250,7 +306,10 @@ internal sealed class MethodLowerer
         {
             var expression = Convert(LowerExpression(field.Initializer!), field.Type, field.Initializer!, false);
             EmitPrelude(writer, expression.Prelude);
-            writer.WriteLine($"ct_self->{field.CName} = {expression.Code};");
+            if (field.Type.ContainsManagedReferences)
+                EmitInitializeOwnedSlot(writer, field.Type, $"ct_self->{field.CName}", expression.Code);
+            else
+                writer.WriteLine($"ct_self->{field.CName} = {expression.Code};");
             _assignedFields.Add(field);
             _fieldAssignmentCounts[field] = 1;
         }
@@ -318,9 +377,9 @@ internal sealed class MethodLowerer
             case BlockStatementSyntax block:
                 using (writer.Block())
                 {
-                    PushScope();
+                    BeginScope(writer);
                     var flow = EmitStatements(writer, block.Statements);
-                    PopScope();
+                    EndScope(writer, flow.FallsThrough);
                     return flow;
                 }
             case EmptyStatementSyntax:
@@ -376,7 +435,14 @@ internal sealed class MethodLowerer
             case DeferStatementSyntax defer:
                 if (_deferredCalls.TryGetValue(defer, out var deferred))
                 {
-                    writer.WriteLine($"(void)({deferred.Code});");
+                    if (deferred.Type.ContainsManagedReferences)
+                    {
+                        var ignored = NewTemp();
+                        writer.WriteLine($"{_emitter.CTypeName(deferred.Type)} {ignored} = {deferred.Code};");
+                        writer.WriteLine(_emitter.DropValueStatement(deferred.Type, $"&{ignored}"));
+                    }
+                    else
+                        writer.WriteLine($"(void)({deferred.Code});");
                     return FlowResult.None;
                 }
                 Report("CT3111", "defer must be a direct member of a braced block.", defer);
@@ -425,6 +491,7 @@ internal sealed class MethodLowerer
             Report("CT2103", "var requires an initializer.", syntax);
         if (type.ContainsPointer)
             RequireUnsafe(syntax);
+        _emitter.RegisterType(type);
         if (syntax.IsConst && initializer is not null && !initializer.IsConstant)
             Report("CT2104", "A const initializer must be a compile-time constant.", syntax.Initializer!);
 
@@ -444,17 +511,23 @@ internal sealed class MethodLowerer
             IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = symbol;
-        if (initializer is not null)
-            EmitPrelude(writer, initializer.Prelude);
-        var qualifier = syntax.IsConst && !symbol.IsDurable ? "const " : string.Empty;
+        var qualifier = string.Empty;
         if (symbol.IsDurable)
         {
             RegisterDurableSlot(symbol.StorageName, type);
-            if (initializer is not null)
-                writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
         else
-            writer.WriteLine($"{qualifier}{_emitter.CTypeName(type)} {symbol.CName}{(initializer is null ? string.Empty : " = " + initializer.Code)};");
+            writer.WriteLine($"{qualifier}{_emitter.CTypeName(type)} {symbol.CName} = {_emitter.DefaultValue(type)};");
+        if (type.ContainsManagedReferences)
+            EmitActivateOwnedSlot(writer, type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
+        if (initializer is not null)
+        {
+            EmitPrelude(writer, initializer.Prelude);
+            if (type.ContainsManagedReferences)
+                EmitInitializeOwnedSlot(writer, type, symbol.CName, initializer.Code);
+            else
+                writer.WriteLine($"{symbol.CName} = {initializer.Code};");
+        }
         writer.WriteLine($"(void){symbol.CName};");
     }
 
@@ -492,15 +565,16 @@ internal sealed class MethodLowerer
             return EmitStatement(writer, statement);
         using (writer.Block())
         {
-            PushScope();
+            BeginScope(writer);
             var flow = EmitStatement(writer, statement);
-            PopScope();
+            EndScope(writer, flow.FallsThrough);
             return flow;
         }
     }
 
     private void EmitWhile(CWriter writer, WhileStatementSyntax syntax)
     {
+        var cleanup = EmitCleanupBoundary(writer, "while");
         var start = NewLabel("while_test");
         var @continue = NewLabel("while_continue");
         var @break = NewLabel("while_break");
@@ -511,20 +585,25 @@ internal sealed class MethodLowerer
         writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
         _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
         _repeatableLoopDepth--;
+        _continueCleanupBoundaries.Pop(); _breakCleanupBoundaries.Pop();
         _continueLabels.Pop(); _breakLabels.Pop();
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         RestoreAssignments(before);
     }
 
     private FlowResult EmitDo(CWriter writer, DoStatementSyntax syntax)
     {
+        var cleanup = EmitCleanupBoundary(writer, "do");
         var start = NewLabel("do_body");
         var @continue = NewLabel("do_continue");
         var @break = NewLabel("do_break");
@@ -534,6 +613,7 @@ internal sealed class MethodLowerer
         var continueStates = new List<AssignmentSnapshot>();
         _breakAssignmentStates.Push(breakStates); _continueAssignmentStates.Push(continueStates);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
         var canRepeat = syntax.Condition is not LiteralExpressionSyntax { LiteralKind: SyntaxKind.FalseKeyword };
         if (canRepeat)
             _repeatableLoopDepth++;
@@ -541,10 +621,12 @@ internal sealed class MethodLowerer
         if (canRepeat)
             _repeatableLoopDepth--;
         var bodyState = SnapshotAssignments();
+        _continueCleanupBoundaries.Pop(); _breakCleanupBoundaries.Pop();
         _continueLabels.Pop(); _breakLabels.Pop();
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var conditionStates = new List<AssignmentSnapshot>(continueStates);
         if (bodyFlow.FallsThrough)
             conditionStates.Add(bodyState);
@@ -559,6 +641,7 @@ internal sealed class MethodLowerer
         }
         writer.WriteLine($"goto {@break};");
         writer.WriteLine($"{@break}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var exits = new List<AssignmentSnapshot>(breakStates);
         if (conditionExit is not null)
             exits.Add(conditionExit);
@@ -571,13 +654,14 @@ internal sealed class MethodLowerer
 
     private void EmitFor(CWriter writer, ForStatementSyntax syntax)
     {
-        PushScope();
+        BeginScope(writer);
         if (syntax.Initializer is not null)
             EmitStatement(writer, syntax.Initializer);
         var start = NewLabel("for_test");
         var @continue = NewLabel("for_continue");
         var @break = NewLabel("for_break");
         var before = SnapshotAssignments();
+        var cleanup = EmitCleanupBoundary(writer, "for");
         writer.WriteLine($"{start}:;");
         if (syntax.Condition is not null)
         {
@@ -587,13 +671,16 @@ internal sealed class MethodLowerer
         }
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
         _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
         _repeatableLoopDepth--;
+        _continueCleanupBoundaries.Pop(); _breakCleanupBoundaries.Pop();
         _continueLabels.Pop(); _breakLabels.Pop();
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         if (syntax.Iterator is not null)
         {
             var iterator = LowerExpression(syntax.Iterator);
@@ -603,16 +690,17 @@ internal sealed class MethodLowerer
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
         RestoreAssignments(before);
-        PopScope();
+        EndScope(writer, fallsThrough: true);
     }
 
     private void EmitForeach(CWriter writer, ForeachStatementSyntax syntax)
     {
-        PushScope();
+        BeginScope(writer);
         var collection = Materialize(LowerExpression(syntax.Collection), syntax.Collection);
         if (collection.Type.Kind != CTypeKind.Array)
             Report("CT2105", "foreach requires a one-dimensional array.", syntax.Collection);
         EmitPrelude(writer, collection.Prelude);
+        var cleanup = EmitCleanupBoundary(writer, "foreach");
         var elementType = collection.Type.ElementType ?? CType.Error;
         var declaredType = syntax.Type.Name == "var" ? elementType : _model.ResolveType(syntax.Type, TreeFor(syntax));
         if (!TypeFacts.CanImplicitlyConvert(elementType, declaredType))
@@ -640,23 +728,34 @@ internal sealed class MethodLowerer
         if (local.IsDurable)
         {
             RegisterDurableSlot(local.StorageName, declaredType);
-            writer.WriteLine($"{local.CName} = {collection.Code}->Data[{index}];");
         }
         else
-            writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {collection.Code}->Data[{index}];");
+            writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {_emitter.DefaultValue(declaredType)};");
+        if (declaredType.ContainsManagedReferences)
+        {
+            EmitActivateOwnedSlot(writer, declaredType, local.CName, $"ct_cleanup_local_{local.Id}");
+            EmitInitializeOwnedSlot(writer, declaredType, local.CName, $"{collection.Code}->Data[{index}]");
+        }
+        else
+            writer.WriteLine($"{local.CName} = {collection.Code}->Data[{index}];");
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
         _repeatableLoopDepth++;
         EmitEmbedded(writer, syntax.Body);
         _repeatableLoopDepth--;
+        _continueCleanupBoundaries.Pop(); _breakCleanupBoundaries.Pop();
         _continueLabels.Pop(); _breakLabels.Pop();
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         writer.WriteLine($"{index} = ct_i32_add({index}, 1);");
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
-        PopScope();
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        EndScope(writer, fallsThrough: true);
         RestoreAssignments(before);
     }
 
@@ -667,10 +766,12 @@ internal sealed class MethodLowerer
             Report("CT2107", "switch requires an integral or enum expression.", syntax.Expression);
         EmitPrelude(writer, value.Prelude);
         var @break = NewLabel("switch_break");
+        var cleanup = EmitCleanupBoundary(writer, "switch");
         var before = SnapshotAssignments();
         var breakStates = new List<AssignmentSnapshot>();
         _breakAssignmentStates.Push(breakStates);
         _breakLabels.Push(@break);
+        _breakCleanupBoundaries.Push(cleanup);
         var sectionFlows = new List<FlowResult>();
         var fallthroughStates = new List<AssignmentSnapshot>();
         var caseValues = new HashSet<string>(StringComparer.Ordinal);
@@ -703,10 +804,10 @@ internal sealed class MethodLowerer
                         writer.WriteLine($"case {code}:;");
                     }
                 }
-                PushScope();
+                BeginScope(writer);
                 var flow = EmitStatements(writer, section.Statements, allowDefer: false);
                 var sectionState = SnapshotAssignments();
-                PopScope();
+                EndScope(writer, flow.FallsThrough);
                 sectionFlows.Add(flow);
                 if (flow.FallsThrough)
                     fallthroughStates.Add(sectionState);
@@ -714,9 +815,11 @@ internal sealed class MethodLowerer
                     Report("CT3105", "A switch section must end with break, continue, or return.", section);
             }
         }
+        _breakCleanupBoundaries.Pop();
         _breakLabels.Pop();
         _breakAssignmentStates.Pop();
         writer.WriteLine($"{@break}:;");
+        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var switchExitStates = new List<AssignmentSnapshot>(breakStates);
         switchExitStates.AddRange(fallthroughStates);
         if (!hasDefault)
@@ -784,7 +887,7 @@ internal sealed class MethodLowerer
         }
         if (_method.IsConstructor)
         {
-            Report("CT3106", "A constructor cannot contain a return statement in draft 0.5.", syntax);
+            Report("CT3106", "A constructor cannot contain a return statement in draft 0.6.", syntax);
             return;
         }
         if (_method.ReturnType == CType.Void)
@@ -852,7 +955,12 @@ internal sealed class MethodLowerer
             _continueLabels.Count == 0 ? null : _continueLabels.Peek());
         _finallyContexts.Push(context);
 
+        var exceptionStateType = _model.Types["System.Object"].Type;
+        EmitActivateOwnedSlot(writer, exceptionStateType, Durable($"ct_ex_{id}"), $"ct_cleanup_exception_{id}");
+        if (!_method.IsConstructor && _method.ReturnType.ContainsManagedReferences)
+            EmitActivateOwnedSlot(writer, _method.ReturnType, Durable($"ct_er_{id}"), $"ct_cleanup_return_{id}");
         writer.WriteLine($"{frame}->Previous = ct_exception_top;");
+        writer.WriteLine($"{frame}->CleanupBoundary = ct_cleanup_top;");
         writer.WriteLine($"ct_exception_top = {frame};");
         _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
         writer.WriteLine($"if (setjmp(*{frame}->Target) == 0)");
@@ -872,7 +980,9 @@ internal sealed class MethodLowerer
         writer.WriteLine("else");
         using (writer.Block())
         {
-            writer.WriteLine($"{Durable($"ct_ex_{id}")} = ({_emitter.CTypeName(_model.Types["System.Object"].Type)})(void*)ct_current_exception;");
+            writer.WriteLine($"{CEmitter.ValueDropName(exceptionStateType)}((void*)(uintptr_t)&{Durable($"ct_ex_{id}")});");
+            writer.WriteLine($"{Durable($"ct_ex_{id}")} = ({_emitter.CTypeName(exceptionStateType)})(void*)ct_current_exception;");
+            writer.WriteLine("ct_current_exception = NULL;");
             writer.WriteLine($"ct_exception_top = {frame}->Previous;");
             writer.WriteLine($"{Durable($"ct_ep_{id}")} = 4;");
             writer.WriteLine($"goto {cleanup};");
@@ -943,6 +1053,7 @@ internal sealed class MethodLowerer
         var frame = $"ct_eh_{id}_catch";
         var done = NewLabel("after_catch");
         writer.WriteLine($"{frame}->Previous = ct_exception_top;");
+        writer.WriteLine($"{frame}->CleanupBoundary = ct_cleanup_top;");
         writer.WriteLine($"ct_exception_top = {frame};");
         _activeExceptionFrames.Add(new ActiveHandler(frame, _breakLabels.Count, _continueLabels.Count));
         writer.WriteLine($"if (setjmp(*{frame}->Target) == 0)");
@@ -964,7 +1075,11 @@ internal sealed class MethodLowerer
         using (writer.Block())
         {
             writer.WriteLine($"ct_object* ct_caught_{id} = ct_current_exception;");
+            writer.WriteLine("ct_current_exception = NULL;");
             writer.WriteLine($"(void)ct_caught_{id};");
+            var caughtRecord = $"ct_cleanup_caught_{id}";
+            RegisterCleanupRecord(caughtRecord);
+            writer.WriteLine($"ct_cleanup_push(&{caughtRecord}, (void*)&ct_caught_{id}, ct_drop_ref_value);");
             writer.WriteLine($"ct_exception_top = {frame}->Previous;");
             foreach (var boundCatch in catches)
             {
@@ -976,16 +1091,17 @@ internal sealed class MethodLowerer
                 using (writer.Block())
                 {
                     RestoreAssignments(before);
-                    PushScope();
+                    BeginScope(writer);
                     DeclareCatchLocal(writer, boundCatch, $"ct_caught_{id}");
                     _catchExceptions.Push($"ct_caught_{id}");
                     var catchFlow = EmitStatements(writer, boundCatch.Syntax.Body.Statements);
                     _catchExceptions.Pop();
-                    PopScope();
+                    EndScope(writer, catchFlow.FallsThrough);
                     catchExits |= catchFlow.Exits;
                     if (catchFlow.FallsThrough)
                     {
                         fallthroughStates.Add(SnapshotAssignments());
+                        writer.WriteLine($"ct_cleanup_unwind_to({frame}->CleanupBoundary);");
                         writer.WriteLine($"goto {done};");
                     }
                 }
@@ -1056,7 +1172,8 @@ internal sealed class MethodLowerer
         };
         _scopes.Peek()[symbol.Name] = symbol;
         RegisterDurableSlot(symbol.StorageName, symbol.Type);
-        writer.WriteLine($"{symbol.CName} = ({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode};");
+        EmitActivateOwnedSlot(writer, symbol.Type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
+        EmitInitializeOwnedSlot(writer, symbol.Type, symbol.CName, $"({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode}");
     }
 
     private void EmitReturnTransfer(CWriter writer, string? value)
@@ -1064,15 +1181,36 @@ internal sealed class MethodLowerer
         if (_finallyContexts.Count != 0)
         {
             var context = _finallyContexts.Peek();
-            EmitPopHandlersTo(writer, context.HandlerDepth);
             if (value is not null)
-                writer.WriteLine($"{Durable($"ct_er_{context.TryId}")} = {value};");
+            {
+                var pending = Durable($"ct_er_{context.TryId}");
+                if (_method.ReturnType.ContainsManagedReferences)
+                {
+                    var raw = NewTemp();
+                    writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)} {raw} = {value};");
+                    writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{raw}"));
+                    writer.WriteLine($"{CEmitter.ValueDropName(_method.ReturnType)}((void*)(uintptr_t)&{pending});");
+                    writer.WriteLine($"{pending} = {raw};");
+                }
+                else
+                    writer.WriteLine($"{pending} = {value};");
+            }
+            writer.WriteLine($"ct_cleanup_unwind_to(ct_eh_{context.TryId}_finally->CleanupBoundary);");
+            EmitPopHandlersTo(writer, context.HandlerDepth);
             writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = 1;");
             writer.WriteLine($"goto {context.CleanupLabel};");
             return;
         }
+        string? finalValue = value;
+        if (value is not null && _method.ReturnType.ContainsManagedReferences)
+        {
+            finalValue = NewTemp();
+            writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)} {finalValue} = {value};");
+            writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{finalValue}"));
+        }
+        writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
         EmitPopHandlersTo(writer, 0);
-        writer.WriteLine(value is null ? "return;" : $"return {value};");
+        writer.WriteLine(finalValue is null ? "return;" : $"return {finalValue};");
     }
 
     private void EmitBreakOrContinue(CWriter writer, bool isContinue)
@@ -1081,11 +1219,13 @@ internal sealed class MethodLowerer
         var context = _finallyContexts.FirstOrDefault(item => depth <= (isContinue ? item.ContinueDepth : item.BreakDepth));
         if (context is not null)
         {
+            writer.WriteLine($"ct_cleanup_unwind_to(ct_eh_{context.TryId}_finally->CleanupBoundary);");
             EmitPopHandlersTo(writer, context.HandlerDepth);
             writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = {(isContinue ? 3 : 2)};");
             writer.WriteLine($"goto {context.CleanupLabel};");
             return;
         }
+        writer.WriteLine($"ct_cleanup_unwind_to({(isContinue ? _continueCleanupBoundaries.Peek() : _breakCleanupBoundaries.Peek())});");
         EmitPopCrossedHandlers(writer, isContinue, depth);
         writer.WriteLine($"goto {(isContinue ? _continueLabels.Peek() : _breakLabels.Peek())};");
     }
@@ -1096,12 +1236,15 @@ internal sealed class MethodLowerer
             (isContinue ? item.ContinueTarget : item.BreakTarget) == target);
         if (context is not null)
         {
+            writer.WriteLine($"ct_cleanup_unwind_to(ct_eh_{context.TryId}_finally->CleanupBoundary);");
             EmitPopHandlersTo(writer, context.HandlerDepth);
             writer.WriteLine($"{Durable($"ct_ep_{context.TryId}")} = {(isContinue ? 3 : 2)};");
             writer.WriteLine($"goto {context.CleanupLabel};");
         }
         else
         {
+            var boundaries = isContinue ? _continueCleanupBoundaries : _breakCleanupBoundaries;
+            writer.WriteLine($"ct_cleanup_unwind_to({boundaries.Peek()});");
             EmitPopHandlersTo(writer, 0);
             writer.WriteLine($"goto {target};");
         }
@@ -1139,8 +1282,98 @@ internal sealed class MethodLowerer
             writer.WriteLine(line);
     }
 
-    private void PushScope() => _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
-    private void PopScope() => _scopes.Pop();
+    private void EmitActivateOwnedSlot(CWriter writer, CType type, string slot, string record)
+    {
+        RegisterCleanupRecord(record);
+        writer.WriteLine($"ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
+    }
+
+    private void EmitInitializeOwnedSlot(CWriter writer, CType type, string slot, string value)
+    {
+        var temporary = NewTemp();
+        writer.WriteLine($"{_emitter.CTypeName(type)} {temporary} = {value};");
+        writer.WriteLine(_emitter.RetainValueStatement(type, $"&{temporary}"));
+        writer.WriteLine($"{slot} = {temporary};");
+    }
+
+    private void AddStrongStore(List<string> prelude, LoweredExpression target, string value)
+    {
+        var type = target.Type;
+        var next = NewTemp();
+        prelude.Add($"{_emitter.CTypeName(type)} {next} = {value};");
+        if (target.LValue!.Property is not null)
+        {
+            prelude.Add(target.LValue.Store(next) + ";");
+            return;
+        }
+        prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
+        var old = NewTemp();
+        prelude.Add($"{_emitter.CTypeName(type)} {old} = {target.Code};");
+        prelude.Add(target.LValue.Store(next) + ";");
+        prelude.Add(_emitter.DropValueStatement(type, $"&{old}"));
+    }
+
+    private LoweredExpression OwnResult(CType type, string code, IEnumerable<string> sourcePrelude, bool borrowed = false)
+    {
+        if (!type.ContainsManagedReferences)
+            return new LoweredExpression { Type = type, Code = code, Prelude = [.. sourcePrelude] };
+        if (_method.Name == "<module_init>")
+            return new LoweredExpression { Type = type, Code = code, Prelude = [.. sourcePrelude], Ownership = borrowed ? OwnershipKind.Borrowed : OwnershipKind.Owned };
+        var prelude = new List<string>(sourcePrelude);
+        var raw = NewTemp();
+        var slotName = $"ct_owned_{_tempId++}";
+        var slot = Durable(slotName);
+        var record = $"ct_cleanup_{slotName}";
+        RegisterDurableSlot(slotName, type);
+        RegisterCleanupRecord(record);
+        prelude.Add($"{_emitter.CTypeName(type)} {raw} = {code};");
+        if (borrowed)
+            prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
+        prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
+        prelude.Add($"{slot} = {raw};");
+        return new LoweredExpression { Type = type, Code = slot, Prelude = prelude, Ownership = OwnershipKind.Owned };
+    }
+
+    private void AddCapturedSlot(List<string> prelude, CType type, string slotName, string value)
+    {
+        RegisterDurableSlot(slotName, type);
+        var slot = Durable(slotName);
+        if (!type.ContainsManagedReferences)
+        {
+            prelude.Add($"{slot} = {value};");
+            return;
+        }
+        var record = $"ct_cleanup_{slotName}";
+        var raw = NewTemp();
+        RegisterCleanupRecord(record);
+        prelude.Add($"{_emitter.CTypeName(type)} {raw} = {value};");
+        prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
+        prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
+        prelude.Add($"{slot} = {raw};");
+    }
+
+    private void BeginScope(CWriter writer)
+    {
+        var boundary = EmitCleanupBoundary(writer, "scope");
+        _cleanupBoundaries.Push(boundary);
+        _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
+    }
+
+    private string EmitCleanupBoundary(CWriter writer, string kind)
+    {
+        var boundary = $"ct_cleanup_{kind}_{_cleanupId++}";
+        writer.WriteLine($"ct_cleanup_record* {boundary} = ct_cleanup_top;");
+        writer.WriteLine($"(void){boundary};");
+        return boundary;
+    }
+
+    private void EndScope(CWriter writer, bool fallsThrough)
+    {
+        var boundary = _cleanupBoundaries.Pop();
+        if (fallsThrough)
+            writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
+        _scopes.Pop();
+    }
     private LocalSymbol? FindLocal(string name) => _scopes.Select(scope => scope.GetValueOrDefault(name)).FirstOrDefault(local => local is not null);
     private IEnumerable<LocalSymbol> ActiveLocals() => _scopes.SelectMany(scope => scope.Values).Distinct();
     private AssignmentSnapshot SnapshotAssignments() => new(
@@ -1185,8 +1418,8 @@ internal sealed class MethodLowerer
         {
             writer.WriteLine($"jmp_buf ct_ej_{index}_catch;");
             writer.WriteLine($"jmp_buf ct_ej_{index}_finally;");
-            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_catch = {{ &ct_ej_{index}_catch, NULL }};");
-            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_finally = {{ &ct_ej_{index}_finally, NULL }};");
+            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_catch = {{ &ct_ej_{index}_catch, NULL, NULL }};");
+            writer.WriteLine($"ct_exception_frame ct_ehs_{index}_finally = {{ &ct_ej_{index}_finally, NULL, NULL }};");
             writer.WriteLine($"ct_exception_frame* ct_eh_{index}_catch = &ct_ehs_{index}_catch;");
             writer.WriteLine($"ct_exception_frame* ct_eh_{index}_finally = &ct_ehs_{index}_finally;");
             RegisterDurableSlot($"ct_ep_{index}", CType.Int);
@@ -1386,7 +1619,7 @@ internal sealed class MethodLowerer
         if (syntax.LiteralKind == SyntaxKind.NullKeyword)
             return Constant(CType.Null, null, "NULL");
         if (syntax.LiteralKind == SyntaxKind.StringToken)
-            return Constant(CType.String, syntax.Value, _emitter.RegisterString((string)syntax.Value!));
+            return new LoweredExpression { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal };
         if (syntax.LiteralKind == SyntaxKind.CharacterToken)
             return Constant(CType.Char, syntax.Value, ((byte)syntax.Value!).ToString(CultureInfo.InvariantCulture));
         if (syntax.Value is NumericLiteralValue numeric)
@@ -1410,7 +1643,7 @@ internal sealed class MethodLowerer
                 var bounded = (uint)numeric.Integer;
                 return Constant(CType.Uint, bounded, $"UINT32_C({bounded.ToString(CultureInfo.InvariantCulture)})");
             }
-            Report("CT2112", "Integer literal does not fit any draft 0.5 integer type.", syntax);
+            Report("CT2112", "Integer literal does not fit any draft 0.6 integer type.", syntax);
             return Constant(CType.Int, 0, "0");
         }
         return ErrorExpression();
@@ -1598,6 +1831,8 @@ internal sealed class MethodLowerer
         if (property.Type.ContainsPointer)
             RequireUnsafe(syntax);
         CheckAccess(property, syntax);
+        if (property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal))
+            RequireUnsafe(syntax);
         CheckAccessibility(forWrite ? property.SetterAccessibility : property.GetterAccessibility, property, syntax);
         var prelude = new List<string>();
         string receiverArgument = string.Empty;
@@ -1630,7 +1865,7 @@ internal sealed class MethodLowerer
             : property.IsVirtual && !baseReceiver
                 ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(property)}({objectReceiver})"
                 : $"{NameMangler.Getter(property)}({typedReceiver})";
-        return new LoweredExpression
+        var result = new LoweredExpression
         {
             Type = property.Type,
             Code = getterCode,
@@ -1645,6 +1880,9 @@ internal sealed class MethodLowerer
                 IsBaseReceiver = baseReceiver,
             },
         };
+        return !forWrite && property.Type.ContainsManagedReferences
+            ? OwnResult(property.Type, getterCode, prelude)
+            : result;
     }
 
     private LoweredExpression LowerIndex(IndexExpressionSyntax syntax, bool forWrite)
@@ -1695,7 +1933,7 @@ internal sealed class MethodLowerer
             _emitter.AllocationEffects.RecordDirect(_method, syntax, "array construction");
             var length = Materialize(Convert(LowerExpression(syntax.ArrayLength), CType.Int, syntax.ArrayLength, false), syntax.ArrayLength);
             var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
-            return new LoweredExpression { Type = type, Code = code, Prelude = length.Prelude };
+            return OwnResult(type, code, length.Prelude);
         }
         if (type.Kind is not CTypeKind.Class and not CTypeKind.Struct)
         {
@@ -1707,11 +1945,14 @@ internal sealed class MethodLowerer
         if (constructor is null)
             return ErrorExpression(arguments.SelectMany(argument => argument.Prelude));
         CheckAccess(constructor, syntax);
+        if (constructor.IsUnsafe)
+            RequireUnsafe(syntax);
         _emitter.AllocationEffects.RecordCall(_method, constructor, syntax, requiresContract: false);
         if (type.Kind == CTypeKind.Class)
             _emitter.AllocationEffects.RecordDirect(_method, syntax, $"construction of class '{type.DisplayName}'");
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
-        return new LoweredExpression { Type = type, Code = $"{constructor.CName}({string.Join(", ", lowered.Codes)})", Prelude = lowered.Prelude };
+        var construction = $"{constructor.CName}({string.Join(", ", lowered.Codes)})";
+        return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude) : new LoweredExpression { Type = type, Code = construction, Prelude = lowered.Prelude };
     }
 
     private TypeSymbol? TryResolveTypeExpression(ExpressionSyntax expression)
@@ -1765,7 +2006,7 @@ internal sealed class MethodLowerer
         }
         else
         {
-            Report("CT2120", "Only methods can be called in draft 0.5.", syntax.Target);
+            Report("CT2120", "Only methods can be called in draft 0.6.", syntax.Target);
             return ErrorExpression();
         }
 
@@ -1795,6 +2036,8 @@ internal sealed class MethodLowerer
             return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
         if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer))
             RequireUnsafe(syntax);
+        if (selected.IsUnsafe)
+            RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
         _emitter.AllocationEffects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
@@ -1812,8 +2055,7 @@ internal sealed class MethodLowerer
             {
                 prelude.AddRange(receiver.Prelude);
                 var slot = $"ct_df_{_deferId}_receiver";
-                RegisterDurableSlot(slot, receiver.Type);
-                prelude.Add($"{Durable(slot)} = {receiver.Code};");
+                AddCapturedSlot(prelude, receiver.Type, slot, receiver.Code);
                 receiverCode = receiver.Type.Kind == CTypeKind.Struct
                     ? $"({_emitter.CTypeName(receiver.Type)}*)(void*)&{Durable(slot)}"
                     : $"({_emitter.CTypeName(receiver.Type)})ct_require_nonnull({Durable(slot)}, {_emitter.SourceArgument(syntax.Target)})";
@@ -1851,7 +2093,11 @@ internal sealed class MethodLowerer
         }
         if (captureForDefer)
             _deferId++;
-        return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
+        if (captureForDefer)
+            return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnType.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None };
+        return selected.ReturnType.ContainsManagedReferences
+            ? OwnResult(selected.ReturnType, call, prelude, selected.ReturnsBorrowed)
+            : new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
     }
 
     private static bool SupportsBuiltInToString(CType type) => type.Kind is
@@ -1871,8 +2117,7 @@ internal sealed class MethodLowerer
         {
             var prelude = new List<string>(receiver.Prelude);
             var slot = $"ct_df_{_deferId}_receiver";
-            RegisterDurableSlot(slot, receiver.Type);
-            prelude.Add($"{Durable(slot)} = {receiver.Code};");
+            AddCapturedSlot(prelude, receiver.Type, slot, receiver.Code);
             receiver = new LoweredExpression { Type = receiver.Type, Code = Durable(slot), Prelude = prelude };
             _deferId++;
         }
@@ -1881,9 +2126,9 @@ internal sealed class MethodLowerer
         if (receiver.Type.Kind == CTypeKind.String)
         {
             if (captureForDefer)
-                return new LoweredExpression { Type = CType.String, Code = $"(ct_string*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)})", Prelude = receiver.Prelude };
+                return new LoweredExpression { Type = CType.String, Code = $"ct_string_v_to_string((ct_object*)(void*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)}))", Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned };
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)});");
-            return new LoweredExpression { Type = CType.String, Code = receiver.Code, Prelude = receiver.Prelude };
+            return OwnResult(CType.String, "ct_string_v_to_string((ct_object*)(void*)" + receiver.Code + ")", receiver.Prelude);
         }
 
         var function = receiver.Type.Kind switch
@@ -1903,7 +2148,9 @@ internal sealed class MethodLowerer
         };
         var code = $"{function}({argument}, {_emitter.SourceArgument(member)})";
         _emitter.AllocationEffects.RecordDirect(_method, syntax, $"conversion of '{receiver.Type.DisplayName}' to string");
-        return new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude };
+        return captureForDefer
+            ? new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned }
+            : OwnResult(CType.String, code, receiver.Prelude);
     }
 
     private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, SyntaxNode syntax)
@@ -1979,6 +2226,8 @@ internal sealed class MethodLowerer
             }
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(converted.Type)} {temp} = {converted.Code};");
+            if (parameters[index].IsRetained)
+                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
             codes.Add(temp);
         }
         return (prelude, codes);
@@ -1993,9 +2242,10 @@ internal sealed class MethodLowerer
             var converted = Convert(arguments[index], parameters[index].Type, syntax[index], false);
             prelude.AddRange(converted.Prelude);
             var slot = $"ct_df_{_deferId}_arg_{index}";
-            RegisterDurableSlot(slot, converted.Type);
-            prelude.Add($"{Durable(slot)} = {converted.Code};");
-            codes.Add(Durable(slot));
+            AddCapturedSlot(prelude, converted.Type, slot, converted.Code);
+            codes.Add(parameters[index].IsRetained
+                ? $"(ct_retain((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
+                : Durable(slot));
         }
         return (prelude, codes);
     }
@@ -2170,7 +2420,7 @@ internal sealed class MethodLowerer
             right = Materialize(right, syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
             _emitter.AllocationEffects.RecordDirect(_method, syntax, "nonconstant string concatenation");
-            return new LoweredExpression { Type = CType.String, Code = $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", Prelude = prelude };
+            return OwnResult(CType.String, $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", prelude);
         }
 
         if (syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken)
@@ -2320,13 +2570,16 @@ internal sealed class MethodLowerer
             prelude.AddRange(value.Prelude);
             var temp = NewTemp();
             prelude.Add($"{_emitter.CTypeName(target.Type)} {temp} = {value.Code};");
-            prelude.Add(target.LValue.Store(temp) + ";");
+            if (target.Type.ContainsManagedReferences)
+                AddStrongStore(prelude, target, temp);
+            else
+                prelude.Add(target.LValue.Store(temp) + ";");
             MarkAssigned(target.LValue);
             return new LoweredExpression { Type = target.Type, Code = temp, Prelude = prelude };
         }
 
         if (!target.Type.IsNumeric)
-            Report("CT2133", "Compound assignment requires a numeric target in draft 0.5.", syntax.Left);
+            Report("CT2133", "Compound assignment requires a numeric target in draft 0.6.", syntax.Left);
         var old = NewTemp();
         prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
         var rawRight = LowerExpression(syntax.Right);
@@ -2442,6 +2695,7 @@ internal sealed class MethodLowerer
                 LValue = expression.LValue,
                 IsConstant = expression.IsConstant,
                 ConstantValue = expression.ConstantValue,
+                Ownership = expression.Ownership,
             };
         var sourceType = expression.Type;
         var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(sourceType, target) : TypeFacts.CanImplicitlyConvert(sourceType, target);
@@ -2460,7 +2714,7 @@ internal sealed class MethodLowerer
             _emitter.RegisterBox(sourceType);
             _emitter.AllocationEffects.RecordDirect(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
             var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
-            return new LoweredExpression { Type = target, Code = boxCode, Prelude = expression.Prelude };
+            return OwnResult(target, boxCode, expression.Prelude);
         }
         if (objectType is not null && sourceType == objectType && target != objectType && target.Kind is not CTypeKind.Class and not CTypeKind.String and not CTypeKind.Array)
         {
@@ -2468,7 +2722,7 @@ internal sealed class MethodLowerer
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(target);
             var unboxCode = $"{CEmitter.UnboxFunctionName(target)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
-            return new LoweredExpression { Type = target, Code = unboxCode, Prelude = expression.Prelude };
+            return target.ContainsManagedReferences ? OwnResult(target, unboxCode, expression.Prelude) : new LoweredExpression { Type = target, Code = unboxCode, Prelude = expression.Prelude };
         }
         if (explicitConversion && sourceType.IsReference && target.IsReference && sourceType != target &&
             !(sourceType.Kind == CTypeKind.Class && target.Kind == CTypeKind.Class && sourceType.Symbol?.DerivesFrom(target.Symbol!) == true))
@@ -2482,7 +2736,7 @@ internal sealed class MethodLowerer
             : sourceType.IsPointerLike || target.IsPointerLike
                 ? $"({_emitter.CTypeName(target)})(void*)({expression.Code})"
                 : $"({_emitter.CTypeName(target)})({expression.Code})";
-        return new LoweredExpression { Type = target, Code = code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue };
+        return new LoweredExpression { Type = target, Code = code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue, Ownership = expression.Ownership };
     }
 
     private LoweredExpression RequireBoolean(LoweredExpression expression, SyntaxNode syntax)

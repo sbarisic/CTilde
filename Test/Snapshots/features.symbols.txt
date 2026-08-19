@@ -1,5 +1,5 @@
 typedef struct ct_type_descriptor ct_type_descriptor;
-struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; };
+struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); };
 typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
 typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
 typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
@@ -8,6 +8,7 @@ typedef struct ct_t_6_System_11_Environment ct_t_6_System_11_Environment;
 typedef struct ct_t_6_System_9_Exception ct_t_6_System_9_Exception;
 typedef struct ct_t_6_System_6_Object ct_t_6_System_6_Object;
 typedef struct ct_t_6_System_13_ObjectRuntime ct_t_6_System_13_ObjectRuntime;
+typedef struct ct_t_14_System_2ERuntime_6_Memory ct_t_14_System_2ERuntime_6_Memory;
 typedef struct ct_a_i32 ct_a_i32;
 typedef uint8_t ct_t_8_Examples_9_Direction;
 struct ct_t_6_System_6_Object
@@ -18,6 +19,7 @@ struct ct_t_6_System_7_Console
 struct ct_t_6_System_11_Environment
 struct ct_t_6_System_9_Exception
 struct ct_t_6_System_13_ObjectRuntime
+struct ct_t_14_System_2ERuntime_6_Memory
 struct ct_a_i32 { ct_object Object; int32_t Length; int32_t* Data; };
 static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue);
 static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self);

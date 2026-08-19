@@ -4,10 +4,10 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.5 has one compiler path:
+C~ draft 0.6 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> combined binding, flow, and allocation effects -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> combined binding, flow, allocation effects, and ARC ownership lowering -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 63 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 69 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -105,8 +105,9 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
 | `[Extern]` | Implemented | Reserved-name, collision, alias, ABI, and prototype tests |
+| `[Retained]` and `[ReturnsBorrowed]` | Implemented | Target, argument, native transfer, and borrowed-result tests |
 | `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
-| Bundled `System.Object`, `System.Console`, and `System.Environment` sources | Implemented | Embedded-source and native output tests |
+| Bundled `System.Object`, `System.Console`, `System.Environment`, and `System.Runtime.Memory` sources | Implemented | Embedded-source and native output tests |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |
 
@@ -142,16 +143,17 @@ The executable test project checks:
 - Handler cleanup on normal completion, return, loop transfer, catch, rethrow, and finally paths.
 - Stack-backed exception and defer state with no control-flow `ct_alloc` calls.
 - `[NoAlloc]` direct allocation categories, recursive inference, transitive witnesses, and trusted boundary contracts.
+- ARC aliases, self-assignment, strong fields and array slots, nested structures, boxes, owned returns, constructor rollback, exception cleanup, native ownership transfer, balanced unsafe counts, cycle leakage, and a 10,000-object non-recursive destruction chain.
 
 The full examples in [examples/Features.ct](examples/Features.ct), [examples/ObjectModel.ct](examples/ObjectModel.ct), and [examples/Exceptions.ct](examples/Exceptions.ct) are part of the native and ABI checks.
 
 ## Runtime status
 
-Managed objects currently use program-lifetime allocation. Exception frames, pending cleanup actions, durable locals, and defer captures use automatic method storage and do not consume the managed heap.
+Managed objects use single-threaded, non-moving automatic reference counting. Classes, arrays, dynamic strings, boxes, and nested reference-bearing structures release deterministically at the last owned reference. Static strings are immortal; static fields live until termination; cycles intentionally leak. Generated class, array, string, box, and structure drop helpers use an allocation-free iterative release queue, so cascading destruction does not recurse on the C stack.
 
 The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
 
-Exception handlers use one process-global `setjmp` and `longjmp` stack plus one current-exception pointer. The implementation is single-threaded. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate.
+Exception handlers use one process-global `setjmp` and `longjmp` stack, one owning current-exception pointer, and one automatic cleanup-record stack. The implementation is single-threaded. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate. Handler frames record cleanup boundaries so throwing releases all exited owning slots before `longjmp`.
 
 The C ABI uses native target-width pointers. The reviewed native run used a 64-bit MSVC target.
 
@@ -159,7 +161,7 @@ The C ABI uses native target-width pointers. The reviewed native run used a 64-b
 
 The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
 
-The draft 0.5 exception surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
+The draft 0.6 exception and ARC surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
 
 ## Language server and VS Code
 
@@ -190,15 +192,22 @@ The corrected self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4
 
 The separate failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `SW_CPU_RESET`. The WS2812 self-test image was reflashed and verified by UART as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
 
+The draft 0.6 ESP acceptance source now repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, and complete `esp32` and `esp32c3` firmware links pass. The revised ARC image has not yet been flashed, so the hardware heap-recovery marker remains to be measured on-device.
+
 ## Deliberately deferred
 
-These features are outside draft 0.5:
+These features are outside draft 0.6:
 
 - Interfaces and abstract types.
 - Generics.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
 - Exceptions across native boundaries and thread-safe handler state.
-- Delegates, lambdas, and function types.
+- Unsafe unmanaged function pointers.
+- Delegates, lambdas, exported methods, callback trampolines, and callback lifetime management.
+- Native-sized and 64-bit integers, opaque native handles, native strings and buffers, and `ref`/`in`/`out` ABI parameters.
+- Header-driven ESP-IDF bindings for configuration structures, constants, macros, and static-inline functions.
+- Typed `esp_err_t` results and native resource ownership diagnostics.
+- FreeRTOS task attachment, `volatile`, atomics, and compiler-checked ISR or IRAM execution profiles.
 - Iterators and yield statements.
 - Pattern matching.
 - Nullable reference analysis.
@@ -207,13 +216,12 @@ These features are outside draft 0.5:
 - Named, optional, `ref`, `in`, `out`, and parameter-array arguments.
 - Multidimensional and jagged arrays.
 - String interpolation and raw or verbatim strings.
-- Finalizers and automatic disposal.
-- Garbage collection before process exit.
+- Weak references, cycle collection, finalizers, and automatic disposal.
 - Exact-source compilation of the current C# compiler.
 
 ## Release gate
 
-A draft 0.5 release requires:
+A draft 0.6 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -223,4 +231,4 @@ A draft 0.5 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.5 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.
+Draft 0.6 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.

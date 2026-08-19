@@ -101,6 +101,10 @@ public sealed partial class LanguageServiceSnapshot
                         Add(result, parameterToken.Span, LanguageSemanticTokenKind.Parameter, DeclarationModifier(parameter.Source.FilePath));
             }
 
+            foreach (var parameter in declaration.DelegateParameters)
+                if (FindDeclarationToken(tree, parameter, parameter.Name) is { } delegateParameterToken)
+                    Add(result, delegateParameterToken.Span, LanguageSemanticTokenKind.Parameter, DeclarationModifier(parameter.Source.FilePath));
+
             foreach (var enumMember in declaration.EnumMembers)
                 if (FindDeclarationToken(tree, enumMember, enumMember.Name) is { } enumToken)
                     Add(result, enumToken.Span, LanguageSemanticTokenKind.EnumMember,

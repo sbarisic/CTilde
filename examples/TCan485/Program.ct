@@ -3,6 +3,14 @@ using Esp.Idf;
 
 namespace Examples.TCan485;
 
+public delegate int ValueReader();
+
+public static class NativeCallback
+{
+    [Extern("ct_esp_invoke_i64")]
+    public static unsafe long Invoke(delegate* unmanaged<long, long> callback, long value);
+}
+
 public class Probe
 {
     public virtual int Value()
@@ -57,14 +65,37 @@ public static class Program
         string dynamicText = "arc " + head.Text;
     }
 
-    [EntryPoint]
-    public static void Main()
+    private static long DoubleLong(long value)
+    {
+        return value * 2L;
+    }
+
+    private static void RunManagedSelfTests()
     {
         Console.WriteLine("C~ ESP-IDF hardware test");
 
         Probe probe = new DerivedProbe();
         Console.Write("virtual: ");
         Console.WriteLine(probe.Value());
+
+        ValueReader reader = probe.Value;
+        Console.Write("delegate: ");
+        Console.WriteLine(reader());
+
+        unsafe
+        {
+            delegate* unmanaged<long, long> callback = &DoubleLong;
+            Console.Write("function pointer: ");
+            Console.WriteLine(NativeCallback.Invoke(callback, 21L));
+        }
+
+        long timerStart = EspTimer.GetTimeMicroseconds();
+        FreeRtos.DelayMilliseconds(1u);
+        long timerEnd = EspTimer.GetTimeMicroseconds();
+        if (timerEnd > timerStart)
+            Console.WriteLine("timer64: ok");
+        else
+            Console.WriteLine("TIMER64_FAILED");
 
         object boxed = 7;
         Console.Write("boxed: ");
@@ -96,12 +127,18 @@ public static class Program
             int[] failure = null;
             failure[0] = 1;
         }
+    }
 
+    [EntryPoint]
+    public static void Main()
+    {
         if (!Ws2812.Configure(Ws2812Pin, 1u) || !Ws2812.Clear())
         {
             Console.WriteLine("WS2812_CONFIG_FAILED");
             return;
         }
+
+        RunManagedSelfTests();
 
         Console.Write("free heap: ");
         Console.WriteLine(EspSystem.GetFreeHeapSize());

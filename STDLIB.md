@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.6. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.7. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 ## Object
 
@@ -61,6 +61,8 @@ public static class Console
     public static void Write(char value);
     public static void Write(int value);
     public static void Write(uint value);
+    public static void Write(long value);
+    public static void Write(ulong value);
     public static void Write(float value);
     public static void Write(bool value);
     public static void Write(object value);
@@ -70,6 +72,8 @@ public static class Console
     public static void WriteLine(char value);
     public static void WriteLine(int value);
     public static void WriteLine(uint value);
+    public static void WriteLine(long value);
+    public static void WriteLine(ulong value);
     public static void WriteLine(float value);
     public static void WriteLine(bool value);
     public static void WriteLine(object value);
@@ -133,6 +137,12 @@ public static class EspSystem
     public static uint GetMinimumFreeHeapSize();
 }
 
+public static class EspTimer
+{
+    [NoAlloc]
+    public static long GetTimeMicroseconds();
+}
+
 public static class Gpio
 {
     public static bool ConfigureInput(int pin);
@@ -150,7 +160,7 @@ public static class Ws2812
 }
 ```
 
-Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. GPIO configuration and writes return `false` when ESP-IDF rejects the pin or operation. `Read` requires a valid pin that the program configured first.
+Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. `EspTimer.GetTimeMicroseconds()` returns the signed 64-bit monotonic time since boot through `esp_timer_get_time()` and does not allocate. GPIO configuration and writes return `false` when ESP-IDF rejects the pin or operation. `Read` requires a valid pin that the program configured first.
 
 `Ws2812` owns one firmware-lifetime RMT strip. The first successful `Configure` fixes its output pin and positive LED count; the same configuration is idempotent, while a different configuration returns `false`. `SetPixel` accepts indexes below that count and RGB components from 0 through 255, updates the native pixel buffer, and requires `Refresh` to transmit it. `Clear` turns off every pixel immediately. All methods return `false` when the strip is unavailable or ESP-IDF rejects an operation.
 
@@ -162,8 +172,8 @@ The following built-in values provide an intrinsic, zero-argument `ToString()` m
 
 | Receiver | Result |
 | --- | --- |
-| `byte`, `ushort`, `uint` | Unsigned decimal text |
-| `sbyte`, `short`, `int` | Signed decimal text |
+| `byte`, `ushort`, `uint`, `ulong` | Unsigned decimal text |
+| `sbyte`, `short`, `int`, `long` | Signed decimal text |
 | `float` | Nine-significant-digit binary32 text |
 | `bool` | `True` or `False` |
 | `char` | A one-code-unit string |
@@ -199,9 +209,9 @@ The GNU C23 runtime is part of each generated translation unit. Managed allocati
 
 Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
 
-An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
+An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.6.
+Other runtime failures remain fatal and are not catchable in draft 0.7.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
@@ -209,4 +219,4 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
 
-ESP-IDF interop can add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 and buffer views, and release operations designed for `defer`. These library types depend on planned compiler support for 64-bit and native-sized scalars, `ref`/`in`/`out`, exports, unmanaged function pointers, delegates, callback trampolines, and task-safe runtime entry. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.
+ESP-IDF interop can add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 and buffer views, and release operations designed for `defer`. These library types still depend on native-sized scalars, `ref`/`in`/`out`, exports, retained-callback lifetime rules, and task-safe runtime entry. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

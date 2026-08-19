@@ -2,6 +2,7 @@
 
 #include "driver/gpio.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_strip.h"
@@ -49,6 +50,16 @@ uint32_t ct_esp_free_heap_size(void)
 uint32_t ct_esp_minimum_free_heap_size(void)
 {
     return esp_get_minimum_free_heap_size();
+}
+
+int64_t ct_esp_timer_get_time_us(void)
+{
+    return esp_timer_get_time();
+}
+
+int64_t ct_esp_invoke_i64(int64_t (*callback)(int64_t), int64_t value)
+{
+    return callback(value);
 }
 
 bool ct_esp_gpio_configure_input(int32_t pin)

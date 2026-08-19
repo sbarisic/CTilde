@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.6. It includes deterministic automatic reference counting, unchecked exceptions, `finally` and `defer` cleanup, and compiler-verified `[NoAlloc]` contracts. It does not require a CLR or C# runtime.
+The current language is draft 0.7. It includes exact-width 64-bit integers, deterministic automatic reference counting, named single-cast delegates, unsafe unmanaged function pointers, same-task synchronous native callbacks, unchecked exceptions, `finally` and `defer` cleanup, and compiler-verified `[NoAlloc]` contracts. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -87,7 +87,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface. [examples/ObjectModel.ct](examples/ObjectModel.ct) covers inheritance, virtual dispatch, constructor chaining, casts, and boxing. [examples/Exceptions.ct](examples/Exceptions.ct) covers typed catch and finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer` capture and `[NoAlloc]` allocation rules.
+See [examples/Features.ct](examples/Features.ct) for the general language surface, including `long`, `ulong`, delegates, and unmanaged function pointers. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, callbacks, and `[NoAlloc]` rules.
 
 ## Public compiler API
 
@@ -135,7 +135,7 @@ cd .\examples\TCan485
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and an object/exception self-test. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
+The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, a 64-bit monotonic timer, a same-task callback fixture, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and managed object/delegate/exception/ARC self-tests. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
 
 ## Projects
 
@@ -145,7 +145,7 @@ The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, UART0 conf
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.6 programs |
+| `examples` | Checked draft 0.7 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -171,7 +171,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.6 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.7 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

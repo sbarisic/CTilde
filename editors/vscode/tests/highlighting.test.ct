@@ -1,4 +1,4 @@
-// SYNTAX TEST "source.ctilde" "C~ draft 0.6 highlighting"
+// SYNTAX TEST "source.ctilde" "C~ draft 0.7 highlighting"
 
 using System;
 // <--- keyword.control.import.ctilde

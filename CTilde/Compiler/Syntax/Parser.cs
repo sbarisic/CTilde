@@ -90,14 +90,39 @@ internal sealed class Parser
             var modifiers = ParseModifiers();
             if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.EnumKeyword)
                 types.Add(ParseTypeDeclaration(attributes, modifiers));
+            else if (Current.Kind == SyntaxKind.DelegateKeyword)
+                types.Add(ParseDelegateDeclaration(attributes, modifiers));
             else
             {
-                Report("CT0102", "Expected a class, structure, or enumeration declaration.", Current);
-                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, terminator);
+                Report("CT0102", "Expected a class, structure, enumeration, or delegate declaration.", Current);
+                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, terminator);
             }
             if (_position == before)
                 SkipToken();
         }
+    }
+
+    private TypeDeclarationSyntax ParseDelegateDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)
+    {
+        var start = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
+        Match(SyntaxKind.DelegateKeyword);
+        var returnType = ParseType();
+        var name = Match(SyntaxKind.IdentifierToken);
+        var parameters = ParseParameters();
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new TypeDeclarationSyntax(
+            _source,
+            TextSpan.FromBounds(start, end),
+            TypeDeclarationKind.Delegate,
+            name.Text,
+            modifiers,
+            attributes,
+            null,
+            [],
+            null,
+            [],
+            returnType,
+            parameters);
     }
 
     private TypeDeclarationSyntax ParseTypeDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)
@@ -138,7 +163,7 @@ internal sealed class Parser
                 SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
-        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable());
+        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, []);
     }
 
     private EnumMemberSyntax ParseEnumMember()
@@ -650,7 +675,7 @@ internal sealed class Parser
                 Report("CT0105", "Expected an expression.", token);
                 if (token.Kind != SyntaxKind.EndOfFileToken)
                     SkipToken();
-                return new LiteralExpressionSyntax(_source, token.Span, new NumericLiteralValue(0, false, null), SyntaxKind.NumberToken);
+                return new LiteralExpressionSyntax(_source, token.Span, new NumericLiteralValue(0, IntegerLiteralSuffix.None, null), SyntaxKind.NumberToken);
         }
     }
 
@@ -712,6 +737,8 @@ internal sealed class Parser
     private TypeSyntax ParseType(bool allowVar = false)
     {
         var start = Current.Span.Start;
+        if (Current.Kind == SyntaxKind.DelegateKeyword)
+            return ParseFunctionPointerType();
         string name;
         if (IsBuiltInType(Current.Kind) || allowVar && Current.Kind == SyntaxKind.VarKeyword)
             name = NextToken().Text;
@@ -733,6 +760,27 @@ internal sealed class Parser
         return new TypeSyntax(_source, TextSpan.FromBounds(start, Peek(-1).Span.End), name, pointerDepth, isArray);
     }
 
+    private TypeSyntax ParseFunctionPointerType()
+    {
+        var start = Match(SyntaxKind.DelegateKeyword).Span.Start;
+        Match(SyntaxKind.StarToken);
+        Match(SyntaxKind.UnmanagedKeyword);
+        Match(SyntaxKind.LessToken);
+        var elements = ImmutableArray.CreateBuilder<TypeSyntax>();
+        while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
+        {
+            elements.Add(ParseType());
+            if (Current.Kind != SyntaxKind.CommaToken)
+                break;
+            NextToken();
+        }
+        var close = Match(SyntaxKind.GreaterToken);
+        if (elements.Count == 0)
+            Report("CT0110", "A function-pointer signature requires a return type.", close);
+        var signature = new FunctionPointerSignatureSyntax(_source, TextSpan.FromBounds(start, close.Span.End), elements.ToImmutable());
+        return new TypeSyntax(_source, signature.Span, "delegate*", FunctionPointer: signature);
+    }
+
     private string ParseQualifiedName()
     {
         var first = Match(SyntaxKind.IdentifierToken);
@@ -752,20 +800,8 @@ internal sealed class Parser
             index++;
         if (index >= _tokens.Length)
             return false;
-        if (IsBuiltInType(_tokens[index].Kind) || _tokens[index].Kind == SyntaxKind.VarKeyword)
-            index++;
-        else if (_tokens[index].Kind == SyntaxKind.IdentifierToken)
-        {
-            index++;
-            while (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.DotToken && _tokens[index + 1].Kind == SyntaxKind.IdentifierToken)
-                index += 2;
-        }
-        else
+        if (!ScanType(ref index, allowVar: true))
             return false;
-        while (index < _tokens.Length && _tokens[index].Kind == SyntaxKind.StarToken)
-            index++;
-        if (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.OpenBracketToken && _tokens[index + 1].Kind == SyntaxKind.CloseBracketToken)
-            index += 2;
         return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.IdentifierToken;
     }
 
@@ -774,7 +810,33 @@ internal sealed class Parser
         var index = _position + 1;
         if (index >= _tokens.Length)
             return false;
-        if (IsBuiltInType(_tokens[index].Kind))
+        if (!ScanType(ref index, allowVar: false))
+            return false;
+        return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.CloseParenToken;
+    }
+
+    private bool ScanType(ref int index, bool allowVar)
+    {
+        if (index >= _tokens.Length)
+            return false;
+        if (_tokens[index].Kind == SyntaxKind.DelegateKeyword)
+        {
+            if (index + 3 >= _tokens.Length || _tokens[index + 1].Kind != SyntaxKind.StarToken ||
+                _tokens[index + 2].Kind != SyntaxKind.UnmanagedKeyword || _tokens[index + 3].Kind != SyntaxKind.LessToken)
+                return false;
+            index += 4;
+            var depth = 1;
+            while (index < _tokens.Length && depth != 0)
+            {
+                if (_tokens[index].Kind == SyntaxKind.LessToken)
+                    depth++;
+                else if (_tokens[index].Kind == SyntaxKind.GreaterToken)
+                    depth--;
+                index++;
+            }
+            return depth == 0;
+        }
+        if (IsBuiltInType(_tokens[index].Kind) || allowVar && _tokens[index].Kind == SyntaxKind.VarKeyword)
             index++;
         else if (_tokens[index].Kind == SyntaxKind.IdentifierToken)
         {
@@ -788,10 +850,10 @@ internal sealed class Parser
             index++;
         if (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.OpenBracketToken && _tokens[index + 1].Kind == SyntaxKind.CloseBracketToken)
             index += 2;
-        return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.CloseParenToken;
+        return true;
     }
 
-    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
+    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.LongKeyword or SyntaxKind.UlongKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
     private static bool IsAssignment(SyntaxKind kind) => kind is SyntaxKind.EqualsToken or SyntaxKind.PlusEqualsToken or SyntaxKind.MinusEqualsToken or SyntaxKind.StarEqualsToken or SyntaxKind.SlashEqualsToken or SyntaxKind.PercentEqualsToken;
     private static int GetUnaryPrecedence(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.BangToken or SyntaxKind.TildeToken or SyntaxKind.PlusPlusToken or SyntaxKind.MinusMinusToken or SyntaxKind.StarToken or SyntaxKind.AmpersandToken ? 12 : 0;
     private static int GetBinaryPrecedence(SyntaxKind kind) => kind switch

@@ -30,6 +30,13 @@ public static class EspSystem
     public static uint GetMinimumFreeHeapSize();
 }
 
+public static class EspTimer
+{
+    [Extern("ct_esp_timer_get_time_us")]
+    [NoAlloc]
+    public static long GetTimeMicroseconds();
+}
+
 public static class Gpio
 {
     [Extern("ct_esp_gpio_configure_input")]

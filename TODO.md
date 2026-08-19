@@ -17,7 +17,7 @@
 
 ## Compiler architecture completion
 
-Draft 0.6 exception and ARC behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
+Draft 0.7 exception and ARC behavior is implemented, but the body pipeline remains transitional. Complete these tasks before a release:
 
 1. Bind method, accessor, constructor, and initializer bodies into immutable bound nodes.
 2. Move lookup, access checks, overload resolution, conversions, constants, and flow diagnostics out of `MethodLowerer`.
@@ -58,7 +58,7 @@ These limits remain:
 - `defer` provides deterministic block cleanup without heap registration.
 - `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
-The draft 0.6 object, ARC, and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
+The draft 0.7 object, ARC, and exception runtime is complete at the language-behavior level. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when ESP work changes the runtime and emitter files.
 
 ### Design rules
 
@@ -157,7 +157,7 @@ A microcontroller firmware image has no portable process exit code. The compiler
 - [x] Document deterministic reclamation and the cycle-leak limitation.
 - [x] Add `CT_MEMORY_DIAGNOSTICS`-guarded live allocation and object counters.
 - [x] Compile and link the ARC heap-recovery source for both ESP architectures.
-- [ ] Flash the draft 0.6 image and verify the ARC heap-recovery marker on hardware.
+- [ ] Flash the draft 0.7 image and verify the ARC heap-recovery marker on hardware.
 
 Permanent loops can allocate temporary managed values when their ownership does not escape an iteration. Programs must still bound live ownership and avoid accumulating cycles. Boxing is an allocation operation.
 
@@ -245,7 +245,7 @@ The first target can use synchronous APIs from the C~ entry task. Full ESP-IDF u
 
 #### Phase 7a: Complete the synchronous C ABI
 
-- [ ] Add signed and unsigned 64-bit integers for ESP-IDF time and counter APIs.
+- [x] Add signed and unsigned 64-bit integers for ESP-IDF time and counter APIs.
 - [ ] Add native-sized signed and unsigned integers for `intptr_t`, `uintptr_t`, and `size_t`.
 - [ ] Add `ref`, `in`, and definitely assigned `out` parameters with exact pointer ABI mappings.
 - [ ] Add unsafe `void*`, stack allocation, and explicit pointer-plus-length native buffer views.
@@ -270,13 +270,13 @@ ESP-IDF guarantees public API source compatibility but not binary layout compati
 
 - [ ] Add an `[Export("symbol")]` attribute for C-callable C~ methods.
 - [ ] Generate a native header for exported symbols and shared runtime layouts.
-- [ ] Add unsafe unmanaged function-pointer types with exact calling convention, parameter, return, and nullability rules.
-- [ ] Add delegates as managed target-plus-method values. Delegates are not layout-compatible with unmanaged function pointers.
+- [x] Add unsafe unmanaged function-pointer types with exact calling convention, parameter, return, and nullability rules.
+- [x] Add delegates as managed target-plus-method values. Delegates are not layout-compatible with unmanaged function pointers.
 - [ ] Add callback trampolines that pair an exported C entry point with an explicit `void*` user context.
 - [ ] Distinguish synchronous callbacks from retained callbacks and require explicit registration, unregistration, and rooted-lifetime rules for retained delegates.
-- [ ] Permit direct unmanaged function pointers only in `unsafe` code; require a trampoline to pass a delegate to C.
+- [x] Permit direct unmanaged function pointers only in `unsafe` code and emit same-task static-method trampolines. Delegate-to-C context trampolines remain deferred.
 - [ ] Define callback-thread attachment before a callback can allocate, throw, use virtual dispatch, or access managed runtime state.
-- [ ] Keep C~ exceptions from unwinding through ESP-IDF or other native frames. A callback trampoline must catch and translate, store, or terminate according to its declared policy.
+- [x] Keep C~ exceptions from unwinding through native frames for the supported synchronous current-task callback profile by terminating with `CTE0003`.
 
 #### Phase 7d: FreeRTOS tasks, shared state, and interrupts
 
@@ -301,6 +301,9 @@ Do not call general C~ allocation, console, or virtual dispatch from an interrup
 - [x] Verify target-specific reserved-symbol diagnostics.
 - [x] Verify target-specific standard-library loading.
 - [x] Verify that unused code does not stay reachable through `ct_keep_symbols`.
+- [x] Verify 64-bit literal, promotion, wrapping, formatting, boxing, enum, switch, and ABI behavior.
+- [x] Verify named delegate selection, ARC receiver lifetime, virtual/base dispatch, identity, exceptions, and null invocation.
+- [x] Verify unmanaged function-pointer signatures, unsafe enforcement, exact native calls, and the `CTE0003` callback boundary.
 
 #### Toolchain tests
 
@@ -324,8 +327,11 @@ The stale `bin/hello.c` artifact currently fails both installed cross-compilers 
 - [x] Verify the configured failure reset or halt behavior.
 - [x] Record minimum free heap and main task stack high-water mark.
 - [x] Run the object construction, virtual dispatch, boxing, and string conformance cases on the target.
+- [ ] Flash Draft 0.7 and confirm `timer64: ok`, `delegate: 42`, `function pointer: 42`, `arc heap recovery: True`, and `CTILDE_ESP_OK` on `COM4`.
+- [ ] Re-run the Draft 0.7 null-failure image, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore the self-test image.
+- [ ] Record fresh Draft 0.7 heap and stack readings and reconfirm the visible green WS2812 blink without watchdog resets.
 
-The corrected 2026-08-18 T-CAN485 run reported 298,172 bytes of free and minimum free heap and 7,744 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812. UART alternated `ws2812: on/off` on GPIO4 for several cycles without a watchdog reset, and the onboard LED was confirmed to blink green in step with it. The null-failure image printed `CTN0001`, aborted, and restarted with `SW_CPU_RESET`; the WS2812 image was restored afterward. The earlier GPIO2 run was command-level validation only because GPIO2 is microSD MISO, not a visible LED.
+The corrected 2026-08-18 T-CAN485 run reported 298,172 bytes of free and minimum free heap and 7,744 bytes of stack high-water headroom after configuring and clearing the RMT-backed WS2812. UART alternated `ws2812: on/off` on GPIO4 for several cycles without a watchdog reset, and the onboard LED was confirmed to blink green in step with it. The null-failure image printed `CTN0001`, aborted, and restarted with `SW_CPU_RESET`; the WS2812 image was restored afterward. The earlier GPIO2 run was command-level validation only because GPIO2 is microSD MISO, not a visible LED. On 2026-08-19 the Draft 0.7 cross-compiler and full-firmware gates passed, but `COM4` and the CH9102 device were absent, so the three Draft 0.7 hardware items above remain open.
 
 ### First-release acceptance criteria
 
@@ -339,7 +345,7 @@ ESP-IDF support is ready for its first release only when all these conditions ar
 - [x] Runtime failures produce a C~ code before the configured abort or restart.
 - [x] Hosted C output and the complete hosted conformance suite still pass.
 - [x] Flash, static DRAM, heap, and stack measurements are recorded.
-- [x] The documentation states the permanent-allocation and single-C~-task limits.
+- [x] The documentation states the ARC cycle-leak and single-C~-task limits.
 
 ### References
 

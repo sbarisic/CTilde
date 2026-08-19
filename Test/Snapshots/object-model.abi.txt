@@ -3,6 +3,7 @@ static ct_type_descriptor ct_desc_string;
 static ct_type_descriptor ct_desc_u_13_System_2EObject;
 static ct_type_descriptor ct_desc_u_13_Examples_2EBase;
 static ct_type_descriptor ct_desc_u_16_Examples_2EDerived;
+static ct_type_descriptor ct_desc_u_20_Examples_2EValueReader;
 static ct_type_descriptor ct_desc_u_16_System_2EException;
 struct ct_t_8_Examples_4_Base
 {
@@ -59,6 +60,7 @@ static const ct_vtable ct_vtable_u_13_System_2EObject = {
     .g_u_34_ct_5Fget_5F_5F13_5FExamples_5F2EBase_5F5_5FValue = NULL,
 };
 static ct_type_descriptor ct_desc_u_13_System_2EObject = { "System.Object", NULL, &ct_vtable_u_13_System_2EObject, 5u, sizeof(ct_t_6_System_6_Object), _Alignof(ct_t_6_System_6_Object), false, ct_drop_object_u_13_System_2EObject };
+static ct_type_descriptor ct_desc_u_20_Examples_2EValueReader = { "Examples.ValueReader", &ct_desc_u_13_System_2EObject, &ct_default_vtable, 6u, sizeof(ct_t_8_Examples_11_ValueReader), _Alignof(ct_t_8_Examples_11_ValueReader), false, ct_drop_delegate_u_20_Examples_2EValueReader };
 static ct_type_descriptor ct_desc_box_s_13_Examples_2EPair;
 static ct_string* ct_box_to_string_s_13_Examples_2EPair(ct_object* value) { ct_box_s_13_Examples_2EPair* box = (ct_box_s_13_Examples_2EPair*)(void*)value; (void)box; return ct_string_from_bytes((const uint8_t*)"Examples.Pair", 13, "<runtime>", 0); }
 static bool ct_box_equals_s_13_Examples_2EPair(ct_object* a, ct_object* b) { if (b == NULL || b->Type != &ct_desc_box_s_13_Examples_2EPair) return false; ct_box_s_13_Examples_2EPair* left = (ct_box_s_13_Examples_2EPair*)(void*)a; ct_box_s_13_Examples_2EPair* right = (ct_box_s_13_Examples_2EPair*)(void*)b; return (left->Value.u_1_X == right->Value.u_1_X) && (left->Value.u_1_Y == right->Value.u_1_Y); }
@@ -70,14 +72,14 @@ static const ct_vtable ct_vtable_box_s_13_Examples_2EPair = {
 };
 static ct_t_6_System_6_Object* ct_box_value_s_13_Examples_2EPair(ct_t_8_Examples_4_Pair value, const char* file, int line) { ct_box_s_13_Examples_2EPair* box = (ct_box_s_13_Examples_2EPair*)ct_alloc(sizeof(ct_box_s_13_Examples_2EPair), file, line); ct_init_object(box, &ct_desc_box_s_13_Examples_2EPair); box->Value = value; return (ct_t_6_System_6_Object*)(void*)box; }
 static ct_t_8_Examples_4_Pair ct_unbox_value_s_13_Examples_2EPair(ct_t_6_System_6_Object* value, const char* file, int line) { if (value == NULL) ct_fail("CTO0002", file, line); ct_object* object = (ct_object*)(void*)value; if (object->Type != &ct_desc_box_s_13_Examples_2EPair) ct_fail("CTO0003", file, line); ct_t_8_Examples_4_Pair result = ((ct_box_s_13_Examples_2EPair*)(void*)value)->Value; return result; }
-static ct_type_descriptor ct_desc_box_s_13_Examples_2EPair = { "Examples.Pair", &ct_desc_u_13_System_2EObject, &ct_vtable_box_s_13_Examples_2EPair, 6u, sizeof(ct_box_s_13_Examples_2EPair), _Alignof(ct_box_s_13_Examples_2EPair), true, ct_drop_box_s_13_Examples_2EPair };
+static ct_type_descriptor ct_desc_box_s_13_Examples_2EPair = { "Examples.Pair", &ct_desc_u_13_System_2EObject, &ct_vtable_box_s_13_Examples_2EPair, 7u, sizeof(ct_box_s_13_Examples_2EPair), _Alignof(ct_box_s_13_Examples_2EPair), true, ct_drop_box_s_13_Examples_2EPair };
     ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32(ct_self, u_6_number);
 static void ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32(ct_t_8_Examples_4_Base* ct_self, int32_t u_6_number)
     ct_init_ct_ctor__13_System_2EObject_6_Object((ct_t_6_System_6_Object*)(void*)ct_self);
     ct_init_ct_ctor__16_Examples_2EDerived_7_Derived(ct_self);
 static void ct_init_ct_ctor__16_Examples_2EDerived_7_Derived(ct_t_8_Examples_7_Derived* ct_self)
     ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32((ct_t_8_Examples_4_Base*)(void*)ct_self, ct_tmp_0);
-    ct_t_8_Examples_7_Derived* ct_tmp_3 = (ct_t_8_Examples_7_Derived*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_desc_u_16_Examples_2EDerived, "test.ct", 60);
+    ct_t_8_Examples_7_Derived* ct_tmp_7 = (ct_t_8_Examples_7_Derived*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_desc_u_16_Examples_2EDerived, "test.ct", 63);
     ct_init_ct_ctor__16_System_2EException_9_Exception(ct_self);
 static void ct_init_ct_ctor__16_System_2EException_9_Exception(ct_t_6_System_9_Exception* ct_self)
     ct_init_ct_ctor__16_System_2EException_9_Exception_str(ct_self, ct_tmp_0);

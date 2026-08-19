@@ -5,7 +5,15 @@ using System.Text;
 
 namespace CTilde;
 
-internal sealed record NumericLiteralValue(BigInteger Integer, bool IsUnsigned, float? FloatingPoint);
+internal enum IntegerLiteralSuffix
+{
+    None,
+    Unsigned,
+    Long,
+    UnsignedLong,
+}
+
+internal sealed record NumericLiteralValue(BigInteger Integer, IntegerLiteralSuffix Suffix, float? FloatingPoint);
 
 internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 {
@@ -24,6 +32,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["continue"] = SyntaxKind.ContinueKeyword,
         ["default"] = SyntaxKind.DefaultKeyword,
         ["defer"] = SyntaxKind.DeferKeyword,
+        ["delegate"] = SyntaxKind.DelegateKeyword,
         ["do"] = SyntaxKind.DoKeyword,
         ["else"] = SyntaxKind.ElseKeyword,
         ["enum"] = SyntaxKind.EnumKeyword,
@@ -37,6 +46,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["int"] = SyntaxKind.IntKeyword,
         ["internal"] = SyntaxKind.InternalKeyword,
         ["is"] = SyntaxKind.IsKeyword,
+        ["long"] = SyntaxKind.LongKeyword,
         ["namespace"] = SyntaxKind.NamespaceKeyword,
         ["new"] = SyntaxKind.NewKeyword,
         ["null"] = SyntaxKind.NullKeyword,
@@ -59,6 +69,8 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["true"] = SyntaxKind.TrueKeyword,
         ["try"] = SyntaxKind.TryKeyword,
         ["uint"] = SyntaxKind.UintKeyword,
+        ["ulong"] = SyntaxKind.UlongKeyword,
+        ["unmanaged"] = SyntaxKind.UnmanagedKeyword,
         ["unsafe"] = SyntaxKind.UnsafeKeyword,
         ["ushort"] = SyntaxKind.UshortKeyword,
         ["using"] = SyntaxKind.UsingKeyword,
@@ -202,23 +214,28 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             }
         }
 
-        var isUnsigned = false;
-        var hasSuffix = false;
-        if (_position < source.Length && source[_position] is 'u' or 'U')
-        {
-            isUnsigned = true;
-            hasSuffix = true;
+        var suffixStart = _position;
+        while (_position < source.Length && char.IsAsciiLetter(source[_position]))
             _position++;
-        }
-        else if (numberBase == 10 && _position < source.Length && source[_position] is 'f' or 'F')
+
+        var suffixText = source.Text[suffixStart.._position];
+        var normalizedSuffix = suffixText.ToUpperInvariant();
+        var integerSuffix = normalizedSuffix switch
         {
-            floating = true;
-            hasSuffix = true;
-            _position++;
-        }
+            "" => IntegerLiteralSuffix.None,
+            "U" => IntegerLiteralSuffix.Unsigned,
+            "L" => IntegerLiteralSuffix.Long,
+            "UL" or "LU" => IntegerLiteralSuffix.UnsignedLong,
+            _ => IntegerLiteralSuffix.None,
+        };
+        var floatSuffix = normalizedSuffix == "F";
+        var validSuffix = floatSuffix
+            ? numberBase == 10
+            : normalizedSuffix is "" or "U" or "L" or "UL" or "LU";
+        floating |= floatSuffix;
 
         var text = source.Text[start.._position];
-        var literalBody = hasSuffix ? text[..^1] : text;
+        var literalBody = source.Text[start..suffixStart];
         var separatorBody = numberBase == 10 ? literalBody : literalBody[2..];
         if (separatorBody.StartsWith('_') || separatorBody.EndsWith('_') || separatorBody.Contains("__", StringComparison.Ordinal) || separatorBody.Contains("_.", StringComparison.Ordinal) || separatorBody.Contains("._", StringComparison.Ordinal))
             diagnostics.Add("CT0008", "Digit separators must appear between digits.", source, new TextSpan(start, _position - start));
@@ -230,22 +247,26 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             {
                 if (numberBase != 10 || !float.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var result) || float.IsInfinity(result))
                     throw new FormatException();
-                value = new NumericLiteralValue(BigInteger.Zero, false, result);
+                if (!validSuffix || !floatSuffix && suffixText.Length > 0)
+                    throw new FormatException();
+                value = new NumericLiteralValue(BigInteger.Zero, IntegerLiteralSuffix.None, result);
             }
             else
             {
+                if (!validSuffix)
+                    throw new FormatException();
                 if (numberBase != 10)
                     digits = digits[2..];
                 if (digits.Length == 0)
                     throw new FormatException();
-                value = new NumericLiteralValue(ParseInteger(digits, numberBase), isUnsigned, null);
+                value = new NumericLiteralValue(ParseInteger(digits, numberBase), integerSuffix, null);
             }
             return Token(SyntaxKind.NumberToken, start, _position - start, value);
         }
         catch (FormatException)
         {
             diagnostics.Add("CT0002", $"Invalid numeric literal '{text}'.", source, new TextSpan(start, _position - start));
-            return Token(SyntaxKind.NumberToken, start, _position - start, new NumericLiteralValue(BigInteger.Zero, false, null));
+            return Token(SyntaxKind.NumberToken, start, _position - start, new NumericLiteralValue(BigInteger.Zero, IntegerLiteralSuffix.None, null));
         }
     }
 

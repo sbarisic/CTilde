@@ -18,6 +18,14 @@ public static class Console
     [NoAlloc]
     public static void Write(uint value);
 
+    [Extern("ct_write_long")]
+    [NoAlloc]
+    public static void Write(long value);
+
+    [Extern("ct_write_ulong")]
+    [NoAlloc]
+    public static void Write(ulong value);
+
     [Extern("ct_write_float")]
     [NoAlloc]
     public static void Write(float value);
@@ -67,6 +75,18 @@ public static class Console
     }
 
     public static void WriteLine(bool value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void WriteLine(long value)
+    {
+        Write(value);
+        WriteLine();
+    }
+
+    public static void WriteLine(ulong value)
     {
         Write(value);
         WriteLine();

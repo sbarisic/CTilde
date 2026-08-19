@@ -159,6 +159,7 @@ internal static class TargetValidator
         "ct_esp_restart",
         "ct_esp_free_heap_size",
         "ct_esp_minimum_free_heap_size",
+        "ct_esp_timer_get_time_us",
         "ct_esp_gpio_configure_input",
         "ct_esp_gpio_configure_output",
         "ct_esp_gpio_write",

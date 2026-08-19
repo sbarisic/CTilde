@@ -323,7 +323,7 @@
       "patterns": [
         {
           "name": "storage.type.declaration.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|struct|enum)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|struct|enum|delegate)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "keyword.declaration.namespace.ctilde",
@@ -339,11 +339,11 @@
       "patterns": [
         {
           "name": "constant.numeric.integer.hexadecimal.ctilde",
-          "match": "(?<![_\\p{L}\\p{Nd}])0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![_\\p{L}\\p{Nd}])0[xX][0-9A-Fa-f](?:_?[0-9A-Fa-f])*(?:[uU][lL]|[lL][uU]|[uUlL])?(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "constant.numeric.integer.binary.ctilde",
-          "match": "(?<![_\\p{L}\\p{Nd}])0[bB][01](?:_?[01])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![_\\p{L}\\p{Nd}])0[bB][01](?:_?[01])*(?:[uU][lL]|[lL][uU]|[uUlL])?(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "constant.numeric.float.ctilde",
@@ -351,7 +351,7 @@
         },
         {
           "name": "constant.numeric.integer.decimal.ctilde",
-          "match": "(?<![_\\p{L}\\p{Nd}])[0-9](?:_?[0-9])*(?:[uU])?(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![_\\p{L}\\p{Nd}])[0-9](?:_?[0-9])*(?:[uU][lL]|[lL][uU]|[uUlL])?(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },
@@ -371,7 +371,7 @@
         },
         {
           "name": "storage.type.builtin.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|long|ulong|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },
@@ -396,6 +396,10 @@
         {
           "name": "keyword.other.accessor.ctilde",
           "match": "(?<![@_\\p{L}\\p{Nd}])(?:get|set)(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.other.calling-convention.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])unmanaged(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },

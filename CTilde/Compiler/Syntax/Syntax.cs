@@ -63,6 +63,7 @@ public enum SyntaxKind
     ContinueKeyword,
     DefaultKeyword,
     DeferKeyword,
+    DelegateKeyword,
     DoKeyword,
     ElseKeyword,
     EnumKeyword,
@@ -76,6 +77,7 @@ public enum SyntaxKind
     IntKeyword,
     InternalKeyword,
     IsKeyword,
+    LongKeyword,
     NamespaceKeyword,
     NewKeyword,
     NullKeyword,
@@ -98,6 +100,8 @@ public enum SyntaxKind
     TrueKeyword,
     TryKeyword,
     UintKeyword,
+    UlongKeyword,
+    UnmanagedKeyword,
     UnsafeKeyword,
     UshortKeyword,
     UsingKeyword,
@@ -272,7 +276,7 @@ public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, stri
 
 public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Name, bool IsFileScoped) : SyntaxNode(Source, Span);
 
-public enum TypeDeclarationKind { Class, Struct, Enum }
+public enum TypeDeclarationKind { Class, Struct, Enum, Delegate }
 
 public sealed record TypeDeclarationSyntax(
     SourceText Source,
@@ -284,15 +288,21 @@ public sealed record TypeDeclarationSyntax(
     TypeSyntax? BaseType,
     ImmutableArray<MemberDeclarationSyntax> Members,
     TypeSyntax? EnumUnderlyingType,
-    ImmutableArray<EnumMemberSyntax> EnumMembers) : SyntaxNode(Source, Span);
+    ImmutableArray<EnumMemberSyntax> EnumMembers,
+    TypeSyntax? DelegateReturnType,
+    ImmutableArray<ParameterSyntax> DelegateParameters) : SyntaxNode(Source, Span);
 
 public sealed record EnumMemberSyntax(SourceText Source, TextSpan Span, string Name, ExpressionSyntax? Value) : SyntaxNode(Source, Span);
 
 public sealed record AttributeSyntax(SourceText Source, TextSpan Span, string Name, ImmutableArray<ExpressionSyntax> Arguments) : SyntaxNode(Source, Span);
 
-public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false) : SyntaxNode(Source, Span)
+public sealed record FunctionPointerSignatureSyntax(SourceText Source, TextSpan Span, ImmutableArray<TypeSyntax> Elements) : SyntaxNode(Source, Span);
+
+public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false, FunctionPointerSignatureSyntax? FunctionPointer = null) : SyntaxNode(Source, Span)
 {
-    public override string ToString() => Name + new string('*', PointerDepth) + (IsArray ? "[]" : string.Empty);
+    public override string ToString() => FunctionPointer is null
+        ? Name + new string('*', PointerDepth) + (IsArray ? "[]" : string.Empty)
+        : $"delegate* unmanaged<{string.Join(", ", FunctionPointer.Elements)}>";
 }
 
 public abstract record MemberDeclarationSyntax(SourceText Source, TextSpan Span, ImmutableArray<string> Modifiers, ImmutableArray<AttributeSyntax> Attributes) : SyntaxNode(Source, Span);

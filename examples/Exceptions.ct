@@ -2,6 +2,8 @@ using System;
 
 namespace Examples;
 
+public delegate int ExceptionReader();
+
 public class DemoException : Exception
 {
     public DemoException(string message) : base(message) { }
@@ -29,6 +31,7 @@ public static class ExceptionExample
     [EntryPoint]
     public static void Main()
     {
-        Console.WriteLine(Read());
+        ExceptionReader reader = Read;
+        Console.WriteLine(reader());
     }
 }

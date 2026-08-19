@@ -49,10 +49,10 @@ public sealed record LanguageWorkspaceSymbol(
 
 public sealed partial class LanguageServiceSnapshot
 {
-    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "static", "sealed"];
+    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "this", "base", "true", "false", "null", "var"];
-    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "float", "string", "object"];
+    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
     private readonly ImmutableArray<SyntaxTree> _allTrees;
@@ -214,7 +214,10 @@ public sealed partial class LanguageServiceSnapshot
                 TypeDeclarationKind.Enum => LanguageSymbolKind.Enum,
                 _ => LanguageSymbolKind.Class,
             };
-            result.Add(new LanguageDocumentSymbol(type.Name, tree.Root.Namespace?.Name ?? string.Empty, typeKind, type.Span, NameSpan(type, type.Name), children.ToImmutable()));
+            var detail = type.Kind == TypeDeclarationKind.Delegate
+                ? $"{type.DelegateReturnType}({string.Join(", ", type.DelegateParameters.Select(parameter => parameter.Type.ToString()))})"
+                : tree.Root.Namespace?.Name ?? string.Empty;
+            result.Add(new LanguageDocumentSymbol(type.Name, detail, typeKind, type.Span, NameSpan(type, type.Name), children.ToImmutable()));
         }
         return result.ToImmutable();
     }
@@ -431,8 +434,7 @@ public sealed partial class LanguageServiceSnapshot
                     SyntaxKind.StringToken => CType.String,
                     SyntaxKind.CharacterToken => CType.Char,
                     SyntaxKind.NullKeyword => CType.Null,
-                    SyntaxKind.NumberToken when literal.Value is NumericLiteralValue { FloatingPoint: not null } => CType.Float,
-                    SyntaxKind.NumberToken when literal.Value is NumericLiteralValue { IsUnsigned: true } => CType.Uint,
+                    SyntaxKind.NumberToken when literal.Value is NumericLiteralValue numeric => InferNumericLiteralType(numeric),
                     _ => CType.Int,
                 }, null);
             case ThisExpressionSyntax:
@@ -497,6 +499,19 @@ public sealed partial class LanguageServiceSnapshot
             default:
                 return new(null, null);
         }
+    }
+
+    private static CType InferNumericLiteralType(NumericLiteralValue numeric)
+    {
+        if (numeric.FloatingPoint is not null)
+            return CType.Float;
+        if (numeric.Suffix == IntegerLiteralSuffix.None && numeric.Integer <= int.MaxValue)
+            return CType.Int;
+        if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Unsigned && numeric.Integer <= uint.MaxValue)
+            return CType.Uint;
+        if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Long && numeric.Integer <= long.MaxValue)
+            return CType.Long;
+        return CType.Ulong;
     }
 
     private IEnumerable<TypeSymbol> VisibleTypes(SyntaxTree tree)
@@ -632,6 +647,7 @@ public sealed partial class LanguageServiceSnapshot
 
     private static string FormatSymbol(object symbol) => symbol switch
     {
+        TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(parameter => $"{parameter.Type.DisplayName} {parameter.Name}"))})",
         TypeSymbol type => $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}",
         FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}",
         PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",

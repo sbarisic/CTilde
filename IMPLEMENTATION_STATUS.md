@@ -4,7 +4,7 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.6 has one compiler path:
+C~ draft 0.7 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> combined binding, flow, allocation effects, and ARC ownership lowering -> transitional typed-line IR -> target validation -> hosted or ESP-IDF GNU C23
@@ -23,7 +23,7 @@ dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 69 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 73 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -41,7 +41,14 @@ The checked feature example prints:
 east
 2
 A
+Text.Length < 10!
 10
+42
+-9223372036854775808
+18446744073709551615
+42
+Before deferred, i hope?
+deferred
 ```
 
 The checked exception example prints:
@@ -92,7 +99,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Method overloads | Implemented | Pairwise best-candidate and cross-argument ambiguity tests |
 | `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
 | Definite assignment and reachability | Implemented | `do`, switch, read-only, constructor, and reachability tests |
-| Fixed-width numeric types | Implemented | Typed lowering and C static assertions |
+| Exact-width integers through `long`/`ulong` | Implemented | Suffix, boundary, promotion, wrapping, formatting, enum, boxing, and C ABI tests |
 | Checked arrays and `foreach` | Implemented | Native iteration and failure tests |
 | Immutable UTF-8 strings | Implemented | Native concatenation, output, indexing, and length tests |
 | Expression precedence | Implemented | Pratt parser and deterministic emission test |
@@ -103,6 +110,8 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | `if`, loops, `switch`, `break`, and `continue` | Implemented | Label lowering and native tests |
 | Numeric, enum, null, and pointer conversions | Implemented | Positive and negative conversion tests |
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
+| Named single-cast delegates | Implemented | Static, instance, virtual, inherited/base, ARC receiver, identity, and null-invocation tests |
+| Unsafe unmanaged function pointers | Implemented | Structural signatures, trampolines, native round trip, unsafe checks, and fatal callback-exception test |
 | `[EntryPoint]` | Implemented | Validation and native wrapper tests |
 | `[Extern]` | Implemented | Reserved-name, collision, alias, ABI, and prototype tests |
 | `[Retained]` and `[ReturnsBorrowed]` | Implemented | Target, argument, native transfer, and borrowed-result tests |
@@ -123,6 +132,9 @@ The executable test project checks:
 - Unsafe pointer exposure through recursively pointer-containing types.
 - Unrelated reference-cast and integral-only operator diagnostics.
 - Pairwise overload ambiguity.
+- 64-bit suffixes, boundaries, conversions, promotions, wrapping arithmetic, shifts, boxing, formatting, enums, and switches.
+- Delegate method-group selection, static and instance capture, virtual and base dispatch, ARC receiver lifetime, identity, and null invocation.
+- Unmanaged function-pointer parsing, exact signatures, native synchronous callback invocation, unsafe enforcement, and the `CTE0003` exception barrier.
 - `do` and switch return-flow analysis.
 - Converted duplicate and out-of-range case labels.
 - Compilation-wide external ABI validation.
@@ -161,7 +173,7 @@ The C ABI uses native target-width pointers. The reviewed native run used a 64-b
 
 The body pipeline does not yet satisfy the final bound-tree and typed-IR design. `MethodLowerer` still combines semantic binding, flow analysis, and C-fragment construction. `TypedIrLowerer` classifies rendered lines into instruction categories.
 
-The draft 0.6 exception and ARC surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
+The draft 0.7 exception and ARC surface and ABI checks pass, but the compiler architecture is not complete until binding produces immutable bound nodes and lowering produces structured three-address IR without C text. `GetDiagnostics()` also still triggers this combined lowering pass.
 
 ## Language server and VS Code
 
@@ -177,7 +189,7 @@ The language-service query snapshot is immutable and does not call `EmitC`. The 
 
 The hardware MVP compiler and project support are implemented. `CompilationOptions` and `--target esp-idf` select one chip-independent profile. It emits `app_main`, compact source locations, unbuffered console startup, four-byte pointer assertions, abort-based fatal failures, and no `ct_keep_symbols` retention routine.
 
-`Esp.Idf` provides FreeRTOS delay and counters, restart and heap counters, basic GPIO, and one RMT-backed WS2812 strip through a fixed-width handwritten shim. `System.Environment.Exit` is rejected with `CT4105`.
+`Esp.Idf` provides FreeRTOS delay and counters, restart and heap counters, a signed 64-bit monotonic microsecond timer, basic GPIO, and one RMT-backed WS2812 strip through a fixed-width handwritten shim. `System.Environment.Exit` is rejected with `CT4105`.
 
 ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello and Exceptions output also passes both cross-compilers in GNU C23 syntax checks.
 
@@ -185,26 +197,25 @@ Measured self-test firmware sizes are:
 
 | Target | Image | Flash code | Flash data | IRAM/DRAM |
 | --- | ---: | ---: | ---: | ---: |
-| `esp32` | 145,417 bytes | 57,666 bytes | 31,904 bytes | 45,003 bytes IRAM; 13,260 bytes DRAM |
-| `esp32c3` | 148,070 bytes | 72,462 bytes | 29,228 bytes | 50,428 bytes DRAM, including 39,876 bytes executable text |
+| `esp32` | 150,592-byte binary; 150,477-byte image | 61,958 bytes | 32,240 bytes | 45,003 bytes IRAM; 13,708 bytes DRAM |
+| `esp32c3` | 153,952-byte binary; 153,662-byte image | 77,174 bytes | 29,580 bytes | 50,972 bytes DRAM, including 39,972 bytes executable text |
 
 The corrected self-test ran on an ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4`. It printed `virtual: 42`, `boxed: 7`, `exception: caught on ESP32`, and `CTILDE_ESP_OK`; the RMT-backed GPIO4 WS2812 commands alternated every 500 ms without a watchdog reset, and the onboard LED was confirmed to blink green in step with them. After the strip was configured and cleared, the board reported 298,172 bytes of free and minimum free heap and 7,744 bytes of main-task stack high-water headroom with the configured 8 KiB stack.
 
 The separate failure image printed `C~ runtime error CTN0001 at RuntimeFailure.ct:17`, entered ESP-IDF `abort()`, and rebooted with `SW_CPU_RESET`. The WS2812 self-test image was reflashed and verified by UART as the final board state. The earlier GPIO2 run is retained only as command-level GPIO validation: GPIO2 is the T-CAN485 microSD MISO signal and did not provide a visible blink.
 
-The draft 0.6 ESP acceptance source now repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, and complete `esp32` and `esp32c3` firmware links pass. The revised ARC image has not yet been flashed, so the hardware heap-recovery marker remains to be measured on-device.
+The draft 0.7 ESP acceptance source now repeats mixed acyclic object, reference-bearing structure, array, box, and dynamic-string allocation for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks the 64-bit timer, an instance delegate with virtual dispatch, and a synchronous unmanaged callback. Both Xtensa and RISC-V ESP cross-compilers accept it with warnings as errors, and complete `esp32` and `esp32c3` firmware links pass with the fresh sizes above. The revised image has not yet been flashed: at the 2026-08-19 validation point `COM4` and the board's CH9102 USB device were absent, so the new markers and heap/stack readings remain pending.
 
 ## Deliberately deferred
 
-These features are outside draft 0.6:
+These features are outside draft 0.7:
 
 - Interfaces and abstract types.
 - Generics.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
-- Exceptions across native boundaries and thread-safe handler state.
-- Unsafe unmanaged function pointers.
-- Delegates, lambdas, exported methods, callback trampolines, and callback lifetime management.
-- Native-sized and 64-bit integers, opaque native handles, native strings and buffers, and `ref`/`in`/`out` ABI parameters.
+- General exceptions across native boundaries and thread-safe handler state.
+- Lambdas, closures, multicast delegates, exported methods, retained/cross-task callbacks, and callback lifetime management.
+- Native-sized integers, opaque native handles, native strings and buffers, and `ref`/`in`/`out` ABI parameters.
 - Header-driven ESP-IDF bindings for configuration structures, constants, macros, and static-inline functions.
 - Typed `esp_err_t` results and native resource ownership diagnostics.
 - FreeRTOS task attachment, `volatile`, atomics, and compiler-checked ISR or IRAM execution profiles.
@@ -221,7 +232,7 @@ These features are outside draft 0.6:
 
 ## Release gate
 
-A draft 0.6 release requires:
+A draft 0.7 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -231,4 +242,4 @@ A draft 0.6 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.6 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.
+Draft 0.7 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check.

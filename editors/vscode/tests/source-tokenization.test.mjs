@@ -48,10 +48,10 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.6 keyword receives its intended scope", () => {
+test("every draft 0.7 keyword receives its intended scope", () => {
   const groups = [
     {
-      words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "float", "string", "object", "void"],
+      words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "float", "string", "object", "void"],
       scope: "storage.type.builtin.ctilde"
     },
     {
@@ -87,6 +87,8 @@ test("every draft 0.6 keyword receives its intended scope", () => {
 
   expectScope("var", "var", "storage.type.inferred.ctilde");
   expectScope("new", "new", "keyword.operator.new.ctilde");
+  expectScope("delegate", "delegate", "storage.type.declaration.ctilde");
+  expectScope("unmanaged", "unmanaged", "keyword.other.calling-convention.ctilde");
   expectScope("using System;", "using", "keyword.control.import.ctilde");
   expectScope("namespace Examples;", "namespace", "keyword.declaration.namespace.ctilde");
   expectScope("class Example", "class", "storage.type.class.ctilde");

@@ -15,7 +15,11 @@ internal sealed class LoweredExpression
     public object? ConstantValue { get; init; }
     public bool IsBaseReceiver { get; init; }
     public OwnershipKind Ownership { get; init; }
+    public MethodGroupBinding? MethodGroup { get; init; }
+    public bool IsFunctionAddress { get; init; }
 }
+
+internal sealed record MethodGroupBinding(ImmutableArray<MethodSymbol> Candidates, LoweredExpression? Receiver, bool IsBaseReceiver);
 
 internal enum OwnershipKind { None, Borrowed, Owned, Immortal }
 
@@ -159,7 +163,7 @@ internal sealed class MethodLowerer
         }
         writer.WriteLine();
         var initializerParameters = new[] { $"{typeName}* ct_self" }
-            .Concat(_method.Parameters.Select(parameter => $"{_emitter.CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}"));
+            .Concat(_method.Parameters.Select(parameter => _emitter.CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name))));
         var body = new CWriter();
         {
             body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
@@ -195,7 +199,7 @@ internal sealed class MethodLowerer
                 using (writer.Block())
                 {
                     foreach (var slot in _durableSlots)
-                        writer.WriteLine($"{_emitter.CTypeName(slot.Value)} {slot.Key};");
+                        writer.WriteLine($"{_emitter.CDeclaration(slot.Value, slot.Key)};");
                 }
                 writer.WriteLine("ct_state = {0};");
                 writer.WriteLine("(void)ct_state;");
@@ -438,7 +442,7 @@ internal sealed class MethodLowerer
                     if (deferred.Type.ContainsManagedReferences)
                     {
                         var ignored = NewTemp();
-                        writer.WriteLine($"{_emitter.CTypeName(deferred.Type)} {ignored} = {deferred.Code};");
+                        writer.WriteLine($"{_emitter.CDeclaration(deferred.Type, ignored)} = {deferred.Code};");
                         writer.WriteLine(_emitter.DropValueStatement(deferred.Type, $"&{ignored}"));
                     }
                     else
@@ -511,13 +515,12 @@ internal sealed class MethodLowerer
             IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = symbol;
-        var qualifier = string.Empty;
         if (symbol.IsDurable)
         {
             RegisterDurableSlot(symbol.StorageName, type);
         }
         else
-            writer.WriteLine($"{qualifier}{_emitter.CTypeName(type)} {symbol.CName} = {_emitter.DefaultValue(type)};");
+            writer.WriteLine($"{_emitter.CDeclaration(type, symbol.CName)} = {_emitter.DefaultValue(type)};");
         if (type.ContainsManagedReferences)
             EmitActivateOwnedSlot(writer, type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
         if (initializer is not null)
@@ -730,7 +733,7 @@ internal sealed class MethodLowerer
             RegisterDurableSlot(local.StorageName, declaredType);
         }
         else
-            writer.WriteLine($"{_emitter.CTypeName(declaredType)} {local.CName} = {_emitter.DefaultValue(declaredType)};");
+            writer.WriteLine($"{_emitter.CDeclaration(declaredType, local.CName)} = {_emitter.DefaultValue(declaredType)};");
         if (declaredType.ContainsManagedReferences)
         {
             EmitActivateOwnedSlot(writer, declaredType, local.CName, $"ct_cleanup_local_{local.Id}");
@@ -844,9 +847,13 @@ internal sealed class MethodLowerer
         if (!target.IsIntegral || !TryGetIntegralValue(constant.ConstantValue, out var value) || !FitsIntegralType(value, target))
             return false;
         key = value.ToString(CultureInfo.InvariantCulture);
-        var literal = target == CType.Uint
-            ? $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})"
-            : value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture);
+        var literal = target.Kind switch
+        {
+            CTypeKind.Uint => $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})",
+            CTypeKind.Long => FormatInt64((long)value),
+            CTypeKind.Ulong => FormatUInt64((ulong)value),
+            _ => value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture),
+        };
         code = governingType.Kind == CTypeKind.Enum ? $"({_emitter.CTypeName(governingType)})({literal})" : $"({_emitter.CTypeName(target)})({literal})";
         return true;
     }
@@ -855,6 +862,7 @@ internal sealed class MethodLowerer
     {
         switch (constant)
         {
+            case BigInteger item: value = item; return true;
             case byte item: value = item; return true;
             case sbyte item: value = item; return true;
             case short item: value = item; return true;
@@ -875,6 +883,8 @@ internal sealed class MethodLowerer
         CTypeKind.Ushort => value >= ushort.MinValue && value <= ushort.MaxValue,
         CTypeKind.Int => value >= int.MinValue && value <= int.MaxValue,
         CTypeKind.Uint => value >= uint.MinValue && value <= uint.MaxValue,
+        CTypeKind.Long => value >= long.MinValue && value <= long.MaxValue,
+        CTypeKind.Ulong => value >= ulong.MinValue && value <= ulong.MaxValue,
         _ => false,
     };
 
@@ -887,7 +897,7 @@ internal sealed class MethodLowerer
         }
         if (_method.IsConstructor)
         {
-            Report("CT3106", "A constructor cannot contain a return statement in draft 0.6.", syntax);
+            Report("CT3106", "A constructor cannot contain a return statement in draft 0.7.", syntax);
             return;
         }
         if (_method.ReturnType == CType.Void)
@@ -1187,7 +1197,7 @@ internal sealed class MethodLowerer
                 if (_method.ReturnType.ContainsManagedReferences)
                 {
                     var raw = NewTemp();
-                    writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)} {raw} = {value};");
+                    writer.WriteLine($"{_emitter.CDeclaration(_method.ReturnType, raw)} = {value};");
                     writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{raw}"));
                     writer.WriteLine($"{CEmitter.ValueDropName(_method.ReturnType)}((void*)(uintptr_t)&{pending});");
                     writer.WriteLine($"{pending} = {raw};");
@@ -1205,7 +1215,7 @@ internal sealed class MethodLowerer
         if (value is not null && _method.ReturnType.ContainsManagedReferences)
         {
             finalValue = NewTemp();
-            writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)} {finalValue} = {value};");
+            writer.WriteLine($"{_emitter.CDeclaration(_method.ReturnType, finalValue)} = {value};");
             writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{finalValue}"));
         }
         writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
@@ -1291,7 +1301,7 @@ internal sealed class MethodLowerer
     private void EmitInitializeOwnedSlot(CWriter writer, CType type, string slot, string value)
     {
         var temporary = NewTemp();
-        writer.WriteLine($"{_emitter.CTypeName(type)} {temporary} = {value};");
+        writer.WriteLine($"{_emitter.CDeclaration(type, temporary)} = {value};");
         writer.WriteLine(_emitter.RetainValueStatement(type, $"&{temporary}"));
         writer.WriteLine($"{slot} = {temporary};");
     }
@@ -1300,7 +1310,7 @@ internal sealed class MethodLowerer
     {
         var type = target.Type;
         var next = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(type)} {next} = {value};");
+        prelude.Add($"{_emitter.CDeclaration(type, next)} = {value};");
         if (target.LValue!.Property is not null)
         {
             prelude.Add(target.LValue.Store(next) + ";");
@@ -1308,7 +1318,7 @@ internal sealed class MethodLowerer
         }
         prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
         var old = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(type)} {old} = {target.Code};");
+        prelude.Add($"{_emitter.CDeclaration(type, old)} = {target.Code};");
         prelude.Add(target.LValue.Store(next) + ";");
         prelude.Add(_emitter.DropValueStatement(type, $"&{old}"));
     }
@@ -1326,7 +1336,7 @@ internal sealed class MethodLowerer
         var record = $"ct_cleanup_{slotName}";
         RegisterDurableSlot(slotName, type);
         RegisterCleanupRecord(record);
-        prelude.Add($"{_emitter.CTypeName(type)} {raw} = {code};");
+        prelude.Add($"{_emitter.CDeclaration(type, raw)} = {code};");
         if (borrowed)
             prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
         prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
@@ -1346,7 +1356,7 @@ internal sealed class MethodLowerer
         var record = $"ct_cleanup_{slotName}";
         var raw = NewTemp();
         RegisterCleanupRecord(record);
-        prelude.Add($"{_emitter.CTypeName(type)} {raw} = {value};");
+        prelude.Add($"{_emitter.CDeclaration(type, raw)} = {value};");
         prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
         prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
         prelude.Add($"{slot} = {raw};");
@@ -1626,24 +1636,15 @@ internal sealed class MethodLowerer
         {
             if (numeric.FloatingPoint is float value)
                 return Constant(CType.Float, value, FormatFloat(value));
-            if (numeric.IsUnsigned)
-            {
-                if (numeric.Integer > uint.MaxValue)
-                    Report("CT2111", "Unsigned integer literal does not fit uint.", syntax);
-                var bounded = (uint)BigInteger.Min(numeric.Integer, uint.MaxValue);
-                return Constant(CType.Uint, bounded, $"UINT32_C({bounded.ToString(CultureInfo.InvariantCulture)})");
-            }
-            if (numeric.Integer <= int.MaxValue)
-            {
-                var bounded = (int)numeric.Integer;
-                return Constant(CType.Int, bounded, FormatInt32(bounded));
-            }
-            if (numeric.Integer <= uint.MaxValue)
-            {
-                var bounded = (uint)numeric.Integer;
-                return Constant(CType.Uint, bounded, $"UINT32_C({bounded.ToString(CultureInfo.InvariantCulture)})");
-            }
-            Report("CT2112", "Integer literal does not fit any draft 0.6 integer type.", syntax);
+            if (numeric.Suffix == IntegerLiteralSuffix.None && numeric.Integer <= int.MaxValue)
+                return Constant(CType.Int, (int)numeric.Integer, FormatInt32((int)numeric.Integer));
+            if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Unsigned && numeric.Integer <= uint.MaxValue)
+                return Constant(CType.Uint, (uint)numeric.Integer, $"UINT32_C({numeric.Integer.ToString(CultureInfo.InvariantCulture)})");
+            if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Long && numeric.Integer <= long.MaxValue)
+                return Constant(CType.Long, (long)numeric.Integer, FormatInt64((long)numeric.Integer));
+            if (numeric.Integer <= ulong.MaxValue)
+                return Constant(CType.Ulong, (ulong)numeric.Integer, FormatUInt64((ulong)numeric.Integer));
+            Report("CT2112", "Integer literal does not fit the type selected by its suffix.", syntax);
             return Constant(CType.Int, 0, "0");
         }
         return ErrorExpression();
@@ -1687,6 +1688,11 @@ internal sealed class MethodLowerer
         var property = Hierarchy(_method.ContainingType).SelectMany(type => type.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name);
         if (property is not null)
             return LowerProperty(property, null, syntax, forWrite);
+        var methods = Hierarchy(_method.ContainingType).SelectMany(type => type.Methods)
+            .Where(candidate => candidate.Name == syntax.Name && (!_method.IsStatic || candidate.IsStatic))
+            .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
+        if (!forWrite && methods.Length != 0)
+            return new LoweredExpression { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
         var type = _model.ResolveNamedType(syntax.Name, TreeFor(syntax));
         if (type is not null)
             return new LoweredExpression { Type = CType.Error, Code = string.Empty, TypeReceiver = type };
@@ -1744,6 +1750,11 @@ internal sealed class MethodLowerer
             var property = Hierarchy(staticType).SelectMany(type => type.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic);
             if (property is not null)
                 return LowerProperty(property, null, syntax, forWrite);
+            var methods = Hierarchy(staticType).SelectMany(type => type.Methods)
+                .Where(candidate => candidate.Name == syntax.Name && candidate.IsStatic)
+                .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
+            if (!forWrite && methods.Length != 0)
+                return new LoweredExpression { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
             Report("CT1108", $"Type '{staticType.FullName}' has no static member named '{syntax.Name}'.", syntax);
             return ErrorExpression();
         }
@@ -1775,6 +1786,11 @@ internal sealed class MethodLowerer
         var instanceProperty = Hierarchy(type).SelectMany(candidateType => candidateType.Properties).FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic);
         if (instanceProperty is not null)
             return LowerProperty(instanceProperty, receiver, syntax, forWrite);
+        var instanceMethods = Hierarchy(type).SelectMany(candidateType => candidateType.Methods)
+            .Where(candidate => candidate.Name == syntax.Name && !candidate.IsStatic)
+            .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
+        if (!forWrite && instanceMethods.Length != 0)
+            return new LoweredExpression { Type = CType.Error, Code = string.Empty, Prelude = receiver.Prelude, MethodGroup = new MethodGroupBinding(instanceMethods, receiver, receiver.IsBaseReceiver) };
         Report("CT1109", $"Type '{type.FullName}' has no instance member named '{syntax.Name}'.", syntax);
         return ErrorExpression(receiver.Prelude);
     }
@@ -1973,6 +1989,21 @@ internal sealed class MethodLowerer
 
     private LoweredExpression LowerCall(CallExpressionSyntax syntax, bool captureForDefer = false)
     {
+        var possibleDelegate = syntax.Target switch
+        {
+            NameExpressionSyntax delegateName when IsCallablePointer(FindLocal(delegateName.Name)?.Type) ||
+                                                   IsCallablePointer(_parameters.GetValueOrDefault(delegateName.Name)?.Type) ||
+                                                   Hierarchy(_method.ContainingType).SelectMany(type => type.Fields).Any(field => field.Name == delegateName.Name && IsCallablePointer(field.Type)) ||
+                                                   Hierarchy(_method.ContainingType).SelectMany(type => type.Properties).Any(property => property.Name == delegateName.Name && IsCallablePointer(property.Type))
+                => LowerName(delegateName, false),
+            MemberAccessExpressionSyntax member => TryLowerDelegateMember(member),
+            _ => null,
+        };
+        if (possibleDelegate?.Type.Kind == CTypeKind.Delegate)
+            return LowerDelegateInvocation(syntax, possibleDelegate);
+        if (possibleDelegate?.Type.Kind == CTypeKind.FunctionPointer)
+            return LowerFunctionPointerInvocation(syntax, possibleDelegate);
+
         TypeSymbol? containingType = null;
         LoweredExpression? receiver = null;
         string methodName;
@@ -2006,7 +2037,7 @@ internal sealed class MethodLowerer
         }
         else
         {
-            Report("CT2120", "Only methods can be called in draft 0.6.", syntax.Target);
+            Report("CT2120", "Only methods, delegates, and function pointers can be called in draft 0.7.", syntax.Target);
             return ErrorExpression();
         }
 
@@ -2100,9 +2131,86 @@ internal sealed class MethodLowerer
             : new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude };
     }
 
+    private static bool IsCallablePointer(CType? type) => type?.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer;
+
+    private LoweredExpression? TryLowerDelegateMember(MemberAccessExpressionSyntax syntax)
+    {
+        var staticType = TryResolveTypeExpression(syntax.Receiver);
+        if (staticType is not null)
+        {
+            var field = Hierarchy(staticType).SelectMany(type => type.Fields)
+                .FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic && IsCallablePointer(candidate.Type));
+            if (field is not null)
+                return LowerField(field, null, syntax, false);
+            var property = Hierarchy(staticType).SelectMany(type => type.Properties)
+                .FirstOrDefault(candidate => candidate.Name == syntax.Name && candidate.IsStatic && IsCallablePointer(candidate.Type));
+            return property is null ? null : LowerProperty(property, null, syntax, false);
+        }
+
+        var receiver = LowerExpression(syntax.Receiver);
+        var type = receiver.Type.Symbol;
+        if (type is null)
+            return null;
+        var instanceField = Hierarchy(type).SelectMany(candidate => candidate.Fields)
+            .FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic && IsCallablePointer(candidate.Type));
+        if (instanceField is not null)
+            return LowerField(instanceField, receiver, syntax, false);
+        var instanceProperty = Hierarchy(type).SelectMany(candidate => candidate.Properties)
+            .FirstOrDefault(candidate => candidate.Name == syntax.Name && !candidate.IsStatic && IsCallablePointer(candidate.Type));
+        return instanceProperty is null ? null : LowerProperty(instanceProperty, receiver, syntax, false);
+    }
+
+    private LoweredExpression LowerDelegateInvocation(CallExpressionSyntax syntax, LoweredExpression target)
+    {
+        var delegateType = target.Type.Symbol!;
+        var parameters = delegateType.DelegateParameters;
+        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        if (arguments.Length != parameters.Length)
+        {
+            Report("CT2160", $"Delegate '{delegateType.FullName}' expects {parameters.Length} argument(s).", syntax);
+            return ErrorExpression(target.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
+        }
+        target = Materialize(target, syntax.Target);
+        var loweredArguments = LowerArguments(arguments, parameters, syntax.Arguments);
+        var prelude = new List<string>(target.Prelude);
+        prelude.AddRange(loweredArguments.Prelude);
+        prelude.Add($"(void)ct_require_nonnull({target.Code}, {_emitter.SourceArgument(syntax.Target)});");
+        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"indirect invocation of delegate '{delegateType.FullName}'");
+        var callArguments = new[] { $"{target.Code}->ct_target" }.Concat(loweredArguments.Codes);
+        var call = $"{target.Code}->ct_invoke({string.Join(", ", callArguments)})";
+        var returnType = delegateType.DelegateReturnType!;
+        return returnType.ContainsManagedReferences
+            ? OwnResult(returnType, call, prelude)
+            : new LoweredExpression { Type = returnType, Code = call, Prelude = prelude };
+    }
+
+    private LoweredExpression LowerFunctionPointerInvocation(CallExpressionSyntax syntax, LoweredExpression target)
+    {
+        RequireUnsafe(syntax);
+        var signature = target.Type.FunctionPointer!;
+        var arguments = syntax.Arguments.Select(LowerExpression).ToArray();
+        if (arguments.Length != signature.ParameterTypes.Length || arguments.Where((argument, index) => index < signature.ParameterTypes.Length && argument.Type != signature.ParameterTypes[index]).Any())
+        {
+            Report("CT2164", "Function-pointer invocation requires exact argument types.", syntax);
+            return ErrorExpression(target.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
+        }
+        target = Materialize(target, syntax.Target);
+        var prelude = new List<string>(target.Prelude);
+        var codes = new List<string>();
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            var argument = Materialize(arguments[index], syntax.Arguments[index]);
+            prelude.AddRange(argument.Prelude);
+            codes.Add(argument.Code);
+        }
+        prelude.Add($"(void)ct_require_nonnull((void*){target.Code}, {_emitter.SourceArgument(syntax.Target)});");
+        _emitter.AllocationEffects.RecordDirect(_method, syntax, "unmanaged function-pointer invocation");
+        return new LoweredExpression { Type = signature.ReturnType, Code = $"{target.Code}({string.Join(", ", codes)})", Prelude = prelude };
+    }
+
     private static bool SupportsBuiltInToString(CType type) => type.Kind is
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
-        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.String;
+        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float or CTypeKind.String;
 
     private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver, bool captureForDefer = false)
     {
@@ -2137,6 +2245,8 @@ internal sealed class MethodLowerer
             CTypeKind.Char => "ct_to_string_char",
             CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint",
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int",
+            CTypeKind.Long => "ct_to_string_long",
+            CTypeKind.Ulong => "ct_to_string_ulong",
             CTypeKind.Float => "ct_to_string_float",
             _ => throw new InvalidOperationException($"Unsupported ToString receiver '{receiver.Type.DisplayName}'."),
         };
@@ -2158,7 +2268,7 @@ internal sealed class MethodLowerer
         var matches = candidates
             .Where(candidate => candidate.Parameters.Length == arguments.Count)
             .Where(candidate => candidate.Parameters
-                .Select((parameter, index) => TypeFacts.CanImplicitlyConvert(arguments[index].Type, parameter.Type))
+                .Select((parameter, index) => CanConvertExpression(arguments[index], parameter.Type))
                 .All(valid => valid))
             .ToArray();
         if (matches.Length == 0)
@@ -2211,6 +2321,19 @@ internal sealed class MethodLowerer
         return 0;
     }
 
+    private static bool CanConvertExpression(LoweredExpression expression, CType target) =>
+        expression.MethodGroup is { } group
+            ? target.Kind == CTypeKind.Delegate && FindDelegateMethod(group, target.Symbol!) is not null
+            : TypeFacts.CanImplicitlyConvert(expression.Type, target);
+
+    private static MethodSymbol? FindDelegateMethod(MethodGroupBinding group, TypeSymbol delegateType)
+    {
+        var matches = group.Candidates.Where(candidate =>
+            candidate.ReturnType == delegateType.DelegateReturnType &&
+            candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(delegateType.DelegateParameters.Select(parameter => parameter.Type))).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
     private (List<string> Prelude, List<string> Codes) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ExpressionSyntax> syntax)
     {
         var prelude = new List<string>();
@@ -2225,7 +2348,7 @@ internal sealed class MethodLowerer
                 continue;
             }
             var temp = NewTemp();
-            prelude.Add($"{_emitter.CTypeName(converted.Type)} {temp} = {converted.Code};");
+            prelude.Add($"{_emitter.CDeclaration(converted.Type, temp)} = {converted.Code};");
             if (parameters[index].IsRetained)
                 prelude.Add($"ct_retain((ct_object*)(void*){temp});");
             codes.Add(temp);
@@ -2306,6 +2429,9 @@ internal sealed class MethodLowerer
         if (syntax.OperatorKind == SyntaxKind.AmpersandToken)
         {
             RequireUnsafe(syntax);
+            var methodGroup = LowerExpression(syntax.Operand);
+            if (methodGroup.MethodGroup is not null)
+                return new LoweredExpression { Type = CType.Error, Code = string.Empty, Prelude = methodGroup.Prelude, MethodGroup = methodGroup.MethodGroup, IsFunctionAddress = true };
             var operand = LowerAssignable(syntax.Operand);
             if (operand.LValue?.Address is null)
             {
@@ -2333,6 +2459,18 @@ internal sealed class MethodLowerer
             };
         }
 
+        if (syntax.OperatorKind == SyntaxKind.MinusToken && syntax.Operand is LiteralExpressionSyntax
+            {
+                LiteralKind: SyntaxKind.NumberToken,
+                Value: NumericLiteralValue { FloatingPoint: null } numeric,
+            })
+        {
+            if (numeric.Suffix == IntegerLiteralSuffix.None && numeric.Integer == (BigInteger)int.MaxValue + 1)
+                return Constant(CType.Int, int.MinValue, "INT32_MIN");
+            if (numeric.Suffix == IntegerLiteralSuffix.Long && numeric.Integer == (BigInteger)long.MaxValue + 1)
+                return Constant(CType.Long, long.MinValue, "INT64_MIN");
+        }
+
         var operandExpression = LowerExpression(syntax.Operand);
         if (syntax.OperatorKind == SyntaxKind.TildeToken && !operandExpression.Type.IsIntegral && !operandExpression.Type.IsError)
         {
@@ -2352,7 +2490,7 @@ internal sealed class MethodLowerer
             return ErrorExpression(operandExpression.Prelude);
         }
         var promoted = operandExpression.Type.Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char ? CType.Int : operandExpression.Type;
-        if (syntax.OperatorKind == SyntaxKind.MinusToken && promoted == CType.Uint)
+        if (syntax.OperatorKind == SyntaxKind.MinusToken && promoted.Kind is CTypeKind.Uint or CTypeKind.Ulong)
         {
             Report("CT2145", "Unary minus requires a signed numeric operand.", syntax);
             return ErrorExpression(operandExpression.Prelude);
@@ -2362,6 +2500,7 @@ internal sealed class MethodLowerer
         {
             SyntaxKind.PlusToken => operandValue.Code,
             SyntaxKind.MinusToken when promoted == CType.Int => $"ct_i32_neg({operandValue.Code})",
+            SyntaxKind.MinusToken when promoted == CType.Long => $"ct_i64_neg({operandValue.Code})",
             SyntaxKind.MinusToken => $"-({operandValue.Code})",
             SyntaxKind.TildeToken => $"~({operandValue.Code})",
             _ => operandValue.Code,
@@ -2385,11 +2524,11 @@ internal sealed class MethodLowerer
         }
         var prelude = new List<string>(target.Prelude);
         var old = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
+        prelude.Add($"{_emitter.CDeclaration(target.Type, old)} = {target.Code};");
         var one = target.Type == CType.Float ? "1.0f" : "1";
         var nextCode = NumericOperation(syntax.OperatorKind == SyntaxKind.PlusPlusToken ? SyntaxKind.PlusToken : SyntaxKind.MinusToken, target.Type, old, one, syntax);
         var next = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(target.Type)} {next} = {nextCode};");
+        prelude.Add($"{_emitter.CDeclaration(target.Type, next)} = {nextCode};");
         prelude.Add(target.LValue.Store(next) + ";");
         MarkAssigned(target.LValue);
         return new LoweredExpression { Type = target.Type, Code = syntax.IsPostfix ? old : next, Prelude = prelude };
@@ -2431,6 +2570,11 @@ internal sealed class MethodLowerer
             if (!(left.Type.IsNumeric && right.Type.IsNumeric) && !(left.Type.Kind == CTypeKind.Enum && left.Type == right.Type))
                 Report("CT2128", "Ordered comparison requires numeric operands or the same enum type.", syntax);
             var common = left.Type.Kind == CTypeKind.Enum ? left.Type : TypeFacts.PromoteNumeric(left.Type, right.Type);
+            if (common.IsError && !left.Type.IsError && !right.Type.IsError)
+            {
+                Report("CT2128", "Ordered comparison has no valid common numeric type.", syntax);
+                return ErrorExpression(left.Prelude.Concat(right.Prelude));
+            }
             left = Materialize(Convert(left, common, syntax.Left, false), syntax.Left);
             right = Materialize(Convert(right, common, syntax.Right, false), syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
@@ -2458,14 +2602,26 @@ internal sealed class MethodLowerer
                 };
                 return new LoweredExpression { Type = enumType, Code = $"({_emitter.CTypeName(enumType)})({enumCode})", Prelude = enumPrelude };
             }
-            var common = left.Type.Kind == CTypeKind.Uint || right.Type.Kind == CTypeKind.Uint ? CType.Uint : CType.Int;
+            var shifting = syntax.OperatorKind is SyntaxKind.LessLessToken or SyntaxKind.GreaterGreaterToken;
+            var common = shifting
+                ? left.Type.Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char ? CType.Int : left.Type
+                : TypeFacts.PromoteNumeric(left.Type, right.Type);
+            if (common.IsError && !left.Type.IsError && !right.Type.IsError)
+            {
+                Report("CT2129", "Bitwise operands have no valid common integral type.", syntax);
+                return ErrorExpression(left.Prelude.Concat(right.Prelude));
+            }
             left = Materialize(Convert(left, common, syntax.Left, false), syntax.Left);
-            right = Materialize(Convert(right, CType.Int, syntax.Right, false), syntax.Right);
+            right = Materialize(Convert(right, shifting ? CType.Int : common, syntax.Right, shifting), syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
             var code = syntax.OperatorKind switch
             {
                 SyntaxKind.LessLessToken when common == CType.Int => $"ct_i32_shl({left.Code}, {right.Code})",
                 SyntaxKind.GreaterGreaterToken when common == CType.Int => $"ct_i32_shr({left.Code}, {right.Code})",
+                SyntaxKind.LessLessToken when common == CType.Long => $"ct_i64_shl({left.Code}, {right.Code})",
+                SyntaxKind.GreaterGreaterToken when common == CType.Long => $"ct_i64_shr({left.Code}, {right.Code})",
+                SyntaxKind.LessLessToken when common == CType.Ulong => $"({left.Code} << ((uint32_t){right.Code} & 63u))",
+                SyntaxKind.GreaterGreaterToken when common == CType.Ulong => $"({left.Code} >> ((uint32_t){right.Code} & 63u))",
                 SyntaxKind.LessLessToken => $"({left.Code} << ((uint32_t){right.Code} & 31u))",
                 SyntaxKind.GreaterGreaterToken => $"({left.Code} >> ((uint32_t){right.Code} & 31u))",
                 _ => $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})",
@@ -2488,6 +2644,11 @@ internal sealed class MethodLowerer
             return ErrorExpression(left.Prelude.Concat(right.Prelude));
         }
         var resultType = TypeFacts.PromoteNumeric(left.Type, right.Type);
+        if (resultType.IsError)
+        {
+            Report("CT2130", "Arithmetic operands have no valid common numeric type.", syntax);
+            return ErrorExpression(left.Prelude.Concat(right.Prelude));
+        }
         left = Materialize(Convert(left, resultType, syntax.Left, false), syntax.Left);
         right = Materialize(Convert(right, resultType, syntax.Right, false), syntax.Right);
         var arithmeticPrelude = new List<string>(left.Prelude); arithmeticPrelude.AddRange(right.Prelude);
@@ -2532,6 +2693,11 @@ internal sealed class MethodLowerer
         else if (left.Type.IsNumeric && right.Type.IsNumeric)
         {
             common = TypeFacts.PromoteNumeric(left.Type, right.Type);
+            if (common.IsError)
+            {
+                Report("CT2131", $"Types '{left.Type.DisplayName}' and '{right.Type.DisplayName}' cannot be compared for equality.", syntax);
+                return ErrorExpression(left.Prelude.Concat(right.Prelude));
+            }
             left = Materialize(Convert(left, common, syntax.Left, false), syntax.Left);
             right = Materialize(Convert(right, common, syntax.Right, false), syntax.Right);
             code = $"({left.Code} == {right.Code})";
@@ -2569,7 +2735,7 @@ internal sealed class MethodLowerer
             var value = Convert(LowerExpression(syntax.Right), target.Type, syntax.Right, false);
             prelude.AddRange(value.Prelude);
             var temp = NewTemp();
-            prelude.Add($"{_emitter.CTypeName(target.Type)} {temp} = {value.Code};");
+            prelude.Add($"{_emitter.CDeclaration(target.Type, temp)} = {value.Code};");
             if (target.Type.ContainsManagedReferences)
                 AddStrongStore(prelude, target, temp);
             else
@@ -2579,9 +2745,9 @@ internal sealed class MethodLowerer
         }
 
         if (!target.Type.IsNumeric)
-            Report("CT2133", "Compound assignment requires a numeric target in draft 0.6.", syntax.Left);
+            Report("CT2133", "Compound assignment requires a numeric target in draft 0.7.", syntax.Left);
         var old = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(target.Type)} {old} = {target.Code};");
+        prelude.Add($"{_emitter.CDeclaration(target.Type, old)} = {target.Code};");
         var rawRight = LowerExpression(syntax.Right);
         if (syntax.OperatorKind == SyntaxKind.PercentEqualsToken &&
             (!target.Type.IsIntegral || !rawRight.Type.IsIntegral) &&
@@ -2597,10 +2763,15 @@ internal sealed class MethodLowerer
             _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Left, property.IsVirtual && !target.LValue.IsBaseReceiver);
         }
         var operationType = TypeFacts.PromoteNumeric(target.Type, rawRight.Type);
+        if (operationType.IsError)
+        {
+            Report("CT2133", "Compound-assignment operands have no valid common numeric type.", syntax);
+            return ErrorExpression(prelude.Concat(rawRight.Prelude));
+        }
         var right = Convert(rawRight, operationType, syntax.Right, true);
         prelude.AddRange(right.Prelude);
         var rightTemp = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(operationType)} {rightTemp} = {right.Code};");
+        prelude.Add($"{_emitter.CDeclaration(operationType, rightTemp)} = {right.Code};");
         var operation = syntax.OperatorKind switch
         {
             SyntaxKind.PlusEqualsToken => SyntaxKind.PlusToken,
@@ -2611,9 +2782,9 @@ internal sealed class MethodLowerer
             _ => SyntaxKind.PlusToken,
         };
         var operationResult = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(operationType)} {operationResult} = {NumericOperation(operation, operationType, $"({_emitter.CTypeName(operationType)})({old})", rightTemp, syntax)};");
+        prelude.Add($"{_emitter.CDeclaration(operationType, operationResult)} = {NumericOperation(operation, operationType, $"({_emitter.CCastType(operationType)})({old})", rightTemp, syntax)};");
         var result = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(target.Type)} {result} = ({_emitter.CTypeName(target.Type)})({operationResult});");
+        prelude.Add($"{_emitter.CDeclaration(target.Type, result)} = ({_emitter.CCastType(target.Type)})({operationResult});");
         prelude.Add(target.LValue.Store(result) + ";");
         MarkAssigned(target.LValue);
         return new LoweredExpression { Type = target.Type, Code = result, Prelude = prelude };
@@ -2681,11 +2852,36 @@ internal sealed class MethodLowerer
                 _ => $"({left} {OperatorText(operation)} {right})",
             };
         }
+        if (type == CType.Long)
+        {
+            return operation switch
+            {
+                SyntaxKind.PlusToken => $"ct_i64_add({left}, {right})",
+                SyntaxKind.MinusToken => $"ct_i64_sub({left}, {right})",
+                SyntaxKind.StarToken => $"ct_i64_mul({left}, {right})",
+                SyntaxKind.SlashToken => $"ct_i64_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_i64_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                _ => $"({left} {OperatorText(operation)} {right})",
+            };
+        }
+        if (type == CType.Ulong)
+        {
+            return operation switch
+            {
+                SyntaxKind.SlashToken => $"ct_u64_div({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                SyntaxKind.PercentToken => $"ct_u64_mod({left}, {right}, {_emitter.SourceArgument(syntax)})",
+                _ => $"({left} {OperatorText(operation)} {right})",
+            };
+        }
         return $"({left} {OperatorText(operation)} {right})";
     }
 
     private LoweredExpression Convert(LoweredExpression expression, CType target, SyntaxNode syntax, bool explicitConversion)
     {
+        if (expression.IsFunctionAddress)
+            return ConvertFunctionAddress(expression, target, syntax);
+        if (expression.MethodGroup is not null)
+            return ConvertMethodGroup(expression, target, syntax);
         if (expression.Type == target || expression.Type.IsError || target.IsError)
             return new LoweredExpression
             {
@@ -2732,11 +2928,86 @@ internal sealed class MethodLowerer
             return new LoweredExpression { Type = target, Code = castCode, Prelude = expression.Prelude };
         }
         var code = sourceType.Kind == CTypeKind.Null
-            ? $"({_emitter.CTypeName(target)})NULL"
+            ? $"({_emitter.CCastType(target)})NULL"
             : sourceType.IsPointerLike || target.IsPointerLike
-                ? $"({_emitter.CTypeName(target)})(void*)({expression.Code})"
-                : $"({_emitter.CTypeName(target)})({expression.Code})";
+                ? $"({_emitter.CCastType(target)})(void*)({expression.Code})"
+                : $"({_emitter.CCastType(target)})({expression.Code})";
         return new LoweredExpression { Type = target, Code = code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue, Ownership = expression.Ownership };
+    }
+
+    private LoweredExpression ConvertFunctionAddress(LoweredExpression expression, CType target, SyntaxNode syntax)
+    {
+        RequireUnsafe(syntax);
+        if (target.Kind != CTypeKind.FunctionPointer)
+        {
+            Report("CT2163", $"A method address can convert only to a compatible unmanaged function pointer, not '{target.DisplayName}'.", syntax);
+            return ErrorExpression(expression.Prelude);
+        }
+        var signature = target.FunctionPointer!;
+        var matches = expression.MethodGroup!.Candidates.Where(candidate =>
+            candidate.IsStatic && candidate.ReturnType == signature.ReturnType &&
+            candidate.Parameters.Select(parameter => parameter.Type).SequenceEqual(signature.ParameterTypes)).ToArray();
+        if (matches.Length != 1)
+        {
+            Report("CT2163", "Method address is not uniquely compatible with the unmanaged function-pointer signature.", syntax);
+            return ErrorExpression(expression.Prelude);
+        }
+        var selected = matches[0];
+        CheckAccess(selected, syntax);
+        if (selected.ExternName is not null)
+        {
+            _emitter.RegisterExternUse(selected, syntax);
+            return new LoweredExpression { Type = target, Code = $"&{selected.CName}", Prelude = expression.Prelude };
+        }
+        var trampoline = _emitter.RegisterFunctionPointerTrampoline(target, selected);
+        return new LoweredExpression { Type = target, Code = $"&{trampoline}", Prelude = expression.Prelude };
+    }
+
+    private LoweredExpression ConvertMethodGroup(LoweredExpression expression, CType target, SyntaxNode syntax)
+    {
+        if (target.Kind != CTypeKind.Delegate)
+        {
+            Report("CT2158", $"A method group can convert only to a compatible named delegate, not '{target.DisplayName}'.", syntax);
+            return ErrorExpression(expression.Prelude);
+        }
+        var group = expression.MethodGroup!;
+        var selected = FindDelegateMethod(group, target.Symbol!);
+        if (selected is null)
+        {
+            Report("CT2159", $"Method group is not uniquely compatible with delegate '{target.DisplayName}'.", syntax);
+            return ErrorExpression(expression.Prelude);
+        }
+        CheckAccess(selected, syntax);
+        if (selected.IsUnsafe)
+            RequireUnsafe(syntax);
+        LoweredExpression? receiver = group.Receiver;
+        if (!selected.IsStatic && receiver is null)
+        {
+            if (_method.IsStatic)
+            {
+                Report("CT2115", $"Instance method '{selected.Name}' requires an object.", syntax);
+                return ErrorExpression(expression.Prelude);
+            }
+            receiver = new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+        }
+        var prelude = new List<string>(expression.Prelude);
+        var targetCode = "NULL";
+        if (receiver is not null)
+        {
+            if (receiver.Type.Kind != CTypeKind.Class)
+            {
+                Report("CT2161", "Instance delegates require a managed class receiver.", syntax);
+                return ErrorExpression(prelude);
+            }
+            receiver = Materialize(receiver, syntax);
+            prelude = new List<string>(receiver.Prelude);
+            targetCode = $"(ct_object*)(void*){receiver.Code}";
+        }
+        var virtualDispatch = !selected.IsStatic && selected.IsVirtual && !group.IsBaseReceiver;
+        var thunk = _emitter.RegisterDelegateThunk(target.Symbol!, selected, virtualDispatch);
+        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"creation of delegate '{target.DisplayName}'");
+        var creation = $"{CEmitter.DelegateFactoryName(target.Symbol!)}({targetCode}, &{thunk}, {_emitter.SourceArgument(syntax)})";
+        return OwnResult(target, creation, prelude);
     }
 
     private LoweredExpression RequireBoolean(LoweredExpression expression, SyntaxNode syntax)
@@ -2752,7 +3023,7 @@ internal sealed class MethodLowerer
             return expression;
         var prelude = new List<string>(expression.Prelude);
         var temp = NewTemp();
-        prelude.Add($"{_emitter.CTypeName(expression.Type)} {temp} = {expression.Code};");
+        prelude.Add($"{_emitter.CDeclaration(expression.Type, temp)} = {expression.Code};");
         return new LoweredExpression
         {
             Type = expression.Type,
@@ -2769,7 +3040,7 @@ internal sealed class MethodLowerer
         if (receiver.Type.Kind == CTypeKind.Class)
         {
             var temp = NewTemp();
-            prelude.Add($"{_emitter.CTypeName(receiver.Type)} {temp} = {receiver.Code};");
+            prelude.Add($"{_emitter.CDeclaration(receiver.Type, temp)} = {receiver.Code};");
             prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
             return new LoweredExpression { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
         }
@@ -2778,7 +3049,7 @@ internal sealed class MethodLowerer
             if (receiver.LValue?.Address is string address)
                 return new LoweredExpression { Type = receiver.Type, Code = address, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
             var temp = NewTemp();
-            prelude.Add($"{_emitter.CTypeName(receiver.Type)} {temp} = {receiver.Code};");
+            prelude.Add($"{_emitter.CDeclaration(receiver.Type, temp)} = {receiver.Code};");
             return new LoweredExpression { Type = receiver.Type, Code = $"&{temp}", Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
         }
         return receiver;
@@ -2820,6 +3091,10 @@ internal sealed class MethodLowerer
                     var signed = unchecked(-(int)operand.ConstantValue!);
                     result = Constant(CType.Int, signed, FormatInt32(signed));
                     return true;
+                case SyntaxKind.MinusToken when operand.Type == CType.Long:
+                    var signed64 = unchecked(-(long)operand.ConstantValue!);
+                    result = Constant(CType.Long, signed64, FormatInt64(signed64));
+                    return true;
                 case SyntaxKind.MinusToken when operand.Type == CType.Float:
                     var floating = -(float)operand.ConstantValue!;
                     result = Constant(CType.Float, floating, FormatFloat(floating));
@@ -2835,6 +3110,14 @@ internal sealed class MethodLowerer
                 case SyntaxKind.TildeToken when operand.Type == CType.Uint:
                     var unsigned = ~(uint)operand.ConstantValue!;
                     result = Constant(CType.Uint, unsigned, $"UINT32_C({unsigned.ToString(CultureInfo.InvariantCulture)})");
+                    return true;
+                case SyntaxKind.TildeToken when operand.Type == CType.Long:
+                    var complemented64 = ~(long)operand.ConstantValue!;
+                    result = Constant(CType.Long, complemented64, FormatInt64(complemented64));
+                    return true;
+                case SyntaxKind.TildeToken when operand.Type == CType.Ulong:
+                    var unsigned64 = ~(ulong)operand.ConstantValue!;
+                    result = Constant(CType.Ulong, unsigned64, FormatUInt64(unsigned64));
                     return true;
             }
         }
@@ -2900,6 +3183,70 @@ internal sealed class MethodLowerer
                     _ => float.NaN,
                 };
                 result = Constant(CType.Float, value, FormatFloat(value));
+                return true;
+            }
+            else if (common == CType.Ulong)
+            {
+                var l = (ulong)left.ConstantValue!; var r = (ulong)right.ConstantValue!;
+                if (comparison)
+                {
+                    var boolean = Compare(syntax.OperatorKind, l, r);
+                    result = Constant(CType.Bool, boolean, boolean ? "true" : "false");
+                    return true;
+                }
+                if (r == 0 && syntax.OperatorKind is SyntaxKind.SlashToken or SyntaxKind.PercentToken)
+                {
+                    Report("CT2142", "Division by zero is not a valid constant expression.", syntax);
+                    result = Constant(CType.Ulong, 0ul, "UINT64_C(0)");
+                    return true;
+                }
+                var value = syntax.OperatorKind switch
+                {
+                    SyntaxKind.PlusToken => unchecked(l + r),
+                    SyntaxKind.MinusToken => unchecked(l - r),
+                    SyntaxKind.StarToken => unchecked(l * r),
+                    SyntaxKind.SlashToken => l / r,
+                    SyntaxKind.PercentToken => l % r,
+                    SyntaxKind.AmpersandToken => l & r,
+                    SyntaxKind.PipeToken => l | r,
+                    SyntaxKind.HatToken => l ^ r,
+                    SyntaxKind.LessLessToken => l << ((int)r & 63),
+                    SyntaxKind.GreaterGreaterToken => l >> ((int)r & 63),
+                    _ => ulong.MaxValue,
+                };
+                result = Constant(CType.Ulong, value, FormatUInt64(value));
+                return true;
+            }
+            else if (common == CType.Long)
+            {
+                var l = (long)left.ConstantValue!; var r = (long)right.ConstantValue!;
+                if (comparison)
+                {
+                    var boolean = Compare(syntax.OperatorKind, l, r);
+                    result = Constant(CType.Bool, boolean, boolean ? "true" : "false");
+                    return true;
+                }
+                if (r == 0 && syntax.OperatorKind is SyntaxKind.SlashToken or SyntaxKind.PercentToken)
+                {
+                    Report("CT2142", "Division by zero is not a valid constant expression.", syntax);
+                    result = Constant(CType.Long, 0L, "INT64_C(0)");
+                    return true;
+                }
+                var value = syntax.OperatorKind switch
+                {
+                    SyntaxKind.PlusToken => unchecked(l + r),
+                    SyntaxKind.MinusToken => unchecked(l - r),
+                    SyntaxKind.StarToken => unchecked(l * r),
+                    SyntaxKind.SlashToken => l == long.MinValue && r == -1 ? long.MinValue : l / r,
+                    SyntaxKind.PercentToken => l == long.MinValue && r == -1 ? 0 : l % r,
+                    SyntaxKind.AmpersandToken => l & r,
+                    SyntaxKind.PipeToken => l | r,
+                    SyntaxKind.HatToken => l ^ r,
+                    SyntaxKind.LessLessToken => unchecked(l << ((int)r & 63)),
+                    SyntaxKind.GreaterGreaterToken => l >> ((int)r & 63),
+                    _ => long.MinValue,
+                };
+                result = Constant(CType.Long, value, FormatInt64(value));
                 return true;
             }
             else if (common == CType.Uint)
@@ -2970,7 +3317,13 @@ internal sealed class MethodLowerer
         catch (DivideByZeroException)
         {
             Report("CT2142", "Division by zero is not a valid constant expression.", syntax);
-            result = Constant(common, common == CType.Uint ? 0u : 0, "0");
+            result = common.Kind switch
+            {
+                CTypeKind.Uint => Constant(common, 0u, "UINT32_C(0)"),
+                CTypeKind.Long => Constant(common, 0L, "INT64_C(0)"),
+                CTypeKind.Ulong => Constant(common, 0ul, "UINT64_C(0)"),
+                _ => Constant(common, 0, "0"),
+            };
             return true;
         }
     }
@@ -2999,7 +3352,7 @@ internal sealed class MethodLowerer
             return true;
         if (expression.Type.Kind == CTypeKind.Null && target.IsPointerLike)
         {
-            result = Constant(target, null, $"({_emitter.CTypeName(target)})NULL");
+            result = Constant(target, null, $"({_emitter.CCastType(target)})NULL");
             return true;
         }
         if (!expression.Type.IsNumeric || !target.IsNumeric)
@@ -3024,10 +3377,36 @@ internal sealed class MethodLowerer
                 result = Constant(target, value, $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})");
                 return true;
             }
+            if (target == CType.Long)
+            {
+                var value = expression.ConstantValue switch
+                {
+                    ulong unsigned => unchecked((long)unsigned),
+                    float floating => unchecked((long)floating),
+                    _ => unchecked(System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
+                };
+                result = Constant(target, value, FormatInt64(value));
+                return true;
+            }
+            if (target == CType.Ulong)
+            {
+                var value = expression.ConstantValue switch
+                {
+                    ulong unsigned => unsigned,
+                    long signed => unchecked((ulong)signed),
+                    int signed => unchecked((ulong)signed),
+                    float floating => unchecked((ulong)floating),
+                    _ => unchecked(System.Convert.ToUInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
+                };
+                result = Constant(target, value, FormatUInt64(value));
+                return true;
+            }
             var signedValue = expression.ConstantValue switch
             {
                 int signed => signed,
                 uint unsigned => unchecked((int)unsigned),
+                long signed => unchecked((int)signed),
+                ulong unsigned => unchecked((int)unsigned),
                 float floating => unchecked((int)floating),
                 _ => unchecked((int)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
             };
@@ -3075,6 +3454,15 @@ internal sealed class MethodLowerer
     };
 
     private static string FormatInt32(int value) => value == int.MinValue ? "INT32_MIN" : value.ToString(CultureInfo.InvariantCulture);
+
+    private static string FormatInt64(long value) => value switch
+    {
+        long.MinValue => "INT64_MIN",
+        < 0 => $"(-INT64_C({(-value).ToString(CultureInfo.InvariantCulture)}))",
+        _ => $"INT64_C({value.ToString(CultureInfo.InvariantCulture)})",
+    };
+
+    private static string FormatUInt64(ulong value) => $"UINT64_C({value.ToString(CultureInfo.InvariantCulture)})";
 
     private static string FormatFloat(float value)
     {

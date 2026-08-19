@@ -30,7 +30,7 @@ Run("deterministic C emission", () =>
 
 Run("ESP-IDF target profile", () =>
 {
-    const string source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { int[] values = new int[1]; FreeRtos.DelayMilliseconds(1u); Gpio.ConfigureOutput(32); Gpio.Write(32, true); Ws2812.Configure(4, 1u); Ws2812.SetPixel(0u, 0u, 16u, 0u); Ws2812.Refresh(); Ws2812.Clear(); } }";
+    const string source = "using Esp.Idf; public static class Program { [EntryPoint] public static void Main() { int[] values = new int[1]; long now = EspTimer.GetTimeMicroseconds(); FreeRtos.DelayMilliseconds(1u); Gpio.ConfigureOutput(32); Gpio.Write(32, true); Ws2812.Configure(4, 1u); Ws2812.SetPixel(0u, 0u, 16u, 0u); Ws2812.Refresh(); Ws2812.Clear(); } }";
     var options = new CompilationOptions(CompilationTarget.EspIdf);
     var first = Emit(source, options, @"E:\private\firmware\Program.ct");
     var second = Emit(source, options, @"E:\private\firmware\Program.ct");
@@ -48,6 +48,7 @@ Run("ESP-IDF target profile", () =>
     Assert(first.Contains("extern bool ct_esp_ws2812_set_pixel(uint32_t", StringComparison.Ordinal), "WS2812 pixel ABI was not emitted.");
     Assert(first.Contains("extern bool ct_esp_ws2812_refresh(void);", StringComparison.Ordinal), "WS2812 refresh ABI was not emitted.");
     Assert(first.Contains("extern bool ct_esp_ws2812_clear(void);", StringComparison.Ordinal), "WS2812 clear ABI was not emitted.");
+    Assert(first.Contains("extern int64_t ct_esp_timer_get_time_us(void);", StringComparison.Ordinal), "ESP timer ABI was not emitted.");
 
     var hostedDiagnostics = Compile(source).GetDiagnostics();
     Assert(hostedDiagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "ESP-IDF declarations were available to the hosted target.");
@@ -58,8 +59,8 @@ Run("ESP-IDF target diagnostics", () =>
     var exit = Compile("public static class Program { [EntryPoint] public static void Main() { System.Environment.Exit(1); } }", new CompilationOptions(CompilationTarget.EspIdf));
     Assert(exit.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4105"), "Environment.Exit was not rejected for ESP-IDF.");
 
-    var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); [Extern(\"ct_esp_ws2812_configure\")] public static bool Configure(int pin, uint count); [Extern(\"ct_esp_ws2812_set_pixel\")] public static bool SetPixel(uint index, uint red, uint green, uint blue); [Extern(\"ct_esp_ws2812_refresh\")] public static bool Refresh(); [Extern(\"ct_esp_ws2812_clear\")] public static bool Clear(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
-    Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 6, "ESP-IDF target symbols were not reserved.");
+    var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); [Extern(\"ct_esp_ws2812_configure\")] public static bool Configure(int pin, uint count); [Extern(\"ct_esp_ws2812_set_pixel\")] public static bool SetPixel(uint index, uint red, uint green, uint blue); [Extern(\"ct_esp_ws2812_refresh\")] public static bool Refresh(); [Extern(\"ct_esp_ws2812_clear\")] public static bool Clear(); [Extern(\"ct_esp_timer_get_time_us\")] public static long Time(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
+    Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 7, "ESP-IDF target symbols were not reserved.");
 
     var invalid = Compile("public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions((CompilationTarget)99));
     using var writer = new StringWriter(CultureInfo.InvariantCulture);
@@ -224,6 +225,28 @@ Run("language service semantic tokens", () =>
     try { _ = service.GetSemanticTokens("semantic.ct", cancellation.Token); }
     catch (OperationCanceledException) { canceled = true; }
     Assert(canceled, "Semantic token classification ignored cancellation.");
+});
+
+Run("language service draft 0.7 types", () =>
+{
+    const string source = "public delegate long Transformer(long value); public static class Program { private static long Double(long value) { return value * 2L; } [EntryPoint] public static unsafe void Main() { Transformer managed = Double; delegate* unmanaged<long, long> native = &Double; long result = managed(21L) + native(21L); } }";
+    var service = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(source, "draft07-editor.ct")]);
+    Assert(!service.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, service.Diagnostics));
+
+    var delegateReference = source.IndexOf("Transformer managed", StringComparison.Ordinal) + 1;
+    var delegateHover = service.GetHover("draft07-editor.ct", delegateReference);
+    Assert(delegateHover?.Contents.Contains("delegate long Transformer(long value)", StringComparison.Ordinal) == true, "Delegate hover did not expose its signature.");
+    var delegateDefinition = service.GetDefinition("draft07-editor.ct", delegateReference);
+    Assert(delegateDefinition?.Span.Start == source.IndexOf("Transformer(long", StringComparison.Ordinal), "Delegate reference did not navigate to its declaration.");
+
+    var nativeUse = source.LastIndexOf("native(21L)", StringComparison.Ordinal) + 1;
+    var pointerHover = service.GetHover("draft07-editor.ct", nativeUse);
+    Assert(pointerHover?.Contents.Contains("delegate* unmanaged<long, long>", StringComparison.Ordinal) == true, "Function-pointer hover did not expose its structural signature.");
+
+    var tokens = service.GetSemanticTokens("draft07-editor.ct");
+    var delegateDeclarationStart = source.IndexOf("Transformer(long", StringComparison.Ordinal);
+    Assert(tokens.Any(token => token.Span.Start == delegateDeclarationStart && token.Kind == LanguageSemanticTokenKind.Class && token.Modifiers.HasFlag(LanguageSemanticTokenModifiers.Declaration)), "Delegate declaration was not semantically classified.");
+    Assert(tokens.Any(token => token.Span.Start == source.IndexOf("Double; delegate", StringComparison.Ordinal) && token.Kind == LanguageSemanticTokenKind.Method), "Delegate method group was not classified as a method.");
 });
 
 Run("project manifest and CLI", () =>
@@ -726,6 +749,224 @@ Run("ToString diagnostics", () =>
     Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT2122") == 1, "Expected only the invalid ToString argument diagnostic.");
 });
 
+Run("64-bit integers", () =>
+{
+    const string source = """
+        using System;
+        public enum Wide : ulong { Maximum = 18446744073709551615UL }
+        public static class Program
+        {
+            private static int Pick(long value) { return 64; }
+            private static int Pick(ulong value) { return 65; }
+
+            [EntryPoint]
+            public static void Main()
+            {
+                long signedMinimum = -9223372036854775808L;
+                ulong unsignedMaximum = 18446744073709551615lu;
+                long inferred = 4294967296;
+                long promoted = 1u + -2;
+                long wrapped = 9223372036854775807L + 1L;
+                long shifted = 1L << 63;
+                long shiftedCount = 1L << 65;
+                long dividedMinimum = signedMinimum / -1L;
+                long remainderMinimum = signedMinimum % -1L;
+                ulong wrappedUnsigned = 0UL - 1UL;
+                int truncated = (int)4294967297L;
+                ulong suffixUl = 1UL;
+                ulong suffixLu = 1LU;
+                ulong suffixLower = 1ul + 1lu;
+                long suffixLong = 1l;
+                long[] values = new long[1];
+                values[0] = inferred;
+                object boxed = unsignedMaximum;
+                Console.WriteLine(signedMinimum);
+                Console.WriteLine(unsignedMaximum);
+                Console.WriteLine(inferred);
+                Console.WriteLine(promoted);
+                Console.WriteLine(wrapped == shifted);
+                Console.WriteLine(Pick(4294967296));
+                Console.WriteLine(Pick(18446744073709551615UL));
+                Console.WriteLine((ulong)boxed == (ulong)Wide.Maximum);
+                Console.WriteLine(unsignedMaximum.ToString());
+                Console.WriteLine(shiftedCount);
+                Console.WriteLine(dividedMinimum == signedMinimum && remainderMinimum == 0L);
+                Console.WriteLine(wrappedUnsigned == unsignedMaximum);
+                Console.WriteLine(truncated);
+                Console.WriteLine(suffixUl + suffixLu + suffixLower + (ulong)suffixLong);
+                Console.WriteLine(values[0]);
+                switch ((Wide)unsignedMaximum) { case Wide.Maximum: Console.WriteLine("wide"); break; }
+            }
+        }
+        """;
+    var result = CompileAndRun(source);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "-9223372036854775808\n18446744073709551615\n4294967296\n-1\nTrue\n64\n65\nTrue\n18446744073709551615\n2\nTrue\nTrue\n1\n5\n4294967296\nwide\n", result.StandardOutput);
+
+    const string malformed = "public static class Program { [EntryPoint] public static void Main() { ulong a = 1UU; ulong b = 1LF; ulong c = 18446744073709551616UL; } }";
+    var diagnostics = Compile(malformed).GetDiagnostics();
+    Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT0002") == 2, "Malformed integer suffixes were not rejected.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2112"), "Overflowing ulong literal was not rejected.");
+
+    var mixedSignedUnsigned = Compile("public static class Program { [EntryPoint] public static void Main() { ulong invalid = 1UL + -1L; } }").GetDiagnostics();
+    Assert(mixedSignedUnsigned.Any(diagnostic => diagnostic.Code == "CT2130"), "ulong combined with a signed integral type was accepted.");
+});
+
+Run("named delegates and ARC", () =>
+{
+    const string source = """
+        using System;
+        using System.Runtime;
+
+        public delegate int Transformer(int value);
+
+        public static class Diagnostics
+        {
+            [Extern("ct_memory_diagnostic_live_allocations")]
+            [NoAlloc]
+            public static uint LiveAllocations();
+        }
+
+        public class Base
+        {
+            public virtual int Transform(int value) { return value + 1; }
+        }
+
+        public class Derived : Base
+        {
+            public override int Transform(int value) { return value * 2; }
+            public Transformer CaptureBase() { return base.Transform; }
+        }
+
+        public static class Program
+        {
+            private static int StaticTransform(int value) { return value + 20; }
+            private static long StaticTransform(long value) { return value + 200L; }
+            private static void Run()
+            {
+                Transformer first = StaticTransform;
+                Derived receiver = new Derived();
+                Transformer second = receiver.Transform;
+                Transformer directBase = receiver.CaptureBase();
+                receiver = null;
+                Console.WriteLine(first(22));
+                Console.WriteLine(second(21));
+                Console.WriteLine(directBase(21));
+                Console.WriteLine(first == second);
+                first = null;
+                second = null;
+                directBase = null;
+            }
+
+            [EntryPoint]
+            public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                Run();
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    var result = CompileAndRun(source, memoryDiagnostics: true);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "42\n42\n22\nFalse\nTrue\n", result.StandardOutput);
+
+    const string nullInvoke = "public delegate int Reader(); public static class Program { [EntryPoint] public static void Main() { Reader value = null; int result = value(); } }";
+    var failure = CompileAndRun(nullInvoke);
+    Assert(failure.ExitCode != 0 && failure.StandardError.Contains("CTN0001", StringComparison.Ordinal), "Null delegate invocation did not report CTN0001.");
+
+    const string containersAndExceptions = """
+        using System;
+        public delegate int Reader();
+        public class Target { public int Read() { return 42; } }
+        public struct Holder { public Reader Value; public Holder(Reader value) { Value = value; } }
+        public static class Diagnostics { [Extern("ct_memory_diagnostic_live_allocations")] [NoAlloc] public static uint LiveAllocations(); }
+        public static class Program
+        {
+            private static int Throwing() { throw new Exception("through delegate"); }
+            private static void Run()
+            {
+                Target target = new Target();
+                Reader reader = target.Read;
+                Holder holder = new Holder(reader);
+                Reader[] readers = new Reader[1];
+                readers[0] = holder.Value;
+                object boxed = holder;
+                Holder copy = (Holder)boxed;
+                target = null;
+                reader = null;
+                Console.WriteLine(copy.Value());
+                Reader throwing = Throwing;
+                try { throwing(); }
+                catch (Exception error) { Console.WriteLine(error.Message); }
+            }
+            [EntryPoint] public static void Main()
+            {
+                uint baseline = Diagnostics.LiveAllocations();
+                Run();
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline);
+            }
+        }
+        """;
+    var containers = CompileAndRun(containersAndExceptions, memoryDiagnostics: true);
+    Assert(containers.ExitCode == 0, containers.StandardError);
+    Assert(Normalize(containers.StandardOutput) == "42\nthrough delegate\nTrue\n", containers.StandardOutput);
+});
+
+Run("unmanaged function pointers", () =>
+{
+    const string source = """
+        using System;
+        public static class Native
+        {
+            [Extern("ct_test_invoke_i64")]
+            public static unsafe long Invoke(delegate* unmanaged<long, long> callback, long value);
+            [Extern("ct_test_identity_i64")]
+            public static long Identity(long value);
+        }
+        public static class Program
+        {
+            private static unsafe delegate* unmanaged<long, long> stored;
+            private static long Transform(long value) { return value * 2L; }
+            private static unsafe delegate* unmanaged<long, long> GetTransform() { return &Transform; }
+            [EntryPoint]
+            public static unsafe void Main()
+            {
+                stored = GetTransform();
+                delegate* unmanaged<long, long> callback = (delegate* unmanaged<long, long>)stored;
+                delegate* unmanaged<long, long> missing = (delegate* unmanaged<long, long>)null;
+                Console.WriteLine(callback(21L));
+                Console.WriteLine(Native.Invoke(callback, 21L));
+                Console.WriteLine(callback != null);
+                delegate* unmanaged<long, long> external = &Native.Identity;
+                Console.WriteLine(external(21L));
+            }
+        }
+        """;
+    const string nativeSuffix = "\nint64_t ct_test_invoke_i64(int64_t (*callback)(int64_t), int64_t value) { return callback(value); }\nint64_t ct_test_identity_i64(int64_t value) { return value; }\n";
+    var generated = Emit(source);
+    Assert(generated.Contains("extern int64_t ct_test_invoke_i64(int64_t (*", StringComparison.Ordinal), "Extern function-pointer parameters did not use a C declarator.");
+    Assert(generated.Contains("static int64_t (*ct_f_", StringComparison.Ordinal), "Function-pointer fields did not use a C declarator.");
+    Assert(generated.Contains("int64_t (*ct_l_", StringComparison.Ordinal), "Function-pointer locals did not use a C declarator.");
+    Assert(generated.Contains("static int64_t (*ct_m_", StringComparison.Ordinal), "Function-pointer returns did not use a C declarator.");
+    Assert(generated.Contains("(int64_t (*)(int64_t))", StringComparison.Ordinal), "Function-pointer casts did not use an unnamed C declarator.");
+    Assert(generated.Contains("&ct_test_identity_i64", StringComparison.Ordinal), "An extern method address did not use its native C symbol directly.");
+    var result = CompileAndRun(source, nativeSuffix: nativeSuffix);
+    Assert(result.ExitCode == 0, result.StandardError);
+    Assert(Normalize(result.StandardOutput) == "42\n42\nTrue\n21\n", result.StandardOutput);
+
+    const string escapingException = "using System; public static class Native { [Extern(\"ct_test_invoke_i64\")] public static unsafe long Invoke(delegate* unmanaged<long, long> callback, long value); } public static class Program { private static long Fail(long value) { defer Console.WriteLine(\"callback cleanup\"); throw new Exception(\"callback\"); } [EntryPoint] public static unsafe void Main() { delegate* unmanaged<long, long> callback = &Fail; Native.Invoke(callback, 1L); } }";
+    var failure = CompileAndRun(escapingException, nativeSuffix: nativeSuffix);
+    Assert(failure.ExitCode != 0 && failure.StandardError.Contains("CTE0003", StringComparison.Ordinal) && Normalize(failure.StandardOutput) == "callback cleanup\n", "A callback exception crossed the native boundary or skipped C~ cleanup.");
+
+    const string invalid = "public delegate int Reader(int value); public class Item { public int Instance(int value) { return value; } } public static class Program { private static int Static(int value) { return value; } [EntryPoint] public static void Main() { delegate* unmanaged<Item, int> invalid; Item item = new Item(); delegate* unmanaged<int, int> callback = &item.Instance; unsafe { Reader managed = Static; delegate* unmanaged<int, int> forbidden = managed; delegate* unmanaged<long, long> mismatch = &Static; } } }";
+    var diagnostics = Compile(invalid).GetDiagnostics();
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2162"), "A managed function-pointer signature was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2139"), "Function-pointer operations were accepted outside unsafe context.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2163"), "An instance method address was accepted.");
+    Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT2137"), "A delegate implicitly converted to an unmanaged function pointer.");
+});
+
 Run("System.Object inheritance dispatch and boxing", () =>
 {
     const string source = """
@@ -983,7 +1224,7 @@ Run("complete feature example", () =>
     var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
-    Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
+    Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\n42\n-9223372036854775808\n18446744073709551615\n42\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
 });
 
 Run("object model example", () =>
@@ -991,7 +1232,7 @@ Run("object model example", () =>
     var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
     var result = CompileAndRun(source);
     Assert(result.ExitCode == 0, result.StandardError);
-    Assert(Normalize(result.StandardOutput) == "Examples.Pair\n", result.StandardOutput);
+    Assert(Normalize(result.StandardOutput) == "5\nExamples.Pair\n", result.StandardOutput);
 });
 
 Run("exception syntax and diagnostics", () =>
@@ -1266,6 +1507,7 @@ Run("NoAlloc effects and contracts", () =>
     Assert(!validDiagnostics.Any(diagnostic => diagnostic.Code is "CT1233" or "CT2155"), string.Join(Environment.NewLine, validDiagnostics));
 
     const string invalid = """
+        public delegate int Reader();
         public class Box { }
         public class VirtualBase { public virtual int Read() { return 1; } public virtual int Number { get { return 2; } } }
         public class ContractBase { [NoAlloc] public virtual string Text() { return "ok"; } }
@@ -1276,6 +1518,7 @@ Run("NoAlloc effects and contracts", () =>
         public static class Native { [Extern("native_unknown")] public static void Unknown(); }
         public static class Program
         {
+            private static int Read() { return 1; }
             private static Box Allocate() { return new Box(); }
             private static void AllocatingSink(string value) { string copy = value + "!"; }
             [NoAlloc] private static Box ClassAllocation() { return new Box(); }
@@ -1289,6 +1532,9 @@ Run("NoAlloc effects and contracts", () =>
             [NoAlloc] private static int VirtualPropertyBoundary(VirtualBase value) { return value.Number; }
             [NoAlloc] private static void IncrementProperty(AccessorBox value) { value.Number++; }
             [NoAlloc] private static void Deferred() { defer AllocatingSink(1.ToString()); }
+            [NoAlloc] private static Reader CreateDelegate() { return Read; }
+            [NoAlloc] private static int InvokeDelegate(Reader value) { return value(); }
+            [NoAlloc] private static unsafe int InvokePointer(delegate* unmanaged<int, int> value) { return value(1); }
             [NoAlloc] public static string Property { get { return 2.ToString(); } }
             [NoAlloc] public static int SetterProperty { set { string text = value.ToString(); } }
             [NoAlloc(1)] public static int BadPropertyArguments { get { return 0; } }
@@ -1300,7 +1546,7 @@ Run("NoAlloc effects and contracts", () =>
     var repeatedEffects = Compile(invalid).GetDiagnostics().Where(diagnostic => diagnostic.Code == "CT2155").Select(diagnostic => (diagnostic.Message, diagnostic.Location)).ToArray();
     Assert(invalidDiagnostics.Where(diagnostic => diagnostic.Code == "CT2155").Select(diagnostic => (diagnostic.Message, diagnostic.Location)).SequenceEqual(repeatedEffects), "NoAlloc witnesses were not deterministic.");
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Code == "CT1233"), "NoAlloc arguments were accepted.");
-    Assert(invalidDiagnostics.Count(diagnostic => diagnostic.Code == "CT2155") >= 12, string.Join(Environment.NewLine, invalidDiagnostics));
+    Assert(invalidDiagnostics.Count(diagnostic => diagnostic.Code == "CT2155") >= 15, string.Join(Environment.NewLine, invalidDiagnostics));
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("Transitive", StringComparison.Ordinal) && diagnostic.Message.Contains("Allocate", StringComparison.Ordinal)), "The transitive allocation witness was not reported.");
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("extern call", StringComparison.Ordinal)), "An uncontracted extern boundary was accepted.");
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("virtual call", StringComparison.Ordinal)), "An uncontracted virtual boundary was accepted.");
@@ -1309,6 +1555,8 @@ Run("NoAlloc effects and contracts", () =>
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("Property", StringComparison.Ordinal)), "An allocating contracted property accessor was accepted.");
     Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Message.Contains("IncrementProperty", StringComparison.Ordinal) && diagnostic.Message.Contains("get_Number", StringComparison.Ordinal)), "A transitive property getter allocation was not reported.");
     Assert(invalidDiagnostics.Count(diagnostic => diagnostic.Code == "CT2155" && diagnostic.Message.Contains("Deferred", StringComparison.Ordinal)) >= 2, "defer capture and deferred-call effects were not both analyzed.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Code == "CT2155" && diagnostic.Message.Contains("delegate", StringComparison.OrdinalIgnoreCase)), "Delegate creation or invocation was accepted in NoAlloc code.");
+    Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Code == "CT2155" && diagnostic.Message.Contains("function-pointer", StringComparison.OrdinalIgnoreCase)), "Function-pointer invocation was accepted in NoAlloc code.");
 
     const string invalidTargets = "[NoAlloc] public class Value { [NoAlloc] public int Field; [NoAlloc] public Value() { } } public static class Program { [EntryPoint] public static void Main() { } }";
     Assert(Compile(invalidTargets).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1213") == 3, "NoAlloc was accepted on a type, field, or constructor.");
@@ -1709,7 +1957,8 @@ Run("ARC cycle limitation", () =>
 {
     const string source = """
         using System;
-        public class Node { public Node Next; }
+        public delegate int Reader();
+        public class Node { public Node Next; public Reader Callback; public int Read() { return 1; } }
         public static class Diagnostics
         {
             [Extern("ct_memory_diagnostic_live_allocations")]
@@ -1728,7 +1977,11 @@ Run("ARC cycle limitation", () =>
                     left.Next = right;
                     right.Next = left;
                 }
-                Console.WriteLine(Diagnostics.LiveAllocations() == baseline + 2u);
+                {
+                    Node target = new Node();
+                    target.Callback = target.Read;
+                }
+                Console.WriteLine(Diagnostics.LiveAllocations() == baseline + 4u);
             }
         }
         """;

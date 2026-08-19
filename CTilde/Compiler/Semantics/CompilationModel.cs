@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using System.Text.RegularExpressions;
 
 namespace CTilde;
@@ -42,6 +43,20 @@ internal sealed class CompilationModel
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
+        if (syntax.FunctionPointer is not null)
+        {
+            var elements = syntax.FunctionPointer.Elements.Select(element => ResolveType(element, tree, report)).ToImmutableArray();
+            if (elements.Length == 0)
+                return CType.Error;
+            var returnType = elements[^1];
+            var parameters = elements.RemoveAt(elements.Length - 1);
+            foreach (var parameter in parameters.Where(parameter => !IsUnmanagedFunctionPointerElement(parameter, allowVoid: false)))
+                if (report)
+                    Diagnostics.Add("CT2162", $"Function-pointer parameter type '{parameter.DisplayName}' is not unmanaged.", syntax.Source, syntax.Span);
+            if (!IsUnmanagedFunctionPointerElement(returnType, allowVoid: true) && report)
+                Diagnostics.Add("CT2162", $"Function-pointer return type '{returnType.DisplayName}' is not unmanaged.", syntax.Source, syntax.Span);
+            return new CType(CTypeKind.FunctionPointer, FunctionPointer: new FunctionPointerSignature(parameters, returnType));
+        }
         var baseType = syntax.Name == "object" && Types.TryGetValue("System.Object", out var objectType)
             ? objectType.Type
             : TypeFacts.BuiltIn(syntax.Name);
@@ -76,6 +91,11 @@ internal sealed class CompilationModel
             baseType = new CType(CTypeKind.Array, ElementType: baseType);
         return baseType;
     }
+
+    private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
+        type.Kind == CTypeKind.Void ? allowVoid :
+        type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer;
 
     public TypeSymbol? ResolveNamedType(string name, SyntaxTree tree)
     {
@@ -138,6 +158,7 @@ internal sealed class CompilationModel
                 {
                     TypeDeclarationKind.Struct => DeclaredTypeKind.Struct,
                     TypeDeclarationKind.Enum => DeclaredTypeKind.Enum,
+                    TypeDeclarationKind.Delegate => DeclaredTypeKind.Delegate,
                     _ when declaration.Modifiers.Contains("static", StringComparer.Ordinal) => DeclaredTypeKind.StaticClass,
                     _ => DeclaredTypeKind.Class,
                 };
@@ -158,7 +179,7 @@ internal sealed class CompilationModel
                     Name = declaration.Name,
                     Kind = kind,
                     Syntax = declaration,
-                    IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind == DeclaredTypeKind.StaticClass,
+                    IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                 });
             }
         }
@@ -231,6 +252,12 @@ internal sealed class CompilationModel
                 if (type.Kind == DeclaredTypeKind.Enum)
                 {
                     DeclareEnum(type, declaration, tree);
+                    continue;
+                }
+                if (type.Kind == DeclaredTypeKind.Delegate)
+                {
+                    type.DelegateReturnType = ResolveType(declaration.DelegateReturnType!, tree);
+                    type.DelegateParameters = DeclareParameters(declaration.DelegateParameters, tree, isExtern: false);
                     continue;
                 }
                 foreach (var member in declaration.Members)
@@ -348,7 +375,7 @@ internal sealed class CompilationModel
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
                     ValidateAttributes(constructor.Attributes, constructor, []);
                     if (isStatic)
-                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.6.", constructor.Source, constructor.Span);
+                        Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.7.", constructor.Source, constructor.Span);
                     var parameters = DeclareParameters(constructor.Parameters, tree, isExtern: false);
                     var symbol = new MethodSymbol
                     {
@@ -453,9 +480,9 @@ internal sealed class CompilationModel
     private void DeclareEnum(TypeSymbol type, TypeDeclarationSyntax declaration, SyntaxTree tree)
     {
         var underlying = declaration.EnumUnderlyingType is null ? CType.Int : ResolveType(declaration.EnumUnderlyingType, tree);
-        if (underlying.Kind is not CTypeKind.Byte and not CTypeKind.Sbyte and not CTypeKind.Short and not CTypeKind.Ushort and not CTypeKind.Int and not CTypeKind.Uint)
-            Diagnostics.Add("CT1208", "An enum underlying type must be byte, sbyte, short, ushort, int, or uint.", declaration.Source, declaration.EnumUnderlyingType?.Span ?? declaration.Span);
-        long value = 0;
+        if (underlying.Kind is not CTypeKind.Byte and not CTypeKind.Sbyte and not CTypeKind.Short and not CTypeKind.Ushort and not CTypeKind.Int and not CTypeKind.Uint and not CTypeKind.Long and not CTypeKind.Ulong)
+            Diagnostics.Add("CT1208", "An enum underlying type must be an integral type other than bool or char.", declaration.Source, declaration.EnumUnderlyingType?.Span ?? declaration.Span);
+        var value = BigInteger.Zero;
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var member in declaration.EnumMembers)
         {
@@ -464,10 +491,10 @@ internal sealed class CompilationModel
                 Diagnostics.Add("CT1103", $"Enum member '{member.Name}' is already declared.", member.Source, member.Span);
                 continue;
             }
-            if (member.Value is LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken } && numeric.FloatingPoint is null && numeric.Integer >= long.MinValue && numeric.Integer <= long.MaxValue)
-                value = (long)numeric.Integer;
+            if (member.Value is LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken } && numeric.FloatingPoint is null)
+                value = numeric.Integer;
             else if (member.Value is not null)
-                Diagnostics.Add("CT1209", "An enum value must be an integral constant in draft 0.6.", member.Source, member.Value.Span);
+                Diagnostics.Add("CT1209", "An enum value must be an integral constant.", member.Source, member.Value.Span);
             if (!FitsEnumValue(value, underlying))
                 Diagnostics.Add("CT1215", $"Enum value {value} does not fit underlying type '{underlying.DisplayName}'.", member.Source, member.Span);
             type.EnumValues.Add(new EnumValueSymbol(member.Name, value, member));
@@ -590,9 +617,11 @@ internal sealed class CompilationModel
             "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_memory_retain", "ct_memory_release", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
             "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
-            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint",
+            "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
+            "ct_u64_div", "ct_u64_mod", "ct_i64_shl", "ct_i64_shr",
+            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
             "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
-            "ct_write_int", "ct_write_uint", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
+            "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
             "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
             "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
             "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
@@ -674,14 +703,16 @@ internal sealed class CompilationModel
         left.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained))
             .SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.IsRetained)));
 
-    private static bool FitsEnumValue(long value, CType underlying) => underlying.Kind switch
+    private static bool FitsEnumValue(BigInteger value, CType underlying) => underlying.Kind switch
     {
-        CTypeKind.Byte => value is >= byte.MinValue and <= byte.MaxValue,
-        CTypeKind.Sbyte => value is >= sbyte.MinValue and <= sbyte.MaxValue,
-        CTypeKind.Short => value is >= short.MinValue and <= short.MaxValue,
-        CTypeKind.Ushort => value is >= ushort.MinValue and <= ushort.MaxValue,
-        CTypeKind.Int => value is >= int.MinValue and <= int.MaxValue,
-        CTypeKind.Uint => value is >= uint.MinValue and <= uint.MaxValue,
+        CTypeKind.Byte => value >= byte.MinValue && value <= byte.MaxValue,
+        CTypeKind.Sbyte => value >= sbyte.MinValue && value <= sbyte.MaxValue,
+        CTypeKind.Short => value >= short.MinValue && value <= short.MaxValue,
+        CTypeKind.Ushort => value >= ushort.MinValue && value <= ushort.MaxValue,
+        CTypeKind.Int => value >= int.MinValue && value <= int.MaxValue,
+        CTypeKind.Uint => value >= uint.MinValue && value <= uint.MaxValue,
+        CTypeKind.Long => value >= long.MinValue && value <= long.MaxValue,
+        CTypeKind.Ulong => value >= ulong.MinValue && value <= ulong.MaxValue,
         _ => false,
     };
 

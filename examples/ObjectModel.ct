@@ -2,6 +2,8 @@ using System;
 
 namespace Examples;
 
+public delegate int ValueReader();
+
 public class Base
 {
     protected int number;
@@ -57,9 +59,11 @@ public static class ObjectProgram
     public static void Main()
     {
         Base item = new Derived();
+        ValueReader reader = item.Read;
         Derived cast = (Derived)item;
         Derived safe = item as Derived;
         object boxed = new Pair(cast.Read(), safe.Value);
+        Console.WriteLine(reader());
         Console.WriteLine(boxed);
     }
 }

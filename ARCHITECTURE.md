@@ -111,11 +111,11 @@ The declaration pass creates all user types before it declares members. This per
 The semantic model owns:
 
 - Fully qualified namespace and type names.
-- Class, structure, enum, field, property, constructor, method, parameter, and local symbols.
+- Class, structure, enum, delegate, field, property, constructor, method, parameter, and local symbols.
 - Single-base class hierarchies, virtual slots, exact overrides, sealed slots, and constructor initializer targets.
 - Static and instance membership.
 - Accessibility.
-- Fixed-width built-in types, arrays, pointers, and target-width references.
+- Fixed-width built-in types through 64 bits, arrays, managed delegates, structural unmanaged function pointers, unsafe pointers, and target-width references.
 - Automatically imported declarations from the bundled C~ standard-library sources.
 
 Overload resolution filters by name, context, argument count, and implicit conversions. It compares candidates per argument. A winner must be no worse for every argument. It must be better for at least one.
@@ -160,11 +160,11 @@ The emitter assembles one translation unit in this order:
 1. Standard headers and runtime support.
 2. String literal data.
 3. User-type forward declarations.
-4. Enum, object, class, and structure layouts.
-5. Array and box layouts and allocators.
+4. Enum, object, class, structure, and delegate layouts.
+5. Array, box, delegate, and structural function-pointer support.
 6. Static fields.
 7. Function, constructor-initializer, and accessor prototypes.
-8. Runtime descriptors, vtables, and dispatch thunks.
+8. Runtime descriptors, vtables, delegate thunks, and unmanaged callback trampolines.
 9. Method, constructor, and accessor definitions.
 10. Deterministic static initialization.
 11. Symbol-retention routine.
@@ -185,9 +185,9 @@ The current ESP target uses handwritten fixed-width shims. The intended next lay
 
 This design follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Private and example-only headers remain outside generated bindings by default.
 
-The language-side ABI will add exact 64-bit and native-sized scalars, opaque handles, `ref`/`in`/`out`, scoped native strings, and explicit pointer-plus-length buffers before it attempts broad API coverage. Ownership metadata and `defer` will describe release obligations without making native resources managed objects.
+The language-side ABI now has exact 64-bit scalars. It still needs native-sized scalars, opaque handles, `ref`/`in`/`out`, scoped native strings, and explicit pointer-plus-length buffers before it attempts broad API coverage. Ownership metadata and `defer` will describe release obligations without making native resources managed objects.
 
-Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent managed method-and-target callables. Exported trampolines bridge the two and carry explicit user context, callback lifetime, task attachment, and exception-translation policy. FreeRTOS task entry and ISR entry remain distinct execution profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.7 emits static-method C trampolines for synchronous callbacks on the current C~ task and converts an escaping exception to fatal `CTE0003`. Exported/context trampolines, retained lifetimes, task attachment, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
 
 ## Runtime ownership
 
@@ -201,11 +201,12 @@ The generated translation unit embeds a small runtime:
 - Array allocation and bounds checks.
 - Null checks.
 - Checked division failure.
-- Two's-complement wrapping helpers for signed arithmetic.
+- Deterministic 32-bit and 64-bit two's-complement wrapping, division, remainder, negation, and arithmetic-shift helpers.
 - Immutable UTF-8 strings and concatenation.
 - Console output and process exit.
 - A single-thread `setjmp` and `longjmp` handler stack plus automatic ownership cleanup stack for C~ exceptions.
 - One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
+- ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and same-task callback exception barriers.
 
 Managed storage is reclaimed when its reference count reaches zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed. C~ source has no `delete`, destructor, or finalizer operation.
 
@@ -213,7 +214,7 @@ Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` a
 
 A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, identity hash, reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the normal cleanup stack.
 
-Unsafe pointers lower to native C pointers. Unsafe operations bypass managed null and bounds checks but remain statically typed.
+Unsafe pointers lower to native C pointers. Unmanaged function pointers lower to exact C function-pointer signatures. Unsafe operations bypass managed null and bounds checks but remain statically typed.
 
 ## Diagnostics
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using System.Text;
 
 namespace CTilde;
@@ -8,7 +9,10 @@ internal sealed class CEmitter
     private readonly Dictionary<string, int> _stringLiterals = new(StringComparer.Ordinal);
     private readonly HashSet<CType> _arrayTypes = [];
     private readonly HashSet<CType> _boxedTypes = [];
+    private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
+    private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
+    private readonly Dictionary<(CType Type, MethodSymbol Method), string> _functionPointerTrampolines = [];
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
@@ -46,6 +50,10 @@ internal sealed class CEmitter
             .Concat(_stringLiterals.Values.SelectMany(id => new[] { $"ct_sl_{id}", $"ct_slb_{id}" }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class)
                 .SelectMany(type => new[] { DescriptorName(type), $"ct_vtable_{NameMangler.Identifier(type.FullName)}" }))
+            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
+                .SelectMany(type => new[] { DescriptorName(type), DelegateFactoryName(type), DelegateDropName(type) }))
+            .Concat(_delegateThunks.Values)
+            .Concat(_functionPointerTrampolines.Values)
             .Concat(Model.UserTypes.SelectMany(type => type.Constructors).Select(ConstructorInitializerName))
             .Concat(Model.UserTypes.SelectMany(type => type.Methods)
                 .Where(method => method.IsVirtual && !method.ContainingType.IsObject)
@@ -117,6 +125,8 @@ internal sealed class CEmitter
         EmitOwnershipHelpers(writer);
         EmitPrototypes(writer);
         EmitObjectMetadata(writer);
+        EmitDelegateSupport(writer);
+        EmitFunctionPointerTrampolines(writer);
         writer.WriteLine();
         foreach (var definition in program.Functions)
         {
@@ -145,21 +155,54 @@ internal sealed class CEmitter
         CTypeKind.Ushort => "uint16_t",
         CTypeKind.Int => "int32_t",
         CTypeKind.Uint => "uint32_t",
+        CTypeKind.Long => "int64_t",
+        CTypeKind.Ulong => "uint64_t",
         CTypeKind.Float => "float",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
+        CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
         CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
+        CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
         CTypeKind.Null => "void*",
         _ => "int32_t",
     };
+
+    public string CDeclaration(CType type, string name)
+    {
+        if (type.Kind != CTypeKind.FunctionPointer)
+            return $"{CTypeName(type)} {name}";
+        var signature = type.FunctionPointer!;
+        return $"{CTypeName(signature.ReturnType)} (*{name})({FunctionPointerParameters(signature)})";
+    }
+
+    public string CCastType(CType type)
+    {
+        if (type.Kind != CTypeKind.FunctionPointer)
+            return CTypeName(type);
+        var signature = type.FunctionPointer!;
+        return $"{CTypeName(signature.ReturnType)} (*)({FunctionPointerParameters(signature)})";
+    }
+
+    private string CFunctionDeclaration(CType returnType, string name, IReadOnlyList<string> parameters)
+    {
+        var arguments = parameters.Count == 0 ? "void" : string.Join(", ", parameters);
+        if (returnType.Kind != CTypeKind.FunctionPointer)
+            return $"{CTypeName(returnType)} {name}({arguments})";
+        var signature = returnType.FunctionPointer!;
+        return $"{CTypeName(signature.ReturnType)} (*{name}({arguments}))({FunctionPointerParameters(signature)})";
+    }
+
+    private string FunctionPointerParameters(FunctionPointerSignature signature) => signature.ParameterTypes.Length == 0
+        ? "void"
+        : string.Join(", ", signature.ParameterTypes.Select(CTypeName));
 
     public string DefaultValue(CType type) => type.Kind switch
     {
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
-        CTypeKind.String or CTypeKind.Class or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.Null => "NULL",
+        CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         _ => "0",
     };
@@ -174,6 +217,13 @@ internal sealed class CEmitter
         else if (type.Kind == CTypeKind.Pointer)
         {
             RegisterType(type.ElementType!);
+        }
+        else if (type.Kind == CTypeKind.FunctionPointer)
+        {
+            _functionPointerTypes.Add(type);
+            foreach (var parameter in type.FunctionPointer!.ParameterTypes)
+                RegisterType(parameter);
+            RegisterType(type.FunctionPointer.ReturnType);
         }
     }
 
@@ -203,7 +253,7 @@ internal sealed class CEmitter
     public string DescriptorExpression(CType type) => type.Kind switch
     {
         CTypeKind.String => "&ct_desc_string",
-        CTypeKind.Class => $"&{DescriptorName(type.Symbol!)}",
+        CTypeKind.Class or CTypeKind.Delegate => $"&{DescriptorName(type.Symbol!)}",
         CTypeKind.Array => $"&{ArrayDescriptorName(type.ElementType!)}",
         _ => $"&{BoxDescriptorName(type)}",
     };
@@ -264,12 +314,46 @@ internal sealed class CEmitter
         return $"\"{EscapeCString(path)}\", {syntax.Source.GetLocation(syntax.Span).Line}";
     }
 
+    private static string FormatIntegralConstant(BigInteger value, CType type) => type.Kind switch
+    {
+        CTypeKind.Uint => $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})",
+        CTypeKind.Ulong => $"UINT64_C({value.ToString(CultureInfo.InvariantCulture)})",
+        CTypeKind.Long when value == long.MinValue => "INT64_MIN",
+        CTypeKind.Long when value < 0 => $"(-INT64_C({BigInteger.Abs(value).ToString(CultureInfo.InvariantCulture)}))",
+        CTypeKind.Long => $"INT64_C({value.ToString(CultureInfo.InvariantCulture)})",
+        _ when value == int.MinValue => "INT32_MIN",
+        _ => value.ToString(CultureInfo.InvariantCulture),
+    };
+
     public static string DescriptorName(TypeSymbol type) => $"ct_desc_{NameMangler.Identifier(type.FullName)}";
     public static string ArrayDescriptorName(CType elementType) => $"ct_desc_{NameMangler.Array(elementType)}";
     public static string ConstructorInitializerName(MethodSymbol constructor) => $"ct_init_{constructor.CName}";
     public static string ObjectDropName(TypeSymbol type) => $"ct_drop_object_{NameMangler.Identifier(type.FullName)}";
     public static string ArrayDropName(CType elementType) => $"ct_drop_array_{NameMangler.TypeCode(elementType)}";
     public static string BoxDropName(CType type) => $"ct_drop_box_{NameMangler.TypeCode(type)}";
+    public static string DelegateFactoryName(TypeSymbol type) => $"ct_new_delegate_{NameMangler.Identifier(type.FullName)}";
+    public static string DelegateDropName(TypeSymbol type) => $"ct_drop_delegate_{NameMangler.Identifier(type.FullName)}";
+
+    public string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch)
+    {
+        var key = (delegateType, method, virtualDispatch);
+        if (_delegateThunks.TryGetValue(key, out var existing))
+            return existing;
+        var name = $"ct_delegate_thunk_{NameMangler.Identifier(delegateType.FullName)}_{NameMangler.Identifier(method.CName)}_{(virtualDispatch ? "virtual" : "direct")}";
+        _delegateThunks.Add(key, name);
+        return name;
+    }
+
+    public string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method)
+    {
+        var key = (type, method);
+        if (_functionPointerTrampolines.TryGetValue(key, out var existing))
+            return existing;
+        RegisterExceptions();
+        var name = $"ct_callback_{NameMangler.Identifier(method.CName)}_{NameMangler.TypeCode(type)}";
+        _functionPointerTrampolines.Add(key, name);
+        return name;
+    }
 
     public string MethodSignature(MethodSymbol method, string? name = null, bool prototype = false)
     {
@@ -278,9 +362,9 @@ internal sealed class CEmitter
         if (!method.IsStatic && !method.IsConstructor)
             parameters.Add($"{NameMangler.Type(method.ContainingType)}* ct_self");
         foreach (var parameter in method.Parameters)
-            parameters.Add($"{CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}");
+            parameters.Add(CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name)));
         var storage = method.ExternName is not null ? "extern " : "static ";
-        var signature = $"{storage}{CTypeName(returnType)} {name ?? method.CName}({(parameters.Count == 0 ? "void" : string.Join(", ", parameters))})";
+        var signature = storage + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;
     }
 
@@ -304,8 +388,8 @@ internal sealed class CEmitter
     private void EmitPreamble(CWriter writer)
     {
         writer.WriteLine(IsEspIdf
-            ? "/* Generated by C~ draft 0.6 for ESP-IDF GNU C23. Do not edit. */"
-            : "/* Generated by C~ draft 0.6 for GNU C23. Do not edit. */");
+            ? "/* Generated by C~ draft 0.7 for ESP-IDF GNU C23. Do not edit. */"
+            : "/* Generated by C~ draft 0.7 for GNU C23. Do not edit. */");
         writer.WriteLine("#include <stdbool.h>");
         writer.WriteLine("#include <stddef.h>");
         writer.WriteLine("#include <stdint.h>");
@@ -323,6 +407,7 @@ internal sealed class CEmitter
         writer.WriteLine();
         writer.WriteLine("static_assert(CHAR_BIT == 8, \"C~ requires 8-bit bytes\");");
         writer.WriteLine("static_assert(sizeof(int32_t) == 4 && sizeof(uint32_t) == 4, \"C~ requires exact 32-bit integers\");");
+        writer.WriteLine("static_assert(sizeof(int64_t) == 8 && sizeof(uint64_t) == 8, \"C~ requires exact 64-bit integers\");");
         writer.WriteLine("static_assert(sizeof(float) == 4 && FLT_RADIX == 2 && FLT_MANT_DIG == 24, \"C~ requires IEEE-754 binary32 float\");");
         writer.WriteLine("static_assert(INT32_MIN == (-2147483647 - 1), \"C~ requires two's-complement int32_t\");");
         if (IsEspIdf)
@@ -447,6 +532,17 @@ internal sealed class CEmitter
         writer.WriteLine("static uint32_t ct_u32_mod(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_fail(\"CTI0001\", file, line); return a % b; }");
         writer.WriteLine("static int32_t ct_i32_shl(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a << ((uint32_t)b & 31u)); }");
         writer.WriteLine("static int32_t ct_i32_shr(int32_t a, int32_t b) { uint32_t n = (uint32_t)b & 31u; if (n == 0u) return a; return a >= 0 ? (int32_t)((uint32_t)a >> n) : ct_i32_bits(((uint32_t)a >> n) | (~UINT32_C(0) << (32u - n))); }");
+        writer.WriteLine("static int64_t ct_i64_bits(uint64_t value) { int64_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
+        writer.WriteLine("static int64_t ct_i64_add(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a + (uint64_t)b); }");
+        writer.WriteLine("static int64_t ct_i64_sub(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a - (uint64_t)b); }");
+        writer.WriteLine("static int64_t ct_i64_mul(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a * (uint64_t)b); }");
+        writer.WriteLine("static int64_t ct_i64_neg(int64_t value) { return ct_i64_bits(UINT64_C(0) - (uint64_t)value); }");
+        writer.WriteLine("static int64_t ct_i64_div(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_fail(\"CTI0001\", file, line); if (a == INT64_MIN && b == -1) return INT64_MIN; return a / b; }");
+        writer.WriteLine("static int64_t ct_i64_mod(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_fail(\"CTI0001\", file, line); if (a == INT64_MIN && b == -1) return 0; return a % b; }");
+        writer.WriteLine("static uint64_t ct_u64_div(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_fail(\"CTI0001\", file, line); return a / b; }");
+        writer.WriteLine("static uint64_t ct_u64_mod(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_fail(\"CTI0001\", file, line); return a % b; }");
+        writer.WriteLine("static int64_t ct_i64_shl(int64_t a, int32_t b) { return ct_i64_bits((uint64_t)a << ((uint32_t)b & 63u)); }");
+        writer.WriteLine("static int64_t ct_i64_shr(int64_t a, int32_t b) { uint32_t n = (uint32_t)b & 63u; if (n == 0u) return a; return a >= 0 ? (int64_t)((uint64_t)a >> n) : ct_i64_bits(((uint64_t)a >> n) | (~UINT64_C(0) << (64u - n))); }");
         writer.WriteLine("static bool ct_string_equal(const ct_string* a, const ct_string* b) { if (a == b) return true; if (a == NULL || b == NULL || a->Length != b->Length) return false; return a->Length == 0 || memcmp(a->Data, b->Data, (size_t)a->Length) == 0; }");
         writer.WriteLine("static ct_string* ct_string_concat(const ct_string* a, const ct_string* b, const char* file, int line)");
         writer.WriteLine("{");
@@ -481,6 +577,8 @@ internal sealed class CEmitter
         writer.WriteLine("}");
         writer.WriteLine("static ct_string* ct_to_string_int(int32_t value, const char* file, int line) { char buffer[12]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_uint(uint32_t value, const char* file, int line) { char buffer[11]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        writer.WriteLine("static ct_string* ct_to_string_long(int64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        writer.WriteLine("static ct_string* ct_to_string_ulong(uint64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_bool(bool value, const char* file, int line) { const char* text = value ? \"True\" : \"False\"; return ct_string_from_bytes((const uint8_t*)text, value ? 4 : 5, file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_char(uint8_t value, const char* file, int line) { return ct_string_from_bytes(&value, 1, file, line); }");
@@ -488,6 +586,8 @@ internal sealed class CEmitter
         writer.WriteLine("void ct_write_char(uint8_t value) { (void)fputc((int)value, stdout); }");
         writer.WriteLine("void ct_write_int(int32_t value) { (void)fprintf(stdout, \"%\" PRId32, value); }");
         writer.WriteLine("void ct_write_uint(uint32_t value) { (void)fprintf(stdout, \"%\" PRIu32, value); }");
+        writer.WriteLine("void ct_write_long(int64_t value) { (void)fprintf(stdout, \"%\" PRId64, value); }");
+        writer.WriteLine("void ct_write_ulong(uint64_t value) { (void)fprintf(stdout, \"%\" PRIu64, value); }");
         writer.WriteLine("void ct_write_float(float value) { (void)fprintf(stdout, \"%.9g\", (double)value); }");
         writer.WriteLine("void ct_write_bool(bool value) { (void)fputs(value ? \"True\" : \"False\", stdout); }");
         writer.WriteLine("void ct_write_line(void) { (void)fputc('\\n', stdout); }");
@@ -511,11 +611,20 @@ internal sealed class CEmitter
 
     private void EmitForwardDeclarations(CWriter writer)
     {
+        foreach (var type in _functionPointerTypes.OrderBy(type => NameMangler.TypeCode(type), StringComparer.Ordinal))
+        {
+            var parameters = type.FunctionPointer!.ParameterTypes.Length == 0
+                ? "void"
+                : string.Join(", ", type.FunctionPointer.ParameterTypes.Select(CTypeName));
+            writer.WriteLine($"typedef {CTypeName(type.FunctionPointer.ReturnType)} (*{CTypeName(type)})({parameters});");
+        }
+        if (_functionPointerTypes.Count != 0)
+            writer.WriteLine();
         foreach (var type in Model.UserTypes.Where(type => type.Kind != DeclaredTypeKind.Enum))
             writer.WriteLine($"typedef struct {NameMangler.Type(type)} {NameMangler.Type(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.Array(array.ElementType!)} {NameMangler.Array(array.ElementType!)};");
-        foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Class))
+        foreach (var type in OrderLayoutTypes().Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Delegate))
             writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"static ct_type_descriptor {ArrayDescriptorName(array.ElementType!)};");
@@ -530,13 +639,23 @@ internal sealed class CEmitter
             var underlying = type.Fields.Single(field => field.Name == "<underlying>").Type;
             writer.WriteLine($"typedef {CTypeName(underlying)} {NameMangler.Type(type)};");
             foreach (var value in type.EnumValues)
-                writer.WriteLine($"#define {NameMangler.Identifier(type.FullName + "." + value.Name)} (({NameMangler.Type(type)}){value.Value.ToString(CultureInfo.InvariantCulture)})");
+                writer.WriteLine($"#define {NameMangler.Identifier(type.FullName + "." + value.Name)} (({NameMangler.Type(type)}){FormatIntegralConstant(value.Value, underlying)})");
             writer.WriteLine();
         }
         foreach (var type in OrderLayoutTypes())
         {
             writer.WriteLine($"struct {NameMangler.Type(type)}");
             writer.WriteLine("{");
+            if (type.Kind == DeclaredTypeKind.Delegate)
+            {
+                var parameters = string.Concat(type.DelegateParameters.Select(parameter => $", {CTypeName(parameter.Type)}"));
+                writer.WriteLine("    ct_object ct_header;");
+                writer.WriteLine($"    {CTypeName(type.DelegateReturnType!)} (*ct_invoke)(ct_object*{parameters});");
+                writer.WriteLine("    ct_object* ct_target;");
+                writer.WriteLine("};");
+                writer.WriteLine();
+                continue;
+            }
             var fields = type.Fields.Where(field => !field.IsStatic).ToArray();
             if (type.Kind == DeclaredTypeKind.Class)
             {
@@ -548,7 +667,7 @@ internal sealed class CEmitter
             else if (fields.Length == 0)
                 writer.WriteLine("    uint8_t ct_empty;");
             foreach (var field in fields)
-                writer.WriteLine($"    {CTypeName(field.Type)} {field.CName};");
+                writer.WriteLine($"    {CDeclaration(field.Type, field.CName)};");
             writer.WriteLine("};");
             writer.WriteLine();
         }
@@ -617,7 +736,7 @@ internal sealed class CEmitter
     private void EmitBoxLayouts(CWriter writer)
     {
         foreach (var type in BoxedTypes)
-            writer.WriteLine($"typedef struct {BoxName(type)} {{ ct_object Object; {CTypeName(type)} Value; }} {BoxName(type)};");
+            writer.WriteLine($"typedef struct {BoxName(type)} {{ ct_object Object; {CDeclaration(type, "Value")}; }} {BoxName(type)};");
         if (_boxedTypes.Count > 0)
             writer.WriteLine();
     }
@@ -626,7 +745,7 @@ internal sealed class CEmitter
     {
         foreach (var field in Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
         {
-            writer.WriteLine($"static {CTypeName(field.Type)} {field.CName} = {DefaultValue(field.Type)};");
+            writer.WriteLine($"static {CDeclaration(field.Type, field.CName)} = {DefaultValue(field.Type)};");
         }
         if (Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();
@@ -643,7 +762,7 @@ internal sealed class CEmitter
                 if (type.Kind == DeclaredTypeKind.Class)
                 {
                     var parameters = new[] { $"{NameMangler.Type(type)}* ct_self" }
-                        .Concat(constructor.Parameters.Select(parameter => $"{CTypeName(parameter.Type)} {NameMangler.Identifier(parameter.Name)}"));
+                        .Concat(constructor.Parameters.Select(parameter => CDeclaration(parameter.Type, NameMangler.Identifier(parameter.Name))));
                     writer.WriteLine($"static void {ConstructorInitializerName(constructor)}({string.Join(", ", parameters)});");
                 }
             }
@@ -659,9 +778,14 @@ internal sealed class CEmitter
             {
                 var self = property.IsStatic ? string.Empty : $"{NameMangler.Type(type)}* ct_self";
                 if (property.Getter is not null)
-                    writer.WriteLine($"static {CTypeName(property.Type)} {NameMangler.Getter(property)}({(self.Length == 0 ? "void" : self)});");
+                    writer.WriteLine("static " + CFunctionDeclaration(property.Type, NameMangler.Getter(property), self.Length == 0 ? [] : [self]) + ";");
                 if (property.Setter is not null)
-                    writer.WriteLine($"static void {NameMangler.Setter(property)}({(self.Length == 0 ? string.Empty : self + ", ")}{CTypeName(property.Type)} {NameMangler.Identifier("value")});");
+                {
+                    var parameters = self.Length == 0
+                        ? new[] { CDeclaration(property.Type, NameMangler.Identifier("value")) }
+                        : new[] { self, CDeclaration(property.Type, NameMangler.Identifier("value")) };
+                    writer.WriteLine("static " + CFunctionDeclaration(CType.Void, NameMangler.Setter(property), parameters) + ";");
+                }
             }
         }
     }
@@ -699,6 +823,17 @@ internal sealed class CEmitter
                 writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CName});");
             if (type.BaseType is not null)
                 writer.WriteLine($"    {ObjectDropName(type.BaseType)}(object);");
+            writer.WriteLine("}");
+        }
+
+        foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Delegate))
+        {
+            writer.WriteLine($"static void {DelegateDropName(type)}(ct_object* object)");
+            writer.WriteLine("{");
+            writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)(void*)object;");
+            writer.WriteLine("    ct_object* target = value->ct_target;");
+            writer.WriteLine("    value->ct_target = NULL;");
+            writer.WriteLine("    ct_release(target);");
             writer.WriteLine("}");
         }
 
@@ -780,6 +915,10 @@ internal sealed class CEmitter
             var baseDescriptor = type.BaseType is null ? "NULL" : $"&{DescriptorName(type.BaseType)}";
             writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &ct_vtable_{NameMangler.Identifier(type.FullName)}, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)} }};");
         }
+        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)} }};");
+        }
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
         {
             var name = NameMangler.Array(array.ElementType!);
@@ -814,6 +953,81 @@ internal sealed class CEmitter
             writer.WriteLine("}");
         }
         writer.WriteLine();
+    }
+
+    private void EmitDelegateSupport(CWriter writer)
+    {
+        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            var parameters = string.Concat(type.DelegateParameters.Select(parameter => $", {CTypeName(parameter.Type)}"));
+            writer.WriteLine($"static {NameMangler.Type(type)}* {DelegateFactoryName(type)}(ct_object* target, {CTypeName(type.DelegateReturnType!)} (*invoke)(ct_object*{parameters}), const char* file, int line)");
+            writer.WriteLine("{");
+            writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)ct_alloc(sizeof({NameMangler.Type(type)}), file, line);");
+            writer.WriteLine($"    ct_init_object(value, &{DescriptorName(type)});");
+            writer.WriteLine("    value->ct_target = target;");
+            writer.WriteLine("    value->ct_invoke = invoke;");
+            writer.WriteLine("    ct_retain(target);");
+            writer.WriteLine("    return value;");
+            writer.WriteLine("}");
+        }
+
+        foreach (var ((delegateType, method, virtualDispatch), name) in _delegateThunks.OrderBy(pair => pair.Value, StringComparer.Ordinal))
+        {
+            var parameters = delegateType.DelegateParameters.Select((parameter, index) => $"{CTypeName(parameter.Type)} ct_arg_{index}").ToArray();
+            var signatureParameters = string.Join(", ", new[] { "ct_object* ct_target" }.Concat(parameters));
+            writer.WriteLine($"static {CTypeName(delegateType.DelegateReturnType!)} {name}({signatureParameters})");
+            writer.WriteLine("{");
+            writer.WriteLine("    (void)ct_target;");
+            var arguments = Enumerable.Range(0, parameters.Length).Select(index => $"ct_arg_{index}").ToList();
+            string call;
+            if (method.IsStatic)
+                call = $"{method.CName}({string.Join(", ", arguments)})";
+            else if (virtualDispatch)
+                call = $"ct_target->Type->VTable->{VirtualSlotName(method)}({string.Join(", ", new[] { "ct_target" }.Concat(arguments))})";
+            else
+                call = $"{method.CName}(({NameMangler.Type(method.ContainingType)}*)(void*)ct_target{(arguments.Count == 0 ? string.Empty : ", " + string.Join(", ", arguments))})";
+            if (delegateType.DelegateReturnType == CType.Void)
+                writer.WriteLine($"    {call};");
+            else
+                writer.WriteLine($"    return {call};");
+            writer.WriteLine("}");
+        }
+        if (Model.UserTypes.Any(type => type.Kind == DeclaredTypeKind.Delegate))
+            writer.WriteLine();
+    }
+
+    private void EmitFunctionPointerTrampolines(CWriter writer)
+    {
+        foreach (var ((type, method), name) in _functionPointerTrampolines.OrderBy(pair => pair.Value, StringComparer.Ordinal))
+        {
+            var signature = type.FunctionPointer!;
+            var parameters = signature.ParameterTypes.Select((parameter, index) => $"{CTypeName(parameter)} ct_arg_{index}").ToArray();
+            writer.WriteLine($"static {CTypeName(signature.ReturnType)} {name}({(parameters.Length == 0 ? "void" : string.Join(", ", parameters))})");
+            writer.WriteLine("{");
+            writer.WriteLine("    jmp_buf ct_callback_jump;");
+            writer.WriteLine("    ct_exception_frame ct_callback_frame = { &ct_callback_jump, ct_exception_top, ct_cleanup_top };");
+            writer.WriteLine("    ct_exception_top = &ct_callback_frame;");
+            writer.WriteLine("    if (setjmp(ct_callback_jump) != 0)");
+            writer.WriteLine("    {");
+            writer.WriteLine("        ct_exception_top = ct_callback_frame.Previous;");
+            writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-callback>\", 0);");
+            writer.WriteLine("    }");
+            var call = $"{method.CName}({string.Join(", ", Enumerable.Range(0, parameters.Length).Select(index => $"ct_arg_{index}"))})";
+            if (signature.ReturnType == CType.Void)
+            {
+                writer.WriteLine($"    {call};");
+                writer.WriteLine("    ct_exception_top = ct_callback_frame.Previous;");
+            }
+            else
+            {
+                writer.WriteLine($"    {CTypeName(signature.ReturnType)} ct_callback_result = {call};");
+                writer.WriteLine("    ct_exception_top = ct_callback_frame.Previous;");
+                writer.WriteLine("    return ct_callback_result;");
+            }
+            writer.WriteLine("}");
+        }
+        if (_functionPointerTrampolines.Count != 0)
+            writer.WriteLine();
     }
 
     private IEnumerable<MethodSymbol> VirtualMethodRoots() => Model.UserTypes
@@ -974,11 +1188,15 @@ internal sealed class CEmitter
             foreach (var enumValue in type.Symbol.EnumValues.GroupBy(value => value.Value).Select(group => group.First()))
             {
                 var escaped = EscapeCString(enumValue.Name);
-                writer.WriteLine($"    if (value == ({CTypeName(type)}){enumValue.Value.ToString(CultureInfo.InvariantCulture)}) return ct_string_from_bytes((const uint8_t*)\"{escaped}\", {Encoding.UTF8.GetByteCount(enumValue.Name)}, \"<runtime>\", 0);");
+                writer.WriteLine($"    if (value == ({CTypeName(type)}){FormatIntegralConstant(enumValue.Value, underlying)}) return ct_string_from_bytes((const uint8_t*)\"{escaped}\", {Encoding.UTF8.GetByteCount(enumValue.Name)}, \"<runtime>\", 0);");
             }
-            var fallback = underlying.Kind is CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint
-                ? "ct_to_string_uint((uint32_t)value, \"<runtime>\", 0)"
-                : "ct_to_string_int((int32_t)value, \"<runtime>\", 0)";
+            var fallback = underlying.Kind switch
+            {
+                CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint((uint32_t)value, \"<runtime>\", 0)",
+                CTypeKind.Ulong => "ct_to_string_ulong((uint64_t)value, \"<runtime>\", 0)",
+                CTypeKind.Long => "ct_to_string_long((int64_t)value, \"<runtime>\", 0)",
+                _ => "ct_to_string_int((int32_t)value, \"<runtime>\", 0)",
+            };
             writer.WriteLine($"    return {fallback};");
             writer.WriteLine("}");
         }
@@ -990,6 +1208,8 @@ internal sealed class CEmitter
             CTypeKind.Char => "ct_to_string_char(box->Value, \"<runtime>\", 0)",
             CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint((uint32_t)box->Value, \"<runtime>\", 0)",
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int((int32_t)box->Value, \"<runtime>\", 0)",
+            CTypeKind.Long => "ct_to_string_long(box->Value, \"<runtime>\", 0)",
+            CTypeKind.Ulong => "ct_to_string_ulong(box->Value, \"<runtime>\", 0)",
             CTypeKind.Float => "ct_to_string_float(box->Value, \"<runtime>\", 0)",
             _ => $"ct_string_from_bytes((const uint8_t*)\"{EscapeCString(type.DisplayName)}\", {Encoding.UTF8.GetByteCount(type.DisplayName)}, \"<runtime>\", 0)",
         };
@@ -1103,9 +1323,11 @@ internal sealed class CEmitter
             "ct_cleanup_push", "ct_cleanup_unwind_to", "ct_cleanup_disarm", "ct_retain_ref_value", "ct_drop_ref_value",
             "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
-            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint",
+            "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
+            "ct_u64_div", "ct_u64_mod", "ct_i64_shl", "ct_i64_shr",
+            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
             "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
-            "ct_write_int", "ct_write_uint", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
+            "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
             "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash", "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals",
             "ct_type_is_assignable", "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals", "ct_object_value_hash",
         };
@@ -1135,6 +1357,12 @@ internal sealed class CEmitter
         }
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"    (void)&ct_new_{NameMangler.Array(array.ElementType!)};");
+        foreach (var type in Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            writer.WriteLine($"    (void)&{DelegateFactoryName(type)};");
+            writer.WriteLine($"    (void)&{DelegateDropName(type)};");
+            writer.WriteLine($"    (void)&{DescriptorName(type)};");
+        }
         foreach (var type in BoxedTypes)
         {
             writer.WriteLine($"    (void)&{BoxFunctionName(type)};");

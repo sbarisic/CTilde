@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.6. Draft 0.6 generated objects and reference-returning functions are ABI-incompatible with draft 0.5 because object headers, descriptors, cleanup state, and ownership conventions changed.
+This document defines the generated C contract for C~ draft 0.7. Draft 0.7 generated C is ABI-incompatible with draft 0.6 because it adds exact 64-bit scalar encodings, managed delegate layouts, and unmanaged callback trampolines.
 
 The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 
@@ -11,8 +11,9 @@ The output is a single GNU C23 translation unit for a selected target profile. G
 The generated file includes only C standard-library headers. Compile-time assertions require:
 
 - Eight-bit bytes.
-- Exact `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int32_t`, and `uint32_t` types when used.
+- Exact `int8_t`, `uint8_t`, `int16_t`, `uint16_t`, `int32_t`, `uint32_t`, `int64_t`, and `uint64_t` types when used.
 - Two's-complement `int32_t`.
+- Two's-complement `int64_t`.
 - A four-byte IEEE-754 binary32 `float`.
 - C23 language support. The native test driver first uses `-std=gnu23`. It retries with `-std=gnu2x` only after an option error. `CTILDE_C_STANDARD` selects an explicit dialect and disables this retry.
 
@@ -31,10 +32,13 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 | `ushort` | `uint16_t` |
 | `int` | `int32_t` |
 | `uint` | `uint32_t` |
+| `long` | `int64_t` |
+| `ulong` | `uint64_t` |
 | `float` | `float` |
 | `T*` | the mapped C type followed by `*` |
+| `delegate* unmanaged<P..., R>` | exact `R (*)(P...)` function pointer |
 
-Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.6 defines two's-complement wrapping.
+Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.7 defines two's-complement wrapping.
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
@@ -60,6 +64,8 @@ Generated prefixes identify symbol kinds:
 | `ct_a_` | Specialized array type |
 | `ct_desc_` | Runtime type descriptor |
 | `ct_vtable_`, `ct_vthunk_` | Virtual dispatch table and receiver thunk |
+| `ct_new_delegate_`, `ct_drop_delegate_`, `ct_delegate_thunk_` | Managed delegate factory, drop callback, and invocation thunk |
+| `ct_callback_` | C ABI trampoline for a C~ static method address |
 | `ct_init_` | Non-allocating class constructor initializer |
 | `ct_box_`, `ct_unbox_` | Value box layout and conversion helper |
 | `ct_l_` | User local |
@@ -113,6 +119,18 @@ A structure lowers to the same C structure form but is passed, returned, assigne
 Instance methods and property accessors receive a first `ct_self` pointer. Static members do not.
 
 A box stores an object header followed by one copied scalar, enum, structure, or pointer value.
+
+## Delegates and unmanaged function pointers
+
+Each named delegate lowers to a sealed managed structure containing `ct_object`, a typed invocation-thunk pointer, and an optional owned `ct_object*` receiver. Its descriptor drop callback releases that receiver. Construction allocates the delegate object and retains a captured instance receiver. Invocation null-checks the delegate and calls its typed thunk. Virtual thunks dispatch through the receiver's current vtable; `base` captures use a direct thunk.
+
+Unmanaged function-pointer types are structural. The emitter owns a C declarator renderer that places names inside the required parentheses:
+
+```c
+int32_t (*callback)(int32_t);
+```
+
+Locals, fields, parameters, results, casts, extern prototypes, and trampolines use the correctly parenthesized form; deterministic structural typedefs remain available for internal composite layouts. Taking the address of an extern method uses the native symbol directly. Taking the address of a C~ static method emits a translation-unit-local C ABI trampoline. A callback trampoline installs a C~ handler boundary; an escaping exception is cleaned up and reported as fatal `CTE0003` instead of unwinding into native code. This contract is valid only for synchronous invocation on the current C~ task.
 
 ## Enumerations
 
@@ -212,25 +230,25 @@ External names cannot collide with `main`, runtime definitions, or generated sym
 
 An extern declaration is linked only when generated code calls it. The compiler does not choose libraries or invoke a linker.
 
-An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. Draft 0.6 does not support exceptions across native callbacks or other native boundaries.
+An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. A generated same-task synchronous callback trampoline catches escaping C~ exceptions and terminates with `CTE0003`. Other exception propagation across native boundaries is unsupported.
 
 Parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns.
 
 The runtime exports `ct_retain(ct_object*)` and `ct_release(ct_object*)`. Both accept null. A native owner must eventually balance every owned or retained reference. Retain overflow terminates with `CTM0002`; invalid release or underflow terminates with `CTM0003`.
 
-ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, and `void`; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
+ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses only `bool`, `int32_t`, `uint32_t`, `int64_t`, and `void`; ESP-IDF structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards the monotonic `esp_timer_get_time()` result. The `ct_esp_ws2812_*` calls own one firmware-lifetime native strip and report validation or ESP-IDF errors as `false`.
 
 ## Future native interop constraints
 
-This section records post-draft constraints and does not extend the draft 0.6 ABI.
+This section records post-draft constraints and does not extend the draft 0.7 ABI.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
 
-The extended scalar ABI will need exact signed and unsigned 64-bit types plus native-sized integer types for `size_t` and pointer-sized values. Native strings and buffers must use explicit pointer, element, length, mutability, and lifetime information. Managed C~ strings and arrays retain their runtime layouts and do not become implicit `char*` or flat C arrays.
+The extended scalar ABI still needs native-sized integer types for `size_t` and pointer-sized values. Native strings and buffers must use explicit pointer, element, length, mutability, and lifetime information. Managed C~ strings and arrays retain their runtime layouts and do not become implicit `char*` or flat C arrays.
 
 Opaque handles will be distinct C~ value types whose generated C representation uses the native typedef from its owning header. Ownership metadata must distinguish borrowed, created, consumed, nullable, and retained values. `ref`, `in`, and `out` arguments will map to native pointers only after definite-assignment, mutability, and escape checks succeed.
 
-An unsafe unmanaged function pointer will lower to one C function pointer with an exact signature and calling convention. A delegate will be a managed callable containing a method and optional target, so it is not ABI-compatible with a C function pointer. Passing a delegate to native code requires an exported trampoline and a user-context pointer. Retained callbacks require explicit registration and unregistration lifetime; synchronous callbacks may use a call-scoped context.
+Delegates remain ABI-incompatible with unmanaged function pointers. Future delegate-to-native adapters require an exported trampoline and a user-context pointer. Retained callbacks require explicit registration and unregistration lifetime; draft 0.7 supports only static-method function pointers invoked synchronously on the current task.
 
 No native call or callback may unwind a C~ exception through C frames. A callback trampoline must attach to defined per-task runtime state before it uses exceptions, managed allocation, virtual dispatch, or other task-sensitive services. ISR entry points additionally require compiler-checked allocation, throwing, blocking, and IRAM/DRAM reachability restrictions.
 
@@ -246,7 +264,7 @@ typedef struct ct_exception_frame {
 } ct_exception_frame;
 ```
 
-One process-global pointer identifies the active handler, one process-global `ct_object*` owns the currently thrown exception, and one process-global pointer identifies the top automatic cleanup record. Draft 0.6 handler and ARC state are single-threaded.
+One process-global pointer identifies the active handler, one process-global `ct_object*` owns the currently thrown exception, and one process-global pointer identifies the top automatic cleanup record. Draft 0.7 handler and ARC state are single-threaded.
 
 Each invocation of a method that contains `try` or `defer` creates its `jmp_buf` values and handler frames on the C stack. Parameters, C~ locals, caught exceptions, pending actions, return payloads, and defer captures that can survive `longjmp` are fields in one compiler-generated `volatile` automatic method-state aggregate. This avoids indeterminate modified C automatic values without calling `ct_alloc` for control state.
 

@@ -1,15 +1,32 @@
 using System.Collections.Immutable;
+using System.Numerics;
 using System.Text;
 
 namespace CTilde;
 
 internal enum CTypeKind
 {
-    Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Int, Uint, Float, String,
-    Class, Struct, Enum, Array, Pointer, Null,
+    Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Int, Uint, Long, Ulong, Float, String,
+    Class, Struct, Enum, Delegate, Array, Pointer, FunctionPointer, Null,
 }
 
-internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? ElementType = null)
+internal sealed class FunctionPointerSignature(ImmutableArray<CType> parameterTypes, CType returnType) : IEquatable<FunctionPointerSignature>
+{
+    public ImmutableArray<CType> ParameterTypes { get; } = parameterTypes;
+    public CType ReturnType { get; } = returnType;
+    public bool Equals(FunctionPointerSignature? other) => other is not null && ReturnType == other.ReturnType && ParameterTypes.SequenceEqual(other.ParameterTypes);
+    public override bool Equals(object? obj) => obj is FunctionPointerSignature other && Equals(other);
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(ReturnType);
+        foreach (var parameter in ParameterTypes)
+            hash.Add(parameter);
+        return hash.ToHashCode();
+    }
+}
+
+internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? ElementType = null, FunctionPointerSignature? FunctionPointer = null)
 {
     public static readonly CType Error = new(CTypeKind.Error);
     public static readonly CType Void = new(CTypeKind.Void);
@@ -21,30 +38,33 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public static readonly CType Char = new(CTypeKind.Char);
     public static readonly CType Int = new(CTypeKind.Int);
     public static readonly CType Uint = new(CTypeKind.Uint);
+    public static readonly CType Long = new(CTypeKind.Long);
+    public static readonly CType Ulong = new(CTypeKind.Ulong);
     public static readonly CType Float = new(CTypeKind.Float);
     public static readonly CType String = new(CTypeKind.String);
     public static readonly CType Null = new(CTypeKind.Null);
 
     public bool IsError => Kind == CTypeKind.Error;
-    public bool IsNumeric => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float;
-    public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Enum;
-    public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Array or CTypeKind.String;
+    public bool IsNumeric => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float;
+    public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Enum;
+    public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.String;
     public bool ContainsManagedReferences => ContainsManagedReferencesCore(this, []);
-    public bool IsPointerLike => IsReference || Kind == CTypeKind.Pointer;
+    public bool IsPointerLike => IsReference || Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer;
     public bool ContainsPointer => ContainsPointerCore(this, []);
-    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum;
+    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum;
 
     public string DisplayName => Kind switch
     {
-        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Enum => Symbol!.FullName,
+        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Delegate => Symbol!.FullName,
         CTypeKind.Array => $"{ElementType!.DisplayName}[]",
         CTypeKind.Pointer => $"{ElementType!.DisplayName}*",
+        CTypeKind.FunctionPointer => $"delegate* unmanaged<{string.Join(", ", FunctionPointer!.ParameterTypes.Select(type => type.DisplayName).Append(FunctionPointer.ReturnType.DisplayName))}>",
         _ => Kind.ToString().ToLowerInvariant(),
     };
 
     private static bool ContainsPointerCore(CType type, HashSet<TypeSymbol> visited)
     {
-        if (type.Kind == CTypeKind.Pointer)
+        if (type.Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer)
             return true;
         if (type.ElementType is not null && ContainsPointerCore(type.ElementType, visited))
             return true;
@@ -64,7 +84,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     }
 }
 
-internal enum DeclaredTypeKind { Class, Struct, Enum, StaticClass }
+internal enum DeclaredTypeKind { Class, Struct, Enum, Delegate, StaticClass }
 internal enum Accessibility { Private, Internal, Protected, Public }
 
 internal sealed class TypeSymbol
@@ -80,6 +100,7 @@ internal sealed class TypeSymbol
     {
         DeclaredTypeKind.Struct => CTypeKind.Struct,
         DeclaredTypeKind.Enum => CTypeKind.Enum,
+        DeclaredTypeKind.Delegate => CTypeKind.Delegate,
         _ => CTypeKind.Class,
     }, this);
     public List<FieldSymbol> Fields { get; } = [];
@@ -87,6 +108,8 @@ internal sealed class TypeSymbol
     public List<MethodSymbol> Methods { get; } = [];
     public List<MethodSymbol> Constructors { get; } = [];
     public List<EnumValueSymbol> EnumValues { get; } = [];
+    public CType? DelegateReturnType { get; set; }
+    public ImmutableArray<ParameterSymbol> DelegateParameters { get; set; } = [];
     public bool IsStatic => Kind == DeclaredTypeKind.StaticClass;
     public bool IsObject => FullName == "System.Object";
 
@@ -162,7 +185,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public string CName => ExternName ?? NameMangler.Method(this);
 }
 
-internal sealed record EnumValueSymbol(string Name, long Value, EnumMemberSyntax Syntax);
+internal sealed record EnumValueSymbol(string Name, BigInteger Value, EnumMemberSyntax Syntax);
 
 internal sealed class LocalSymbol
 {
@@ -208,13 +231,17 @@ internal static class NameMangler
         CTypeKind.Char => "c8",
         CTypeKind.Int => "i32",
         CTypeKind.Uint => "u32",
+        CTypeKind.Long => "i64",
+        CTypeKind.Ulong => "u64",
         CTypeKind.Float => "f32",
         CTypeKind.String => "str",
         CTypeKind.Class => $"r{Encode(type.Symbol!.FullName)}",
         CTypeKind.Struct => $"s{Encode(type.Symbol!.FullName)}",
         CTypeKind.Enum => $"e{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Delegate => $"d{Encode(type.Symbol!.FullName)}",
         CTypeKind.Array => $"a{TypeCode(type.ElementType!)}",
         CTypeKind.Pointer => $"p{TypeCode(type.ElementType!)}",
+        CTypeKind.FunctionPointer => $"fp{string.Concat(type.FunctionPointer!.ParameterTypes.Select(parameter => "_" + TypeCode(parameter)))}_r{TypeCode(type.FunctionPointer.ReturnType)}",
         _ => "err",
     };
 
@@ -247,6 +274,8 @@ internal static class TypeFacts
         "char" => CType.Char,
         "int" => CType.Int,
         "uint" => CType.Uint,
+        "long" => CType.Long,
+        "ulong" => CType.Ulong,
         "float" => CType.Float,
         "string" => CType.String,
         _ => null,
@@ -258,17 +287,19 @@ internal static class TypeFacts
             return true;
         if (from.Kind == CTypeKind.Null && to.IsPointerLike)
             return true;
-        if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error)
+        if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.FunctionPointer)
             return true;
         if (from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null && from.Symbol.DerivesFrom(to.Symbol))
             return true;
         return from.Kind switch
         {
-            CTypeKind.Byte => to.Kind is CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float,
-            CTypeKind.Sbyte => to.Kind is CTypeKind.Short or CTypeKind.Int or CTypeKind.Float,
-            CTypeKind.Short => to.Kind is CTypeKind.Int or CTypeKind.Float,
-            CTypeKind.Ushort or CTypeKind.Char => to.Kind is CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float,
-            CTypeKind.Int or CTypeKind.Uint => to.Kind == CTypeKind.Float,
+            CTypeKind.Byte => to.Kind is CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float,
+            CTypeKind.Sbyte => to.Kind is CTypeKind.Short or CTypeKind.Int or CTypeKind.Long or CTypeKind.Float,
+            CTypeKind.Short => to.Kind is CTypeKind.Int or CTypeKind.Long or CTypeKind.Float,
+            CTypeKind.Ushort or CTypeKind.Char => to.Kind is CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float,
+            CTypeKind.Int => to.Kind is CTypeKind.Long or CTypeKind.Float,
+            CTypeKind.Uint => to.Kind is CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Float,
+            CTypeKind.Long or CTypeKind.Ulong => to.Kind == CTypeKind.Float,
             _ => false,
         };
     }
@@ -277,6 +308,7 @@ internal static class TypeFacts
         CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
         from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum ||
         from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer ||
+        from.Kind == CTypeKind.FunctionPointer && to.Kind == CTypeKind.FunctionPointer && from == to ||
         IsExplicitObjectConversion(from, to) || IsExplicitClassConversion(from, to);
 
     private static bool IsExplicitObjectConversion(CType from, CType to) =>
@@ -290,8 +322,19 @@ internal static class TypeFacts
     {
         if (left.Kind == CTypeKind.Float || right.Kind == CTypeKind.Float)
             return CType.Float;
+        if (left.Kind == CTypeKind.Ulong || right.Kind == CTypeKind.Ulong)
+        {
+            var other = left.Kind == CTypeKind.Ulong ? right : left;
+            return IsSignedIntegral(other) ? CType.Error : CType.Ulong;
+        }
+        if (left.Kind == CTypeKind.Long || right.Kind == CTypeKind.Long ||
+            left.Kind == CTypeKind.Uint && IsSignedIntegral(right) ||
+            right.Kind == CTypeKind.Uint && IsSignedIntegral(left))
+            return CType.Long;
         if (left.Kind == CTypeKind.Uint || right.Kind == CTypeKind.Uint)
             return CType.Uint;
         return CType.Int;
     }
+
+    private static bool IsSignedIntegral(CType type) => type.Kind is CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int or CTypeKind.Long;
 }

@@ -20,10 +20,9 @@ The current workspace passes:
 
 ```powershell
 dotnet build .\CTilde.sln --nologo
-dotnet run --project .\Test\Test.csproj --no-build
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 89 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 92 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. The `System.Math` checks pass under MSVC, WSL GCC, and WSL Clang. A complete current conformance run is blocked because the HostedIo fixture executes the example's nonterminating console loop; the runner reaches that fixture after the math and core runtime checks.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -131,7 +130,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | `[Export]` and C headers | Implemented | Signature validation, wrappers, exception barriers, deterministic C/C++ declarations, and conflict tests |
 | Synchronous delegate/context callbacks | Implemented | ARC lifetime, virtual dispatch, ABI placement, attachment guards, and exception barriers |
 | `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
-| Bundled `System.Object`, `System.Console`, `System.Environment`, and `System.Runtime.Memory` sources | Implemented | Embedded-source and native output tests |
+| Bundled `System.Object`, `System.Console`, `System.Environment`, `System.Math`, and `System.Runtime.Memory` sources | Implemented | Embedded-source, documentation, native math, and output tests |
 | Hosted console input and `System.IO` | Implemented | UTF-8 line/EOF behavior, Unicode paths, opaque ownership, binary round trip, exceptions, target filtering, and editor documentation |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
 | Structured diagnostics | Implemented | Stable phase ranges and source locations |

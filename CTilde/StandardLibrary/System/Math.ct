@@ -1,0 +1,42 @@
+namespace System;
+
+public static class Math
+{
+    public const float Pi = 3.14159265358979323846f;
+
+    [Extern("ct_math_sqrt")]
+    [NoAlloc]
+    public static float Sqrt(float value);
+
+    [Extern("ct_math_abs")]
+    [NoAlloc]
+    public static float Abs(float value);
+
+    [Extern("ct_math_tan")]
+    [NoAlloc]
+    public static float Tan(float value);
+
+    [Extern("ct_math_min")]
+    [NoAlloc]
+    public static float Min(float left, float right);
+
+    [Extern("ct_math_max")]
+    [NoAlloc]
+    public static float Max(float left, float right);
+
+    [Extern("ct_math_sin")]
+    [NoAlloc]
+    public static float Sin(float value);
+
+    [Extern("ct_math_cos")]
+    [NoAlloc]
+    public static float Cos(float value);
+
+    [Extern("ct_math_floor")]
+    [NoAlloc]
+    public static float Floor(float value);
+
+    [Extern("ct_math_ceiling")]
+    [NoAlloc]
+    public static float Ceiling(float value);
+}

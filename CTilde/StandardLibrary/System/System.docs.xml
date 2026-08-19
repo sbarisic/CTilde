@@ -41,6 +41,19 @@
 
   <member id="T:System.Environment"><summary>Provides hosted process operations.</summary></member>
   <member id="M:System.Environment.Exit(int)"><summary>Terminates a hosted process with an exit code.</summary><param name="exitCode">The process exit code.</param><remarks>This API is unavailable for ESP-IDF compilations.</remarks></member>
+
+  <member id="T:System.Math"><summary>Provides single-precision mathematical functions.</summary><remarks>Functions follow the target C math library for NaN, infinity, signed-zero, and domain behavior. They do not expose errno or floating-point exception state.</remarks></member>
+  <member id="F:System.Math.Pi"><summary>Represents the nearest single-precision value to pi.</summary></member>
+  <member id="M:System.Math.Sqrt(float)"><summary>Returns the square root of a value.</summary><param name="value">The input value.</param><returns>The native C square-root result.</returns></member>
+  <member id="M:System.Math.Abs(float)"><summary>Returns the absolute magnitude of a value.</summary><param name="value">The input value.</param><returns>The native C absolute-value result.</returns></member>
+  <member id="M:System.Math.Tan(float)"><summary>Returns the tangent of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C tangent result.</returns></member>
+  <member id="M:System.Math.Min(float,float)"><summary>Returns the smaller of two values using native C minimum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C minimum result.</returns></member>
+  <member id="M:System.Math.Max(float,float)"><summary>Returns the larger of two values using native C maximum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C maximum result.</returns></member>
+  <member id="M:System.Math.Sin(float)"><summary>Returns the sine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C sine result.</returns></member>
+  <member id="M:System.Math.Cos(float)"><summary>Returns the cosine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C cosine result.</returns></member>
+  <member id="M:System.Math.Floor(float)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a float.</returns></member>
+  <member id="M:System.Math.Ceiling(float)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a float.</returns></member>
+
   <member id="T:System.Memory"><summary>Provides unsafe manual ARC operations for native interoperation.</summary></member>
   <member id="M:System.Memory.Retain(object)"><summary>Adds one owned reference.</summary><param name="value">The managed reference to retain.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
   <member id="M:System.Memory.Release(object)"><summary>Releases one owned reference.</summary><param name="value">The managed reference to release.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>

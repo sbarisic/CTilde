@@ -624,6 +624,8 @@ internal sealed partial class CEmitter
             foreach (var name in new[] { "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close" })
                 writer.WriteLine($"    (void)&{name};");
         }
+        foreach (var name in MathFunctions.Select(function => function.RuntimeName).Where(_usedMathSymbols.Contains))
+            writer.WriteLine($"    (void)&{name};");
         if (_usesNativeIntegers)
         {
             foreach (var name in new[] { "ct_ni_bits", "ct_ni_add", "ct_ni_sub", "ct_ni_mul", "ct_ni_neg", "ct_ni_div", "ct_ni_mod", "ct_nu_div", "ct_nu_mod", "ct_ni_shl", "ct_ni_shr", "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint" })

@@ -91,10 +91,13 @@ internal static partial class ConformanceTests
         var sanitizerArguments = threads && Environment.GetEnvironmentVariable("CTILDE_THREAD_SANITIZER") == "1"
             ? new[] { "-fsanitize=thread", "-fno-omit-frame-pointer", "-g" }
             : [];
-        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath]);
+        var mathArguments = command.Equals("wsl", StringComparison.OrdinalIgnoreCase) || !OperatingSystem.IsWindows()
+            ? new[] { "-lm" }
+            : [];
+        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
         if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
             return result;
-        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath]);
+        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
     }
 
     static bool RejectedCStandard(ProcessResult result)

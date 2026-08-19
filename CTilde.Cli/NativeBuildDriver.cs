@@ -169,6 +169,8 @@ internal static class HostedBuildDriver
         var arguments = new List<string>(prefix) { "-std=gnu23" };
         arguments.AddRange(configuration);
         arguments.AddRange(["-Wall", "-Wextra", "-Werror", "-o", executable, generatedC]);
+        if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
+            arguments.Add("-lm");
         var first = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment, ForwardOutput: false), cancellationToken);
         if (first.ExitCode == 0)

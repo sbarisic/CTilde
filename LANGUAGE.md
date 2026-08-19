@@ -533,9 +533,9 @@ Allocating operations are class and array construction, boxing, delegate creatio
 
 ## Core library
 
-The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
+The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, `Environment`, and single-precision `Math`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.10 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
+Draft 0.10 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation
 

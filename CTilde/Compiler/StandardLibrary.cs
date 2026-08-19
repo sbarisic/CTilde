@@ -13,7 +13,7 @@ internal static class StandardLibrary
         includeHostedIo &= target == CompilationTarget.Hosted;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo), key =>
         {
-            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Memory.ct" };
+            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct" };
             if (key.HostedIo)
                 files.Add("HostedIO.ct");
             if (key.Target == CompilationTarget.EspIdf)

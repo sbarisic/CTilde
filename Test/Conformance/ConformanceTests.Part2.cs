@@ -189,6 +189,116 @@ internal static partial class ConformanceTests
             Assert(writer.ToString().Contains("extern void ct_write_int", StringComparison.Ordinal), "The Console extern declaration was not loaded from the bundled library.");
         });
 
+        suite.Run("System.Math standard library", () =>
+        {
+            const string source = "public static class Program { public static float Read() { return Math.Sqrt(Math.Pi); } [EntryPoint] public static void Main() { } }";
+            var compilation = Compile(source);
+            Assert(!compilation.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, compilation.GetDiagnostics()));
+
+            var editorSource = "public static class Program { public static float Read() { return Math.Sqrt(4.0f); } [EntryPoint] public static void Main() { } }";
+            var completionSource = "public static class Program { public static void Read() { Math. } [EntryPoint] public static void Main() { } }";
+            var service = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(editorSource, "math-editor.ct"), SyntaxTree.ParseText(completionSource, "math-completion.ct")]);
+            var completionPosition = completionSource.IndexOf("Math.", StringComparison.Ordinal) + "Math.".Length;
+            var completions = service.GetCompletions("math-completion.ct", completionPosition);
+            var piCompletion = completions.Single(item => item.Label == "Pi" && item.Kind == LanguageCompletionKind.Field);
+            Assert(piCompletion.DocumentationId is not null && service.GetDocumentation(piCompletion.DocumentationId)?.Summary.Contains("single-precision value", StringComparison.Ordinal) == true, "Math.Pi documentation was unavailable.");
+            var sqrtCompletion = completions.Single(item => item.Label == "Sqrt");
+            Assert(sqrtCompletion.DocumentationId is not null && service.GetDocumentation(sqrtCompletion.DocumentationId)?.Summary.Contains("square root", StringComparison.Ordinal) == true, "Math.Sqrt documentation was unavailable.");
+            var sqrtPosition = editorSource.IndexOf("Sqrt", StringComparison.Ordinal) + 1;
+            Assert(service.GetDefinition("math-editor.ct", sqrtPosition)?.FilePath == "stdlib/System/Math.ct", "Math.Sqrt did not navigate to its embedded declaration.");
+
+            var esp = Compile(source, new CompilationOptions(CompilationTarget.EspIdf));
+            Assert(!esp.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "System.Math was unavailable to ESP-IDF.");
+        });
+
+        suite.Run("System.Math emission and native behavior", () =>
+        {
+            const string sqrtOnlySource = "public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(Math.Sqrt(9.0f)); } }";
+            var first = Emit(sqrtOnlySource);
+            var second = Emit(sqrtOnlySource);
+            Assert(first == second, "System.Math emission was not byte-identical.");
+            Assert(first.Contains("float ct_math_sqrt(float value) { return sqrtf(value); }", StringComparison.Ordinal), "Math.Sqrt did not emit its native wrapper.");
+            foreach (var unused in new[] { "fabsf", "tanf", "fminf", "fmaxf", "sinf", "cosf", "floorf", "ceilf" })
+                Assert(!first.Contains($"return {unused}(", StringComparison.Ordinal), $"Unused native math function '{unused}' was emitted.");
+
+            const string behaviorSource = """
+                using System;
+                public static class Program
+                {
+                    [NoAlloc]
+                    private static float ExerciseAll(float value)
+                    {
+                        value = Math.Sqrt(value);
+                        value = Math.Abs(value);
+                        value = Math.Tan(value);
+                        value = Math.Min(value, Math.Pi);
+                        value = Math.Max(value, -Math.Pi);
+                        value = Math.Sin(value);
+                        value = Math.Cos(value);
+                        value = Math.Floor(value);
+                        return Math.Ceiling(value);
+                    }
+
+                    private static bool Close(float left, float right)
+                    {
+                        return Math.Abs(left - right) < 0.0001f;
+                    }
+
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        const float pi = Math.Pi;
+                        Console.WriteLine(Close(pi, 3.1415927f));
+                        Console.WriteLine(Math.Sqrt(9.0f) == 3.0f);
+                        Console.WriteLine(Math.Abs(-2.5f) == 2.5f);
+                        Console.WriteLine(Close(Math.Tan(Math.Pi / 4.0f), 1.0f));
+                        Console.WriteLine(Close(Math.Sin(Math.Pi / 2.0f), 1.0f));
+                        Console.WriteLine(Math.Cos(0.0f) == 1.0f);
+                        Console.WriteLine(Math.Floor(-1.25f) == -2.0f);
+                        Console.WriteLine(Math.Ceiling(-1.25f) == -1.0f);
+                        float nan = 0.0f / 0.0f;
+                        Console.WriteLine(Math.Min(nan, 2.0f) == 2.0f);
+                        Console.WriteLine(Math.Max(2.0f, nan) == 2.0f);
+                        float invalid = Math.Sqrt(-1.0f);
+                        Console.WriteLine(invalid != invalid);
+                        float infinity = 1.0f / 0.0f;
+                        Console.WriteLine(Math.Sqrt(infinity) == infinity);
+                        Console.WriteLine(ExerciseAll(1.0f) == 0.0f);
+                    }
+                }
+                """;
+            var result = CompileAndRun(behaviorSource);
+            Assert(result.ExitCode == 0, result.StandardError);
+            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 13)), result.StandardOutput);
+
+            var generated = Emit(behaviorSource);
+            foreach (var mapping in new[]
+            {
+                "ct_math_sqrt(float value) { return sqrtf(value); }",
+                "ct_math_abs(float value) { return fabsf(value); }",
+                "ct_math_tan(float value) { return tanf(value); }",
+                "ct_math_min(float left, float right) { return fminf(left, right); }",
+                "ct_math_max(float left, float right) { return fmaxf(left, right); }",
+                "ct_math_sin(float value) { return sinf(value); }",
+                "ct_math_cos(float value) { return cosf(value); }",
+                "ct_math_floor(float value) { return floorf(value); }",
+                "ct_math_ceiling(float value) { return ceilf(value); }",
+            })
+                Assert(generated.Contains(mapping, StringComparison.Ordinal), $"Generated C omitted math mapping '{mapping}'.");
+
+            var espGenerated = Emit(behaviorSource, new CompilationOptions(CompilationTarget.EspIdf));
+            Assert(espGenerated.Contains("return sqrtf(value);", StringComparison.Ordinal) && espGenerated.Contains("return tanf(value);", StringComparison.Ordinal), "ESP-IDF output omitted native math wrappers.");
+        });
+
+        suite.Run("System.Math runtime symbols are reserved", () =>
+        {
+            foreach (var symbol in new[] { "ct_math_sqrt", "ct_math_abs", "ct_math_tan", "ct_math_min", "ct_math_max", "ct_math_sin", "ct_math_cos", "ct_math_floor", "ct_math_ceiling" })
+            {
+                var source = $"public static class Native {{ [Extern(\"{symbol}\")] public static float Call(float value); }} public static class Program {{ [EntryPoint] public static void Main() {{ }} }}";
+                Assert(Compile(source).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), $"Compiler-owned math symbol '{symbol}' was not reserved.");
+            }
+        });
+
         suite.Run("scalar ToString", () =>
         {
             const string source = """

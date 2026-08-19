@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console output, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console output, single-precision math, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -95,6 +95,29 @@ Smaller integer types use the language overload rules. A signed widening target 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
 
 On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at EOF. `ReadLine()` flushes standard output, reads one UTF-8 line, removes LF and one preceding CR, and returns an owned string. It returns `null` only when EOF occurs before any byte. Invalid UTF-8, input errors, and lines beyond the managed-string length limit throw `System.IO.IOException`. These input methods can allocate and are unavailable to `[NoAlloc]` call paths and ESP-IDF.
+
+## Math
+
+`System.Math` provides allocation-free single-precision functions on every target:
+
+```csharp
+public static class Math
+{
+    public const float Pi = 3.14159265358979323846f;
+
+    [NoAlloc] public static float Sqrt(float value);
+    [NoAlloc] public static float Abs(float value);
+    [NoAlloc] public static float Tan(float value);
+    [NoAlloc] public static float Min(float left, float right);
+    [NoAlloc] public static float Max(float left, float right);
+    [NoAlloc] public static float Sin(float value);
+    [NoAlloc] public static float Cos(float value);
+    [NoAlloc] public static float Floor(float value);
+    [NoAlloc] public static float Ceiling(float value);
+}
+```
+
+`Pi` is the nearest representable C~ `float` to pi. Angles use radians. Functions map to the target C library's `sqrtf`, `fabsf`, `tanf`, `fminf`, `fmaxf`, `sinf`, `cosf`, `floorf`, and `ceilf` operations. Their NaN, infinity, signed-zero, rounding, and domain behavior follows that implementation. In particular, `Min` and `Max` return the numeric operand when exactly one operand is NaN, as specified for C `fminf` and `fmaxf`. C~ does not expose `errno` or floating-point exception state, and these functions do not throw C~ exceptions. The C~ native-build driver links `libm` on Unix and WSL; manual GNU links of math-using generated C must place `-lm` after the generated translation unit.
 
 ## Hosted file I/O
 
@@ -317,6 +340,6 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 ## Non-normative roadmap
 
-Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
+Future library work can add `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
 
 ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, source-level task APIs, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

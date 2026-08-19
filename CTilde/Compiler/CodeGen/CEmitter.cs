@@ -12,6 +12,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly HashSet<CType> _nativeBufferTypes = [];
+    private readonly HashSet<string> _usedMathSymbols = new(StringComparer.Ordinal);
     private readonly HashSet<TypeSymbol> _synchronousDelegateTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
@@ -133,6 +134,8 @@ internal sealed partial class CEmitter : ILoweringServices
                 _usesHostedIo = true;
                 _usesExceptions = true;
             }
+            if (IsMathSymbol(method.ExternName))
+                _usedMathSymbols.Add(method.ExternName);
         }
     }
 
@@ -152,6 +155,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitOwnershipHelpers(writer);
         EmitPrototypes(writer);
         EmitObjectMetadata(writer);
+        EmitMathSupport(writer);
         EmitHostedIoSupport(writer);
         EmitDelegateSupport(writer);
         EmitSynchronousDelegateAdapters(writer);

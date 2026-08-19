@@ -302,7 +302,7 @@ internal static partial class ConformanceTests
             try
             {
                 File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"],\"build\":{\"generatedC\":\"out/program.c\",\"generatedHeader\":\"out/exports.h\",\"configuration\":\"release\",\"compiler\":\"auto\",\"executable\":\"out/program.exe\"}}");
-                File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+                File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(Math.Sqrt(9.0f)); } }");
                 File.WriteAllText(Path.Combine(directory, "src", "Library.ct"), "public class Library { }");
                 File.WriteAllText(Path.Combine(directory, "src", "generated", "Ignored.ct"), "public class Ignored { }");
                 var project = CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json"));
@@ -319,6 +319,12 @@ internal static partial class ConformanceTests
                 var build = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
                 Assert(build.ExitCode == 0, $"Project native build failed: {build.StandardOutput}{build.StandardError}");
                 Assert(File.Exists(Path.Combine(directory, "out", "program.c")) && File.Exists(Path.Combine(directory, "out", "exports.h")) && File.Exists(Path.Combine(directory, "out", "program.exe")), "Project native build outputs were missing.");
+                var executable = Path.Combine(directory, "out", "program.exe");
+                var configuredCompiler = Environment.GetEnvironmentVariable("CTILDE_CC");
+                var builtProgram = configuredCompiler?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true
+                    ? RunProcess("wsl", ["--exec", WslPath(executable)])
+                    : RunProcess(executable, []);
+                Assert(builtProgram.ExitCode == 0 && Normalize(builtProgram.StandardOutput) == "3\n", $"Project native math executable failed: {builtProgram.StandardOutput}{builtProgram.StandardError}");
                 using (var buildLock = new FileStream(Path.Combine(directory, "out", ".ctilde-build.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
                 {
                     var overlapping = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);

@@ -62,7 +62,8 @@ public sealed class Compilation
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
             var hostedIo = target == CompilationTarget.Hosted && StandardLibrary.RequiresHostedIo(SyntaxTrees);
-            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo).AddRange(SyntaxTrees);
+            var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);
+            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)

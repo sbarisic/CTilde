@@ -4,7 +4,7 @@
 
 This document defines the generated C contract for C~ draft 0.10. Draft 0.10 makes ARC atomic, moves cleanup and exception state into attached-thread storage, and adds native attachment to the draft 0.9 export and callback ABI. Every generated translation unit uses the new runtime, so draft 0.10 generated objects and runtime entry points are ABI-incompatible with draft 0.9.
 
-C~ draft 0.11 adds source-level arithmetic operators without changing this ABI. Operator functions are internal `ct_op_*` symbols and are not exported or added to generated headers. Managed layouts, reference-return conventions, runtime entry points, and native ownership contracts remain draft 0.10 compatible.
+C~ draft 0.11 adds source-level arithmetic operators without changing this ABI. Draft 0.12 uses them for allocation-free standard-library vectors and changes the generated source banner, but does not change the public-header signature prefix. Operator functions remain internal `ct_op_*` symbols and are never exported directly. A vector layout appears in a generated header only when an ordinary exported signature uses that unmanaged structure. Managed layouts, reference-return conventions, runtime entry points, and native ownership contracts remain draft 0.10 compatible.
 
 The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
 

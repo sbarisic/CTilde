@@ -1,0 +1,127 @@
+namespace System;
+
+public struct Vec2
+{
+    public float X;
+    public float Y;
+
+    public Vec2()
+    {
+        X = 0.0f;
+        Y = 0.0f;
+    }
+
+    public Vec2(float value)
+    {
+        X = value;
+        Y = value;
+    }
+
+    public Vec2(float x, float y)
+    {
+        X = x;
+        Y = y;
+    }
+
+    [NoAlloc]
+    public static Vec2 Zero
+    {
+        get { return new Vec2(); }
+    }
+
+    [NoAlloc]
+    public static Vec2 One
+    {
+        get { return new Vec2(1.0f); }
+    }
+
+    [NoAlloc]
+    public static Vec2 UnitX
+    {
+        get { return new Vec2(1.0f, 0.0f); }
+    }
+
+    [NoAlloc]
+    public static Vec2 UnitY
+    {
+        get { return new Vec2(0.0f, 1.0f); }
+    }
+
+    [NoAlloc]
+    public static Vec2 operator +(Vec2 value)
+    {
+        return value;
+    }
+
+    [NoAlloc]
+    public static Vec2 operator -(Vec2 value)
+    {
+        return new Vec2(-value.X, -value.Y);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator +(Vec2 left, Vec2 right)
+    {
+        return new Vec2(left.X + right.X, left.Y + right.Y);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator -(Vec2 left, Vec2 right)
+    {
+        return new Vec2(left.X - right.X, left.Y - right.Y);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator *(Vec2 left, Vec2 right)
+    {
+        return new Vec2(left.X * right.X, left.Y * right.Y);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator /(Vec2 left, Vec2 right)
+    {
+        return new Vec2(left.X / right.X, left.Y / right.Y);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator *(Vec2 value, float scale)
+    {
+        return new Vec2(value.X * scale, value.Y * scale);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator *(float scale, Vec2 value)
+    {
+        return value * scale;
+    }
+
+    [NoAlloc]
+    public static Vec2 operator /(Vec2 value, float scale)
+    {
+        return new Vec2(value.X / scale, value.Y / scale);
+    }
+
+    [NoAlloc]
+    public float Dot(Vec2 other)
+    {
+        return X * other.X + Y * other.Y;
+    }
+
+    [NoAlloc]
+    public float LengthSquared()
+    {
+        return Dot(this);
+    }
+
+    [NoAlloc]
+    public float Length()
+    {
+        return Math.Sqrt(LengthSquared());
+    }
+
+    [NoAlloc]
+    public Vec2 Normalize()
+    {
+        return this / Length();
+    }
+}

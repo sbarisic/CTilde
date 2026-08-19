@@ -54,6 +54,85 @@
   <member id="M:System.Math.Floor(float)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a float.</returns></member>
   <member id="M:System.Math.Ceiling(float)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a float.</returns></member>
 
+  <member id="T:System.Vec2"><summary>Represents a mutable two-component single-precision vector.</summary></member>
+  <member id="F:System.Vec2.X"><summary>Gets or sets the X component.</summary></member>
+  <member id="F:System.Vec2.Y"><summary>Gets or sets the Y component.</summary></member>
+  <member id="M:System.Vec2.#ctor()"><summary>Initializes a vector with zero components.</summary></member>
+  <member id="M:System.Vec2.#ctor(float)"><summary>Initializes every component to one value.</summary><param name="value">The value for every component.</param></member>
+  <member id="M:System.Vec2.#ctor(float,float)"><summary>Initializes a vector from its components.</summary><param name="x">The X component.</param><param name="y">The Y component.</param></member>
+  <member id="P:System.Vec2.Zero"><summary>Gets the zero vector.</summary></member>
+  <member id="P:System.Vec2.One"><summary>Gets the vector whose components are one.</summary></member>
+  <member id="P:System.Vec2.UnitX"><summary>Gets the positive X unit vector.</summary></member>
+  <member id="P:System.Vec2.UnitY"><summary>Gets the positive Y unit vector.</summary></member>
+  <member id="M:System.Vec2.op_UnaryPlus(System.Vec2)"><summary>Returns the vector unchanged.</summary><param name="value">The input vector.</param><returns>The input vector.</returns></member>
+  <member id="M:System.Vec2.op_UnaryNegation(System.Vec2)"><summary>Negates every component.</summary><param name="value">The input vector.</param><returns>The negated vector.</returns></member>
+  <member id="M:System.Vec2.op_Addition(System.Vec2,System.Vec2)"><summary>Adds corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise sum.</returns></member>
+  <member id="M:System.Vec2.op_Subtraction(System.Vec2,System.Vec2)"><summary>Subtracts corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise difference.</returns></member>
+  <member id="M:System.Vec2.op_Multiplication(System.Vec2,System.Vec2)"><summary>Multiplies corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise product.</returns></member>
+  <member id="M:System.Vec2.op_Division(System.Vec2,System.Vec2)"><summary>Divides corresponding components.</summary><param name="left">The dividend vector.</param><param name="right">The divisor vector.</param><returns>The componentwise quotient.</returns></member>
+  <member id="M:System.Vec2.op_Multiplication(System.Vec2,float)"><summary>Multiplies a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec2.op_Multiplication(float,System.Vec2)"><summary>Multiplies a scalar by a vector.</summary><param name="scale">The scalar.</param><param name="value">The vector.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec2.op_Division(System.Vec2,float)"><summary>Divides a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar divisor.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec2.Dot(System.Vec2)"><summary>Returns the dot product with another vector.</summary><param name="other">The other vector.</param><returns>The scalar dot product.</returns></member>
+  <member id="M:System.Vec2.LengthSquared()"><summary>Returns the squared vector length.</summary><returns>The squared length.</returns></member>
+  <member id="M:System.Vec2.Length()"><summary>Returns the vector length.</summary><returns>The vector length.</returns></member>
+  <member id="M:System.Vec2.Normalize()"><summary>Returns a vector with the same direction and unit length.</summary><returns>The normalized vector.</returns><remarks>A zero vector produces components according to native floating-point division by zero.</remarks></member>
+
+  <member id="T:System.Vec3"><summary>Represents a mutable three-component single-precision vector.</summary></member>
+  <member id="F:System.Vec3.X"><summary>Gets or sets the X component.</summary></member>
+  <member id="F:System.Vec3.Y"><summary>Gets or sets the Y component.</summary></member>
+  <member id="F:System.Vec3.Z"><summary>Gets or sets the Z component.</summary></member>
+  <member id="M:System.Vec3.#ctor()"><summary>Initializes a vector with zero components.</summary></member>
+  <member id="M:System.Vec3.#ctor(float)"><summary>Initializes every component to one value.</summary><param name="value">The value for every component.</param></member>
+  <member id="M:System.Vec3.#ctor(float,float,float)"><summary>Initializes a vector from its components.</summary><param name="x">The X component.</param><param name="y">The Y component.</param><param name="z">The Z component.</param></member>
+  <member id="P:System.Vec3.Zero"><summary>Gets the zero vector.</summary></member>
+  <member id="P:System.Vec3.One"><summary>Gets the vector whose components are one.</summary></member>
+  <member id="P:System.Vec3.UnitX"><summary>Gets the positive X unit vector.</summary></member>
+  <member id="P:System.Vec3.UnitY"><summary>Gets the positive Y unit vector.</summary></member>
+  <member id="P:System.Vec3.UnitZ"><summary>Gets the positive Z unit vector.</summary></member>
+  <member id="M:System.Vec3.op_UnaryPlus(System.Vec3)"><summary>Returns the vector unchanged.</summary><param name="value">The input vector.</param><returns>The input vector.</returns></member>
+  <member id="M:System.Vec3.op_UnaryNegation(System.Vec3)"><summary>Negates every component.</summary><param name="value">The input vector.</param><returns>The negated vector.</returns></member>
+  <member id="M:System.Vec3.op_Addition(System.Vec3,System.Vec3)"><summary>Adds corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise sum.</returns></member>
+  <member id="M:System.Vec3.op_Subtraction(System.Vec3,System.Vec3)"><summary>Subtracts corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise difference.</returns></member>
+  <member id="M:System.Vec3.op_Multiplication(System.Vec3,System.Vec3)"><summary>Multiplies corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise product.</returns></member>
+  <member id="M:System.Vec3.op_Division(System.Vec3,System.Vec3)"><summary>Divides corresponding components.</summary><param name="left">The dividend vector.</param><param name="right">The divisor vector.</param><returns>The componentwise quotient.</returns></member>
+  <member id="M:System.Vec3.op_Multiplication(System.Vec3,float)"><summary>Multiplies a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec3.op_Multiplication(float,System.Vec3)"><summary>Multiplies a scalar by a vector.</summary><param name="scale">The scalar.</param><param name="value">The vector.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec3.op_Division(System.Vec3,float)"><summary>Divides a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar divisor.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec3.Dot(System.Vec3)"><summary>Returns the dot product with another vector.</summary><param name="other">The other vector.</param><returns>The scalar dot product.</returns></member>
+  <member id="M:System.Vec3.Cross(System.Vec3)"><summary>Returns the right-handed cross product with another vector.</summary><param name="other">The other vector.</param><returns>The cross product.</returns></member>
+  <member id="M:System.Vec3.LengthSquared()"><summary>Returns the squared vector length.</summary><returns>The squared length.</returns></member>
+  <member id="M:System.Vec3.Length()"><summary>Returns the vector length.</summary><returns>The vector length.</returns></member>
+  <member id="M:System.Vec3.Normalize()"><summary>Returns a vector with the same direction and unit length.</summary><returns>The normalized vector.</returns><remarks>A zero vector produces components according to native floating-point division by zero.</remarks></member>
+
+  <member id="T:System.Vec4"><summary>Represents a mutable four-component single-precision vector.</summary></member>
+  <member id="F:System.Vec4.X"><summary>Gets or sets the X component.</summary></member>
+  <member id="F:System.Vec4.Y"><summary>Gets or sets the Y component.</summary></member>
+  <member id="F:System.Vec4.Z"><summary>Gets or sets the Z component.</summary></member>
+  <member id="F:System.Vec4.W"><summary>Gets or sets the W component.</summary></member>
+  <member id="M:System.Vec4.#ctor()"><summary>Initializes a vector with zero components.</summary></member>
+  <member id="M:System.Vec4.#ctor(float)"><summary>Initializes every component to one value.</summary><param name="value">The value for every component.</param></member>
+  <member id="M:System.Vec4.#ctor(float,float,float,float)"><summary>Initializes a vector from its components.</summary><param name="x">The X component.</param><param name="y">The Y component.</param><param name="z">The Z component.</param><param name="w">The W component.</param></member>
+  <member id="P:System.Vec4.Zero"><summary>Gets the zero vector.</summary></member>
+  <member id="P:System.Vec4.One"><summary>Gets the vector whose components are one.</summary></member>
+  <member id="P:System.Vec4.UnitX"><summary>Gets the positive X unit vector.</summary></member>
+  <member id="P:System.Vec4.UnitY"><summary>Gets the positive Y unit vector.</summary></member>
+  <member id="P:System.Vec4.UnitZ"><summary>Gets the positive Z unit vector.</summary></member>
+  <member id="P:System.Vec4.UnitW"><summary>Gets the positive W unit vector.</summary></member>
+  <member id="M:System.Vec4.op_UnaryPlus(System.Vec4)"><summary>Returns the vector unchanged.</summary><param name="value">The input vector.</param><returns>The input vector.</returns></member>
+  <member id="M:System.Vec4.op_UnaryNegation(System.Vec4)"><summary>Negates every component.</summary><param name="value">The input vector.</param><returns>The negated vector.</returns></member>
+  <member id="M:System.Vec4.op_Addition(System.Vec4,System.Vec4)"><summary>Adds corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise sum.</returns></member>
+  <member id="M:System.Vec4.op_Subtraction(System.Vec4,System.Vec4)"><summary>Subtracts corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise difference.</returns></member>
+  <member id="M:System.Vec4.op_Multiplication(System.Vec4,System.Vec4)"><summary>Multiplies corresponding components.</summary><param name="left">The first vector.</param><param name="right">The second vector.</param><returns>The componentwise product.</returns></member>
+  <member id="M:System.Vec4.op_Division(System.Vec4,System.Vec4)"><summary>Divides corresponding components.</summary><param name="left">The dividend vector.</param><param name="right">The divisor vector.</param><returns>The componentwise quotient.</returns></member>
+  <member id="M:System.Vec4.op_Multiplication(System.Vec4,float)"><summary>Multiplies a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec4.op_Multiplication(float,System.Vec4)"><summary>Multiplies a scalar by a vector.</summary><param name="scale">The scalar.</param><param name="value">The vector.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec4.op_Division(System.Vec4,float)"><summary>Divides a vector by a scalar.</summary><param name="value">The vector.</param><param name="scale">The scalar divisor.</param><returns>The scaled vector.</returns></member>
+  <member id="M:System.Vec4.Dot(System.Vec4)"><summary>Returns the dot product with another vector.</summary><param name="other">The other vector.</param><returns>The scalar dot product.</returns></member>
+  <member id="M:System.Vec4.LengthSquared()"><summary>Returns the squared vector length.</summary><returns>The squared length.</returns></member>
+  <member id="M:System.Vec4.Length()"><summary>Returns the vector length.</summary><returns>The vector length.</returns></member>
+  <member id="M:System.Vec4.Normalize()"><summary>Returns a vector with the same direction and unit length.</summary><returns>The normalized vector.</returns><remarks>A zero vector produces components according to native floating-point division by zero.</remarks></member>
+
   <member id="T:System.Memory"><summary>Provides unsafe manual ARC operations for native interoperation.</summary></member>
   <member id="M:System.Memory.Retain(object)"><summary>Adds one owned reference.</summary><param name="value">The managed reference to retain.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
   <member id="M:System.Memory.Release(object)"><summary>Releases one owned reference.</summary><param name="value">The managed reference to release.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>

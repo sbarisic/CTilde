@@ -2,11 +2,18 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits one GNU C23 translation unit, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.11. It adds user-defined unary and binary arithmetic operators for classes and structures, including derived compound assignment. It retains draft 0.10 atomic ARC, per-thread exception and cleanup state, native thread attachment, object layout, and native ABI unchanged. It does not require a CLR or C# runtime.
+The current language is draft 0.12. It adds allocation-free `System.Vec2`, `System.Vec3`, and `System.Vec4` values on top of draft 0.11 user-defined arithmetic operators. It retains draft 0.10 atomic ARC, per-thread exception and cleanup state, native thread attachment, object layout, and native ABI unchanged. It does not require a CLR or C# runtime.
 
 ```csharp
 public static Vector3 operator +(Vector3 left, Vector3 right) { ... }
 public static Vector3 operator *(Vector3 value, float scale) { ... }
+```
+
+The standard library uses those declarations directly:
+
+```csharp
+Vec3 direction = (Vec3.UnitX + Vec3.UnitY).Normalize();
+Vec3 normal = Vec3.UnitX.Cross(Vec3.UnitY);
 ```
 
 ## Quick start
@@ -107,7 +114,7 @@ public static class Program
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a hosted ray tracer that uses `System.Math`, value-type geometry, and an owned file handle to render a PPM image. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
+See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a hosted ray tracer that uses `System.Math`, `System.Vec3`, and an owned file handle to render a PPM image. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
 
 ## Public compiler API
 
@@ -168,8 +175,8 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.11 programs |
-| `examples/HostedIo` | Hosted PPM ray tracer with overloaded vector arithmetic and owned file output |
+| `examples` | Checked draft 0.12 programs |
+| `examples/HostedIo` | Hosted PPM ray tracer with `System.Vec3` arithmetic and owned file output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -195,7 +202,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.11 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.12 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

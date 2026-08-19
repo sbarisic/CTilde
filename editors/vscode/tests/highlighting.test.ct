@@ -1,4 +1,4 @@
-// SYNTAX TEST "source.ctilde" "C~ draft 0.11 highlighting"
+// SYNTAX TEST "source.ctilde" "C~ draft 0.12 highlighting"
 
 /// <summary>Uses <paramref name="value"/>.</summary>
 

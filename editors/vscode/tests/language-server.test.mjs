@@ -110,7 +110,7 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
   }
 });
 
-test("language server exposes draft 0.11 operator declarations and usages", async () => {
+test("language server exposes draft 0.12 operator declarations and usages", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-operator-"));
   const programPath = path.join(directory, "Program.ct");
   const uri = pathToFileURL(programPath).href;
@@ -147,6 +147,51 @@ public static class Program
     const memberPosition = positionAt(source, source.indexOf("\n\n") + 1);
     const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: memberPosition });
     assert.ok(completion.items.some(item => item.label === "operator"));
+
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("language server exposes draft 0.12 vector sources and documentation", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-vector-"));
+  const programPath = path.join(directory, "Program.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = "public static class Program { [EntryPoint] public static void Main() { Vec3 left = Vec3.UnitX; Vec3 right = Vec3.UnitY; Vec3 result = left + right; } }";
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+
+  const client = new LspClient(serverDll);
+  try {
+    const initialized = await client.request("initialize", { processId: process.pid, rootUri: pathToFileURL(directory).href, capabilities: {} });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+
+    const typeOffset = source.indexOf("Vec3 left");
+    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, typeOffset) });
+    assert.match(definition.uri, /^ctilde-stdlib:\/\/\/System\/Vec3\.ct$/);
+    const standardLibraryText = await client.request("ctilde/standardLibraryText", { uri: definition.uri });
+    assert.match(standardLibraryText, /public struct Vec3/);
+
+    const staticOffset = source.indexOf("Vec3.UnitX") + "Vec3.".length;
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: positionAt(source, staticOffset) });
+    const unitX = completion.items.find(item => item.label === "UnitX");
+    assert.ok(unitX);
+    const resolved = await client.request("completionItem/resolve", unitX);
+    assert.match(resolved.documentation.value, /positive X unit vector/);
+
+    const plusOffset = source.lastIndexOf("+");
+    const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, plusOffset) });
+    assert.match(hover.contents.value, /operator \+/);
+    assert.match(hover.contents.value, /Adds corresponding components/);
+
+    const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
+    const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, source);
+    assert.ok(decoded.some(token => token.text === "Vec3" && token.type === "struct" && token.modifiers.includes("defaultLibrary")));
 
     await client.request("shutdown");
     client.notify("exit");

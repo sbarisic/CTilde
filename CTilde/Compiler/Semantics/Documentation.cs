@@ -92,7 +92,11 @@ internal sealed class DocumentationIndex
 
     private static string MethodId(MethodSymbol method)
     {
-        var name = method.IsConstructor ? "#ctor" : method.Name;
+        var name = method.IsConstructor
+            ? "#ctor"
+            : method.IsOperator
+                ? $"op_{OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length)}"
+                : method.Name;
         return $"M:{method.ContainingType.FullName}.{name}({string.Join(",", method.Parameters.Select(ParameterId))})";
     }
 

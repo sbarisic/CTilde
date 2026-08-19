@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.11. Object, exception, console output, single-precision math, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.11 adds no standard-library APIs and retains the draft 0.10 native ABI.
+This document is the canonical standard-library reference for C~ draft 0.12. Object, exception, console output, single-precision math, mutable single-precision vectors, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.12 retains the draft 0.10 native ABI.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -118,6 +118,49 @@ public static class Math
 ```
 
 `Pi` is the nearest representable C~ `float` to pi. Angles use radians. Functions map to the target C library's `sqrtf`, `fabsf`, `tanf`, `fminf`, `fmaxf`, `sinf`, `cosf`, `floorf`, and `ceilf` operations. Their NaN, infinity, signed-zero, rounding, and domain behavior follows that implementation. In particular, `Min` and `Max` return the numeric operand when exactly one operand is NaN, as specified for C `fminf` and `fmaxf`. C~ does not expose `errno` or floating-point exception state, and these functions do not throw C~ exceptions. The C~ native-build driver links `libm` on Unix and WSL; manual GNU links of math-using generated C must place `-lm` after the generated translation unit.
+
+## Vectors
+
+`System.Vec2`, `System.Vec3`, and `System.Vec4` are mutable single-precision value types available on every target. Their component fields are named `X`, `Y`, `Z`, and `W` as applicable. Each type provides zero, scalar-splat, and component constructors; `Zero`, `One`, and axis-unit properties; componentwise arithmetic; scalar scaling; dot product; length; squared length; and normalization. `Vec3` also provides a right-handed cross product.
+
+The `Vec3` surface is representative:
+
+```csharp
+public struct Vec3
+{
+    public float X;
+    public float Y;
+    public float Z;
+
+    public Vec3();
+    public Vec3(float value);
+    public Vec3(float x, float y, float z);
+
+    [NoAlloc] public static Vec3 Zero { get; }
+    [NoAlloc] public static Vec3 One { get; }
+    [NoAlloc] public static Vec3 UnitX { get; }
+    [NoAlloc] public static Vec3 UnitY { get; }
+    [NoAlloc] public static Vec3 UnitZ { get; }
+
+    [NoAlloc] public static Vec3 operator +(Vec3 value);
+    [NoAlloc] public static Vec3 operator -(Vec3 value);
+    [NoAlloc] public static Vec3 operator +(Vec3 left, Vec3 right);
+    [NoAlloc] public static Vec3 operator -(Vec3 left, Vec3 right);
+    [NoAlloc] public static Vec3 operator *(Vec3 left, Vec3 right);
+    [NoAlloc] public static Vec3 operator /(Vec3 left, Vec3 right);
+    [NoAlloc] public static Vec3 operator *(Vec3 value, float scale);
+    [NoAlloc] public static Vec3 operator *(float scale, Vec3 value);
+    [NoAlloc] public static Vec3 operator /(Vec3 value, float scale);
+
+    [NoAlloc] public float Dot(Vec3 other);
+    [NoAlloc] public Vec3 Cross(Vec3 other);
+    [NoAlloc] public float LengthSquared();
+    [NoAlloc] public float Length();
+    [NoAlloc] public Vec3 Normalize();
+}
+```
+
+`Vec2` provides `UnitX` and `UnitY`; `Vec4` additionally provides `UnitZ` and `UnitW`. Vector-vector multiplication and division operate component by component. Dot products remain explicit. Normalization divides by the native square-root result without a special zero check, so normalizing a zero vector produces NaN components according to target floating-point behavior. Vector declarations are loaded into compilation only when the corresponding exact type name appears in source; editor services load all three for completion and embedded-source navigation.
 
 ## Hosted file I/O
 
@@ -334,7 +377,7 @@ Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.11. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
+Other runtime failures remain fatal and are not catchable in draft 0.12. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 

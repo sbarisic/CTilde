@@ -33,9 +33,16 @@
 - [x] Rewrite HostedIo vector arithmetic to exercise both scalar orders, unary operators, division, and compound assignment.
 - [ ] Add user-defined conversions and additional operator families only with a separate language-design revision.
 
+## Standard-library vectors
+
+- [x] Add lazily loaded `System.Vec2`, `System.Vec3`, and `System.Vec4` mutable value types.
+- [x] Add allocation-free constants, component and scalar arithmetic, dot products, lengths, normalization, and `Vec3.Cross`.
+- [x] Add documentation, editor navigation, hosted native tests, ESP cross-build coverage, and the HostedIo migration.
+- [ ] Add interpolation, clamping, distance, swizzles, conversions, or SIMD-specific lowering only when applications require them.
+
 ## Compiler architecture completion
 
-Draft 0.11 uses the release pipeline completed for draft 0.7:
+Draft 0.12 uses the release pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.

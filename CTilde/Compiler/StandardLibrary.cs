@@ -4,22 +4,59 @@ using System.Text;
 
 namespace CTilde;
 
+[Flags]
+internal enum StandardVectorTypes
+{
+    None = 0,
+    Vec2 = 1,
+    Vec3 = 2,
+    Vec4 = 4,
+    All = Vec2 | Vec3 | Vec4,
+}
+
 internal static class StandardLibrary
 {
-    private static readonly ConcurrentDictionary<(CompilationTarget Target, bool NativeIntegers, bool NativeUtf8, bool HostedIo), ImmutableArray<SyntaxTree>> SyntaxTreeCache = new();
+    private static readonly ConcurrentDictionary<(CompilationTarget Target, bool NativeIntegers, bool NativeUtf8, bool HostedIo, StandardVectorTypes Vectors), ImmutableArray<SyntaxTree>> SyntaxTreeCache = new();
 
-    public static ImmutableArray<SyntaxTree> GetSyntaxTrees(CompilationTarget target, bool includeNativeIntegers = false, bool includeNativeUtf8 = false, bool includeHostedIo = false)
+    public static ImmutableArray<SyntaxTree> GetSyntaxTrees(
+        CompilationTarget target,
+        bool includeNativeIntegers = false,
+        bool includeNativeUtf8 = false,
+        bool includeHostedIo = false,
+        StandardVectorTypes vectors = StandardVectorTypes.None)
     {
         includeHostedIo &= target == CompilationTarget.Hosted;
-        return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo), key =>
+        return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
         {
             var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct" };
+            if ((key.Vectors & StandardVectorTypes.Vec2) != 0)
+                files.Add("Vec2.ct");
+            if ((key.Vectors & StandardVectorTypes.Vec3) != 0)
+                files.Add("Vec3.ct");
+            if ((key.Vectors & StandardVectorTypes.Vec4) != 0)
+                files.Add("Vec4.ct");
             if (key.HostedIo)
                 files.Add("HostedIO.ct");
             if (key.Target == CompilationTarget.EspIdf)
                 files.Add("EspIdf.ct");
             return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo);
         });
+    }
+
+    public static StandardVectorTypes RequiredVectors(IEnumerable<SyntaxTree> trees)
+    {
+        var result = StandardVectorTypes.None;
+        foreach (var token in trees.SelectMany(tree => tree.Tokens).Where(token => token.Kind == SyntaxKind.IdentifierToken))
+        {
+            result |= token.Text switch
+            {
+                "Vec2" => StandardVectorTypes.Vec2,
+                "Vec3" => StandardVectorTypes.Vec3,
+                "Vec4" => StandardVectorTypes.Vec4,
+                _ => StandardVectorTypes.None,
+            };
+        }
+        return result;
     }
 
     public static bool RequiresHostedIo(IEnumerable<SyntaxTree> trees)

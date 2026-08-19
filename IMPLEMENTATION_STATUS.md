@@ -4,7 +4,7 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.11 has one compiler path:
+C~ draft 0.12 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
@@ -22,7 +22,7 @@ The current workspace passes:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 100 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs cover operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, and the HostedIo ray tracer's deterministic PPM output.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner contains 103 managed and native checks, plus end-to-end LSP protocol and VS Code Extension Host checks. Complete conformance runs cover operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, `System.Vec2`, `System.Vec3`, `System.Vec4`, and the HostedIo ray tracer's deterministic PPM output.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -218,7 +218,7 @@ The hardware MVP compiler and project support are implemented. `CompilationOptio
 
 Draft 0.9 intentionally changes the GPIO configuration/write and WS2812 operation results from `bool` to `EspError`. Boolean sensor data such as `Gpio.Read` remains unchanged.
 
-ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello and Exceptions output also passes both cross-compilers in GNU C23 syntax checks.
+ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello, Exceptions, ARC, Math, operator, and vector output also passes both cross-compilers in GNU C23 syntax checks.
 
 Measured self-test firmware sizes are:
 
@@ -237,7 +237,7 @@ The Draft 0.10 firmware adds two attached FreeRTOS workers, cross-task delegate 
 
 ## Deliberately deferred
 
-These features are outside draft 0.11:
+These features are outside draft 0.12:
 
 - Interfaces and abstract types.
 - General user-defined generics; only intrinsic native-buffer forms exist.
@@ -261,7 +261,7 @@ These features are outside draft 0.11:
 
 ## Release gate
 
-A draft 0.11 release requires:
+A draft 0.12 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -271,4 +271,4 @@ A draft 0.11 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.11 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The full conformance suite passes under MSVC, WSL GCC, and WSL Clang, and generated C plus complete firmware builds pass for ESP32 Xtensa and ESP32-C3 RISC-V. The source-language addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI. The connected dual-core Xtensa ESP32 result above remains the historical Draft 0.10 threading and heap-recovery hardware acceptance sequence; no draft 0.11 firmware was flashed or monitored as part of the operator-only change.
+Draft 0.12 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The vector standard-library addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI and the draft 0.11 operator lowering. The connected dual-core Xtensa ESP32 result above remains the historical Draft 0.10 threading and heap-recovery hardware acceptance sequence; no draft 0.12 firmware has been flashed or monitored.

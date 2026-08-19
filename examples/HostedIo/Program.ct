@@ -3,70 +3,6 @@ using System.IO;
 
 namespace HostedIoExample;
 
-public struct Vec3
-{
-    public float X;
-    public float Y;
-    public float Z;
-
-    public Vec3(float x, float y, float z)
-    {
-        X = x;
-        Y = y;
-        Z = z;
-    }
-
-    public static Vec3 operator +(Vec3 left, Vec3 right)
-    {
-        return new Vec3(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
-    }
-
-    public static Vec3 operator -(Vec3 left, Vec3 right)
-    {
-        return new Vec3(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
-    }
-
-    public static Vec3 operator +(Vec3 value)
-    {
-        return value;
-    }
-
-    public static Vec3 operator -(Vec3 value)
-    {
-        return new Vec3(-value.X, -value.Y, -value.Z);
-    }
-
-    public static Vec3 operator *(Vec3 value, float scale)
-    {
-        return new Vec3(value.X * scale, value.Y * scale, value.Z * scale);
-    }
-
-    public static Vec3 operator *(float scale, Vec3 value)
-    {
-        return value * scale;
-    }
-
-    public static Vec3 operator /(Vec3 value, float scale)
-    {
-        return new Vec3(value.X / scale, value.Y / scale, value.Z / scale);
-    }
-
-    public float Dot(Vec3 other)
-    {
-        return X * other.X + Y * other.Y + Z * other.Z;
-    }
-
-    public float LengthSquared()
-    {
-        return Dot(this);
-    }
-
-    public Vec3 Unit()
-    {
-        return this / Math.Sqrt(LengthSquared());
-    }
-}
-
 public struct Ray
 {
     public Vec3 Origin;
@@ -105,8 +41,8 @@ public static class Program
 
     private static Vec3 SurfaceColor(Ray ray, Vec3 center, float distance)
     {
-        Vec3 normal = (ray.At(distance) - center).Unit();
-        return (normal + new Vec3(1.0f, 1.0f, 1.0f)) * 0.5f;
+        Vec3 normal = (ray.At(distance) - center).Normalize();
+        return (normal + Vec3.One) * 0.5f;
     }
 
     private static Vec3 RayColor(Ray ray)
@@ -125,9 +61,9 @@ public static class Program
         if (groundDistance > 0.001f)
             return SurfaceColor(ray, groundCenter, groundDistance);
 
-        Vec3 unitDirection = ray.Direction.Unit();
+        Vec3 unitDirection = ray.Direction.Normalize();
         float blend = 0.5f * (unitDirection.Y + 1.0f);
-        Vec3 white = new Vec3(1.0f, 1.0f, 1.0f);
+        Vec3 white = Vec3.One;
         Vec3 blue = new Vec3(0.5f, 0.7f, 1.0f);
         return (1.0f - blend) * white + blue * blend;
     }
@@ -152,6 +88,7 @@ public static class Program
     {
         FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
         defer File.Close(image);
+        defer Console.WriteLine("Defering!");
 
         Console.WriteLine("Rendering image.ppm...");
         File.Write(image, "P3\n256 144\n255\n");
@@ -159,9 +96,9 @@ public static class Program
         float focalLength = 1.0f;
         float viewportHeight = 2.0f;
         float viewportWidth = viewportHeight * ((float)ImageWidth / (float)ImageHeight);
-        Vec3 cameraCenter = new Vec3(0.0f, 0.0f, 0.0f);
-        Vec3 viewportU = +new Vec3(viewportWidth, 0.0f, 0.0f);
-        Vec3 viewportV = -new Vec3(0.0f, viewportHeight, 0.0f);
+        Vec3 cameraCenter = Vec3.Zero;
+        Vec3 viewportU = +Vec3.UnitX * viewportWidth;
+        Vec3 viewportV = -Vec3.UnitY * viewportHeight;
         Vec3 pixelDeltaU = viewportU / (float)ImageWidth;
         Vec3 pixelDeltaV = viewportV / (float)ImageHeight;
 

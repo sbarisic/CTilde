@@ -175,7 +175,7 @@ The emitter assembles one translation unit in this order:
 
 Emission lazily lowers the already validated bound program to typed IR. `CEmitter` then renders function bodies from that structured program before it orders runtime sections, so array specializations and string literals are registered deterministically without storing rendered C inside IR. Calling `GetDiagnostics()` never initializes those backend artifacts.
 
-Draft 0.11 changes only source binding and generated function names for programs that declare operators. Programs without operator declarations remain on the existing emission path. The managed runtime, ARC header, exception/thread state, export ABI, and generated public-header contract remain draft 0.10 compatible.
+Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` declarations. Compilation detects exact vector identifiers and loads only the corresponding embedded source, while language-service snapshots load all three for discovery and navigation. Every translation-unit banner identifies draft 0.12, but unused vector layouts and functions remain absent. The managed runtime, ARC header, exception/thread state, export ABI, and generated public-header contract remain draft 0.10 compatible.
 
 Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
 

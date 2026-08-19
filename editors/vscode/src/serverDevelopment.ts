@@ -1,9 +1,21 @@
+import {
+    cpSync,
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    rmSync,
+} from 'fs';
 import * as path from 'path';
 
 export interface ServerLaunchConfiguration {
     readonly serverDll: string;
     readonly workingDirectory: string;
     readonly isExternal: boolean;
+}
+
+export interface StagedServerLaunch {
+    readonly launch: ServerLaunchConfiguration;
+    readonly shadowDirectory: string;
 }
 
 export interface DisposableLike {
@@ -63,6 +75,39 @@ export function serverPathError(
             + 'Build CTilde.LanguageServer or update ctilde.languageServer.serverPath.';
     }
     return `Bundled C~ language server does not exist: ${launch.serverDll}. Reinstall the extension.`;
+}
+
+export function stageExternalServer(
+    launch: ServerLaunchConfiguration,
+    storageRoot: string,
+): StagedServerLaunch {
+    if (!launch.isExternal)
+        throw new Error('Only an external language server can be staged.');
+
+    mkdirSync(storageRoot, { recursive: true });
+    const shadowDirectory = mkdtempSync(path.join(storageRoot, 'server-'));
+    const sourceDirectory = path.dirname(launch.serverDll);
+    try {
+        for (const entry of readdirSync(sourceDirectory)) {
+            cpSync(
+                path.join(sourceDirectory, entry),
+                path.join(shadowDirectory, entry),
+                { recursive: true },
+            );
+        }
+    } catch (error) {
+        rmSync(shadowDirectory, { recursive: true, force: true });
+        throw error;
+    }
+
+    return {
+        launch: {
+            serverDll: path.join(shadowDirectory, path.basename(launch.serverDll)),
+            workingDirectory: launch.workingDirectory,
+            isExternal: true,
+        },
+        shadowDirectory,
+    };
 }
 
 export class RestartCoordinator {

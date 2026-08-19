@@ -27,7 +27,10 @@ internal sealed partial class CompilationModel
             "ct_memory_live_allocations", "ct_memory_live_objects",
             "ct_exception_frame", "ct_exception_top", "ct_current_exception", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
             "ct_native_utf8_string", "ct_native_utf8_borrow", "ct_native_utf8_null", "ct_retain_value_nu8", "ct_drop_value_nu8",
-            "ct_task_attached", "ct_attached_task", "ct_attach_entry_task", "ct_require_attached_task",
+            "ct_atomic_u32", "ct_atomic_load_relaxed", "ct_atomic_load_acquire", "ct_atomic_store_relaxed", "ct_atomic_store_release",
+            "ct_atomic_compare_exchange_relaxed", "ct_atomic_compare_exchange_release", "ct_atomic_fetch_add_relaxed", "ct_atomic_fetch_sub_release", "ct_atomic_acquire_fence",
+            "ct_thread_state", "ct_thread_current_state", "ct_thread_current", "ct_thread_set_current", "ct_thread_require_attached", "ct_thread_attach_primary",
+            "ct_thread_publish_ready", "ct_thread_begin_shutdown", "ct_thread_state_deleted", "ct_thread_attach", "ct_thread_detach", "ct_runtime_phase", "ct_attached_thread_count",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)

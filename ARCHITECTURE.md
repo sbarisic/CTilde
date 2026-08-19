@@ -87,7 +87,7 @@ EmitResult result = compilation.EmitC(writer);
 
 `GetDiagnostics()` runs declarations, immutable body binding, flow/effect analysis, and target validation. It does not construct a C emitter, C writer, typed IR, or translation unit. `EmitC()` lazily lowers and caches the backend result after successful analysis. Repeated emission is byte-identical.
 
-`EmitCHeader()` consumes the validated `BoundProgram` directly. It does not initialize typed IR or the C emitter. This keeps export discovery, native headers, layouts, ownership comments, and prototypes available to tooling without backend side effects.
+`EmitCHeader()` consumes the validated `BoundProgram` directly. It does not initialize typed IR or the C emitter. This keeps export discovery, native headers, layouts, ownership comments, runtime attachment declarations, and prototypes available to tooling without backend side effects.
 
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
@@ -188,14 +188,14 @@ This design follows ESP-IDF's source-compatibility boundary. Native configuratio
 
 The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, scoped pointer-plus-length native buffers, scoped UTF-8 views, nominal opaque handles, and lexical native ownership. The compiler flattens buffers and UTF-8 inputs and renders qualified declarators from structured types. `defer` reserves opaque release obligations without making native resources managed objects. Broad ESP-IDF coverage still requires header-driven source-compatible binding generation.
 
-Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.9 emits body-bearing export wrappers and delegate/context trampolines for synchronous calls on the internally attached entry task. Wrappers initialize modules and convert escaping exceptions to fatal `CTE0003`; wrong-task entry fails with `CTT0001`. Retained lifetimes, public task attachment, native-created tasks, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.10 emits body-bearing export wrappers and callback trampolines that accept any attached native thread. The entrypoint attaches an automatic primary state; native-created threads use the generated-header `ct_thread_attach` and `ct_thread_detach` ABI. Wrappers convert escaping exceptions to fatal `CTE0003`; unattached entry fails with `CTT0001`. Retained callback lifetimes and ISR entry remain later profiles because their blocking, allocation, and IRAM-safety rules differ.
 
 ## Runtime ownership
 
 The generated translation unit embeds a small runtime:
 
 - Zero-initialized allocation and target-aware deallocation.
-- Single-threaded, non-moving ARC with immortal static strings and an allocation-free iterative release queue.
+- Atomic, non-moving ARC with immortal static strings and a per-thread allocation-free iterative release worklist.
 - Generated drop callbacks for classes, arrays, strings, boxes, and reference-bearing structures.
 - A common managed-object header, deterministic type descriptors, identity hashes, and typed virtual dispatch.
 - Checked reference casts, safe casts, type tests, boxing, and exact unboxing.
@@ -205,16 +205,18 @@ The generated translation unit embeds a small runtime:
 - Deterministic 32-bit and 64-bit two's-complement wrapping, division, remainder, negation, and arithmetic-shift helpers.
 - Immutable UTF-8 strings and concatenation.
 - Console output and process exit.
-- A single-thread `setjmp` and `longjmp` handler stack plus automatic ownership cleanup stack for C~ exceptions.
+- Per-attached-thread `setjmp` and `longjmp` handler, current-exception, ownership-cleanup, and release-worklist state.
 - One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
-- ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and same-task callback exception barriers.
+- ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and attached-thread callback exception barriers.
 - Scoped UTF-8 owner views, nominal opaque-handle ownership checks, deterministic export headers, and conditional entry-task guards.
 
-Managed storage is reclaimed when its reference count reaches zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed. C~ source has no `delete`, destructor, or finalizer operation.
+Managed storage is reclaimed on the thread that atomically releases its reference count to zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed and linked from the current `ct_thread_state`. C~ source has no `delete`, destructor, or finalizer operation.
+
+The runtime phase publishes completed static initialization before public attachment becomes legal. Hosted output stores the state pointer in C thread-local storage. ESP-IDF stores it in a reserved FreeRTOS task-local-storage slot with a task-deletion callback. ARC atomics protect lifetime only; ordinary managed fields and slots still require native synchronization when shared.
 
 Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
 
-A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, identity hash, reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the normal cleanup stack.
+A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, immutable identity hash, four-byte atomic reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the current thread's cleanup stack.
 
 Unsafe pointers lower to native C pointers. `nint` and `nuint` lower to `intptr_t` and `uintptr_t`. Unmanaged function pointers lower to exact C function-pointer signatures, and `ref`/`out` versus `in` lower to writable versus const pointers. Native-buffer locals are scoped pointer-plus-length structures, while ABI parameters flatten to adjacent pointer and `size_t` values. Stack allocation uses checked compiler alloca support. Raw pointer operations bypass managed checks; native-buffer indexing remains bounds-checked.
 

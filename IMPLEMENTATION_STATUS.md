@@ -4,7 +4,7 @@ Last reviewed: 2026-08-19
 
 ## Current state
 
-C~ draft 0.9 has one compiler path:
+C~ draft 0.10 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> hosted or ESP-IDF GNU C23
@@ -12,7 +12,7 @@ C~ draft 0.9 has one compiler path:
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file and can independently emit a deterministic public header for `[Export]` methods. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The compiler does not invoke a native compiler.
+The compiler emits one C file and can independently emit a deterministic public header for `[Export]` methods and the native ARC/thread attachment ABI. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The compiler does not invoke a native compiler.
 
 ## Measured baseline
 
@@ -179,11 +179,13 @@ The full examples in [examples/Features.ct](examples/Features.ct), [examples/Obj
 
 ## Runtime status
 
-Managed objects use single-threaded, non-moving automatic reference counting. Classes, arrays, dynamic strings, boxes, and nested reference-bearing structures release deterministically at the last owned reference. Static strings are immortal; static fields live until termination; cycles intentionally leak. Generated class, array, string, box, and structure drop helpers use an allocation-free iterative release queue, so cascading destruction does not recurse on the C stack.
+Managed objects use atomic, non-moving automatic reference counting. Classes, arrays, dynamic strings, boxes, and nested reference-bearing structures release deterministically on the thread that atomically drops the last owned reference. Static strings are immortal; static fields live until termination; cycles intentionally leak. Generated class, array, string, box, and structure drop helpers use a per-thread allocation-free LIFO worklist, so cascading destruction does not recurse on the C stack.
 
 The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
 
-Exception handlers use one process-global `setjmp` and `longjmp` stack, one owning current-exception pointer, and one automatic cleanup-record stack. The implementation is single-threaded. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate. Handler frames record cleanup boundaries so throwing releases all exited owning slots before `longjmp`.
+Each attached thread has independent `setjmp`/`longjmp` handlers, current-exception ownership, automatic cleanup records, and iterative release state. Methods with `try` or `defer` keep values that survive `longjmp` in one volatile automatic aggregate. Handler frames record cleanup boundaries so throwing releases all exited owning slots on the current thread before `longjmp`.
+
+The entrypoint installs an automatic primary `ct_thread_state` before static initialization and publishes a ready phase afterward. Native-created threads use `ct_thread_attach` and `ct_thread_detach`; exports, callback trampolines, retain, and release reject unattached use. Hosted builds use C thread-local storage, while ESP-IDF uses a configured FreeRTOS task-local-storage slot with deletion checking. ARC atomics protect lifetime only; sharing ordinary object state still requires synchronization.
 
 The C ABI uses native target-width pointers and `nint`/`nuint`. Scoped native buffers use checked pointer-plus-length values, and scoped UTF-8 input retains its managed owner without allocating before flattening to `const char*`. Nominal opaque native handles carry lexical move-only ownership obligations. Stack allocation does not use the managed heap.
 
@@ -191,7 +193,7 @@ The C ABI uses native target-width pointers and `nint`/`nuint`. Scoped native bu
 
 Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
 
-Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. The rendered-line classifier and `MethodLowerer` have been removed. `GetDiagnostics()` is analysis-only and a conformance check verifies that it constructs no `CEmitter`, `CWriter`, typed IR, or generated C. Emission remains lazy and preserves the six frozen hosted and ESP-IDF output baselines byte-for-byte.
+Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. The rendered-line classifier and `MethodLowerer` have been removed. `GetDiagnostics()` is analysis-only and a conformance check verifies that it constructs no `CEmitter`, `CWriter`, typed IR, or generated C. Emission remains lazy and deterministic; draft 0.10 deliberately updates the managed-header and runtime snapshots.
 
 ## Language server and VS Code
 
@@ -228,18 +230,20 @@ The RMT-backed GPIO4 WS2812 commands completed more than ten 500 ms on/off cycle
 
 The Draft 0.9 ESP acceptance source repeats mixed acyclic managed allocations for 50 rounds and requires free heap to return within 512 bytes of its baseline. It also checks a scoped UTF-8 call, deferred opaque release, exact ESP error naming, same-task delegate/context entry, a generated export, the timer, virtual delegate, unmanaged function pointer, and native buffer. Both Xtensa and RISC-V ESP cross-compilers accepted it with warnings as errors, complete firmware links passed with the sizes above, and its physical-board acceptance sequence is complete.
 
+The Draft 0.10 firmware adds two attached FreeRTOS workers, cross-task delegate and function-pointer callbacks, per-task exception/defer cleanup, and concurrent ARC lifetime operations. Complete Xtensa and RISC-V links pass. The final 155,360-byte Xtensa image was flashed to the connected dual-core ESP32 on 2026-08-19 and printed `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. It reported 297,620 bytes free, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom before continuing for more than ten GPIO4 WS2812 cycles without a watchdog reset.
+
 ## Deliberately deferred
 
-These features are outside draft 0.9:
+These features are outside draft 0.10:
 
 - Interfaces and abstract types.
 - General user-defined generics; only intrinsic native-buffer forms exist.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
-- General exceptions across native boundaries and thread-safe handler state.
-- Lambdas, closures, multicast delegates, retained/cross-task callbacks, and callback registration lifetime management.
-- Long-lived owned native-resource fields, public task attachment, native-created-task entry, and exported delegates as ordinary ABI values.
+- General exceptions across native boundaries.
+- Lambdas, closures, multicast delegates, retained callbacks, and callback registration lifetime management.
+- Long-lived owned native-resource fields, source-level task and lock APIs, and exported delegates as ordinary ABI values.
 - Header-driven ESP-IDF bindings for configuration structures, constants, macros, and static-inline functions.
-- `volatile`, atomics, and compiler-checked ISR or IRAM execution profiles.
+- Source-level `volatile` or atomic access and compiler-checked ISR or IRAM execution profiles.
 - Iterators and yield statements.
 - Pattern matching.
 - Nullable reference analysis.
@@ -253,7 +257,7 @@ These features are outside draft 0.9:
 
 ## Release gate
 
-A draft 0.9 release requires:
+A draft 0.10 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -263,4 +267,4 @@ A draft 0.9 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.9 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. The Draft 0.9 compiler, editor, cross-build, and T-CAN485 acceptance gates are complete.
+Draft 0.10 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check. Hosted MSVC, GCC 13, and Clang 18 conformance pass for the atomic ARC and attached-thread runtime, including the Clang ThreadSanitizer fixture. Both ESP syntax cross-compilers and complete firmware links pass, and the connected dual-core Xtensa ESP32 passes the Draft 0.10 threading and heap-recovery acceptance sequence.

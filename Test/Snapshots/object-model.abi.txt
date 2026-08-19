@@ -1,4 +1,4 @@
-typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; uint32_t RefCount; struct ct_object* ReleaseNext; } ct_object;
+typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;
 static ct_type_descriptor ct_desc_string;
 static ct_type_descriptor ct_desc_u_13_System_2EObject;
 static ct_type_descriptor ct_desc_u_13_Examples_2EBase;

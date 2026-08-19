@@ -224,7 +224,7 @@ internal sealed partial class CEmitter
                 .ToArray();
             writer.WriteLine($"static {CTypeName(delegateType.DelegateReturnType!)} {SynchronousCallbackAdapterName(delegateType)}({string.Join(", ", parameters)})");
             writer.WriteLine("{");
-            writer.WriteLine("    ct_require_attached_task();");
+            writer.WriteLine("    (void)ct_thread_require_attached();");
             writer.WriteLine($"    {NameMangler.Type(delegateType)}* ct_callback = ({NameMangler.Type(delegateType)}*)ct_require_nonnull(ct_context, \"<native-callback>\", 0);");
             writer.WriteLine("    jmp_buf ct_callback_jump;");
             writer.WriteLine("    ct_exception_frame ct_callback_frame = { &ct_callback_jump, ct_exception_top, ct_cleanup_top };");
@@ -271,6 +271,7 @@ internal sealed partial class CEmitter
             }).ToArray();
             writer.WriteLine($"static {CTypeName(signature.ReturnType)} {name}({(parameters.Length == 0 ? "void" : string.Join(", ", parameters))})");
             writer.WriteLine("{");
+            writer.WriteLine("    (void)ct_thread_require_attached();");
             writer.WriteLine("    jmp_buf ct_callback_jump;");
             writer.WriteLine("    ct_exception_frame ct_callback_frame = { &ct_callback_jump, ct_exception_top, ct_cleanup_top };");
             writer.WriteLine("    ct_exception_top = &ct_callback_frame;");
@@ -555,11 +556,14 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    (void)setvbuf(stdout, NULL, _IONBF, 0);");
             writer.WriteLine("    (void)setvbuf(stderr, NULL, _IONBF, 0);");
-            if (UsesNativeEntry)
-                writer.WriteLine("    ct_attach_entry_task();");
+            writer.WriteLine("    ct_thread_state ct_primary_thread;");
+            writer.WriteLine("    ct_thread_attach_primary(&ct_primary_thread);");
             writer.WriteLine("    ct_module_init();");
+            writer.WriteLine("    ct_thread_publish_ready();");
             if (Model.EntryPoint is not null)
                 writer.WriteLine($"    {Model.EntryPoint.CName}();");
+            writer.WriteLine("    ct_thread_begin_shutdown();");
+            writer.WriteLine("    ct_thread_detach();");
             writer.WriteLine("}");
             return;
         }
@@ -567,11 +571,14 @@ internal sealed partial class CEmitter
         writer.WriteLine("int main(void)");
         writer.WriteLine("{");
         writer.WriteLine("    ct_keep_symbols();");
-        if (UsesNativeEntry)
-            writer.WriteLine("    ct_attach_entry_task();");
+        writer.WriteLine("    ct_thread_state ct_primary_thread;");
+        writer.WriteLine("    ct_thread_attach_primary(&ct_primary_thread);");
         writer.WriteLine("    ct_module_init();");
+        writer.WriteLine("    ct_thread_publish_ready();");
         if (Model.EntryPoint is not null)
             writer.WriteLine($"    {Model.EntryPoint.CName}();");
+        writer.WriteLine("    ct_thread_begin_shutdown();");
+        writer.WriteLine("    ct_thread_detach();");
         writer.WriteLine("    return EXIT_SUCCESS;");
         writer.WriteLine("}");
     }
@@ -593,7 +600,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         var runtime = new[]
         {
-            "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_memory_retain", "ct_memory_release", "ct_init_object", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
+            "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_thread_attach", "ct_thread_detach", "ct_thread_require_attached", "ct_memory_retain", "ct_memory_release", "ct_init_object", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
             "ct_cleanup_push", "ct_cleanup_unwind_to", "ct_cleanup_disarm", "ct_retain_ref_value", "ct_drop_ref_value",
             "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",

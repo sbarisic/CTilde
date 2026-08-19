@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.9 syntax and semantic classification for native integers, by-reference calls, buffers, `NativeUtf8String`, opaque declarations, native ownership attributes, exports, named delegates, callback adapters, and unmanaged function pointers.
+- Draft 0.10 syntax and semantic classification for native integers, by-reference calls, buffers, `NativeUtf8String`, opaque declarations, native ownership attributes, exports, named delegates, callback adapters, and unmanaged function pointers.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
@@ -74,7 +74,7 @@ Build after changing the compiler or language server:
 dotnet build .\CTilde.LanguageServer\CTilde.LanguageServer.csproj
 ```
 
-The incremental build updates both `CTilde.LanguageServer.dll` and `CTilde.Compiler.dll`. The extension watches those files, waits for the build writes to settle, and restarts the server automatically. This workflow does not require rebuilding the TypeScript client, repackaging the VSIX, or reinstalling the extension. Clear `ctilde.languageServer.serverPath` to return to the bundled server.
+The incremental build updates both `CTilde.LanguageServer.dll` and `CTilde.Compiler.dll`. The extension watches those files, waits for the build writes to settle, copies the completed output to private extension storage, and restarts from that shadow copy. The server therefore does not lock the repository build output on Windows. This workflow does not require rebuilding the TypeScript client, repackaging the VSIX, or reinstalling the extension. Clear `ctilde.languageServer.serverPath` to return to the bundled server.
 
 The extension always starts a built assembly with `dotnet <server.dll> --stdio`. Do not configure `dotnet run` as the server command because build or console output on standard output would corrupt the LSP protocol stream.
 

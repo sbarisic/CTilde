@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.9. It adds scoped UTF-8 native strings, nominal move-only opaque handles, typed ESP-IDF errors, C-callable exports and headers, and synchronous delegate-to-C callback/context adapters to the draft 0.8 native ABI. It does not require a CLR or C# runtime.
+The current language is draft 0.10. It adds atomic ARC, per-thread exception and cleanup state, and explicit native thread attachment to the draft 0.9 export and callback ABI. Native-created threads can call generated exports and synchronous callbacks after `ct_thread_attach()` and must call `ct_thread_detach()` before exit. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -149,7 +149,7 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.9 programs |
+| `examples` | Checked draft 0.10 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -175,7 +175,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.9 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.10 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

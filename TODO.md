@@ -18,7 +18,7 @@
 
 ## Compiler architecture completion
 
-Draft 0.9 uses the release pipeline completed for draft 0.7:
+Draft 0.10 uses the release pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.
@@ -27,9 +27,9 @@ Draft 0.9 uses the release pipeline completed for draft 0.7:
 - [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and line classifier.
 - [x] Split non-generated C# implementation and conformance files below 900 physical lines.
 
-The migration retained the original 74 conformance checks and byte-identical hosted and ESP-IDF C baselines. Drafts 0.8 and 0.9 add six native-ABI and resource-entry checks while preserving old generated C outside explicitly changed ESP error APIs.
+The migration retained the original 74 conformance checks and deterministic hosted and ESP-IDF C baselines. Draft 0.10 deliberately changes every generated runtime for atomic ARC and attached-thread state.
 
-Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
+Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, and broader native-boundary propagation policy.
 
 ## ESP-IDF target support
 
@@ -54,13 +54,13 @@ The hardware MVP has removed the entry-point, failure, process-exit, and symbol-
 These limits remain:
 
 - The CLI emits C but does not duplicate ESP-IDF linking, flashing, or monitoring.
-- `[Extern]` supports synchronous scalar, by-reference, buffer, UTF-8, opaque-handle, and delegate/context calls. `[Export]` supports ABI-safe same-task entry. Retained callbacks remain unsupported.
-- Managed allocation uses single-threaded deterministic ARC; cycles leak.
-- Exception-handler state supports one C~ execution task.
+- `[Extern]` supports synchronous scalar, by-reference, buffer, UTF-8, opaque-handle, and delegate/context calls. `[Export]` supports ABI-safe entry from attached native threads. Retained callbacks remain unsupported.
+- Managed allocation uses atomic deterministic ARC; cycles leak.
+- Exception, cleanup, and release-worklist state is isolated per attached native thread.
 - `defer` provides deterministic block cleanup without heap registration.
 - `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
-The draft 0.9 language-side synchronous ABI adds scoped UTF-8 input, nominal opaque handles, lexical native ownership, typed ESP errors, exports, headers, and same-task delegate/context adapters to the draft 0.8 native ABI. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when later ESP work changes runtime and emitter files.
+The draft 0.10 runtime adds atomic ARC and explicit native-thread attachment to the draft 0.9 synchronous ABI. Preserve its descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, per-thread handler semantics, and fatal-runtime-failure boundary when later ESP work changes runtime and emitter files.
 
 ### Design rules
 
@@ -143,7 +143,7 @@ A microcontroller firmware image has no portable process exit code. The compiler
 
 #### Allocation
 
-- [x] Replace program-lifetime allocation with single-threaded, non-moving ARC.
+- [x] Replace program-lifetime allocation with non-moving ARC and make reference counts atomic in draft 0.10.
 - [x] Route allocation through one target hook.
 - [x] Add target-aware deallocation.
 - [x] Start with normal `calloc` or `heap_caps_calloc` using byte-addressable memory.
@@ -276,18 +276,20 @@ ESP-IDF guarantees public API source compatibility but not binary layout compati
 - [x] Add delegates as managed target-plus-method values. Delegates are not layout-compatible with unmanaged function pointers.
 - [x] Add synchronous callback trampolines that pair a typed C entry point with an explicit `void*` user context.
 - [ ] Distinguish synchronous callbacks from retained callbacks and require explicit registration, unregistration, and rooted-lifetime rules for retained delegates.
-- [x] Permit direct unmanaged function pointers only in `unsafe` code and emit same-task static-method and delegate-to-C context trampolines.
-- [x] Attach the generated entry task internally and reject synchronous export or callback entry from another thread/task with `CTT0001`.
-- [ ] Add public attachment for native-created tasks and retained or cross-task callbacks.
+- [x] Permit direct unmanaged function pointers only in `unsafe` code and emit attached-thread static-method and delegate-to-C context trampolines.
+- [x] Attach the generated entry task internally and reject unattached export or callback entry with `CTT0001`.
+- [x] Add native ABI attachment for native-created tasks and synchronous cross-task callbacks.
+- [ ] Add retained callback registration, unregistration, and rooted-lifetime rules.
 - [x] Keep C~ exceptions from unwinding through native frames for the supported synchronous current-task callback profile by terminating with `CTE0003`.
 
-#### Phase 7d: FreeRTOS tasks, shared state, and interrupts
+#### Phase 7d: FreeRTOS and ISR safety
 
-- [ ] Add `volatile` and atomic access rules.
-- [ ] Define thread safety for static initialization and object identity hashes.
-- [ ] Move exception and current-callback state from process-global storage to attached-task storage.
+- [ ] Add source-level `volatile` and atomic operations with defined ordering and shared-state rules.
+- [x] Make static initialization thread-safe and isolate exception, cleanup, and release state per attached C~ task.
+- [x] Support multiple attached C~ tasks through the native attachment ABI and FreeRTOS task-local storage.
+- [x] Make ARC counts atomic across attached tasks.
 - [ ] Define which C~ operations are permitted in an interrupt service routine.
-- [ ] Add compiler-checked ISR effects such as no allocation, no throw, no blocking, and IRAM/DRAM-safe reachability.
+- [ ] Add compiler-enforced ISR profiles: no allocation, no throwing, and no blocking, with IRAM/DRAM-safe reachability checks.
 - [ ] Add separate task-stack configuration for exported task entry methods.
 
 Do not call general C~ allocation, console, or virtual dispatch from an interrupt until the runtime defines ISR-safe behavior.
@@ -357,6 +359,15 @@ The 2026-08-19 Draft 0.8 run produced a 151,008-byte `esp32` binary and a 154,49
 - [x] Flash `RuntimeFailure.ct`, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore and recheck the Draft 0.9 self-test as the final board state.
 
 The 2026-08-19 Draft 0.9 builds produced 153,165-byte `esp32` and 156,744-byte `esp32c3` images. The T-CAN485 reported 297,700 bytes of free heap, a 295,112-byte minimum, and 6,552 bytes of stack high-water headroom. Every new marker passed, more than ten UART-confirmed GPIO4 WS2812 cycles ran without a watchdog reset, the failure image repeatedly produced the required abort/reset sequence, and the Draft 0.9 self-test was restored and rechecked as the final board state.
+
+#### Draft 0.10 closure
+
+- [x] Validate atomic ARC and attached exports, delegate callbacks, unmanaged function pointers, exceptions, cleanup, and attach/detach failures under optimized hosted native tests.
+- [x] Compile fresh draft 0.10 output with both Xtensa and RISC-V cross-compilers using warnings as errors.
+- [x] Complete-link the `esp32` and `esp32c3` attached-task firmware.
+- [x] Flash the connected dual-core ESP32 and confirm `threading: ok`, ARC heap recovery, exception isolation, and the existing hardware markers.
+
+The 2026-08-19 Draft 0.10 build produced a 155,360-byte `esp32` image. Both complete Xtensa and RISC-V firmware links passed. The connected ESP32-D0WDQ6-V3 reported `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`, with 297,620 bytes of free heap, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom. More than ten GPIO4 WS2812 cycles continued without a watchdog reset, and the Draft 0.10 self-test remains flashed.
 
 ### First-release acceptance criteria
 

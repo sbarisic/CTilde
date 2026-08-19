@@ -320,7 +320,7 @@ internal static partial class ConformanceTests
             Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CTS0003"), "Expected literal embedded-NUL diagnostics.");
         });
 
-        suite.Run("draft 0.9 exports headers and synchronous delegates", () =>
+        suite.Run("draft 0.10 exports headers and synchronous delegates", () =>
         {
             const string source = """
                 public delegate int Transformer(int value);
@@ -343,10 +343,11 @@ internal static partial class ConformanceTests
             Assert(compilation.EmitCHeader(firstWriter).Success && compilation.EmitCHeader(secondWriter).Success, "Header emission failed.");
             Assert(firstWriter.ToString() == secondWriter.ToString(), "Header emission was not deterministic.");
             Assert(firstWriter.ToString().Contains("extern \"C\"", StringComparison.Ordinal) && firstWriter.ToString().Contains("int32_t ctilde_add(int32_t u_4_left, int32_t u_5_right);", StringComparison.Ordinal), "Export header omitted its C/C++ declaration.");
+            Assert(firstWriter.ToString().Contains("void ct_thread_attach(void);", StringComparison.Ordinal) && firstWriter.ToString().Contains("void ct_release(ct_object* value);", StringComparison.Ordinal), "Export header omitted the runtime ownership and attachment ABI.");
             var generated = Emit(source);
             Assert(generated.Contains("int32_t (*u_8_callback)(int32_t, void*), void* u_8_callback_context", StringComparison.Ordinal), "Synchronous delegate ABI did not place context adjacent to the callback.");
             Assert(generated.Contains("ct_delegate_callback_", StringComparison.Ordinal), "Synchronous delegate adapter was not emitted.");
-            Assert(generated.Contains("ct_require_attached_task", StringComparison.Ordinal) && generated.Contains("CTT0001", StringComparison.Ordinal), "Same-task native-entry validation was not emitted.");
+            Assert(generated.Contains("ct_thread_require_attached", StringComparison.Ordinal) && generated.Contains("CTT0001", StringComparison.Ordinal) && generated.Contains("CTT0002", StringComparison.Ordinal), "Attached-thread native-entry validation was not emitted.");
             Assert(generated.Contains("int32_t ctilde_add(int32_t u_4_left, int32_t u_5_right)", StringComparison.Ordinal), "Export wrapper was not emitted.");
 
             var invalid = Compile("public static class Program { [Export(\"same\")] public static string Managed() { return \"x\"; } [Export(\"same\")] public static int Duplicate() { return 1; } [EntryPoint] public static void Main() { } }").GetDiagnostics();

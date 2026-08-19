@@ -25,12 +25,17 @@ int64_t ct_esp_timer_get_time_us(void);
 int64_t ct_esp_invoke_i64(int64_t (*callback)(int64_t), int64_t value);
 uint32_t ct_esp_fill_buffer(uint8_t* data, size_t length);
 void* ct_esp_current_task(void);
+typedef void (*ct_esp_thread_state_delete_fn)(int index, void* value);
+void* ct_esp_thread_state_get(void);
+void ct_esp_thread_state_set(void* state, ct_esp_thread_state_delete_fn delete_callback);
 uint32_t ct_esp_utf8_length(const char* value);
 esp_err_t ct_esp_test_resource_create(ct_esp_test_handle_t* handle);
 int32_t ct_esp_test_resource_value(ct_esp_test_handle_t handle);
 void ct_esp_test_resource_release(ct_esp_test_handle_t handle);
 int32_t ct_esp_invoke_delegate(int32_t (*callback)(int32_t value, void* context), void* callback_context, int32_t value);
 int32_t ct_esp_call_export(int32_t left, int32_t right);
+int32_t ct_esp_threading_self_test(int32_t (*callback)(int32_t value, void* context), void* callback_context);
+void ct_esp_thread_cleanup(int32_t value);
 
 esp_err_t ct_esp_gpio_configure_input(int32_t pin);
 esp_err_t ct_esp_gpio_configure_output(int32_t pin);

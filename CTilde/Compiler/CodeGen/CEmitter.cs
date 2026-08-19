@@ -21,7 +21,6 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly CompilationTarget _target;
     private bool _usesExceptions;
     private bool _usesNativeIntegers;
-    private bool _usesDraft08;
     private bool _usesNativeUtf8;
 
     public CEmitter(CompilationModel model, CompilationTarget target)
@@ -46,7 +45,6 @@ internal sealed partial class CEmitter : ILoweringServices
                         _synchronousDelegateTypes.Add(parameter.Type.Symbol);
                         _usesExceptions = true;
                     }
-                    _usesDraft08 |= parameter.PassingKind != ParameterPassingKind.Value;
                 }
             }
         }
@@ -60,10 +58,6 @@ internal sealed partial class CEmitter : ILoweringServices
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
     private bool HasExports => Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.ExportName is not null);
-    private bool UsesNativeEntry => HasExports || _synchronousDelegateTypes.Count != 0;
-    private bool UsesDraft09 => HasExports || _synchronousDelegateTypes.Count != 0 || _usesNativeUtf8 ||
-        Model.UserTypes.Any(type => type.Kind == DeclaredTypeKind.Opaque) ||
-        Model.UserTypes.Any(type => type.FullName == "Esp.Idf.EspError");
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -337,10 +331,7 @@ internal sealed partial class CEmitter : ILoweringServices
         if (type.Kind is CTypeKind.Nint or CTypeKind.Nuint)
         {
             _usesNativeIntegers = true;
-            _usesDraft08 = true;
         }
-        if (type.Kind == CTypeKind.Pointer && type.ElementType == CType.Void)
-            _usesDraft08 = true;
         if (type.Kind == CTypeKind.Array)
         {
             _arrayTypes.Add(type);
@@ -361,13 +352,11 @@ internal sealed partial class CEmitter : ILoweringServices
         {
             _nativeBufferTypes.Add(type);
             _usesNativeIntegers = true;
-            _usesDraft08 = true;
             RegisterType(type.ElementType!);
         }
         else if (type.IsNativeUtf8String)
         {
             _usesNativeUtf8 = true;
-            _usesDraft08 = true;
             _usesNativeIntegers = true;
         }
     }

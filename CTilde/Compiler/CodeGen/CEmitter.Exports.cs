@@ -13,7 +13,7 @@ internal sealed partial class CEmitter
                 .ToArray();
             writer.WriteLine(CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
             writer.WriteLine("{");
-            writer.WriteLine("    ct_require_attached_task();");
+            writer.WriteLine("    (void)ct_thread_require_attached();");
             writer.WriteLine("    jmp_buf ct_export_target;");
             writer.WriteLine("    ct_exception_frame ct_export_frame = { &ct_export_target, ct_exception_top, ct_cleanup_top };");
             writer.WriteLine("    if (setjmp(ct_export_target) != 0)");

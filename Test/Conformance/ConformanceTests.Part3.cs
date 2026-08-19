@@ -541,7 +541,7 @@ internal static partial class ConformanceTests
         suite.Run("ARC ABI and ownership annotations", () =>
         {
             var generated = Emit("public class Item { public Item Next; } public static class Program { [EntryPoint] public static void Main() { Item value = new Item(); } }");
-            Assert(generated.Contains("uint32_t RefCount;", StringComparison.Ordinal), "The object header does not contain a reference count.");
+            Assert(generated.Contains("ct_atomic_u32 RefCount;", StringComparison.Ordinal), "The object header does not contain an atomic reference count.");
             Assert(generated.Contains("ct_object* ReleaseNext;", StringComparison.Ordinal), "The object header does not contain the intrusive release link.");
             Assert(generated.Contains("void (*Drop)(ct_object*);", StringComparison.Ordinal), "Type descriptors do not contain drop callbacks.");
             Assert(generated.Contains("void ct_retain(ct_object* object)", StringComparison.Ordinal), "ct_retain was not exported.");

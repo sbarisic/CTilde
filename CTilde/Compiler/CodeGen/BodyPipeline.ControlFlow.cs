@@ -343,11 +343,12 @@ internal sealed partial class BodyPipeline
             return;
         }
         string? finalValue = value;
-        if (value is not null && _method.ReturnType.ContainsManagedReferences)
+        if (value is not null)
         {
             finalValue = NewTemp();
             writer.WriteLine($"{_emitter.CDeclaration(_method.ReturnType, finalValue)} = {value};");
-            writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{finalValue}"));
+            if (_method.ReturnType.ContainsManagedReferences)
+                writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{finalValue}"));
         }
         writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
         EmitPopHandlersTo(writer, 0);

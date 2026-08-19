@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.9. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.10. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -253,13 +253,13 @@ These operations are compiler intrinsics rather than declarations in the bundled
 
 ## Runtime behavior
 
-The GNU C23 runtime is part of each generated translation unit. Managed allocations use single-threaded automatic reference counting and are reclaimed when the last owned reference is released. Static managed fields live until termination, static strings are immortal, and reference cycles leak. Fatal failures, `Environment.Exit`, abort, reset, and power loss do not promise ARC or defer cleanup.
+The GNU C23 runtime is part of each generated translation unit. Managed allocations use atomic automatic reference counting and are reclaimed on the thread that releases the last owned reference. Each attached thread has independent exception, cleanup, and iterative-release state. Static managed fields live until termination, static strings are immortal, and reference cycles leak. Fatal failures, `Environment.Exit`, abort, reset, and power loss do not promise ARC or defer cleanup.
 
 Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.9. Same-task native entry failures report `CTT0001`; dynamic embedded NUL reports `CTS0003`.
+Other runtime failures remain fatal and are not catchable in draft 0.10. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
@@ -267,4 +267,4 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
 
-ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, public task attachment, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.
+ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, source-level task APIs, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

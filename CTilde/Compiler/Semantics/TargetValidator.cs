@@ -22,6 +22,8 @@ internal static class TargetValidator
         "ct_esp_ws2812_clear",
         "ct_esp_error_name",
         "ct_esp_current_task",
+        "ct_esp_thread_state_get",
+        "ct_esp_thread_state_set",
     };
 
     public static void Validate(CompilationModel model, ILoweringServices emitter, CompilationTarget target)

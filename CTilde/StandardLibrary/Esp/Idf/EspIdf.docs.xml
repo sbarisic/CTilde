@@ -6,7 +6,7 @@
   <member id="M:Esp.Idf.EspError.GetName()"><summary>Copies the symbolic ESP-IDF error name into an owned string.</summary><returns>An owned managed string.</returns><remarks>This method allocates.</remarks></member>
   <member id="M:Esp.Idf.EspError.ThrowIfError()"><summary>Throws when the result is not ESP_OK.</summary><exception cref="System.Exception">The result represents an ESP-IDF error.</exception><remarks>The exception message contains the symbolic name and numeric code. This method is unavailable in NoAlloc code.</remarks></member>
 
-  <member id="T:Esp.Idf.FreeRtos"><summary>Provides same-task FreeRTOS timing and measurement operations.</summary></member>
+  <member id="T:Esp.Idf.FreeRtos"><summary>Provides FreeRTOS timing and measurement operations for the current attached task.</summary></member>
   <member id="M:Esp.Idf.FreeRtos.DelayMilliseconds(uint)"><summary>Blocks the current task while yielding to FreeRTOS.</summary><param name="milliseconds">The delay in milliseconds.</param></member>
   <member id="M:Esp.Idf.FreeRtos.GetTickCount()"><summary>Gets the current FreeRTOS tick count.</summary><returns>The tick count.</returns></member>
   <member id="M:Esp.Idf.FreeRtos.GetStackHighWaterMark()"><summary>Gets the current task stack high-water mark.</summary><returns>The minimum remaining stack measured in words.</returns></member>

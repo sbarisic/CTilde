@@ -13,7 +13,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .Where(method => method.ExportName is not null)
             .OrderBy(method => method.ExportName, StringComparer.Ordinal)
             .ToArray();
-        var signatureText = string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
+        var signatureText = "draft-0.10\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -24,6 +24,11 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         if (ExportTypes(exports).Any(type => type.Kind == CTypeKind.EspError))
             writer.Append("#include <esp_err.h>\n");
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
+        writer.Append("typedef struct ct_object ct_object;\n\n");
+        writer.Append("void ct_thread_attach(void);\n");
+        writer.Append("void ct_thread_detach(void);\n");
+        writer.Append("void ct_retain(ct_object* value);\n");
+        writer.Append("void ct_release(ct_object* value);\n\n");
 
         foreach (var type in ExportTypes(exports).Where(type => type.Kind == CTypeKind.Enum).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
         {

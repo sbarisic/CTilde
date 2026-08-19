@@ -18,7 +18,7 @@ internal static partial class ConformanceTests
         return writer.ToString();
     }
 
-    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "")
+    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
@@ -27,7 +27,7 @@ internal static partial class ConformanceTests
             var cPath = Path.Combine(directory, "program.c");
             var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
             File.WriteAllText(cPath, Emit(source) + nativeSuffix, new UTF8Encoding(false));
-            var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics);
+            var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads);
             Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
             return RunCompiledProgram(executablePath);
         }
@@ -38,7 +38,7 @@ internal static partial class ConformanceTests
         }
     }
 
-    static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false)
+    static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false)
     {
         var diagnosticDefine = memoryDiagnostics ? "CT_MEMORY_DIAGNOSTICS" : null;
         var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
@@ -49,7 +49,7 @@ internal static partial class ConformanceTests
                 var compiler = configured[4..];
                 var linuxSource = WslPath(cPath);
                 var linuxOutput = WslPath(executablePath);
-                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics);
+                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics, threads);
             }
             var compilerName = Path.GetFileNameWithoutExtension(configured);
             var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
@@ -64,11 +64,11 @@ internal static partial class ConformanceTests
             }
             return arguments is not null
                 ? RunProcess(configured, arguments)
-                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics);
+                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics, threads);
         }
 
         if (!OperatingSystem.IsWindows())
-            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics);
+            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics, threads);
 
         var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
         Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -82,15 +82,19 @@ internal static partial class ConformanceTests
         return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
     }
 
-    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false)
+    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false)
     {
         var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
         var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
         var diagnosticArguments = memoryDiagnostics ? new[] { "-DCT_MEMORY_DIAGNOSTICS" } : [];
-        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, "-o", executablePath, cPath]);
+        var threadArguments = threads ? new[] { "-pthread" } : [];
+        var sanitizerArguments = threads && Environment.GetEnvironmentVariable("CTILDE_THREAD_SANITIZER") == "1"
+            ? new[] { "-fsanitize=thread", "-fno-omit-frame-pointer", "-g" }
+            : [];
+        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath]);
         if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
             return result;
-        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, "-o", executablePath, cPath]);
+        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O2", "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath]);
     }
 
     static bool RejectedCStandard(ProcessResult result)

@@ -47,6 +47,13 @@ public static class NativeInterop
     [Extern("ct_esp_call_export")]
     [NoAlloc]
     public static int CallExport(int left, int right);
+
+    [Extern("ct_esp_threading_self_test")]
+    public static int ThreadingSelfTest([SynchronousCallback] NativeTransformer callback);
+
+    [Extern("ct_esp_thread_cleanup")]
+    [NoAlloc]
+    public static void ThreadCleanup(int value);
 }
 
 public class Probe
@@ -119,6 +126,22 @@ public static class Program
         return left + right;
     }
 
+    [Export("ctilde_thread_probe")]
+    public static int ThreadProbe(int value)
+    {
+        defer NativeInterop.ThreadCleanup(value);
+        try
+        {
+            if (value < 0)
+                throw new Exception("thread probe");
+        }
+        catch (Exception)
+        {
+            value = -value;
+        }
+        return value + 1;
+    }
+
     private static unsafe void RunManagedSelfTests()
     {
         Console.WriteLine("C~ ESP-IDF hardware test");
@@ -172,6 +195,12 @@ public static class Program
 
         Console.Write("export: ");
         Console.WriteLine(NativeInterop.CallExport(20, 22));
+
+        Console.Write("threading: ");
+        if (NativeInterop.ThreadingSelfTest(transformer) == 86)
+            Console.WriteLine("ok");
+        else
+            Console.WriteLine("FAILED");
 
         object boxed = 7;
         Console.Write("boxed: ");
@@ -236,12 +265,24 @@ public static class Program
 
         Console.WriteLine("CTILDE_ESP_OK");
         bool high = false;
+        int count = 0;
         while (true)
         {
             high = !high;
-            bool updated;
-            if (high)
-                updated = Ws2812.SetPixel(0u, 0u, 16u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
+            bool updated = false;
+
+            if (high) {
+                count = count + 1;
+
+                if (count == 1) {
+                    updated = Ws2812.SetPixel(0u, 16u, 0u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
+                } else if (count == 2) {
+                    updated = Ws2812.SetPixel(0u, 0u, 16u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
+                } else if (count == 3) {
+                    updated = Ws2812.SetPixel(0u, 0u, 0u, 16u).IsSuccess && Ws2812.Refresh().IsSuccess;
+                    count = 0;
+                }
+            }
             else
                 updated = Ws2812.Clear().IsSuccess;
                 

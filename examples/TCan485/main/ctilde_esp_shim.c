@@ -17,10 +17,36 @@ static led_strip_handle_t ct_esp_ws2812_strip;
 static int32_t ct_esp_ws2812_pin = -1;
 static uint32_t ct_esp_ws2812_led_count;
 
+#ifndef CTILDE_FREERTOS_TLS_INDEX
+#define CTILDE_FREERTOS_TLS_INDEX 0
+#endif
+
+static_assert(CTILDE_FREERTOS_TLS_INDEX >= 0, "C~ requires a non-negative FreeRTOS TLS index");
+static_assert(CTILDE_FREERTOS_TLS_INDEX < CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS, "C~ FreeRTOS TLS index is outside the configured application slots");
+
 struct ct_esp_test_resource
 {
     int32_t value;
 };
+
+struct ct_esp_thread_test_context
+{
+    TaskHandle_t waiter;
+    int32_t input;
+    int32_t result;
+    int32_t (*callback)(int32_t value, void* context);
+    void* callback_context;
+};
+
+static void ct_esp_thread_test_worker(void* argument)
+{
+    struct ct_esp_thread_test_context* context = argument;
+    ct_thread_attach();
+    context->result = ctilde_thread_probe(context->input) + context->callback(context->input, context->callback_context);
+    ct_thread_detach();
+    xTaskNotifyGive(context->waiter);
+    vTaskDelete(NULL);
+}
 
 static uint64_t ct_esp_gpio_mask(int32_t pin)
 {
@@ -83,6 +109,20 @@ void* ct_esp_current_task(void)
     return (void*)xTaskGetCurrentTaskHandle();
 }
 
+void* ct_esp_thread_state_get(void)
+{
+    return pvTaskGetThreadLocalStoragePointer(NULL, CTILDE_FREERTOS_TLS_INDEX);
+}
+
+void ct_esp_thread_state_set(void* state, ct_esp_thread_state_delete_fn delete_callback)
+{
+    vTaskSetThreadLocalStoragePointerAndDelCallback(
+        NULL,
+        CTILDE_FREERTOS_TLS_INDEX,
+        state,
+        state == NULL ? NULL : delete_callback);
+}
+
 uint32_t ct_esp_utf8_length(const char* value)
 {
     return value == NULL ? 0u : (uint32_t)strlen(value);
@@ -117,6 +157,31 @@ int32_t ct_esp_invoke_delegate(int32_t (*callback)(int32_t value, void* context)
 int32_t ct_esp_call_export(int32_t left, int32_t right)
 {
     return ctilde_add(left, right);
+}
+
+int32_t ct_esp_threading_self_test(int32_t (*callback)(int32_t value, void* context), void* callback_context)
+{
+    struct ct_esp_thread_test_context contexts[2] = {
+        { xTaskGetCurrentTaskHandle(), -40, 0, callback, callback_context },
+        { xTaskGetCurrentTaskHandle(), 41, 0, callback, callback_context },
+    };
+    int created = 0;
+    for (int index = 0; index < 2; index++)
+    {
+        if (xTaskCreate(ct_esp_thread_test_worker, "ctilde-test", 4096, &contexts[index], tskIDLE_PRIORITY + 1, NULL) != pdPASS)
+            break;
+        created++;
+    }
+    for (int index = 0; index < created; index++)
+        (void)ulTaskNotifyTake(pdFALSE, portMAX_DELAY);
+    if (created != 2)
+        return -1;
+    return contexts[0].result + contexts[1].result;
+}
+
+void ct_esp_thread_cleanup(int32_t value)
+{
+    (void)value;
 }
 
 esp_err_t ct_esp_gpio_configure_input(int32_t pin)

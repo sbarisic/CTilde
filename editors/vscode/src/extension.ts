@@ -1,4 +1,5 @@
-import { existsSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import {
     LanguageClient,
@@ -11,6 +12,7 @@ import {
     RestartCoordinator,
     ServerLaunchConfiguration,
     serverPathError,
+    stageExternalServer,
 } from './serverDevelopment';
 
 let controller: LanguageServerController | undefined;
@@ -39,6 +41,7 @@ class LanguageServerController {
     private readonly developmentWatchers: DevelopmentServerWatchManager;
     private client: LanguageClient | undefined;
     private launch: ServerLaunchConfiguration | undefined;
+    private shadowDirectory: string | undefined;
     private shuttingDown = false;
 
     public constructor(
@@ -90,6 +93,7 @@ class LanguageServerController {
         this.developmentWatchers.dispose();
         await this.restartCoordinator.dispose();
         await this.stopClient();
+        this.removeShadowDirectory();
     }
 
     private async restartNow(): Promise<void> {
@@ -115,7 +119,24 @@ class LanguageServerController {
         }
 
         await this.stopClient();
-        const languageClient = this.createClient(launch);
+        this.removeShadowDirectory();
+        let processLaunch = launch;
+        if (launch.isExternal) {
+            try {
+                const staged = stageExternalServer(
+                    launch,
+                    path.join(this.context.globalStorageUri.fsPath, 'development-server'),
+                );
+                processLaunch = staged.launch;
+                this.shadowDirectory = staged.shadowDirectory;
+            } catch (error) {
+                void vscode.window.showErrorMessage(
+                    `C~ development language server could not be staged: ${String(error)}`);
+                return;
+            }
+        }
+
+        const languageClient = this.createClient(processLaunch);
         this.client = languageClient;
         this.provider.attach(languageClient);
         languageClient.outputChannel.appendLine(launch.isExternal
@@ -177,6 +198,25 @@ class LanguageServerController {
         this.provider.attach(undefined);
         if (current !== undefined)
             await current.dispose();
+    }
+
+    private removeShadowDirectory(): void {
+        const directory = this.shadowDirectory;
+        this.shadowDirectory = undefined;
+        if (directory === undefined)
+            return;
+        try {
+            rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        } catch {
+            setTimeout(() => {
+                try {
+                    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+                } catch {
+                    // A stopped Windows process can retain a transient DLL mapping. A later
+                    // extension-storage cleanup may remove this obsolete shadow directory.
+                }
+            }, 1000);
+        }
     }
 
     private reportUnexpectedRestartError(error: unknown): void {

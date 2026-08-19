@@ -7,6 +7,7 @@ public sealed class Compilation
     private readonly object _gate = new();
     private ImmutableArray<Diagnostic> _diagnostics;
     private string? _generatedC;
+    private string? _generatedHeader;
     private BoundProgram? _boundProgram;
     private bool _analyzed;
 
@@ -59,7 +60,8 @@ public sealed class Compilation
             var diagnostics = new DiagnosticBag();
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
-            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers).AddRange(SyntaxTrees);
+            var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
+            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
@@ -69,6 +71,20 @@ public sealed class Compilation
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
         }
+    }
+
+    public EmitResult EmitCHeader(TextWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        EnsureAnalyzed();
+        var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        if (success)
+        {
+            lock (_gate)
+                _generatedHeader ??= new CHeaderEmitter(_boundProgram!).Emit();
+            writer.Write(_generatedHeader);
+        }
+        return new EmitResult(success, _diagnostics);
     }
 
     private string GenerateC()

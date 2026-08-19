@@ -90,10 +90,10 @@ internal static partial class ConformanceTests
             Assert(first.Contains("\"ctilde_esp_shim.h\"", StringComparison.Ordinal), "ESP-IDF shim header was not included.");
             Assert(first.Contains("\"Program.ct\"", StringComparison.Ordinal) && !first.Contains("E:/private", StringComparison.Ordinal), "ESP-IDF source locations were not compacted.");
             Assert(first.Contains("CT_UNUSED", StringComparison.Ordinal), "ESP-IDF unused-definition marker was not emitted.");
-            Assert(first.Contains("extern bool ct_esp_ws2812_configure(int32_t", StringComparison.Ordinal), "WS2812 configure ABI was not emitted.");
-            Assert(first.Contains("extern bool ct_esp_ws2812_set_pixel(uint32_t", StringComparison.Ordinal), "WS2812 pixel ABI was not emitted.");
-            Assert(first.Contains("extern bool ct_esp_ws2812_refresh(void);", StringComparison.Ordinal), "WS2812 refresh ABI was not emitted.");
-            Assert(first.Contains("extern bool ct_esp_ws2812_clear(void);", StringComparison.Ordinal), "WS2812 clear ABI was not emitted.");
+            Assert(first.Contains("extern esp_err_t ct_esp_ws2812_configure(int32_t", StringComparison.Ordinal), "WS2812 configure ABI was not emitted.");
+            Assert(first.Contains("extern esp_err_t ct_esp_ws2812_set_pixel(uint32_t", StringComparison.Ordinal), "WS2812 pixel ABI was not emitted.");
+            Assert(first.Contains("extern esp_err_t ct_esp_ws2812_refresh(void);", StringComparison.Ordinal), "WS2812 refresh ABI was not emitted.");
+            Assert(first.Contains("extern esp_err_t ct_esp_ws2812_clear(void);", StringComparison.Ordinal), "WS2812 clear ABI was not emitted.");
             Assert(first.Contains("extern int64_t ct_esp_timer_get_time_us(void);", StringComparison.Ordinal), "ESP timer ABI was not emitted.");
 
             var hostedDiagnostics = Compile(source).GetDiagnostics();
@@ -105,8 +105,8 @@ internal static partial class ConformanceTests
             var exit = Compile("public static class Program { [EntryPoint] public static void Main() { System.Environment.Exit(1); } }", new CompilationOptions(CompilationTarget.EspIdf));
             Assert(exit.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4105"), "Environment.Exit was not rejected for ESP-IDF.");
 
-            var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); [Extern(\"ct_esp_ws2812_configure\")] public static bool Configure(int pin, uint count); [Extern(\"ct_esp_ws2812_set_pixel\")] public static bool SetPixel(uint index, uint red, uint green, uint blue); [Extern(\"ct_esp_ws2812_refresh\")] public static bool Refresh(); [Extern(\"ct_esp_ws2812_clear\")] public static bool Clear(); [Extern(\"ct_esp_timer_get_time_us\")] public static long Time(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
-            Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 7, "ESP-IDF target symbols were not reserved.");
+            var reserved = Compile("public static class Native { [Extern(\"app_main\")] public static void Start(); [Extern(\"ct_esp_restart\")] public static void Restart(); [Extern(\"ct_esp_ws2812_configure\")] public static bool Configure(int pin, uint count); [Extern(\"ct_esp_ws2812_set_pixel\")] public static bool SetPixel(uint index, uint red, uint green, uint blue); [Extern(\"ct_esp_ws2812_refresh\")] public static bool Refresh(); [Extern(\"ct_esp_ws2812_clear\")] public static bool Clear(); [Extern(\"ct_esp_timer_get_time_us\")] public static long Time(); [Extern(\"ct_esp_error_name\")] public static string ErrorName(int code); [Extern(\"ct_esp_current_task\")] public static unsafe void* CurrentTask(); } public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions(CompilationTarget.EspIdf));
+            Assert(reserved.GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT4101") == 9, "ESP-IDF target symbols were not reserved.");
 
             var invalid = Compile("public static class Program { [EntryPoint] public static void Main() { } }", new CompilationOptions((CompilationTarget)99));
             using var writer = new StringWriter(CultureInfo.InvariantCulture);

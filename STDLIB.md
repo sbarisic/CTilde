@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.8. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
+This document is the canonical standard-library reference for C~ draft 0.9. Object, exception, console, and runtime memory declarations are available to every target. ESP declarations are loaded only for the ESP-IDF target.
 
 ## Object
 
@@ -138,6 +138,20 @@ Construction, pointer access, and `stackalloc` use require an unsafe context. El
 
 Views can be local values and synchronous value parameters. They cannot be stored in managed state, boxed, returned, or passed by `ref`, `in`, or `out`. Native ABI parameters flatten to a data pointer followed by `size_t` length; read-only views use a `const` data pointer.
 
+## Scoped native UTF-8 strings
+
+```csharp
+public readonly struct NativeUtf8String
+{
+    public static NativeUtf8String Borrow(string value);
+    public static NativeUtf8String Null { get; }
+    public nuint ByteLength { get; }
+    public unsafe byte* Pointer { get; }
+}
+```
+
+`Borrow` retains the managed string for the view's lexical lifetime and does not allocate. It rejects null and embedded NUL bytes; dynamic embedded NUL reports `CTS0003`. Native boundaries receive `const char*`. The view is stack-only and cannot be stored, boxed, returned, or retained. `Null` requires `[Nullable]` at the receiving native parameter.
+
 ## ESP-IDF
 
 The ESP-IDF target adds fixed-width wrappers around FreeRTOS, system, heap, GPIO, and WS2812 operations:
@@ -167,24 +181,34 @@ public static class EspTimer
 
 public static class Gpio
 {
-    public static bool ConfigureInput(int pin);
-    public static bool ConfigureOutput(int pin);
-    public static bool Write(int pin, bool high);
+    public static EspError ConfigureInput(int pin);
+    public static EspError ConfigureOutput(int pin);
+    public static EspError Write(int pin, bool high);
     public static bool Read(int pin);
 }
 
 public static class Ws2812
 {
-    public static bool Configure(int pin, uint ledCount);
-    public static bool SetPixel(uint index, uint red, uint green, uint blue);
-    public static bool Refresh();
-    public static bool Clear();
+    public static EspError Configure(int pin, uint ledCount);
+    public static EspError SetPixel(uint index, uint red, uint green, uint blue);
+    public static EspError Refresh();
+    public static EspError Clear();
+}
+
+public readonly struct EspError
+{
+    public int Code { get; }
+    public bool IsSuccess { get; }
+    public string GetName();
+    public void ThrowIfError();
 }
 ```
 
-Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. `EspTimer.GetTimeMicroseconds()` returns the signed 64-bit monotonic time since boot through `esp_timer_get_time()` and does not allocate. GPIO configuration and writes return `false` when ESP-IDF rejects the pin or operation. `Read` requires a valid pin that the program configured first.
+Positive delays yield the current FreeRTOS task and wait at least one tick. The stack high-water mark is the minimum free stack space in bytes. `EspTimer.GetTimeMicroseconds()` returns the signed 64-bit monotonic time since boot through `esp_timer_get_time()` and does not allocate. GPIO configuration and writes preserve the exact `esp_err_t` code in `EspError`. `Read` remains Boolean data and requires a valid pin that the program configured first.
 
-`Ws2812` owns one firmware-lifetime RMT strip. The first successful `Configure` fixes its output pin and positive LED count; the same configuration is idempotent, while a different configuration returns `false`. `SetPixel` accepts indexes below that count and RGB components from 0 through 255, updates the native pixel buffer, and requires `Refresh` to transmit it. `Clear` turns off every pixel immediately. All methods return `false` when the strip is unavailable or ESP-IDF rejects an operation.
+`Ws2812` owns one firmware-lifetime RMT strip. The first successful `Configure` fixes its output pin and positive LED count; the same configuration is idempotent, while a conflicting configuration returns an error. `SetPixel` accepts indexes below that count and RGB components from 0 through 255, updates the native pixel buffer, and requires `Refresh` to transmit it. `Clear` turns off every pixel immediately.
+
+`EspError.IsSuccess` tests for `ESP_OK`. `GetName()` copies `esp_err_to_name()` into an owned C~ string. `ThrowIfError()` throws `System.Exception` containing the symbolic name and numeric code and is not allowed in `[NoAlloc]` code.
 
 These APIs are synchronous and are intended for the C~ entry task. They do not define callback, multi-task, or interrupt-safe C~ execution.
 
@@ -233,7 +257,7 @@ Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched
 
 An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.8.
+Other runtime failures remain fatal and are not catchable in draft 0.9. Same-task native entry failures report `CTT0001`; dynamic embedded NUL reports `CTS0003`.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
@@ -241,4 +265,4 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 Future library work can add `System.Math`, `System.Convert`, parsing, richer strings, collections, file and stream I/O, clocks, and date/time APIs.
 
-ESP-IDF interop can next add a typed `EspError` value, opaque driver and resource handles, scoped native UTF-8 views, and release operations designed for `defer`. Native-sized scalars, by-reference arguments, and scoped byte buffers are now available; exports, retained-callback lifetime rules, ownership attributes, and task-safe runtime entry remain prerequisites for broader bindings. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.
+ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, public task attachment, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

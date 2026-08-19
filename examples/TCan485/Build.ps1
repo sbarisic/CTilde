@@ -33,6 +33,7 @@ if (-not (Test-Path -LiteralPath $sourcePath)) {
 
 $generatedDirectory = Join-Path $projectDirectory "main\generated"
 $generatedPath = Join-Path $generatedDirectory "ctilde_program.c"
+$generatedHeaderPath = Join-Path $generatedDirectory "ctilde_exports.h"
 New-Item -ItemType Directory -Force -Path $generatedDirectory | Out-Null
 
 $resolvedIdfPath = (Resolve-Path -LiteralPath $IdfPath).Path
@@ -58,7 +59,7 @@ if ($activeIdfPath -ne $resolvedIdfPath -or $null -eq (Get-Command idf.py -Error
 
 Push-Location $projectDirectory
 try {
-    & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -- $sourcePath -o $generatedPath --target esp-idf --trace
+    & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath -o $generatedPath --header $generatedHeaderPath --target esp-idf --trace
     if ($LASTEXITCODE -ne 0) { throw "C~ compilation failed with exit code $LASTEXITCODE." }
 
     & idf.py set-target $Target

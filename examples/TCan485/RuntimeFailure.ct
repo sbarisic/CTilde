@@ -9,6 +9,12 @@ public sealed class Box
 
 public static class Program
 {
+    [Export("ctilde_add")]
+    public static int Add(int left, int right)
+    {
+        return left + right;
+    }
+
     [EntryPoint]
     public static void Main()
     {

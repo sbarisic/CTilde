@@ -84,6 +84,7 @@ public enum SyntaxKind
     NewKeyword,
     NullKeyword,
     ObjectKeyword,
+    OpaqueKeyword,
     OverrideKeyword,
     OutKeyword,
     PrivateKeyword,
@@ -281,7 +282,7 @@ public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, stri
 
 public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Name, bool IsFileScoped) : SyntaxNode(Source, Span);
 
-public enum TypeDeclarationKind { Class, Struct, Enum, Delegate }
+public enum TypeDeclarationKind { Class, Struct, Enum, Delegate, Opaque }
 
 public enum ParameterPassingKind { Value, Ref, In, Out }
 

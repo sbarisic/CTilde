@@ -23,6 +23,7 @@ internal sealed partial class BodyPipeline
         {
             if (syntax.Expression is not null)
                 Report("CT2109", "A void method cannot return a value.", syntax.Expression);
+            ValidateNativeResourceObligations();
             EmitReturnTransfer(writer, null);
             return;
         }
@@ -33,12 +34,23 @@ internal sealed partial class BodyPipeline
             return;
         }
         var expression = Convert(LowerExpression(syntax.Expression), _method.ReturnType, syntax.Expression, false);
+        if (_method.ReturnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+        {
+            if (_method.ReturnsOwned && expression.Ownership != OwnershipKind.Owned)
+                Report("CT1256", "An owned native resource return requires an owned value.", syntax.Expression);
+            if (!_method.ReturnsOwned && expression.Ownership == OwnershipKind.Owned)
+                Report("CT1257", "An owned native resource cannot be returned from a method without ReturnsOwned.", syntax.Expression);
+            if (_method.ReturnsOwned)
+                ConsumeOwnedExpression(expression, syntax.Expression);
+        }
+        ValidateNativeResourceObligations();
         EmitPrelude(writer, expression.Prelude);
         EmitReturnTransfer(writer, expression.Code);
     }
 
     private void EmitThrow(ILoweringWriter writer, ThrowStatementSyntax syntax)
     {
+        ValidateNativeResourceObligations();
         string exceptionCode;
         if (syntax.Expression is null)
         {
@@ -501,12 +513,20 @@ internal sealed partial class BodyPipeline
         var boundary = _cleanupBoundaries.Pop();
         if (fallsThrough)
             writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
-        _scopes.Pop();
+        var scope = _scopes.Pop();
+        if (fallsThrough)
+            foreach (var local in scope.Values.Where(local => local.NativeResourceState == NativeResourceState.Owned))
+                Report("CT1258", $"Owned native resource '{local.Name}' must be returned, consumed, retained, or scheduled with defer.", local.Syntax);
     }
     private LocalSymbol? FindLocal(string name) => _scopes.Select(scope => scope.GetValueOrDefault(name)).FirstOrDefault(local => local is not null);
     private IEnumerable<LocalSymbol> ActiveLocals() => _scopes.SelectMany(scope => scope.Values).Distinct();
+    private void ValidateNativeResourceObligations()
+    {
+        foreach (var local in ActiveLocals().Where(local => local.NativeResourceState == NativeResourceState.Owned))
+            Report("CT1258", $"Owned native resource '{local.Name}' must be returned, consumed, retained, or scheduled with defer.", local.Syntax);
+    }
     private AssignmentSnapshot SnapshotAssignments() => new(
-        ActiveLocals().ToDictionary(local => local, local => (local.IsAssigned, local.AssignmentCount)),
+        ActiveLocals().ToDictionary(local => local, local => (local.IsAssigned, local.AssignmentCount, local.NativeResourceState)),
         [.. _assignedFields],
         new Dictionary<FieldSymbol, int>(_fieldAssignmentCounts),
         [.. _assignedOutParameters]);
@@ -517,6 +537,7 @@ internal sealed partial class BodyPipeline
         {
             pair.Key.IsAssigned = pair.Value.IsAssigned;
             pair.Key.AssignmentCount = pair.Value.AssignmentCount;
+            pair.Key.NativeResourceState = pair.Value.NativeResourceState;
         }
         _assignedFields.Clear();
         _assignedFields.UnionWith(snapshot.Fields);
@@ -533,7 +554,8 @@ internal sealed partial class BodyPipeline
             pair => pair.Key,
             pair => (
                 thenState.Locals.GetValueOrDefault(pair.Key).IsAssigned && elseState.Locals.GetValueOrDefault(pair.Key).IsAssigned,
-                Math.Max(thenState.Locals.GetValueOrDefault(pair.Key).AssignmentCount, elseState.Locals.GetValueOrDefault(pair.Key).AssignmentCount)));
+                Math.Max(thenState.Locals.GetValueOrDefault(pair.Key).AssignmentCount, elseState.Locals.GetValueOrDefault(pair.Key).AssignmentCount),
+                MergeNativeResourceState(thenState.Locals.GetValueOrDefault(pair.Key).NativeResourceState, elseState.Locals.GetValueOrDefault(pair.Key).NativeResourceState)));
         var fields = new HashSet<FieldSymbol>(thenState.Fields);
         fields.IntersectWith(elseState.Fields);
         var fieldCounts = thenState.FieldCounts.Keys.Concat(elseState.FieldCounts.Keys).Distinct().ToDictionary(
@@ -641,7 +663,8 @@ internal sealed partial class BodyPipeline
             pair => pair.Key,
             pair => (
                 states.All(state => state.Locals.GetValueOrDefault(pair.Key).IsAssigned),
-                states.Max(state => state.Locals.GetValueOrDefault(pair.Key).AssignmentCount)));
+                states.Max(state => state.Locals.GetValueOrDefault(pair.Key).AssignmentCount),
+                states.Select(state => state.Locals.GetValueOrDefault(pair.Key).NativeResourceState).Aggregate(MergeNativeResourceState)));
         var fields = new HashSet<FieldSymbol>(first.Fields);
         foreach (var state in states.Skip(1))
             fields.IntersectWith(state.Fields);
@@ -663,7 +686,8 @@ internal sealed partial class BodyPipeline
                 var beforeValue = before.Locals.GetValueOrDefault(pair.Key);
                 var finallyValue = finallyState.Locals.GetValueOrDefault(pair.Key);
                 var addedAssignments = Math.Max(0, finallyValue.AssignmentCount - beforeValue.AssignmentCount);
-                return (pair.Value.IsAssigned || finallyValue.IsAssigned, pair.Value.AssignmentCount + addedAssignments);
+                return (pair.Value.IsAssigned || finallyValue.IsAssigned, pair.Value.AssignmentCount + addedAssignments,
+                    finallyValue.NativeResourceState == beforeValue.NativeResourceState ? pair.Value.NativeResourceState : finallyValue.NativeResourceState);
             });
         var fields = new HashSet<FieldSymbol>(protectedState.Fields);
         fields.UnionWith(finallyState.Fields);
@@ -720,7 +744,7 @@ internal sealed partial class BodyPipeline
     }
 
     private sealed record AssignmentSnapshot(
-        Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount)> Locals,
+        Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount, NativeResourceState NativeResourceState)> Locals,
         HashSet<FieldSymbol> Fields,
         Dictionary<FieldSymbol, int> FieldCounts,
         HashSet<ParameterSymbol> OutParameters);
@@ -728,4 +752,7 @@ internal sealed partial class BodyPipeline
     private sealed record ActiveHandler(string Name, int BreakDepth, int ContinueDepth);
     private sealed record FinallyContext(int TryId, string CleanupLabel, int HandlerDepth, int BreakDepth, int ContinueDepth, string? BreakTarget, string? ContinueTarget);
     private sealed record BoundCatch(CatchClauseSyntax Syntax, CType? Type);
+
+    private static NativeResourceState MergeNativeResourceState(NativeResourceState left, NativeResourceState right) =>
+        left == right ? left : NativeResourceState.Moved;
 }

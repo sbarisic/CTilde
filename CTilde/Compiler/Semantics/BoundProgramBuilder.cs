@@ -10,7 +10,7 @@ internal static class BoundProgramBuilder
         var bodies = ImmutableArray.CreateBuilder<BoundBody>();
         foreach (var type in model.UserTypes)
         {
-            if (type.Kind == DeclaredTypeKind.Enum)
+            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque)
                 continue;
             foreach (var constructor in type.Constructors)
                 AnalyzeBody(services, constructor, bodies);

@@ -103,10 +103,11 @@ internal sealed partial class BodyPipeline
         return matches.Length == 1 ? matches[0] : null;
     }
 
-    private (List<string> Prelude, List<string> Codes) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    private (List<string> Prelude, List<string> Codes, List<string> Postlude) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
     {
         var prelude = new List<string>();
         var codes = new List<string>();
+        var postlude = new List<string>();
         for (var index = 0; index < arguments.Count; index++)
         {
             var parameter = parameters[index];
@@ -129,11 +130,15 @@ internal sealed partial class BodyPipeline
                         prelude.Add(_emitter.DropValueStatement(argument.Type, address));
                     prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
                     MarkAssigned(argument.LValue);
+                    if (parameter.NativeOwnership == NativeParameterOwnership.Creates && argument.LValue.Local is { } createdLocal)
+                        createdLocal.NativeResourceState = NativeResourceState.Owned;
                 }
                 codes.Add(address);
                 continue;
             }
             var converted = Convert(arguments[index], parameter.Type, argumentSyntax.Expression, false);
+            if (parameter.NativeOwnership is NativeParameterOwnership.Consumes or NativeParameterOwnership.Retained)
+                ConsumeOwnedExpression(converted, argumentSyntax.Expression);
             prelude.AddRange(converted.Prelude);
             if (converted.Type.Kind == CTypeKind.Void)
             {
@@ -142,6 +147,21 @@ internal sealed partial class BodyPipeline
             }
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(converted.Type, temp)} = {converted.Code};");
+            if (!parameter.IsNullable && parameter.Type.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+                prelude.Add($"(void)ct_require_nonnull((void*){temp}, {_emitter.SourceArgument(argumentSyntax)});");
+            if (!parameter.IsNullable && parameter.Type.IsNativeUtf8String)
+                prelude.Add($"(void)ct_require_nonnull((void*){temp}.Data, {_emitter.SourceArgument(argumentSyntax)});");
+            if (parameter.IsSynchronousCallback)
+            {
+                if (!parameter.IsNullable)
+                    prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(argumentSyntax)});");
+                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
+                var adapter = _emitter.SynchronousCallbackAdapterName(parameter.Type.Symbol!);
+                codes.Add(parameter.IsNullable ? $"{temp} == NULL ? NULL : &{adapter}" : $"&{adapter}");
+                codes.Add($"(void*){temp}");
+                postlude.Add($"ct_release((ct_object*)(void*){temp});");
+                continue;
+            }
             if (parameter.IsRetained)
                 prelude.Add($"ct_retain((ct_object*)(void*){temp});");
             if (converted.Type.IsNativeBuffer)
@@ -149,10 +169,12 @@ internal sealed partial class BodyPipeline
                 codes.Add($"{temp}.Data");
                 codes.Add($"{temp}.Length");
             }
+            else if (converted.Type.IsNativeUtf8String)
+                codes.Add($"(const char*)(const void*){temp}.Data");
             else
                 codes.Add(temp);
         }
-        return (prelude, codes);
+        return (prelude, codes, postlude);
     }
 
     private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
@@ -175,15 +197,42 @@ internal sealed partial class BodyPipeline
                 continue;
             }
             var converted = Convert(arguments[index], parameters[index].Type, syntax[index].Expression, false);
+            if (parameters[index].NativeOwnership is NativeParameterOwnership.Consumes or NativeParameterOwnership.Retained)
+            {
+                if (converted.LValue?.Local is { NativeResourceState: NativeResourceState.Owned } resource)
+                    resource.NativeResourceState = NativeResourceState.Deferred;
+                else
+                    Report("CT1261", "Deferred native cleanup requires an owned local resource.", syntax[index]);
+            }
             prelude.AddRange(converted.Prelude);
             var slot = $"ct_df_{_deferId}_arg_{index}";
             AddCapturedSlot(prelude, converted.Type, slot, converted.Code);
             codes.Add(parameters[index].IsRetained
                 ? $"(ct_retain((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
-                : Durable(slot));
+                : converted.Type.IsNativeUtf8String
+                    ? $"(const char*)(const void*){Durable(slot)}.Data"
+                    : Durable(slot));
         }
         return (prelude, codes);
     }
 
     private static bool IsReadonly(LoweredLValue lvalue) => lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
+
+    private void ConsumeOwnedExpression(LoweredExpression expression, SyntaxNode syntax)
+    {
+        if (expression.Ownership != OwnershipKind.Owned)
+        {
+            Report("CT1259", "This operation requires ownership of the native resource.", syntax);
+            return;
+        }
+        if (expression.LValue?.Local is { } local)
+        {
+            if (local.NativeResourceState == NativeResourceState.Deferred)
+                Report("CT1260", $"Native resource '{local.Name}' is already reserved by defer.", syntax);
+            else if (local.NativeResourceState != NativeResourceState.Owned)
+                Report("CT1254", $"Owned native resource '{local.Name}' has already moved.", syntax);
+            else
+                local.NativeResourceState = NativeResourceState.Moved;
+        }
+    }
 }

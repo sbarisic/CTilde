@@ -33,20 +33,23 @@ try {
     try {
         # Build the compiler, CLI, and conformance project needed by this gate. The
         # editor may have the language-server output loaded while this script runs.
-        Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "--nologo")
+        Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "-c", "Release", "--nologo")
 
         $hello = Join-Path $temporaryDirectory "hello.c"
         $exceptions = Join-Path $temporaryDirectory "exceptions.c"
         $arcHeap = Join-Path $temporaryDirectory "arc-heap.c"
-        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\Hello.ct", "-o", $hello, "--target", "esp-idf")
-        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\Exceptions.ct", "-o", $exceptions, "--target", "esp-idf")
-        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "--no-build", "--", ".\examples\TCan485\Program.ct", "-o", $arcHeap, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Hello.ct", "-o", $hello, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Exceptions.ct", "-o", $exceptions, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\TCan485\Program.ct", "-o", $arcHeap, "--target", "esp-idf")
 
         $xtensa = Find-Compiler (Join-Path $ToolsPath "xtensa-esp-elf") "xtensa-esp32-elf-gcc.exe"
         $riscv = Find-Compiler (Join-Path $ToolsPath "riscv32-esp-elf") "riscv32-esp-elf-gcc.exe"
         foreach ($compiler in @($xtensa, $riscv)) {
             foreach ($source in @($hello, $exceptions, $arcHeap)) {
-                Invoke-Checked $compiler @("-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only", "-I", (Join-Path $exampleDirectory "main"), $source)
+                Invoke-Checked $compiler @(
+                    "-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
+                    "-I", (Join-Path $exampleDirectory "main"),
+                    $source)
                 Write-Host "PASS $([IO.Path]::GetFileName($compiler)) $([IO.Path]::GetFileName($source))"
             }
         }

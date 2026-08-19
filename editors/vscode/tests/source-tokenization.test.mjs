@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.8 keyword receives its intended scope", () => {
+test("every draft 0.9 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
@@ -95,6 +95,7 @@ test("every draft 0.8 keyword receives its intended scope", () => {
   expectScope("class Example", "class", "storage.type.class.ctilde");
   expectScope("struct Example", "struct", "storage.type.struct.ctilde");
   expectScope("enum Example", "enum", "storage.type.enum.ctilde");
+  expectScope("opaque Handle", "opaque", "storage.type.declaration.ctilde");
 });
 
 test("escaped and Unicode identifiers remain identifiers", () => {

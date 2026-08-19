@@ -20,10 +20,41 @@ internal static partial class ConformanceTests
                     for (size_t index = 0; index < length; index++) result += data[index];
                     return result;
                 }
+
+                uint32_t ct_native_utf8_length(const char* value)
+                {
+                    return value == NULL ? 0u : (uint32_t)strlen(value);
+                }
+
+                int32_t ct_native_resource_create(uintptr_t* resource)
+                {
+                    *resource = (uintptr_t)42;
+                    return 0;
+                }
+
+                int32_t ct_native_resource_value(uintptr_t resource)
+                {
+                    return (int32_t)resource;
+                }
+
+                void ct_native_resource_release(uintptr_t resource)
+                {
+                    (void)resource;
+                }
+
+                int32_t ct_native_invoke_delegate(int32_t (*callback)(int32_t, void*), void* context, int32_t value)
+                {
+                    return callback(value, context);
+                }
+
+                int32_t ct_native_call_export(int32_t left, int32_t right)
+                {
+                    return ctilde_add(left, right);
+                }
                 """;
             var result = CompileAndRun(source, nativeSuffix: native);
             Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\n42\n-9223372036854775808\n18446744073709551615\n42\n42\n42\n42\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
+            Assert(Normalize(result.StandardOutput) == "14\n4\n12\n6\neast\n2\nA\nText.Length < 10!\n10\n42\n-9223372036854775808\n18446744073709551615\n42\n42\n42\n42\n6\n42\n42\n42\nBefore deferred, i hope?\ndeferred\n", $"Unexpected output: {result.StandardOutput}");
         });
 
         suite.Run("object model example", () =>
@@ -789,108 +820,5 @@ internal static partial class ConformanceTests
             Assert(Normalize(result.StandardOutput) == "True\n", result.StandardOutput);
         });
 
-        suite.Run("feature C symbol snapshot", () =>
-        {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
-            var generated = Emit(source);
-            var projection = string.Join('\n', generated.Split('\n').Where(line =>
-                line.StartsWith("typedef struct ct_t", StringComparison.Ordinal) ||
-                line.StartsWith("typedef struct ct_a", StringComparison.Ordinal) ||
-                line.StartsWith("typedef uint", StringComparison.Ordinal) && line.Contains("ct_t_", StringComparison.Ordinal) ||
-                line.StartsWith("typedef int", StringComparison.Ordinal) && line.Contains("ct_t_", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_t", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_a", StringComparison.Ordinal) ||
-                line.StartsWith("static ", StringComparison.Ordinal) && (line.Contains(" ct_ctor_", StringComparison.Ordinal) || line.Contains(" ct_m_", StringComparison.Ordinal) || line.Contains(" ct_get_", StringComparison.Ordinal) || line.Contains(" ct_set_", StringComparison.Ordinal)) ||
-                line == "int main(void)")) + "\n";
-            var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "features.symbols.txt")));
-            Assert(projection == expected, "Generated C symbol snapshot changed.");
-        });
-
-        suite.Run("object ABI snapshot", () =>
-        {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
-            var projection = ProjectObjectAbi(Emit(source));
-            var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt")));
-            Assert(projection == expected, "Generated object ABI snapshot changed.");
-        });
-
-        suite.Run("bounds failure", () =>
-        {
-            const string source = """
-                public static class Program
-                {
-                    [EntryPoint]
-                    public static void Main()
-                    {
-                        int[] values = new int[1];
-                        values[1] = 4;
-                    }
-                }
-                """;
-            var result = CompileAndRun(source);
-            Assert(result.ExitCode != 0, "Bounds failure returned success.");
-            Assert(result.StandardError.Contains("CTA0003", StringComparison.Ordinal), result.StandardError);
-        });
-
-        suite.Run("null failure", () =>
-        {
-            const string source = """
-                public sealed class Box { public int Value; }
-                public static class Program
-                {
-                    [EntryPoint]
-                    public static void Main()
-                    {
-                        Box box = null;
-                        int value = box.Value;
-                    }
-                }
-                """;
-            var result = CompileAndRun(source);
-            Assert(result.ExitCode != 0, "Null failure returned success.");
-            Assert(result.StandardError.Contains("CTN0001", StringComparison.Ordinal), result.StandardError);
-        });
-
-        suite.Run("negative array length failure", () =>
-        {
-            const string source = """
-                public static class Program
-                {
-                    [EntryPoint]
-                    public static void Main()
-                    {
-                        int length = -1;
-                        int[] values = new int[length];
-                    }
-                }
-                """;
-            var result = CompileAndRun(source);
-            Assert(result.ExitCode != 0, "Negative array length returned success.");
-            Assert(result.StandardError.Contains("CTA0001", StringComparison.Ordinal), result.StandardError);
-        });
-
-        suite.Run("integer division failure", () =>
-        {
-            const string source = """
-                public static class Program
-                {
-                    [EntryPoint]
-                    public static void Main()
-                    {
-                        int zero = 0;
-                        int value = 4 / zero;
-                    }
-                }
-                """;
-            var result = CompileAndRun(source);
-            Assert(result.ExitCode != 0, "Division by zero returned success.");
-            Assert(result.StandardError.Contains("CTI0001", StringComparison.Ordinal), result.StandardError);
-        });
-
-        suite.Run("allocation overflow guard emitted", () =>
-        {
-            var generated = Emit("public static class Program { [EntryPoint] public static void Main() { int[] values = new int[0]; } }");
-            Assert(generated.Contains("CTA0002", StringComparison.Ordinal), "Allocation overflow guard was not emitted.");
-        });
     }
 }

@@ -11,6 +11,8 @@ internal sealed partial class CEmitter
         var objectType = Model.Types["System.Object"];
         writer.WriteLine($"void ct_memory_retain({NameMangler.Type(objectType)}* value) {{ ct_retain((ct_object*)(void*)value); }}");
         writer.WriteLine($"void ct_memory_release({NameMangler.Type(objectType)}* value) {{ ct_release((ct_object*)(void*)value); }}");
+        if (IsEspIdf && Model.Types.ContainsKey("Esp.Idf.EspError"))
+            writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name((esp_err_t)code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
 
         foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences))
         {
@@ -209,6 +211,49 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
         }
         if (Model.UserTypes.Any(type => type.Kind == DeclaredTypeKind.Delegate))
+            writer.WriteLine();
+    }
+
+    private void EmitSynchronousDelegateAdapters(CWriter writer)
+    {
+        foreach (var delegateType in _synchronousDelegateTypes.OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            var parameters = delegateType.DelegateParameters
+                .Select((parameter, index) => CParameterDeclaration(parameter, $"ct_arg_{index}"))
+                .Append("void* ct_context")
+                .ToArray();
+            writer.WriteLine($"static {CTypeName(delegateType.DelegateReturnType!)} {SynchronousCallbackAdapterName(delegateType)}({string.Join(", ", parameters)})");
+            writer.WriteLine("{");
+            writer.WriteLine("    ct_require_attached_task();");
+            writer.WriteLine($"    {NameMangler.Type(delegateType)}* ct_callback = ({NameMangler.Type(delegateType)}*)ct_require_nonnull(ct_context, \"<native-callback>\", 0);");
+            writer.WriteLine("    jmp_buf ct_callback_jump;");
+            writer.WriteLine("    ct_exception_frame ct_callback_frame = { &ct_callback_jump, ct_exception_top, ct_cleanup_top };");
+            writer.WriteLine("    ct_exception_top = &ct_callback_frame;");
+            writer.WriteLine("    if (setjmp(ct_callback_jump) != 0)");
+            writer.WriteLine("    {");
+            writer.WriteLine("        ct_object* ct_callback_exception = ct_current_exception;");
+            writer.WriteLine("        ct_current_exception = NULL;");
+            writer.WriteLine("        ct_exception_top = ct_callback_frame.Previous;");
+            writer.WriteLine("        ct_release(ct_callback_exception);");
+            writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-callback>\", 0);");
+            writer.WriteLine("    }");
+            var arguments = delegateType.DelegateParameters
+                .SelectMany((parameter, index) => ParameterArgumentNames(parameter, $"ct_arg_{index}"));
+            var call = $"ct_callback->ct_invoke(ct_callback->ct_target{(delegateType.DelegateParameters.Length == 0 ? string.Empty : ", " + string.Join(", ", arguments))})";
+            if (delegateType.DelegateReturnType == CType.Void)
+            {
+                writer.WriteLine($"    {call};");
+                writer.WriteLine("    ct_exception_top = ct_callback_frame.Previous;");
+            }
+            else
+            {
+                writer.WriteLine($"    {CDeclaration(delegateType.DelegateReturnType!, "ct_callback_result")} = {call};");
+                writer.WriteLine("    ct_exception_top = ct_callback_frame.Previous;");
+                writer.WriteLine("    return ct_callback_result;");
+            }
+            writer.WriteLine("}");
+        }
+        if (_synchronousDelegateTypes.Count != 0)
             writer.WriteLine();
     }
 
@@ -510,6 +555,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    (void)setvbuf(stdout, NULL, _IONBF, 0);");
             writer.WriteLine("    (void)setvbuf(stderr, NULL, _IONBF, 0);");
+            if (UsesNativeEntry)
+                writer.WriteLine("    ct_attach_entry_task();");
             writer.WriteLine("    ct_module_init();");
             if (Model.EntryPoint is not null)
                 writer.WriteLine($"    {Model.EntryPoint.CName}();");
@@ -520,6 +567,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("int main(void)");
         writer.WriteLine("{");
         writer.WriteLine("    ct_keep_symbols();");
+        if (UsesNativeEntry)
+            writer.WriteLine("    ct_attach_entry_task();");
         writer.WriteLine("    ct_module_init();");
         if (Model.EntryPoint is not null)
             writer.WriteLine($"    {Model.EntryPoint.CName}();");
@@ -576,7 +625,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("    (void)&ct_default_vtable;");
         foreach (var literal in _stringLiterals.Values.Order())
             writer.WriteLine($"    (void)&ct_sl_{literal};");
-        foreach (var type in Model.UserTypes.Where(type => type.Kind != DeclaredTypeKind.Enum))
+        foreach (var type in Model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
         {
             foreach (var constructor in type.Constructors)
                 writer.WriteLine($"    (void)&{constructor.CName};");

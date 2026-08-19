@@ -7,7 +7,7 @@ namespace CTilde;
 internal enum CTypeKind
 {
     Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Int, Uint, Long, Ulong, Nint, Nuint, Float, String,
-    Class, Struct, Enum, Delegate, Array, Pointer, FunctionPointer, NativeBuffer, ReadOnlyNativeBuffer, Null,
+    Class, Struct, Enum, Delegate, Opaque, EspError, Array, Pointer, FunctionPointer, NativeBuffer, ReadOnlyNativeBuffer, NativeUtf8String, Null,
 }
 
 internal sealed class FunctionPointerSignature(ImmutableArray<CType> parameterTypes, ImmutableArray<ParameterPassingKind> passingKinds, CType returnType) : IEquatable<FunctionPointerSignature>
@@ -54,19 +54,21 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Enum;
     public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.String;
     public bool IsNativeBuffer => Kind is CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
+    public bool IsNativeUtf8String => Kind == CTypeKind.NativeUtf8String;
     public bool ContainsManagedReferences => ContainsManagedReferencesCore(this, []);
-    public bool IsPointerLike => IsReference || Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer;
+    public bool IsPointerLike => IsReference || Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Opaque;
     public bool ContainsPointer => ContainsPointerCore(this, []);
-    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum;
+    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.NativeUtf8String;
 
     public string DisplayName => Kind switch
     {
-        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Delegate => Symbol!.FullName,
+        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.EspError => Symbol!.FullName,
         CTypeKind.Array => $"{ElementType!.DisplayName}[]",
         CTypeKind.Pointer => $"{ElementType!.DisplayName}*",
         CTypeKind.FunctionPointer => $"delegate* unmanaged<{string.Join(", ", FunctionPointer!.ParameterTypes.Select((type, index) => FunctionPointer.PassingKinds[index] == ParameterPassingKind.Value ? type.DisplayName : $"{FunctionPointer.PassingKinds[index].ToString().ToLowerInvariant()} {type.DisplayName}").Append(FunctionPointer.ReturnType.DisplayName))}>",
         CTypeKind.NativeBuffer => $"System.Runtime.NativeBuffer<{ElementType!.DisplayName}>",
         CTypeKind.ReadOnlyNativeBuffer => $"System.Runtime.ReadOnlyNativeBuffer<{ElementType!.DisplayName}>",
+        CTypeKind.NativeUtf8String => "System.Runtime.NativeUtf8String",
         _ => Kind.ToString().ToLowerInvariant(),
     };
 
@@ -84,6 +86,8 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
 
     private static bool ContainsManagedReferencesCore(CType type, HashSet<TypeSymbol> visited)
     {
+        if (type.Kind == CTypeKind.NativeUtf8String)
+            return true;
         if (type.IsReference)
             return true;
         if (type.Kind != CTypeKind.Struct || type.Symbol is null || !visited.Add(type.Symbol))
@@ -92,8 +96,9 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     }
 }
 
-internal enum DeclaredTypeKind { Class, Struct, Enum, Delegate, StaticClass }
+internal enum DeclaredTypeKind { Class, Struct, Enum, Delegate, Opaque, StaticClass }
 internal enum Accessibility { Private, Internal, Protected, Public }
+internal enum NativeParameterOwnership { Borrowed, Consumes, Retained, Creates }
 
 internal sealed class TypeSymbol
 {
@@ -103,12 +108,16 @@ internal sealed class TypeSymbol
     public TypeDeclarationSyntax? Syntax { get; init; }
     public TypeSymbol? BaseType { get; set; }
     public bool IsSealed { get; init; }
+    public Accessibility Accessibility { get; init; }
+    public string? NativeTypeName { get; init; }
+    public string? NativeHeader { get; init; }
     public string FullName => string.IsNullOrEmpty(Namespace) ? Name : $"{Namespace}.{Name}";
-    public CType Type => new(Kind switch
+    public CType Type => new(FullName == "Esp.Idf.EspError" ? CTypeKind.EspError : Kind switch
     {
         DeclaredTypeKind.Struct => CTypeKind.Struct,
         DeclaredTypeKind.Enum => CTypeKind.Enum,
         DeclaredTypeKind.Delegate => CTypeKind.Delegate,
+        DeclaredTypeKind.Opaque => CTypeKind.Opaque,
         _ => CTypeKind.Class,
     }, this);
     public List<FieldSymbol> Fields { get; } = [];
@@ -171,6 +180,9 @@ internal sealed class ParameterSymbol
     public required ParameterSyntax? Syntax { get; init; }
     public ParameterPassingKind PassingKind { get; init; }
     public bool IsRetained { get; init; }
+    public NativeParameterOwnership NativeOwnership { get; init; }
+    public bool IsNullable { get; init; }
+    public bool IsSynchronousCallback { get; init; }
 }
 
 internal sealed class MethodSymbol : MemberSymbol
@@ -183,7 +195,10 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsNoAlloc { get; set; }
     public bool IsUnsafe { get; init; }
     public bool ReturnsBorrowed { get; init; }
+    public bool ReturnsOwned { get; init; }
+    public bool ReturnsNullable { get; init; }
     public string? ExternName { get; init; }
+    public string? ExportName { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }
     public bool IsOverride { get; init; }
@@ -195,6 +210,8 @@ internal sealed class MethodSymbol : MemberSymbol
 }
 
 internal sealed record EnumValueSymbol(string Name, BigInteger Value, EnumMemberSyntax Syntax);
+
+internal enum NativeResourceState { None, Borrowed, Owned, Deferred, Moved }
 
 internal sealed class LocalSymbol
 {
@@ -210,6 +227,7 @@ internal sealed class LocalSymbol
     public string? ConstantCode { get; set; }
     public object? ConstantValue { get; set; }
     public bool IsDurable { get; init; }
+    public NativeResourceState NativeResourceState { get; set; }
     public string StorageName => IsDurable ? $"ct_lp_{Id}" : $"ct_l_{Id}";
     public string CName => IsDurable ? $"ct_state.{StorageName}" : StorageName;
 }
@@ -250,11 +268,14 @@ internal static class NameMangler
         CTypeKind.Struct => $"s{Encode(type.Symbol!.FullName)}",
         CTypeKind.Enum => $"e{Encode(type.Symbol!.FullName)}",
         CTypeKind.Delegate => $"d{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Opaque => $"o{Encode(type.Symbol!.FullName)}",
+        CTypeKind.EspError => "esperr",
         CTypeKind.Array => $"a{TypeCode(type.ElementType!)}",
         CTypeKind.Pointer => $"p{TypeCode(type.ElementType!)}",
         CTypeKind.FunctionPointer => $"fp{string.Concat(type.FunctionPointer!.ParameterTypes.Select((parameter, index) => "_" + PassingCode(type.FunctionPointer.PassingKinds[index]) + TypeCode(parameter)))}_r{TypeCode(type.FunctionPointer.ReturnType)}",
         CTypeKind.NativeBuffer => $"nb{TypeCode(type.ElementType!)}",
         CTypeKind.ReadOnlyNativeBuffer => $"rnb{TypeCode(type.ElementType!)}",
+        CTypeKind.NativeUtf8String => "nu8",
         _ => "err",
     };
 
@@ -314,7 +335,7 @@ internal static class TypeFacts
             return true;
         if (from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer && to.ElementType == CType.Void)
             return true;
-        if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.FunctionPointer and not CTypeKind.NativeBuffer and not CTypeKind.ReadOnlyNativeBuffer)
+        if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.FunctionPointer and not CTypeKind.NativeBuffer and not CTypeKind.ReadOnlyNativeBuffer and not CTypeKind.Opaque and not CTypeKind.NativeUtf8String)
             return true;
         if (from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null && from.Symbol.DerivesFrom(to.Symbol))
             return true;
@@ -341,7 +362,7 @@ internal static class TypeFacts
         IsExplicitObjectConversion(from, to) || IsExplicitClassConversion(from, to);
 
     private static bool IsExplicitObjectConversion(CType from, CType to) =>
-        from.Kind == CTypeKind.Class && from.Symbol?.IsObject == true && to.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.NativeBuffer and not CTypeKind.ReadOnlyNativeBuffer;
+        from.Kind == CTypeKind.Class && from.Symbol?.IsObject == true && to.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.NativeBuffer and not CTypeKind.ReadOnlyNativeBuffer and not CTypeKind.Opaque and not CTypeKind.NativeUtf8String;
 
     private static bool IsExplicitClassConversion(CType from, CType to) =>
         from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null &&

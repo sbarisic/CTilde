@@ -4,7 +4,7 @@ using System.Text.RegularExpressions;
 
 namespace CTilde;
 
-internal sealed class CompilationModel
+internal sealed partial class CompilationModel
 {
     private static readonly Regex CIdentifier = new("^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant);
     private static readonly HashSet<string> CKeywords = new(StringComparer.Ordinal)
@@ -43,6 +43,16 @@ internal sealed class CompilationModel
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
+        if ((syntax.Name is "NativeUtf8String" or "System.Runtime.NativeUtf8String") && syntax.TypeArguments.IsDefaultOrEmpty)
+        {
+            if (syntax.PointerDepth != 0 || syntax.IsArray)
+            {
+                if (report)
+                    Diagnostics.Add("CT1263", "NativeUtf8String cannot be a pointer or array element type.", syntax.Source, syntax.Span);
+                return CType.Error;
+            }
+            return new CType(CTypeKind.NativeUtf8String);
+        }
         if (!syntax.TypeArguments.IsDefaultOrEmpty)
         {
             var bufferKind = syntax.Name is "NativeBuffer" or "System.Runtime.NativeBuffer"
@@ -119,6 +129,13 @@ internal sealed class CompilationModel
             return CType.Error;
         }
 
+        if (baseType.Kind == CTypeKind.Opaque && (syntax.IsArray || syntax.PointerDepth != 0))
+        {
+            if (report)
+                Diagnostics.Add("CT1241", "Opaque handles cannot be array elements or pointed types.", syntax.Source, syntax.Span);
+            return CType.Error;
+        }
+
         for (var i = 0; i < syntax.PointerDepth; i++)
             baseType = new CType(CTypeKind.Pointer, ElementType: baseType);
         if (syntax.IsArray)
@@ -129,13 +146,13 @@ internal sealed class CompilationModel
     private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
         type.Kind == CTypeKind.Void ? allowVoid :
         type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
 
     private static bool IsCompleteUnmanagedType(CType type) => type.Kind switch
     {
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
-        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
+        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
         CTypeKind.Struct => !type.ContainsManagedReferences,
         _ => false,
     };
@@ -202,6 +219,7 @@ internal sealed class CompilationModel
                     TypeDeclarationKind.Struct => DeclaredTypeKind.Struct,
                     TypeDeclarationKind.Enum => DeclaredTypeKind.Enum,
                     TypeDeclarationKind.Delegate => DeclaredTypeKind.Delegate,
+                    TypeDeclarationKind.Opaque => DeclaredTypeKind.Opaque,
                     _ when declaration.Modifiers.Contains("static", StringComparer.Ordinal) => DeclaredTypeKind.StaticClass,
                     _ => DeclaredTypeKind.Class,
                 };
@@ -213,19 +231,37 @@ internal sealed class CompilationModel
                     Diagnostics.Add("CT1217", "Only a class can be static.", declaration.Source, declaration.Span);
                 if (declaration.Kind != TypeDeclarationKind.Class && declaration.Modifiers.Contains("sealed", StringComparer.Ordinal))
                     Diagnostics.Add("CT1218", "sealed applies only to classes.", declaration.Source, declaration.Span);
-                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "readonly" or "unsafe" or "virtual" or "override"))
+                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" || modifier == "readonly" && declaration.Kind != TypeDeclarationKind.Struct))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
-                ValidateAttributes(declaration.Attributes, declaration, []);
+                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : []);
+                string? nativeTypeName = null;
+                string? nativeHeader = null;
+                if (declaration.Kind == TypeDeclarationKind.Opaque)
+                {
+                    var nativeType = FindAttribute(declaration.Attributes, "NativeType");
+                    if (nativeType?.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string typeName }, LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string header }] &&
+                        IsPortableExternalIdentifier(typeName) && IsPortableHeaderName(header))
+                    {
+                        nativeTypeName = typeName;
+                        nativeHeader = header;
+                    }
+                    else
+                        Diagnostics.Add("CT1240", "An opaque declaration requires NativeType with a portable C typedef and header name.", declaration.Source, nativeType?.Span ?? declaration.Span);
+                }
                 Types.Add(fullName, new TypeSymbol
                 {
                     Namespace = namespaceName,
                     Name = declaration.Name,
                     Kind = kind,
                     Syntax = declaration,
+                    Accessibility = typeAccessibility,
+                    NativeTypeName = nativeTypeName,
+                    NativeHeader = nativeHeader,
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                 });
             }
         }
+
     }
 
     private void ResolveBaseTypes()
@@ -303,9 +339,11 @@ internal sealed class CompilationModel
                     type.DelegateParameters = DeclareParameters(declaration.DelegateParameters, tree, isExtern: false);
                     continue;
                 }
+                if (type.Kind == DeclaredTypeKind.Opaque)
+                    continue;
                 foreach (var member in declaration.Members)
                     DeclareMember(type, member, tree);
-                if (!type.IsStatic && type.Constructors.Count == 0)
+                if (!type.IsStatic && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
                 {
                     type.Constructors.Add(new MethodSymbol
                     {
@@ -353,6 +391,10 @@ internal sealed class CompilationModel
                     };
                     if (symbol.Type.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
+                    if (symbol.Type.Kind == CTypeKind.Opaque)
+                        Diagnostics.Add("CT1242", "Opaque handles cannot be stored in fields.", field.Source, field.Span);
+                    if (symbol.Type.IsNativeUtf8String)
+                        Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in fields or static storage.", field.Source, field.Span);
                     if (symbol.IsConst && field.Initializer is null)
                         Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
                     if (symbol.IsConst && symbol.IsReadonly)
@@ -372,6 +414,10 @@ internal sealed class CompilationModel
                     var propertyType = ResolveType(property.Type, tree);
                     if (propertyType.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in properties.", property.Source, property.Span);
+                    if (propertyType.Kind == CTypeKind.Opaque)
+                        Diagnostics.Add("CT1242", "Opaque handles cannot be stored in properties.", property.Source, property.Span);
+                    if (propertyType.IsNativeUtf8String && UserSyntaxTrees.Contains(tree))
+                        Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in properties.", property.Source, property.Span);
                     if (property.Getter is not null)
                         ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
                     if (property.Setter is not null)
@@ -444,16 +490,20 @@ internal sealed class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NoAlloc", "ReturnsBorrowed"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
+                    var export = FindAttribute(method.Attributes, "Export");
                     var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
                     var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
+                    var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
+                    var returnsNullable = FindAttribute(method.Attributes, "ReturnsNullable");
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
                         Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     string? externalName = null;
+                    string? exportName = null;
                     if (external is not null)
                     {
                         if (external.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
@@ -465,13 +515,34 @@ internal sealed class CompilationModel
                     }
                     else if (method.Body is null)
                         Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
+                    if (export is not null)
+                    {
+                        if (export.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
+                            exportName = value;
+                        else
+                            Diagnostics.Add("CT1243", "Export requires one string containing a portable C identifier.", export.Source, export.Span);
+                        if (external is not null || entry is not null || !isStatic || method.Body is null || accessibility != Accessibility.Public)
+                            Diagnostics.Add("CT1244", "Export requires a public static body-bearing method and cannot be combined with EntryPoint or Extern.", method.Source, method.Span);
+                    }
                     var returnType = ResolveType(method.ReturnType, tree);
                     if (returnType.IsNativeBuffer)
                         Diagnostics.Add("CT2186", "Native-buffer views cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
-                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null);
+                    if (returnType.IsNativeUtf8String && UserSyntaxTrees.Contains(tree))
+                        Diagnostics.Add("CT1266", "NativeUtf8String is scoped and cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
+                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null || export is not null);
                     if (returnsBorrowed is not null &&
-                        (returnsBorrowed.Arguments.Length != 0 || external is null || !returnType.IsReference))
-                        Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern method with a managed-reference return type.", returnsBorrowed.Source, returnsBorrowed.Span);
+                        (returnsBorrowed.Arguments.Length != 0 || external is null || !(returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)))
+                        Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern method with a managed-reference, opaque-handle, or pointer return type.", returnsBorrowed.Source, returnsBorrowed.Span);
+                    if (returnsOwned is not null &&
+                        (returnsOwned.Arguments.Length != 0 || returnType.Kind is not CTypeKind.Opaque and not CTypeKind.Pointer))
+                        Diagnostics.Add("CT1245", "ReturnsOwned accepts no arguments and requires an opaque-handle or pointer return type.", returnsOwned.Source, returnsOwned.Span);
+                    if (returnsNullable is not null &&
+                        (returnsNullable.Arguments.Length != 0 || returnType.Kind is not CTypeKind.Opaque and not CTypeKind.Pointer))
+                        Diagnostics.Add("CT1246", "ReturnsNullable accepts no arguments and requires an opaque-handle or pointer return type.", returnsNullable.Source, returnsNullable.Span);
+                    if (returnsOwned is not null && returnsBorrowed is not null)
+                        Diagnostics.Add("CT1247", "A return value cannot be both owned and borrowed.", method.Source, method.Span);
+                    if (external is not null && returnType.Kind == CTypeKind.Opaque && returnsOwned is null && returnsBorrowed is null)
+                        Diagnostics.Add("CT1248", "An extern opaque-handle result must declare ReturnsOwned or ReturnsBorrowed.", method.ReturnType.Source, method.ReturnType.Span);
                     var symbol = new MethodSymbol
                     {
                         Name = method.Name,
@@ -485,8 +556,11 @@ internal sealed class CompilationModel
                         IsEntryPoint = entry is not null,
                         IsNoAlloc = noAlloc is not null,
                         IsUnsafe = method.Modifiers.Contains("unsafe", StringComparer.Ordinal),
-                        ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && returnType.IsReference,
+                        ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && (returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer),
+                        ReturnsOwned = returnsOwned is not null,
+                        ReturnsNullable = returnsNullable is not null,
                         ExternName = externalName,
+                        ExportName = exportName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
                         IsVirtual = method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
@@ -510,15 +584,34 @@ internal sealed class CompilationModel
         {
             if (!names.Add(parameter.Name))
                 Diagnostics.Add("CT1102", $"Parameter '{parameter.Name}' is already declared.", parameter.Source, parameter.Span);
-            ValidateAttributes(parameter.Attributes, parameter, ["Retained"]);
+            ValidateAttributes(parameter.Attributes, parameter, ["Borrowed", "Consumes", "Retained", "Creates", "Nullable", "SynchronousCallback"]);
             var type = ResolveType(parameter.Type, tree);
+            var borrowed = FindAttribute(parameter.Attributes, "Borrowed");
+            var consumes = FindAttribute(parameter.Attributes, "Consumes");
             var retained = FindAttribute(parameter.Attributes, "Retained");
+            var creates = FindAttribute(parameter.Attributes, "Creates");
+            var nullable = FindAttribute(parameter.Attributes, "Nullable");
+            var synchronousCallback = FindAttribute(parameter.Attributes, "SynchronousCallback");
             if (type.IsNativeBuffer && parameter.PassingKind != ParameterPassingKind.Value)
                 Diagnostics.Add("CT2187", "Native-buffer parameters cannot use ref, in, or out.", parameter.Source, parameter.Span);
+            if (type.IsNativeUtf8String && parameter.PassingKind != ParameterPassingKind.Value)
+                Diagnostics.Add("CT1264", "NativeUtf8String parameters cannot use ref, in, or out.", parameter.Source, parameter.Span);
             if (isExtern && parameter.PassingKind != ParameterPassingKind.Value && !IsCompleteUnmanagedType(type))
                 Diagnostics.Add("CT2188", $"Extern by-reference parameter type '{type.DisplayName}' is not unmanaged ABI-safe.", parameter.Source, parameter.Span);
-            if (retained is not null && (retained.Arguments.Length != 0 || !isExtern || !type.IsReference))
-                Diagnostics.Add("CT1234", "Retained accepts no arguments and is valid only on a managed-reference parameter of an extern method.", retained.Source, retained.Span);
+            var ownershipAttributes = new[] { borrowed, consumes, retained, creates }.Where(attribute => attribute is not null).ToArray();
+            if (ownershipAttributes.Any(attribute => attribute!.Arguments.Length != 0) || ownershipAttributes.Length > 1)
+                Diagnostics.Add("CT1249", "Borrowed, Consumes, Retained, and Creates accept no arguments and are mutually exclusive.", parameter.Source, parameter.Span);
+            var nativeResource = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer;
+            if (retained is not null && (retained.Arguments.Length != 0 || !isExtern || !(type.IsReference && parameter.PassingKind == ParameterPassingKind.Value || nativeResource && parameter.PassingKind == ParameterPassingKind.Value)))
+                Diagnostics.Add("CT1234", "Retained requires a value parameter of an extern method and a managed reference, opaque handle, or pointer type.", retained.Source, retained.Span);
+            if ((borrowed is not null || consumes is not null) && (!isExtern || !nativeResource || parameter.PassingKind != ParameterPassingKind.Value))
+                Diagnostics.Add("CT1250", "Borrowed and Consumes require a value opaque-handle or pointer parameter of an extern method.", parameter.Source, parameter.Span);
+            if (creates is not null && (!isExtern || !nativeResource || parameter.PassingKind != ParameterPassingKind.Out))
+                Diagnostics.Add("CT1251", "Creates requires an out opaque-handle or pointer parameter of an extern method.", creates.Source, creates.Span);
+            if (nullable is not null && (nullable.Arguments.Length != 0 || !(nativeResource || type.Kind == CTypeKind.Delegate || type.IsNativeUtf8String)))
+                Diagnostics.Add("CT1252", "Nullable accepts no arguments and requires an opaque handle, pointer, delegate, or NativeUtf8String parameter.", nullable.Source, nullable.Span);
+            if (synchronousCallback is not null && (synchronousCallback.Arguments.Length != 0 || !isExtern || type.Kind != CTypeKind.Delegate || parameter.PassingKind != ParameterPassingKind.Value))
+                Diagnostics.Add("CT1253", "SynchronousCallback requires a value delegate parameter of an extern method.", synchronousCallback.Source, synchronousCallback.Span);
             result.Add(new ParameterSymbol
             {
                 Name = parameter.Name,
@@ -526,6 +619,9 @@ internal sealed class CompilationModel
                 Syntax = parameter,
                 PassingKind = parameter.PassingKind,
                 IsRetained = retained is not null && retained.Arguments.Length == 0 && isExtern && type.IsReference && parameter.PassingKind == ParameterPassingKind.Value,
+                NativeOwnership = creates is not null ? NativeParameterOwnership.Creates : consumes is not null ? NativeParameterOwnership.Consumes : retained is not null && nativeResource ? NativeParameterOwnership.Retained : NativeParameterOwnership.Borrowed,
+                IsNullable = nullable is not null,
+                IsSynchronousCallback = synchronousCallback is not null,
             });
         }
         return result.ToImmutable();
@@ -664,101 +760,6 @@ internal sealed class CompilationModel
     private static bool HaveSameSourceSignature(MethodSymbol left, MethodSymbol right) =>
         left.Name == right.Name && left.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind)).SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind)));
 
-    private void ValidateExternalSymbols()
-    {
-        var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_memory_retain", "ct_memory_release", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
-            "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
-            "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
-            "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
-            "ct_u64_div", "ct_u64_mod", "ct_i64_shl", "ct_i64_shr",
-            "ct_ni_bits", "ct_ni_add", "ct_ni_sub", "ct_ni_mul", "ct_ni_neg", "ct_ni_div", "ct_ni_mod", "ct_nu_div", "ct_nu_mod", "ct_ni_shl", "ct_ni_shr",
-            "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
-            "ct_to_string_float", "ct_to_string_bool", "ct_to_string_char", "ct_write_string", "ct_write_char",
-            "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_bool", "ct_write_line", "ct_environment_exit",
-            "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_stack_bytes",
-            "ct_module_init", "ct_keep_symbols", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
-            "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
-            "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
-            "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_object_value_equals",
-            "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",
-            "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", "NAN", "INFINITY",
-            "ct_cleanup_record", "ct_cleanup_top", "ct_cleanup_push", "ct_cleanup_unwind_to", "ct_cleanup_disarm",
-            "ct_release_head", "ct_release_draining", "ct_retain_ref_value", "ct_drop_ref_value", "ct_drop_string",
-            "ct_memory_live_allocations", "ct_memory_live_objects",
-            "ct_exception_frame", "ct_exception_top", "ct_current_exception", "ct_throw", "ct_unhandled_exception", "setjmp", "longjmp", "CT_NORETURN",
-        };
-        var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in Types.Values)
-        {
-            generatedSymbols.Add(NameMangler.Type(type));
-            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>"))
-                generatedSymbols.Add(field.CName);
-            foreach (var value in type.EnumValues)
-                generatedSymbols.Add(NameMangler.Identifier(type.FullName + "." + value.Name));
-            foreach (var constructor in type.Constructors)
-                generatedSymbols.Add(NameMangler.Method(constructor));
-            foreach (var method in type.Methods.Where(method => method.ExternName is null))
-                generatedSymbols.Add(NameMangler.Method(method));
-            foreach (var property in type.Properties)
-            {
-                if (property.Getter is not null)
-                    generatedSymbols.Add(NameMangler.Getter(property));
-                if (property.Setter is not null)
-                    generatedSymbols.Add(NameMangler.Setter(property));
-            }
-        }
-
-        var externs = Types.Values.SelectMany(type => type.Methods)
-            .Where(method => method.ExternName is not null)
-            .OrderBy(method => method.ExternName, StringComparer.Ordinal)
-            .ThenBy(method => method.ContainingType.FullName, StringComparer.Ordinal)
-            .ToArray();
-        foreach (var method in externs.Where(method => !method.IsTrustedExtern))
-        {
-            if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!) || IsExceptionLoweringName(method.ExternName!) || IsOwnershipLoweringName(method.ExternName!))
-                Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a compiler-owned or generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
-        }
-
-        foreach (var group in externs.GroupBy(method => method.ExternName!, StringComparer.Ordinal))
-        {
-            var first = group.First();
-            foreach (var method in group.Skip(1))
-            {
-                if (HaveSameAbiSignature(first, method))
-                    continue;
-                Diagnostics.Add("CT4102", $"External symbol '{group.Key}' has incompatible ABI signatures.", method.Syntax!.Source, method.Syntax.Span,
-                    first.Syntax?.Source.GetLocation(first.Syntax.Span));
-            }
-        }
-    }
-
-    private static bool IsExceptionLoweringName(string name) =>
-        name.StartsWith("ct_eh_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_ep_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_ex_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_er_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_lp_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_pp_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_finally_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_after_finally_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_after_catch_", StringComparison.Ordinal);
-
-    private static bool IsOwnershipLoweringName(string name) =>
-        name.StartsWith("ct_drop_object_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_drop_array_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_drop_box_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_retain_value_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_drop_value_", StringComparison.Ordinal) ||
-        name.StartsWith("ct_cleanup_", StringComparison.Ordinal);
-
-    private static bool HaveSameAbiSignature(MethodSymbol left, MethodSymbol right) =>
-        left.ReturnType == right.ReturnType &&
-        left.ReturnsBorrowed == right.ReturnsBorrowed &&
-        left.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind, parameter.IsRetained))
-            .SequenceEqual(right.Parameters.Select(parameter => (parameter.Type, parameter.PassingKind, parameter.IsRetained)));
-
     private static bool FitsEnumValue(BigInteger value, CType underlying) => underlying.Kind switch
     {
         CTypeKind.Byte => value >= byte.MinValue && value <= byte.MaxValue,
@@ -876,4 +877,10 @@ internal sealed class CompilationModel
 
     private static bool IsPortableExternalIdentifier(string value) =>
         CIdentifier.IsMatch(value) && !value.StartsWith('_') && !CKeywords.Contains(value);
+
+    private static bool IsPortableHeaderName(string value) =>
+        !string.IsNullOrWhiteSpace(value) &&
+        value.Length <= 200 &&
+        !value.Contains("..", StringComparison.Ordinal) &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.' or '/');
 }

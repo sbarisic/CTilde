@@ -20,6 +20,7 @@ internal interface ILoweringServices
     string SourceArgument(SyntaxNode syntax);
     string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch);
     string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method);
+    string SynchronousCallbackAdapterName(TypeSymbol delegateType);
     string MethodSignature(MethodSymbol method, string? name = null, bool prototype = false);
     MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter);
     void RegisterExceptions();

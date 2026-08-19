@@ -250,5 +250,108 @@ internal static partial class ConformanceTests
             Assert(invalid.Any(diagnostic => diagnostic.Code == "CT2177"), "Expected managed buffer-element diagnostics.");
             Assert(invalid.Any(diagnostic => diagnostic.Code == "CT2180"), "Expected void-pointer dereference diagnostics.");
         });
+
+        suite.Run("draft 0.9 opaque ownership and UTF-8 views", () =>
+        {
+            const string valid = """
+                using System.Runtime;
+                [NativeType("uintptr_t", "stdint.h")]
+                public opaque Handle;
+                public static class Native
+                {
+                    [Extern("native_create")] [ReturnsOwned] public static Handle Create();
+                    [Extern("native_read")] public static int Read([Borrowed] Handle value);
+                    [Extern("native_release")] public static void Release([Consumes] Handle value);
+                    [Extern("native_text")] public static uint Text(NativeUtf8String value);
+                    [Extern("native_optional_text")] public static uint OptionalText([Nullable] NativeUtf8String value);
+                }
+                public static class Program
+                {
+                    private static void Use()
+                    {
+                        Handle value = Native.Create();
+                        defer Native.Release(value);
+                        int result = Native.Read(value);
+                        NativeUtf8String text = NativeUtf8String.Borrow("ctilde");
+                        uint length = Native.Text(text);
+                        uint optional = Native.OptionalText(NativeUtf8String.Null);
+                    }
+                    [EntryPoint] public static void Main() { Use(); }
+                }
+                """;
+            var validCompilation = Compile(valid);
+            Assert(!validCompilation.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, validCompilation.GetDiagnostics()));
+            var generated = Emit(valid);
+            Assert(generated.Contains("typedef struct ct_native_utf8_string", StringComparison.Ordinal), "Native UTF-8 runtime view was not emitted.");
+            Assert(generated.Contains("ct_native_utf8_borrow", StringComparison.Ordinal) && generated.Contains("CTS0003", StringComparison.Ordinal), "Native UTF-8 validation was not emitted.");
+            Assert(generated.Contains("ct_require_nonnull((void*)", StringComparison.Ordinal) && generated.Contains(".Data", StringComparison.Ordinal), "Non-null native UTF-8 arguments were not checked.");
+
+            const string completionSource = "using System.Runtime; public static class Program { private static void Use() { NativeUtf8String text = NativeUtf8String.Borrow(\"x\"); text. } [EntryPoint] public static void Main() { } }";
+            var completionService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(completionSource, "draft09-completion.ct")]);
+            var completionPosition = completionSource.IndexOf("text. }", StringComparison.Ordinal) + "text.".Length;
+            var completions = completionService.GetCompletions("draft09-completion.ct", completionPosition);
+            Assert(completions.Any(item => item.Label == "ByteLength") && completions.Any(item => item.Label == "Pointer"), "Native UTF-8 member completion was incomplete.");
+
+            const string invalid = """
+                using System.Runtime;
+                [NativeType("uintptr_t", "stdint.h")] public opaque Handle;
+                public class Holder { public Handle Stored; public NativeUtf8String Text; }
+                public static class Native
+                {
+                    [Extern("native_create")] [ReturnsOwned] public static Handle Create();
+                    [Extern("native_release")] public static void Release([Consumes] Handle value);
+                }
+                public static class Program
+                {
+                    private static NativeUtf8String Escape(NativeUtf8String value) { return value; }
+                    private static void Leak() { Handle value = Native.Create(); }
+                    private static void MoveTwice() { Handle value = Native.Create(); Native.Release(value); Native.Release(value); }
+                    private static void Discard() { Native.Create(); }
+                    [EntryPoint] public static void Main() { NativeUtf8String text = NativeUtf8String.Borrow("a\0b"); }
+                }
+                """;
+            var diagnostics = Compile(invalid).GetDiagnostics();
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1242"), "Expected opaque-storage diagnostics.");
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1254"), "Expected use-after-move diagnostics.");
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1255"), "Expected discarded-owned-result diagnostics.");
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1258"), "Expected unresolved-ownership diagnostics: " + string.Join(Environment.NewLine, diagnostics));
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1265"), "Expected NativeUtf8String field-escape diagnostics.");
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CT1266"), "Expected NativeUtf8String return-escape diagnostics.");
+            Assert(diagnostics.Any(diagnostic => diagnostic.Code == "CTS0003"), "Expected literal embedded-NUL diagnostics.");
+        });
+
+        suite.Run("draft 0.9 exports headers and synchronous delegates", () =>
+        {
+            const string source = """
+                public delegate int Transformer(int value);
+                public static class Native
+                {
+                    [Extern("native_invoke")]
+                    public static int Invoke([SynchronousCallback] Transformer callback, int value);
+                }
+                public static class Program
+                {
+                    private static int AddOne(int value) { return value + 1; }
+                    [Export("ctilde_add")] public static int Add(int left, int right) { return left + right; }
+                    [EntryPoint] public static void Main() { Transformer callback = AddOne; int value = Native.Invoke(callback, 41); }
+                }
+                """;
+            var compilation = Compile(source);
+            Assert(!compilation.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, compilation.GetDiagnostics()));
+            using var firstWriter = new StringWriter();
+            using var secondWriter = new StringWriter();
+            Assert(compilation.EmitCHeader(firstWriter).Success && compilation.EmitCHeader(secondWriter).Success, "Header emission failed.");
+            Assert(firstWriter.ToString() == secondWriter.ToString(), "Header emission was not deterministic.");
+            Assert(firstWriter.ToString().Contains("extern \"C\"", StringComparison.Ordinal) && firstWriter.ToString().Contains("int32_t ctilde_add(int32_t u_4_left, int32_t u_5_right);", StringComparison.Ordinal), "Export header omitted its C/C++ declaration.");
+            var generated = Emit(source);
+            Assert(generated.Contains("int32_t (*u_8_callback)(int32_t, void*), void* u_8_callback_context", StringComparison.Ordinal), "Synchronous delegate ABI did not place context adjacent to the callback.");
+            Assert(generated.Contains("ct_delegate_callback_", StringComparison.Ordinal), "Synchronous delegate adapter was not emitted.");
+            Assert(generated.Contains("ct_require_attached_task", StringComparison.Ordinal) && generated.Contains("CTT0001", StringComparison.Ordinal), "Same-task native-entry validation was not emitted.");
+            Assert(generated.Contains("int32_t ctilde_add(int32_t u_4_left, int32_t u_5_right)", StringComparison.Ordinal), "Export wrapper was not emitted.");
+
+            var invalid = Compile("public static class Program { [Export(\"same\")] public static string Managed() { return \"x\"; } [Export(\"same\")] public static int Duplicate() { return 1; } [EntryPoint] public static void Main() { } }").GetDiagnostics();
+            Assert(invalid.Any(diagnostic => diagnostic.Code == "CT1267"), "Expected managed export-signature diagnostics.");
+            Assert(invalid.Any(diagnostic => diagnostic.Code == "CT4101"), "Expected duplicate export-symbol diagnostics.");
+        });
     }
 }

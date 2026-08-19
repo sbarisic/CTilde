@@ -92,14 +92,27 @@ internal sealed partial class Parser
                 types.Add(ParseTypeDeclaration(attributes, modifiers));
             else if (Current.Kind == SyntaxKind.DelegateKeyword)
                 types.Add(ParseDelegateDeclaration(attributes, modifiers));
+            else if (Current.Kind == SyntaxKind.OpaqueKeyword)
+                types.Add(ParseOpaqueDeclaration(attributes, modifiers));
             else
             {
-                Report("CT0102", "Expected a class, structure, enumeration, or delegate declaration.", Current);
-                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, terminator);
+                Report("CT0102", "Expected a class, structure, enumeration, delegate, or opaque declaration.", Current);
+                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
             }
             if (_position == before)
                 SkipToken();
         }
+    }
+
+    private TypeDeclarationSyntax ParseOpaqueDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)
+    {
+        var start = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
+        Match(SyntaxKind.OpaqueKeyword);
+        var name = Match(SyntaxKind.IdentifierToken);
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new TypeDeclarationSyntax(
+            _source, TextSpan.FromBounds(start, end), TypeDeclarationKind.Opaque, name.Text,
+            modifiers, attributes, null, [], null, [], null, []);
     }
 
     private TypeDeclarationSyntax ParseDelegateDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)

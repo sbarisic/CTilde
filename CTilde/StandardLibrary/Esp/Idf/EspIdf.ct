@@ -1,5 +1,37 @@
 namespace Esp.Idf;
 
+public readonly struct EspError
+{
+    [NoAlloc]
+    public int Code
+    {
+        get { return 0; }
+    }
+
+    [NoAlloc]
+    public bool IsSuccess
+    {
+        get { return false; }
+    }
+
+    public string GetName()
+    {
+        return EspErrorRuntime.GetName(Code);
+    }
+
+    public void ThrowIfError()
+    {
+        if (!IsSuccess)
+            throw new System.Exception(GetName() + " (" + Code.ToString() + ")");
+    }
+}
+
+internal static class EspErrorRuntime
+{
+    [Extern("ct_esp_error_name")]
+    public static string GetName(int code);
+}
+
 public static class FreeRtos
 {
     [Extern("ct_esp_delay_ms")]
@@ -41,15 +73,15 @@ public static class Gpio
 {
     [Extern("ct_esp_gpio_configure_input")]
     [NoAlloc]
-    public static bool ConfigureInput(int pin);
+    public static EspError ConfigureInput(int pin);
 
     [Extern("ct_esp_gpio_configure_output")]
     [NoAlloc]
-    public static bool ConfigureOutput(int pin);
+    public static EspError ConfigureOutput(int pin);
 
     [Extern("ct_esp_gpio_write")]
     [NoAlloc]
-    public static bool Write(int pin, bool high);
+    public static EspError Write(int pin, bool high);
 
     [Extern("ct_esp_gpio_read")]
     [NoAlloc]
@@ -59,17 +91,17 @@ public static class Gpio
 public static class Ws2812
 {
     [Extern("ct_esp_ws2812_configure")]
-    public static bool Configure(int pin, uint ledCount);
+    public static EspError Configure(int pin, uint ledCount);
 
     [Extern("ct_esp_ws2812_set_pixel")]
     [NoAlloc]
-    public static bool SetPixel(uint index, uint red, uint green, uint blue);
+    public static EspError SetPixel(uint index, uint red, uint green, uint blue);
 
     [Extern("ct_esp_ws2812_refresh")]
     [NoAlloc]
-    public static bool Refresh();
+    public static EspError Refresh();
 
     [Extern("ct_esp_ws2812_clear")]
     [NoAlloc]
-    public static bool Clear();
+    public static EspError Clear();
 }

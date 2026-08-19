@@ -53,6 +53,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["new"] = SyntaxKind.NewKeyword,
         ["null"] = SyntaxKind.NullKeyword,
         ["object"] = SyntaxKind.ObjectKeyword,
+        ["opaque"] = SyntaxKind.OpaqueKeyword,
         ["override"] = SyntaxKind.OverrideKeyword,
         ["out"] = SyntaxKind.OutKeyword,
         ["private"] = SyntaxKind.PrivateKeyword,

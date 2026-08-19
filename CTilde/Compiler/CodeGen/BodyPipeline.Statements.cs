@@ -82,6 +82,8 @@ internal sealed partial class BodyPipeline
             case ExpressionStatementSyntax expression:
                 {
                     var lowered = LowerExpression(expression.Expression);
+                    if (lowered.Ownership == OwnershipKind.Owned && lowered.Type.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+                        Report("CT1255", "An owned native resource result cannot be discarded.", expression.Expression);
                     EmitPrelude(writer, lowered.Prelude);
                     writer.WriteLine($"(void)({lowered.Code});");
                     return FlowResult.None;
@@ -200,7 +202,13 @@ internal sealed partial class BodyPipeline
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
             IsDurable = _tryCount != 0,
+            NativeResourceState = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer
+                ? initializer?.Ownership == OwnershipKind.Owned ? NativeResourceState.Owned :
+                    initializer?.Ownership == OwnershipKind.Borrowed ? NativeResourceState.Borrowed : NativeResourceState.None
+                : NativeResourceState.None,
         };
+        if (type.Kind is CTypeKind.Opaque or CTypeKind.Pointer && initializer?.Ownership == OwnershipKind.Owned)
+            ConsumeOwnedExpression(initializer, syntax.Initializer!);
         _scopes.Peek()[syntax.Name] = symbol;
         if (symbol.IsDurable)
         {

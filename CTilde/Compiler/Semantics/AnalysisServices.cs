@@ -123,11 +123,14 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Float => "float",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class or CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
+        CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
+        CTypeKind.EspError => "esp_err_t",
         CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"ct_{NameMangler.TypeCode(type)}",
+        CTypeKind.NativeUtf8String => "ct_native_utf8_string",
         CTypeKind.Null => "void*",
         _ => "int32_t",
     };
@@ -142,11 +145,19 @@ internal sealed class AnalysisServices : ILoweringServices
 
     public string CParameterDeclaration(ParameterSymbol parameter, string name) => parameter.PassingKind switch
     {
+        _ when parameter.IsSynchronousCallback => SynchronousCallbackDeclaration(parameter.Type.Symbol!, name),
         _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}* {name}_data, size_t {name}_length",
+        _ when parameter.Type.IsNativeUtf8String => $"const char* {name}",
         ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}* {name}",
         ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}* {name}",
         _ => CDeclaration(parameter.Type, name),
     };
+
+    private string SynchronousCallbackDeclaration(TypeSymbol delegateType, string name)
+    {
+        var parameters = delegateType.DelegateParameters.Select(parameter => CParameterDeclaration(parameter, string.Empty).Trim()).Append("void*");
+        return $"{CTypeName(delegateType.DelegateReturnType!)} (*{name})({string.Join(", ", parameters)})";
+    }
 
     public string CCastType(CType type)
     {
@@ -161,7 +172,10 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
+        CTypeKind.Opaque => $"({CTypeName(type)})0",
+        CTypeKind.EspError => "ESP_OK",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
+        CTypeKind.NativeUtf8String => "(ct_native_utf8_string){ NULL, NULL, (size_t)0 }",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         _ => "0",
     };
@@ -247,14 +261,23 @@ internal sealed class AnalysisServices : ILoweringServices
         return name;
     }
 
+    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => $"ct_delegate_callback_{NameMangler.Identifier(delegateType.FullName)}";
+
     public string MethodSignature(MethodSymbol method, string? name = null, bool prototype = false)
     {
         var returnType = method.IsConstructor ? method.ContainingType.Type : method.ReturnType;
         var parameters = new List<string>();
         if (!method.IsStatic && !method.IsConstructor)
-            parameters.Add($"{NameMangler.Type(method.ContainingType)}* ct_self");
+            parameters.Add($"{InstanceStorageType(method.ContainingType)}* ct_self");
         foreach (var parameter in method.Parameters)
-            parameters.Add(CParameterDeclaration(parameter, NameMangler.Identifier(parameter.Name)));
+        {
+            var parameterName = NameMangler.Identifier(parameter.Name);
+            parameters.Add(parameter.Type.IsNativeUtf8String && method.ExternName is null
+                ? CDeclaration(parameter.Type, parameterName)
+                : CParameterDeclaration(parameter, parameterName));
+            if (parameter.IsSynchronousCallback)
+                parameters.Add($"void* {parameterName}_context");
+        }
         var storage = method.ExternName is not null ? "extern " : "static ";
         var arguments = parameters.Count == 0 ? "void" : string.Join(", ", parameters);
         var declaration = returnType.Kind == CTypeKind.FunctionPointer
@@ -263,6 +286,10 @@ internal sealed class AnalysisServices : ILoweringServices
         var signature = storage + declaration;
         return prototype ? signature + ";" : signature;
     }
+
+    private static string InstanceStorageType(TypeSymbol type) => type.FullName == "Esp.Idf.EspError"
+        ? "esp_err_t"
+        : NameMangler.Type(type);
 
     private string FunctionPointerParameters(FunctionPointerSignature signature) => signature.ParameterTypes.Length == 0
         ? "void"

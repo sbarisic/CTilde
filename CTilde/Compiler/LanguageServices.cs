@@ -49,7 +49,7 @@ public sealed record LanguageWorkspaceSymbol(
 
 public sealed partial class LanguageServiceSnapshot
 {
-    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "static", "sealed"];
+    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "opaque", "static", "sealed"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "void"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
@@ -69,7 +69,8 @@ public sealed partial class LanguageServiceSnapshot
         _userTrees = syntaxTrees.ToImmutableArray();
         Options = options;
         var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
-        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target, nativeIntegers).AddRange(_userTrees);
+        var nativeUtf8 = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
+        _allTrees = StandardLibrary.GetSyntaxTrees(options.Target, nativeIntegers, nativeUtf8).AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
@@ -286,6 +287,8 @@ public sealed partial class LanguageServiceSnapshot
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
         Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1");
         Add("ReadOnlyNativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.ReadOnlyNativeBuffer<T>", "1");
+        if (!_model.Types.ContainsKey("System.Runtime.NativeUtf8String"))
+            Add("NativeUtf8String", LanguageCompletionKind.Struct, "System.Runtime.NativeUtf8String", "1");
 
         foreach (var type in VisibleTypes(context.Tree))
             Add(type.Name, CompletionKind(type), $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}", "2");
@@ -348,6 +351,11 @@ public sealed partial class LanguageServiceSnapshot
             Add("Length", LanguageCompletionKind.Property, "nuint Length", "0");
             Add("Pointer", LanguageCompletionKind.Property, $"{receiver.Type.ElementType!.DisplayName}* Pointer", "0");
         }
+        if (receiver.Type.IsNativeUtf8String)
+        {
+            Add("ByteLength", LanguageCompletionKind.Property, "nuint ByteLength", "0");
+            Add("Pointer", LanguageCompletionKind.Property, "byte* Pointer", "0");
+        }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.IsValueType || receiver.Type.Kind is CTypeKind.String or CTypeKind.Array))
             type = _model.Types.GetValueOrDefault("System.Object");
@@ -374,6 +382,8 @@ public sealed partial class LanguageServiceSnapshot
         {
             var receiver = InferExpression(context, member.Receiver);
             var receiverType = receiver.StaticType ?? receiver.Type?.Symbol;
+            if (receiverType is null && receiver.Type?.IsNativeUtf8String == true)
+                receiverType = _model.Types.GetValueOrDefault("System.Runtime.NativeUtf8String");
             if (receiverType is not null)
             {
                 if (receiver.StaticType?.Kind == DeclaredTypeKind.Enum)
@@ -509,6 +519,8 @@ public sealed partial class LanguageServiceSnapshot
                 }
                 if (receiver.Type?.Kind is CTypeKind.String or CTypeKind.Array && member.Name == "Length")
                     return new(CType.Int, null);
+                if (receiver.Type?.IsNativeUtf8String == true)
+                    return new(member.Name == "ByteLength" ? CType.Nuint : member.Name == "Pointer" ? new CType(CTypeKind.Pointer, ElementType: CType.Byte) : null, null);
                 var receiverType = receiver.Type?.Symbol;
                 if (receiverType is not null)
                 {

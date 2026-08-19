@@ -12,6 +12,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly HashSet<CType> _nativeBufferTypes = [];
+    private readonly HashSet<TypeSymbol> _synchronousDelegateTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
     private readonly Dictionary<(CType Type, MethodSymbol Method), string> _functionPointerTrampolines = [];
@@ -21,6 +22,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool _usesExceptions;
     private bool _usesNativeIntegers;
     private bool _usesDraft08;
+    private bool _usesNativeUtf8;
 
     public CEmitter(CompilationModel model, CompilationTarget target)
     {
@@ -39,10 +41,17 @@ internal sealed partial class CEmitter : ILoweringServices
                 foreach (var parameter in method.Parameters)
                 {
                     RegisterType(parameter.Type);
+                    if (parameter.IsSynchronousCallback && parameter.Type.Symbol is not null)
+                    {
+                        _synchronousDelegateTypes.Add(parameter.Type.Symbol);
+                        _usesExceptions = true;
+                    }
                     _usesDraft08 |= parameter.PassingKind != ParameterPassingKind.Value;
                 }
             }
         }
+        if (model.UserTypes.SelectMany(type => type.Methods).Any(method => method.ExportName is not null))
+            _usesExceptions = true;
     }
 
     public CompilationModel Model { get; }
@@ -50,6 +59,11 @@ internal sealed partial class CEmitter : ILoweringServices
     public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
+    private bool HasExports => Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.ExportName is not null);
+    private bool UsesNativeEntry => HasExports || _synchronousDelegateTypes.Count != 0;
+    private bool UsesDraft09 => HasExports || _synchronousDelegateTypes.Count != 0 || _usesNativeUtf8 ||
+        Model.UserTypes.Any(type => type.Kind == DeclaredTypeKind.Opaque) ||
+        Model.UserTypes.Any(type => type.FullName == "Esp.Idf.EspError");
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -60,6 +74,7 @@ internal sealed partial class CEmitter : ILoweringServices
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { DescriptorName(type), DelegateFactoryName(type), DelegateDropName(type) }))
             .Concat(_delegateThunks.Values)
+            .Concat(_synchronousDelegateTypes.Select(SynchronousCallbackAdapterName))
             .Concat(_functionPointerTrampolines.Values)
             .Concat(Model.UserTypes.SelectMany(type => type.Constructors).Select(ConstructorInitializerName))
             .Concat(Model.UserTypes.SelectMany(type => type.Methods)
@@ -136,6 +151,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitPrototypes(writer);
         EmitObjectMetadata(writer);
         EmitDelegateSupport(writer);
+        EmitSynchronousDelegateAdapters(writer);
         EmitFunctionPointerTrampolines(writer);
         writer.WriteLine();
         foreach (var definition in definitions)
@@ -145,6 +161,9 @@ internal sealed partial class CEmitter : ILoweringServices
         }
         writer.WriteBlock(moduleInitializer.TrimEnd().Split('\n'));
         writer.WriteLine();
+        EmitExports(writer);
+        if (HasExports)
+            writer.WriteLine();
         if (!IsEspIdf)
         {
             EmitKeepSymbols(writer);
@@ -170,6 +189,12 @@ internal sealed partial class CEmitter : ILoweringServices
         var writer = new CWriter();
         writer.WriteLine("static void ct_module_init(void)");
         writer.WriteLine("{");
+        if (HasExports)
+        {
+            writer.WriteLine("    static bool ct_initialized = false;");
+            writer.WriteLine("    if (ct_initialized) return;");
+            writer.WriteLine("    ct_initialized = true;");
+        }
         var initializerIndex = 0;
         foreach (var initializer in initializers)
         {
@@ -215,11 +240,14 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.String => "ct_string*",
         CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
         CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
+        CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
+        CTypeKind.EspError => "esp_err_t",
         CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"ct_{NameMangler.TypeCode(type)}",
+        CTypeKind.NativeUtf8String => "ct_native_utf8_string",
         CTypeKind.Null => "void*",
         _ => "int32_t",
     };
@@ -234,7 +262,9 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public string CParameterDeclaration(ParameterSymbol parameter, string name) => parameter.PassingKind switch
     {
+        _ when parameter.IsSynchronousCallback => SynchronousCallbackDeclaration(parameter.Type.Symbol!, name),
         _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}* {name}_data, size_t {name}_length",
+        _ when parameter.Type.IsNativeUtf8String => $"const char* {name}",
         ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}* {name}",
         ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}* {name}",
         _ => CDeclaration(parameter.Type, name),
@@ -243,10 +273,19 @@ internal sealed partial class CEmitter : ILoweringServices
     private string ParameterTypeName(ParameterSymbol parameter) => parameter.PassingKind switch
     {
         _ when parameter.Type.IsNativeBuffer => $"{(parameter.Type.Kind == CTypeKind.ReadOnlyNativeBuffer ? "const " : string.Empty)}{CTypeName(parameter.Type.ElementType!)}*, size_t",
+        _ when parameter.Type.IsNativeUtf8String => "const char*",
         ParameterPassingKind.In => $"const {CTypeName(parameter.Type)}*",
         ParameterPassingKind.Ref or ParameterPassingKind.Out => $"{CTypeName(parameter.Type)}*",
         _ => CTypeName(parameter.Type),
     };
+
+    private string SynchronousCallbackDeclaration(TypeSymbol delegateType, string name)
+    {
+        var parameters = delegateType.DelegateParameters.Select(parameter => ParameterTypeName(parameter)).Append("void*");
+        return $"{CTypeName(delegateType.DelegateReturnType!)} (*{name})({string.Join(", ", parameters)})";
+    }
+
+    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => $"ct_delegate_callback_{NameMangler.Identifier(delegateType.FullName)}";
 
     private static IEnumerable<string> ParameterArgumentNames(ParameterSymbol parameter, string name) => parameter.Type.IsNativeBuffer
         ? [$"{name}_data", $"{name}_length"]
@@ -285,7 +324,10 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
+        CTypeKind.Opaque => $"({CTypeName(type)})0",
+        CTypeKind.EspError => "ESP_OK",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
+        CTypeKind.NativeUtf8String => "(ct_native_utf8_string){ NULL, NULL, (size_t)0 }",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         _ => "0",
     };
@@ -322,11 +364,17 @@ internal sealed partial class CEmitter : ILoweringServices
             _usesDraft08 = true;
             RegisterType(type.ElementType!);
         }
+        else if (type.IsNativeUtf8String)
+        {
+            _usesNativeUtf8 = true;
+            _usesDraft08 = true;
+            _usesNativeIntegers = true;
+        }
     }
 
     public void RegisterBox(CType type)
     {
-        if (type.Kind is CTypeKind.Void or CTypeKind.Null or CTypeKind.Error or CTypeKind.String or CTypeKind.Class or CTypeKind.Array)
+        if (type.Kind is CTypeKind.Void or CTypeKind.Null or CTypeKind.Error or CTypeKind.String or CTypeKind.Class or CTypeKind.Array or CTypeKind.Opaque or CTypeKind.NativeUtf8String)
             return;
         _boxedTypes.Add(type);
         RegisterType(type);
@@ -459,13 +507,24 @@ internal sealed partial class CEmitter : ILoweringServices
         var returnType = method.IsConstructor ? method.ContainingType.Type : method.ReturnType;
         var parameters = new List<string>();
         if (!method.IsStatic && !method.IsConstructor)
-            parameters.Add($"{NameMangler.Type(method.ContainingType)}* ct_self");
+            parameters.Add($"{InstanceStorageType(method.ContainingType)}* ct_self");
         foreach (var parameter in method.Parameters)
-            parameters.Add(CParameterDeclaration(parameter, NameMangler.Identifier(parameter.Name)));
+        {
+            var parameterName = NameMangler.Identifier(parameter.Name);
+            parameters.Add(parameter.Type.IsNativeUtf8String && method.ExternName is null
+                ? CDeclaration(parameter.Type, parameterName)
+                : CParameterDeclaration(parameter, parameterName));
+            if (parameter.IsSynchronousCallback)
+                parameters.Add($"void* {parameterName}_context");
+        }
         var storage = method.ExternName is not null ? "extern " : "static ";
         var signature = storage + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;
     }
+
+    private static string InstanceStorageType(TypeSymbol type) => type.FullName == "Esp.Idf.EspError"
+        ? "esp_err_t"
+        : NameMangler.Type(type);
 
     internal void RegisterDeclaredTypes()
     {

@@ -4,6 +4,10 @@ using System.Runtime;
 namespace Examples;
 
 public delegate long LongTransformer(long value);
+public delegate int IntTransformer(int value);
+
+[NativeType("uintptr_t", "stdint.h")]
+public opaque NativeResource;
 
 public enum Direction : byte
 {
@@ -49,6 +53,37 @@ public sealed class Counter
     {
         value++;
     }
+
+    public int Add(int delta)
+    {
+        return value + delta;
+    }
+}
+
+public static class NativeInterop
+{
+    [Extern("ct_native_utf8_length")]
+    [NoAlloc]
+    public static uint Utf8Length(NativeUtf8String value);
+
+    [Extern("ct_native_resource_create")]
+    [NoAlloc]
+    public static int Create([Creates] out NativeResource resource);
+
+    [Extern("ct_native_resource_value")]
+    [NoAlloc]
+    public static int Read([Borrowed] NativeResource resource);
+
+    [Extern("ct_native_resource_release")]
+    [NoAlloc]
+    public static void Release([Consumes] NativeResource resource);
+
+    [Extern("ct_native_invoke_delegate")]
+    public static int Invoke([SynchronousCallback] IntTransformer callback, int value);
+
+    [Extern("ct_native_call_export")]
+    [NoAlloc]
+    public static int CallExport(int left, int right);
 }
 
 public static class Program
@@ -84,6 +119,12 @@ public static class Program
     [Extern("ct_native_buffer_sum")]
     [NoAlloc]
     private static unsafe uint NativeBufferSum(ReadOnlyNativeBuffer<byte> buffer);
+
+    [Export("ctilde_add")]
+    public static int Add(int left, int right)
+    {
+        return left + right;
+    }
 
     [NoAlloc]
     private static void ShowDeferredCleanup()
@@ -174,6 +215,18 @@ public static class Program
             ReadOnlyNativeBuffer<byte> readable = buffer;
             Console.WriteLine(NativeBufferSum(readable));
         }
+
+        NativeUtf8String nativeText = NativeUtf8String.Borrow("ctilde");
+        Console.WriteLine(NativeInterop.Utf8Length(nativeText));
+
+        NativeResource resource;
+        int createResult = NativeInterop.Create(out resource);
+        defer NativeInterop.Release(resource);
+        Console.WriteLine(createResult + NativeInterop.Read(resource));
+
+        IntTransformer nativeDelegate = counter.Add;
+        Console.WriteLine(NativeInterop.Invoke(nativeDelegate, 38));
+        Console.WriteLine(NativeInterop.CallExport(20, 22));
 
         ShowDeferredCleanup();
     }

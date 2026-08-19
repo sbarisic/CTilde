@@ -90,13 +90,19 @@ internal sealed partial class BodyPipeline
                 RequireUnsafe(syntax);
             if (!forWrite && !local.IsAssigned)
                 Report("CT3108", $"Local '{syntax.Name}' is read before it is assigned.", syntax);
+            if (!forWrite && local.NativeResourceState == NativeResourceState.Moved)
+                Report("CT1254", $"Owned native resource '{syntax.Name}' is used after ownership moved.", syntax);
+            var address = local.IsDurable && local.Type.Kind != CTypeKind.FunctionPointer
+                ? $"({_emitter.CTypeName(local.Type)}*)(void*)(uintptr_t)&{local.CName}"
+                : $"&{local.CName}";
             return new LoweredExpression
             {
                 Type = local.Type,
                 Code = local.ConstantCode ?? local.CName,
-                LValue = new LoweredLValue { Store = value => $"{local.CName} = {value}", Address = $"&{local.CName}", Local = local },
+                LValue = new LoweredLValue { Store = value => $"{local.CName} = {value}", Address = address, Local = local },
                 IsConstant = local.IsConst,
                 ConstantValue = local.ConstantValue,
+                Ownership = local.NativeResourceState == NativeResourceState.Owned ? OwnershipKind.Owned : local.NativeResourceState is NativeResourceState.Borrowed or NativeResourceState.Deferred ? OwnershipKind.Borrowed : OwnershipKind.None,
             };
         }
         if (_parameters.TryGetValue(syntax.Name, out var parameter))
@@ -218,6 +224,15 @@ internal sealed partial class BodyPipeline
                 ? new LoweredExpression { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.Length", Prelude = receiver.Prelude }
                 : new LoweredExpression { Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType), Code = $"{receiver.Code}.Data", Prelude = receiver.Prelude };
         }
+        if (receiver.Type.IsNativeUtf8String && syntax.Name is "ByteLength" or "Pointer")
+        {
+            receiver = Materialize(receiver, syntax.Receiver);
+            if (syntax.Name == "Pointer")
+                RequireUnsafe(syntax);
+            return syntax.Name == "ByteLength"
+                ? new LoweredExpression { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.ByteLength", Prelude = receiver.Prelude }
+                : new LoweredExpression { Type = new CType(CTypeKind.Pointer, ElementType: CType.Byte), Code = $"(uint8_t*)(void*){receiver.Code}.Data", Prelude = receiver.Prelude };
+        }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
             type = _model.Types.GetValueOrDefault("System.Object");
@@ -297,6 +312,16 @@ internal sealed partial class BodyPipeline
         if (property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal))
             RequireUnsafe(syntax);
         CheckAccessibility(forWrite ? property.SetterAccessibility : property.GetterAccessibility, property, syntax);
+        if (property.ContainingType.FullName == "Esp.Idf.EspError" && property.Name is "Code" or "IsSuccess")
+        {
+            if (forWrite)
+                Report("CT1266", $"Property '{property.Name}' is read-only.", syntax);
+            receiver ??= new LoweredExpression { Type = property.ContainingType.Type, Code = "(*ct_self)" };
+            receiver = Materialize(receiver, syntax);
+            return property.Name == "Code"
+                ? new LoweredExpression { Type = CType.Int, Code = $"(int32_t){receiver.Code}", Prelude = receiver.Prelude, Symbol = property }
+                : new LoweredExpression { Type = CType.Bool, Code = $"({receiver.Code} == ESP_OK)", Prelude = receiver.Prelude, Symbol = property };
+        }
         var prelude = new List<string>();
         string receiverArgument = string.Empty;
         var baseReceiver = receiver?.IsBaseReceiver == true;
@@ -582,6 +607,15 @@ internal sealed partial class BodyPipeline
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
         _emitter.AllocationEffects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
+        if (selected.ExternName == "ct_native_utf8_borrow" &&
+            syntax.Arguments is [{ Expression: LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string utf8Literal } }] &&
+            utf8Literal.Contains('\0'))
+            Report("CTS0003", "NativeUtf8String.Borrow rejects strings containing an embedded NUL byte.", syntax.Arguments[0].Expression);
+        if (captureForDefer && selected.Parameters.Any(parameter => parameter.IsSynchronousCallback))
+        {
+            Report("CT1268", "A synchronous native delegate callback cannot be captured by defer.", syntax);
+            return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
+        }
 
         var prelude = new List<string>();
         string? receiverCode = null;
@@ -609,7 +643,7 @@ internal sealed partial class BodyPipeline
             }
         }
         var loweredArguments = captureForDefer
-            ? CaptureDeferredArguments(arguments, selected.Parameters, syntax.Arguments)
+            ? CaptureDeferredArgumentsWithPostlude(arguments, selected.Parameters, syntax.Arguments)
             : LowerArguments(arguments, selected.Parameters, syntax.Arguments);
         prelude.AddRange(loweredArguments.Prelude);
 
@@ -629,16 +663,52 @@ internal sealed partial class BodyPipeline
         else
         {
             if (receiverCode is not null)
-                callArguments[0] = $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
+                callArguments[0] = selected.ContainingType.FullName == "Esp.Idf.EspError"
+                    ? $"(esp_err_t*)(void*){receiverCode}"
+                    : $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
             call = $"{selected.CName}({string.Join(", ", callArguments)})";
         }
         if (captureForDefer)
             _deferId++;
         if (captureForDefer)
             return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnType.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None, Symbol = selected };
+        if (loweredArguments.Postlude.Count != 0)
+        {
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, "synchronous native delegate callback");
+            if (selected.ReturnType == CType.Void)
+            {
+                prelude.Add(call + ";");
+                prelude.AddRange(loweredArguments.Postlude);
+                return new LoweredExpression { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+            }
+            var callbackResult = NewTemp();
+            prelude.Add($"{_emitter.CDeclaration(selected.ReturnType, callbackResult)} = {call};");
+            prelude.AddRange(loweredArguments.Postlude);
+            call = callbackResult;
+        }
+        if (selected.ReturnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+        {
+            if (!selected.ReturnsNullable && (selected.ReturnType.Kind == CTypeKind.Opaque || selected.ReturnsOwned || selected.ReturnsBorrowed))
+            {
+                var nativeResult = NewTemp();
+                prelude.Add($"{_emitter.CDeclaration(selected.ReturnType, nativeResult)} = {call};");
+                prelude.Add($"(void)ct_require_nonnull((void*){nativeResult}, {_emitter.SourceArgument(syntax)});");
+                call = nativeResult;
+            }
+            return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnsOwned ? OwnershipKind.Owned : OwnershipKind.Borrowed, Symbol = selected };
+        }
         return selected.ReturnType.ContainsManagedReferences
             ? OwnResult(selected.ReturnType, call, prelude, selected.ReturnsBorrowed, selected)
             : new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+    }
+
+    private (List<string> Prelude, List<string> Codes, List<string> Postlude) CaptureDeferredArgumentsWithPostlude(
+        IReadOnlyList<LoweredExpression> arguments,
+        ImmutableArray<ParameterSymbol> parameters,
+        ImmutableArray<ArgumentSyntax> syntax)
+    {
+        var captured = CaptureDeferredArguments(arguments, parameters, syntax);
+        return (captured.Prelude, captured.Codes, []);
     }
 
     private static bool IsCallablePointer(CType? type) => type?.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer;

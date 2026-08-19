@@ -87,6 +87,8 @@ EmitResult result = compilation.EmitC(writer);
 
 `GetDiagnostics()` runs declarations, immutable body binding, flow/effect analysis, and target validation. It does not construct a C emitter, C writer, typed IR, or translation unit. `EmitC()` lazily lowers and caches the backend result after successful analysis. Repeated emission is byte-identical.
 
+`EmitCHeader()` consumes the validated `BoundProgram` directly. It does not initialize typed IR or the C emitter. This keeps export discovery, native headers, layouts, ownership comments, and prototypes available to tooling without backend side effects.
+
 `EmitC` writes nothing when `EmitResult.Success` is false.
 
 ## Syntax and recovery
@@ -184,9 +186,9 @@ The current ESP target uses handwritten fixed-width shims. The intended next lay
 
 This design follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Private and example-only headers remain outside generated bindings by default.
 
-The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, and scoped pointer-plus-length native buffers. The compiler flattens buffer parameters and renders qualified pointer declarators from structured types rather than text templates. Opaque handles, scoped native strings, ownership metadata, and generated header adapters remain before broad ESP-IDF API coverage. `defer` will describe native release obligations without making native resources managed objects.
+The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, scoped pointer-plus-length native buffers, scoped UTF-8 views, nominal opaque handles, and lexical native ownership. The compiler flattens buffers and UTF-8 inputs and renders qualified declarators from structured types. `defer` reserves opaque release obligations without making native resources managed objects. Broad ESP-IDF coverage still requires header-driven source-compatible binding generation.
 
-Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.8 emits static-method C trampolines for synchronous callbacks on the current C~ task and converts an escaping exception to fatal `CTE0003`. Exported/context trampolines, retained lifetimes, task attachment, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.9 emits body-bearing export wrappers and delegate/context trampolines for synchronous calls on the internally attached entry task. Wrappers initialize modules and convert escaping exceptions to fatal `CTE0003`; wrong-task entry fails with `CTT0001`. Retained lifetimes, public task attachment, native-created tasks, and ISR entry remain later profiles because their stack, blocking, allocation, and IRAM-safety rules differ.
 
 ## Runtime ownership
 
@@ -206,6 +208,7 @@ The generated translation unit embeds a small runtime:
 - A single-thread `setjmp` and `longjmp` handler stack plus automatic ownership cleanup stack for C~ exceptions.
 - One volatile automatic method-state aggregate for values that must remain defined across `longjmp`.
 - ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and same-task callback exception barriers.
+- Scoped UTF-8 owner views, nominal opaque-handle ownership checks, deterministic export headers, and conditional entry-task guards.
 
 Managed storage is reclaimed when its reference count reaches zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed. C~ source has no `delete`, destructor, or finalizer operation.
 

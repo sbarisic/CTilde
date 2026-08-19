@@ -1,7 +1,9 @@
 typedef struct ct_type_descriptor ct_type_descriptor;
 struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); };
 typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
+typedef struct ct_t_8_Examples_14_IntTransformer ct_t_8_Examples_14_IntTransformer;
 typedef struct ct_t_8_Examples_15_LongTransformer ct_t_8_Examples_15_LongTransformer;
+typedef struct ct_t_8_Examples_13_NativeInterop ct_t_8_Examples_13_NativeInterop;
 typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
 typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
 typedef struct ct_t_6_System_7_Console ct_t_6_System_7_Console;
@@ -10,11 +12,14 @@ typedef struct ct_t_6_System_9_Exception ct_t_6_System_9_Exception;
 typedef struct ct_t_6_System_6_Object ct_t_6_System_6_Object;
 typedef struct ct_t_6_System_13_ObjectRuntime ct_t_6_System_13_ObjectRuntime;
 typedef struct ct_t_14_System_2ERuntime_6_Memory ct_t_14_System_2ERuntime_6_Memory;
+typedef struct ct_t_14_System_2ERuntime_16_NativeUtf8String ct_t_14_System_2ERuntime_16_NativeUtf8String;
 typedef struct ct_a_i32 ct_a_i32;
 typedef uint8_t ct_t_8_Examples_9_Direction;
 struct ct_t_6_System_6_Object
 struct ct_t_8_Examples_7_Counter
+struct ct_t_8_Examples_14_IntTransformer
 struct ct_t_8_Examples_15_LongTransformer
+struct ct_t_8_Examples_13_NativeInterop
 struct ct_t_8_Examples_5_Point
 struct ct_t_8_Examples_7_Program
 struct ct_t_6_System_7_Console
@@ -22,9 +27,11 @@ struct ct_t_6_System_11_Environment
 struct ct_t_6_System_9_Exception
 struct ct_t_6_System_13_ObjectRuntime
 struct ct_t_14_System_2ERuntime_6_Memory
+struct ct_t_14_System_2ERuntime_16_NativeUtf8String
 struct ct_a_i32 { ct_object Object; int32_t Length; int32_t* Data; };
 static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue);
 static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self);
+static int32_t ct_m__16_Examples_2ECounter_3_Add_i32(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_delta);
 static int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self);
 static void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value);
 static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y);
@@ -33,6 +40,7 @@ static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
 static int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value);
 static void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result);
+static int32_t ct_m__16_Examples_2EProgram_3_Add_i32_i32(int32_t u_4_left, int32_t u_5_right);
 static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void);
 static void ct_m__16_Examples_2EProgram_4_Main(void);
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
@@ -57,9 +65,14 @@ static bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject(ct_t_6_System
 static int32_t ct_m__13_System_2EObject_11_GetHashCode(ct_t_6_System_6_Object* ct_self);
 static bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right);
 static bool ct_m__13_System_2EObject_15_ReferenceEquals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right);
+static ct_t_14_System_2ERuntime_16_NativeUtf8String ct_ctor__31_System_2ERuntime_2ENativeUtf8String_16_NativeUtf8String(void);
+static ct_native_utf8_string ct_get__31_System_2ERuntime_2ENativeUtf8String_4_Null(void);
+static uintptr_t ct_get__31_System_2ERuntime_2ENativeUtf8String_10_ByteLength(ct_t_14_System_2ERuntime_16_NativeUtf8String* ct_self);
+static uint8_t* ct_get__31_System_2ERuntime_2ENativeUtf8String_7_Pointer(ct_t_14_System_2ERuntime_16_NativeUtf8String* ct_self);
 static ct_string* ct_vthunk_u_38_ct_5Fm_5F_5F16_5FSystem_5F2EException_5F8_5FToString(ct_object* self) { return ct_m__16_System_2EException_8_ToString((ct_t_6_System_9_Exception*)(void*)self); }
 static ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue)
 static void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self)
+static int32_t ct_m__16_Examples_2ECounter_3_Add_i32(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_delta)
 static int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self)
 static void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value)
 static ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y)
@@ -68,6 +81,7 @@ static int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
 static uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
 static int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value)
 static void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result)
+static int32_t ct_m__16_Examples_2EProgram_3_Add_i32_i32(int32_t u_4_left, int32_t u_5_right)
 static void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void)
 static void ct_m__16_Examples_2EProgram_4_Main(void)
 static void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
@@ -92,4 +106,8 @@ static bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject(ct_t_6_System
 static int32_t ct_m__13_System_2EObject_11_GetHashCode(ct_t_6_System_6_Object* ct_self)
 static bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right)
 static bool ct_m__13_System_2EObject_15_ReferenceEquals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right)
+static ct_t_14_System_2ERuntime_16_NativeUtf8String ct_ctor__31_System_2ERuntime_2ENativeUtf8String_16_NativeUtf8String(void)
+static ct_native_utf8_string ct_get__31_System_2ERuntime_2ENativeUtf8String_4_Null(void)
+static uintptr_t ct_get__31_System_2ERuntime_2ENativeUtf8String_10_ByteLength(ct_t_14_System_2ERuntime_16_NativeUtf8String* ct_self)
+static uint8_t* ct_get__31_System_2ERuntime_2ENativeUtf8String_7_Pointer(ct_t_14_System_2ERuntime_16_NativeUtf8String* ct_self)
 int main(void)

@@ -20,6 +20,8 @@ internal static class TargetValidator
         "ct_esp_ws2812_set_pixel",
         "ct_esp_ws2812_refresh",
         "ct_esp_ws2812_clear",
+        "ct_esp_error_name",
+        "ct_esp_current_task",
     };
 
     public static void Validate(CompilationModel model, ILoweringServices emitter, CompilationTarget target)
@@ -61,7 +63,7 @@ internal static class TargetValidator
 
         var complete = new HashSet<TypeSymbol>();
         var active = new HashSet<TypeSymbol>();
-        foreach (var type in model.UserTypes.Where(type => type.Kind != DeclaredTypeKind.Enum))
+        foreach (var type in model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
             VisitLayout(type);
 
         void VisitLayout(TypeSymbol type)

@@ -1,12 +1,12 @@
 # C~ language specification
 
-Specification version: draft 0.8
+Specification version: draft 0.9
 
 ## Status
 
-This document is the normative specification for C~ draft 0.8.
+This document is the normative specification for C~ draft 0.9.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.8 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.9 compiler emits deterministic GNU C23 and diagnoses invalid programs before it writes C.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -101,7 +101,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.8 has no aliases and no `using static`.
+Draft 0.9 has no aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -171,7 +171,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.8 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.9 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -208,7 +208,7 @@ Every expression has a compile-time type before C emission.
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.8 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
+Draft 0.9 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -228,7 +228,7 @@ byte[] data = new byte[256];
 
 Every array has a read-only `Length` property of type `int`. Indexing starts at zero and checks the receiver, index, and length.
 
-Draft 0.8 has no multidimensional or jagged arrays.
+Draft 0.9 has no multidimensional or jagged arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
@@ -253,7 +253,7 @@ The final type is the return type; `delegate* unmanaged<void>` has no parameters
 
 ### Native buffers and stack allocation
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic scoped value types. They are the only generic forms in draft 0.8. `T` must be a complete unmanaged type and cannot be `void`, an array, a managed reference, a delegate, or a reference-bearing structure.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic scoped value types. They are the only generic forms in draft 0.9. `T` must be a complete unmanaged type and cannot be `void`, an array, a managed reference, a delegate, or a reference-bearing structure.
 
 Both views expose `nuint Length` and `T* Pointer`. Writable buffers have checked read/write indexing; read-only buffers have checked read-only indexing. Indexes use `nuint`. Writable-to-read-only conversion is implicit. Constructing a view from `(T* pointer, nuint length)` requires an unsafe context.
 
@@ -265,6 +265,17 @@ ReadOnlyNativeBuffer<byte> input = data;
 `stackalloc T[count]` returns `NativeBuffer<T>`. The count is `int` or `nuint`; negative `int` values fail, zero produces `{ null, 0 }`, and size multiplication is checked before aligned compiler alloca storage is requested. Lexical stack allocation inside a loop is rejected because the storage lasts until method return. It is permitted in `[NoAlloc]` code.
 
 Buffers can be locals and value parameters and can pass through nested synchronous calls. They cannot escape through fields, properties, arrays, boxing, managed structures, static storage, returns, delegates, or by-reference parameters. At every C ABI boundary a buffer parameter expands to adjacent pointer and `size_t` length parameters; read-only data pointers are `const`.
+
+`System.Runtime.NativeUtf8String` is a scoped stack-only view over a managed string. `Borrow(string)` retains its non-null owner without allocating and exposes UTF-8 data and a `nuint` byte length. Embedded NUL is rejected at compile time for literals and fails with `CTS0003` for dynamic values. `Null` is valid only at a `[Nullable]` native boundary. Native UTF-8 views can be locals and input parameters, but cannot be fields, properties, arrays, returns, boxes, static values, or retained arguments. An extern parameter maps to `const char*`.
+
+An opaque declaration is nominal and names a native typedef and its public header:
+
+```csharp
+[NativeType("esp_timer_handle_t", "esp_timer.h")]
+public opaque EspTimerHandle;
+```
+
+Opaque values support locals, parameters, returns, `out` creation, equality, and `null`. They cannot be fields, properties, arrays, boxes, managed-structure members, pointer operands, casts, arithmetic, or static storage. Owned handles are move-only. The compiler rejects discarded owned results, use after move, double consumption, owned-slot overwrite, and normal or exceptional exits with unresolved ownership.
 
 ### Enumerations
 
@@ -355,7 +366,7 @@ public delegate int Transformer(int value);
 
 A compatible method group converts contextually to that delegate. Overload resolution uses the delegate's exact parameter and return types. Static, instance, inherited, virtual, and `base` method groups are supported. An instance delegate retains its receiver; virtual invocation dispatches against the captured receiver, while `base.Method` remains a direct base call.
 
-Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation reports `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.8 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
+Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation reports `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.9 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
 
 ### Classes
 
@@ -466,7 +477,7 @@ Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site
 
 An `out` call releases and zeroes an existing managed/reference-bearing destination before transfer. Normal return assigns the caller slot; exceptional control does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
 
-Draft 0.8 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
+Draft 0.9 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### Evaluation order
 
@@ -500,13 +511,17 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 ### Native calls and callbacks
 
-Extern methods and unmanaged function pointers cover direct calls from C~ to exact C symbols and signatures, including native-sized scalars, unmanaged `ref`/`in`/`out`, and flattened native-buffer parameters. They do not provide native header imports, opaque native handles, native UTF-8 strings, exported C~ methods, or retained callbacks.
+Extern methods and unmanaged function pointers cover direct calls from C~ to exact C symbols and signatures, including native-sized scalars, unmanaged `ref`/`in`/`out`, flattened native buffers, opaque handles, and scoped UTF-8 input. `[Borrowed]`, `[Consumes]`, `[Retained]`, `[Creates]`, and `[Nullable]` describe opaque or explicitly annotated pointer parameters. `[ReturnsOwned]`, `[ReturnsBorrowed]`, and `[ReturnsNullable]` describe results. A borrowed input is the default. `[Creates]` applies to `out`; ownership transfers only on normal return. `[Retained]` transfers an owned opaque value to native code.
+
+`[Export("symbol")]` marks a public static body-bearing C~ method with a unique portable C name. Its signature is limited to ABI-safe scalars, enums, unmanaged structures, pointers, opaque handles, `EspError`, native buffers, by-reference parameters, and input `NativeUtf8String`. The generated wrapper initializes modules, requires the attached C~ task, translates flattened arguments, and converts an escaping exception to fatal `CTE0003`. `EmitCHeader` and CLI `--header` produce its deterministic C/C++ declaration and reachable unmanaged layouts.
+
+`[SynchronousCallback]` on an extern delegate parameter flattens the delegate to a C function pointer followed by `void*` context. The adapter retains the delegate for the call, preserves instance and virtual dispatch, and releases it afterward. Null requires `[Nullable]`. The callback must run synchronously on the attached C~ task; otherwise the runtime fails with `CTT0001`. Callback exceptions run C~ cleanup and terminate with `CTE0003`.
 
 Ordinary parameters are borrowed for the duration of a call. `[Retained]` accepts no arguments and is valid only on a direct class, array, or string parameter of an extern method. The compiler retains that argument immediately before the call and transfers the additional ownership count to native code. Invalid uses report `CT1234`.
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.8 supports a C~ static-method trampoline passed as an unmanaged function pointer to native code and invoked synchronously on the current C~ task. An exception escaping that callback runs C~ cleanup and terminates with `CTE0003`; it never unwinds through native frames. Cross-task, retained, ISR, and exported callbacks remain unsupported.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.9 supports static-method function-pointer trampolines and synchronous delegate/context adapters invoked on the attached C~ task. An exception escaping a callback runs C~ cleanup and terminates with `CTE0003`; it never unwinds through native frames. Retained, cross-task, native-created-task, and ISR callbacks remain unsupported.
 
 ### NoAlloc
 
@@ -520,7 +535,7 @@ Allocating operations are class and array construction, boxing, delegate creatio
 
 The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, and `Environment`. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.8 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
+Draft 0.9 does not provide `System.Type`, reflection, `System.Convert`, or `System.Math`.
 
 ## Object and array creation
 
@@ -606,7 +621,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.8 has no pattern cases and no `goto case`.
+Draft 0.9 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -669,7 +684,7 @@ Exceptions are unchecked. Every call can complete by throwing. A throw from a ca
 
 A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
-Exception filters, inner exceptions, stack traces, specialized exception subclasses, and automatic disposal are not part of draft 0.8. An exception that escapes a supported synchronous unmanaged callback becomes fatal `CTE0003`; general exception propagation across native boundaries is unsupported.
+Exception filters, inner exceptions, stack traces, specialized exception subclasses, and automatic disposal are not part of draft 0.9. An exception that escapes a supported synchronous native boundary becomes fatal `CTE0003`; general exception propagation across native boundaries is unsupported.
 
 ## Unsafe code
 
@@ -687,17 +702,17 @@ public static unsafe void Clear(byte* address, int length)
 
 Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, pointer casts, unmanaged function-pointer declarations, method-address acquisition, native-buffer construction, stack allocation, comparisons, casts, and invocation. It does not disable normal type checking.
 
-Draft 0.8 has no inline assembly.
+Draft 0.9 has no inline assembly.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.8 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.9 uses single-threaded, non-moving automatic reference counting for classes, arrays, strings, boxes, and references nested in structures. Heap objects begin with one owned reference and are reclaimed when the last owned reference is released. Static and empty strings are immortal. Static managed fields own their values until program termination.
 
-Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.8.
+Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.9.
 
 `System.Runtime.Memory.Retain` and `Release` manipulate an additional untracked ownership count. `null` is a no-op. They are unsafe APIs: unbalanced use can leak, dangle, or double-release a value. Calling any unsafe method requires an unsafe method or block and otherwise reports `CT2139`.
 
-External resources require explicit release. `defer` provides deterministic block cleanup for user-defined native release calls; there is no language `using` statement or automatic `Dispose` convention.
+External resources require explicit release. `defer Release(handle);` reserves an owned opaque handle's cleanup immediately, forbids reassignment or a second transfer, and still permits borrowed use until the block exits. Cleanup runs before ordinary lexical ownership teardown. There is no language `using` statement or automatic `Dispose` convention.
 
 Managed null access, invalid casts, invalid unboxing, array failures, allocation failures, integer division by zero, and string overflow terminate the program. These runtime failures are not catchable.
 
@@ -718,7 +733,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.8 when:
+A compiler conforms to draft 0.9 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -726,7 +741,7 @@ A compiler conforms to draft 0.8 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.8 has no second backend.
+The canonical backend is GNU C23. Draft 0.9 has no second backend.
 
 ## Deliberate differences from C#
 
@@ -737,4 +752,4 @@ The canonical backend is GNU C23. Draft 0.8 has no second backend.
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.8 defers interfaces, abstract types, general generics, weak references, cycle collection, exception filters, inner exceptions, stack traces, specialized exception subclasses, lambdas and closures, multicast delegates, exported methods, retained or cross-task callbacks, opaque native handles, native strings, reference returns and locals, origin-sensitive buffer escape analysis, iterators, pattern matching, nullable analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, general native-boundary unwinding, volatile and atomic access, and thread-safe exception handlers.
+Draft 0.9 defers interfaces, abstract types, general generics, weak references, cycle collection, exception filters, inner exceptions, stack traces, specialized exception subclasses, lambdas and closures, multicast delegates, retained or cross-task callbacks, public task attachment, ISR entry, generated native bindings, owned resource fields, reference returns and locals, origin-sensitive buffer escape analysis, iterators, pattern matching, nullable reference analysis, reflection, dynamic binding, async methods, LINQ, multidimensional arrays, string interpolation, automatic disposal conventions, general native-boundary unwinding, volatile and atomic access, and thread-safe exception handlers.

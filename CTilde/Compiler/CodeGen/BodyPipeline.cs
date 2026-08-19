@@ -139,7 +139,10 @@ internal sealed partial class BodyPipeline
                 if (!_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
                     Report("CT3100", $"Not every reachable path returns a value from '{_method.Name}'.", _method.Syntax ?? _method.Body);
                 if (flow.FallsThrough)
+                {
                     ValidateOutParameters(_method.Body);
+                    ValidateNativeResourceObligations();
+                }
             }
 
             if (_method.IsConstructor)
@@ -273,6 +276,7 @@ internal sealed partial class BodyPipeline
             ? "ct_self"
             : $"({NameMangler.Type(targetType)}*)(void*)ct_self";
         writer.WriteLine($"{CEmitter.ConstructorInitializerName(target)}({self}{(lowered.Codes.Count == 0 ? string.Empty : ", " + string.Join(", ", lowered.Codes))});");
+        EmitPrelude(writer, lowered.Postlude);
         return syntax?.Kind == ConstructorInitializerKind.This;
     }
 

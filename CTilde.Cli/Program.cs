@@ -15,6 +15,7 @@ static int Run(string[] args)
     string? output = null;
     string? inputDirectory = null;
     string? projectManifest = null;
+    string? headerOutput = null;
     var checkOnly = false;
     var trace = false;
     var target = CompilationTarget.Hosted;
@@ -35,6 +36,11 @@ static int Run(string[] args)
                 if (++index >= args.Length)
                     return UsageError("--compile-directory requires a directory path.");
                 inputDirectory = args[index];
+                break;
+            case "--header":
+                if (++index >= args.Length)
+                    return UsageError("--header requires an output path.");
+                headerOutput = args[index];
                 break;
             case "--project":
                 if (++index >= args.Length)
@@ -67,8 +73,8 @@ static int Run(string[] args)
 
     if (inputDirectory is not null)
     {
-        if (inputs.Count != 0 || output is not null || checkOnly || projectManifest is not null)
-            return UsageError("--compile-directory cannot be combined with input files, --project, -o, or --check.");
+        if (inputs.Count != 0 || output is not null || headerOutput is not null || checkOnly || projectManifest is not null)
+            return UsageError("--compile-directory cannot be combined with input files, --project, -o, --header, or --check.");
 
         return CompileDirectory(inputDirectory, trace, target);
     }
@@ -79,25 +85,33 @@ static int Run(string[] args)
             return UsageError("--project cannot be combined with input files, --compile-directory, or --target.");
         if (!checkOnly && string.IsNullOrWhiteSpace(output))
             return UsageError("-o is required unless --check is used.");
-        return CompileProject(projectManifest, output, checkOnly, trace);
+        if (checkOnly && headerOutput is not null)
+            return UsageError("--header cannot be combined with --check.");
+        if (headerOutput is not null && Path.GetFullPath(headerOutput).Equals(Path.GetFullPath(output!), StringComparison.OrdinalIgnoreCase))
+            return UsageError("--header and -o must name different files.");
+        return CompileProject(projectManifest, output, headerOutput, checkOnly, trace);
     }
 
     if (inputs.Count == 0)
         return UsageError("At least one .ct input file is required.");
     if (!checkOnly && string.IsNullOrWhiteSpace(output))
         return UsageError("-o is required unless --check is used.");
+    if (checkOnly && headerOutput is not null)
+        return UsageError("--header cannot be combined with --check.");
+    if (headerOutput is not null && Path.GetFullPath(headerOutput).Equals(Path.GetFullPath(output!), StringComparison.OrdinalIgnoreCase))
+        return UsageError("--header and -o must name different files.");
 
-    return Compile(inputs, output, checkOnly, trace, target);
+    return Compile(inputs, output, headerOutput, checkOnly, trace, target);
 }
 
-static int CompileProject(string manifestPath, string? output, bool checkOnly, bool trace)
+static int CompileProject(string manifestPath, string? output, string? headerOutput, bool checkOnly, bool trace)
 {
     try
     {
         var project = CTildeProjectFile.Load(manifestPath);
         if (trace)
             Console.Error.WriteLine($"trace: loaded {project.SourceFiles.Length} source file(s) from {project.ManifestPath}");
-        return Compile(project.SourceFiles, output, checkOnly, trace, project.Configuration.Target);
+        return Compile(project.SourceFiles, output, headerOutput, checkOnly, trace, project.Configuration.Target);
     }
     catch (CTildeProjectException exception)
     {
@@ -127,7 +141,7 @@ static int CompileDirectory(string inputDirectory, bool trace, CompilationTarget
         foreach (var input in inputs)
         {
             var output = Path.ChangeExtension(input, ".c");
-            if (Compile([input], output, checkOnly: false, trace, target, removeStaleGeneratedOutput: true) != 0)
+            if (Compile([input], output, null, checkOnly: false, trace, target, removeStaleGeneratedOutput: true) != 0)
                 exitCode = 1;
         }
 
@@ -164,7 +178,7 @@ static string ResolveDirectory(string path)
     return resolvedPath ?? workingDirectoryPath;
 }
 
-static int Compile(IReadOnlyCollection<string> inputs, string? output, bool checkOnly, bool trace, CompilationTarget target, bool removeStaleGeneratedOutput = false)
+static int Compile(IReadOnlyCollection<string> inputs, string? output, string? headerOutput, bool checkOnly, bool trace, CompilationTarget target, bool removeStaleGeneratedOutput = false)
 {
     try
     {
@@ -178,7 +192,10 @@ static int Compile(IReadOnlyCollection<string> inputs, string? output, bool chec
             Console.Error.WriteLine("trace: parsing complete; declaring and binding symbols");
         var compilation = Compilation.Create(trees, new CompilationOptions(target));
         using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+        using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
         var diagnostics = checkOnly ? compilation.GetDiagnostics() : compilation.EmitC(generated).Diagnostics;
+        if (!checkOnly && headerOutput is not null && !diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+            diagnostics = compilation.EmitCHeader(generatedHeader).Diagnostics;
         foreach (var diagnostic in diagnostics)
             Console.Error.WriteLine(diagnostic);
         if (diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
@@ -193,6 +210,8 @@ static int Compile(IReadOnlyCollection<string> inputs, string? output, bool chec
         {
             var fullOutputPath = Path.GetFullPath(output!);
             WriteAtomically(fullOutputPath, generated.ToString());
+            if (headerOutput is not null)
+                WriteAtomically(Path.GetFullPath(headerOutput), generatedHeader.ToString());
             if (trace)
                 Console.Error.WriteLine($"trace: wrote {fullOutputPath}");
         }
@@ -246,7 +265,7 @@ static int UsageError(string message)
 
 static void PrintUsage()
 {
-    Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]");
-    Console.Error.WriteLine("       ctilde --project <ctilde.json> -o <program.c> [--check] [--trace]");
+    Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--check] [--trace]");
+    Console.Error.WriteLine("       ctilde --project <ctilde.json> -o <program.c> [--header <exports.h>] [--check] [--trace]");
     Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]");
 }

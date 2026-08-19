@@ -10,3 +10,5 @@ public static class Memory
     [NoAlloc]
     public static unsafe void Release(object value);
 }
+
+// CTILDE_NATIVE_UTF8_DECLARATION

@@ -5,6 +5,10 @@ using Esp.Idf;
 namespace Examples.TCan485;
 
 public delegate int ValueReader();
+public delegate int NativeTransformer(int value);
+
+[NativeType("ct_esp_test_handle_t", "ctilde_esp_shim.h")]
+public opaque NativeTestHandle;
 
 public static class NativeCallback
 {
@@ -17,6 +21,32 @@ public static class NativeBufferApi
     [Extern("ct_esp_fill_buffer")]
     [NoAlloc]
     public static unsafe uint Fill(NativeBuffer<byte> buffer);
+}
+
+public static class NativeInterop
+{
+    [Extern("ct_esp_utf8_length")]
+    [NoAlloc]
+    public static uint Utf8Length(NativeUtf8String value);
+
+    [Extern("ct_esp_test_resource_create")]
+    [NoAlloc]
+    public static EspError Create([Creates] [Nullable] out NativeTestHandle handle);
+
+    [Extern("ct_esp_test_resource_value")]
+    [NoAlloc]
+    public static int Read([Borrowed] NativeTestHandle handle);
+
+    [Extern("ct_esp_test_resource_release")]
+    [NoAlloc]
+    public static void Release([Consumes] [Nullable] NativeTestHandle handle);
+
+    [Extern("ct_esp_invoke_delegate")]
+    public static int Invoke([SynchronousCallback] NativeTransformer callback, int value);
+
+    [Extern("ct_esp_call_export")]
+    [NoAlloc]
+    public static int CallExport(int left, int right);
 }
 
 public class Probe
@@ -78,6 +108,17 @@ public static class Program
         return value * 2L;
     }
 
+    private static int AddOne(int value)
+    {
+        return value + 1;
+    }
+
+    [Export("ctilde_add")]
+    public static int Add(int left, int right)
+    {
+        return left + right;
+    }
+
     private static unsafe void RunManagedSelfTests()
     {
         Console.WriteLine("C~ ESP-IDF hardware test");
@@ -110,6 +151,27 @@ public static class Program
             Console.WriteLine("native buffer: 42");
         else
             Console.WriteLine("NATIVE_BUFFER_FAILED");
+
+        NativeUtf8String nativeText = NativeUtf8String.Borrow("ctilde");
+        if (NativeInterop.Utf8Length(nativeText) == 6u)
+            Console.WriteLine("native utf8: ok");
+        else
+            Console.WriteLine("NATIVE_UTF8_FAILED");
+
+        NativeTestHandle handle;
+        EspError createError = NativeInterop.Create(out handle);
+        defer NativeInterop.Release(handle);
+        if (createError.IsSuccess && NativeInterop.Read(handle) == 42)
+            Console.WriteLine("opaque defer: ok");
+        else
+            Console.WriteLine("OPAQUE_DEFER_FAILED");
+
+        NativeTransformer transformer = AddOne;
+        Console.Write("delegate context: ");
+        Console.WriteLine(NativeInterop.Invoke(transformer, 41));
+
+        Console.Write("export: ");
+        Console.WriteLine(NativeInterop.CallExport(20, 22));
 
         object boxed = 7;
         Console.Write("boxed: ");
@@ -146,11 +208,20 @@ public static class Program
     [EntryPoint]
     public static unsafe void Main()
     {
-        if (!Ws2812.Configure(Ws2812Pin, 1u) || !Ws2812.Clear())
+        EspError configureError = Ws2812.Configure(Ws2812Pin, 1u);
+        if (!configureError.IsSuccess)
+        {
+            Console.Write("esp error: ");
+            Console.WriteLine(configureError.GetName());
+            return;
+        }
+        EspError clearError = Ws2812.Clear();
+        if (!clearError.IsSuccess)
         {
             Console.WriteLine("WS2812_CONFIG_FAILED");
             return;
         }
+        Console.WriteLine("esp error: ESP_OK");
 
         RunManagedSelfTests();
 
@@ -170,9 +241,9 @@ public static class Program
             high = !high;
             bool updated;
             if (high)
-                updated = Ws2812.SetPixel(0u, 0u, 16u, 0u) && Ws2812.Refresh();
+                updated = Ws2812.SetPixel(0u, 0u, 16u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
             else
-                updated = Ws2812.Clear();
+                updated = Ws2812.Clear().IsSuccess;
                 
             if (!updated)
             {

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files and emits one GNU C23 translation unit for either a hosted process or an ESP-IDF component. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.8. It adds native-sized integers, exact `ref`/`in`/`out` call semantics, `void*`, checked stack allocation, and scoped pointer-plus-length native-buffer views to the draft 0.7 object, ARC, delegate, callback, exception, cleanup, and `[NoAlloc]` foundation. It does not require a CLR or C# runtime.
+The current language is draft 0.9. It adds scoped UTF-8 native strings, nominal move-only opaque handles, typed ESP-IDF errors, C-callable exports and headers, and synchronous delegate-to-C callback/context adapters to the draft 0.8 native ABI. It does not require a CLR or C# runtime.
 
 ## Quick start
 
@@ -43,12 +43,13 @@ The program prints:
 The CLI accepts multiple input files as one compilation:
 
 ```text
-ctilde <input.ct>... -o <program.c> [--target hosted|esp-idf] [--check] [--trace]
-ctilde --project <ctilde.json> -o <program.c> [--check] [--trace]
+ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--check] [--trace]
+ctilde --project <ctilde.json> -o <program.c> [--header <exports.h>] [--check] [--trace]
 ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 ```
 
 - `-o` selects the generated C file.
+- `--header` emits a deterministic C/C++-compatible header for `[Export]` methods. It requires `-o` and cannot be combined with `--check` or directory mode.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
 - `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
@@ -57,7 +58,7 @@ ctilde --compile-directory <directory> [--target hosted|esp-idf] [--trace]
 
 Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
 
-The compiler atomically replaces output after successful emission. Directory mode removes stale generated output after an error. It identifies generated files by their banner and preserves handwritten C.
+The compiler generates requested C and header text in memory before atomically replacing successful outputs. Directory mode removes stale generated output after an error. It identifies generated files by their banner and preserves handwritten C.
 
 ## Language example
 
@@ -99,6 +100,9 @@ var compilation = Compilation.Create(
 
 using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
+
+using var header = new StringWriter();
+EmitResult headerResult = compilation.EmitCHeader(header);
 ```
 
 `Compilation.GetDiagnostics()` returns structured diagnostics from immutable bound bodies without initializing C emission or typed IR. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location. `EmitC()` lazily lowers the validated bound program and caches byte-identical output.
@@ -135,7 +139,7 @@ cd .\examples\TCan485
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, a 64-bit monotonic timer, synchronous callback and flattened native-buffer fixtures, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and managed object/delegate/exception/ARC self-tests. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
+The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and opaque-resource fixtures, generated exports, synchronous delegate/context callbacks, native buffers, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and managed object/delegate/exception/ARC self-tests. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
 
 ## Projects
 
@@ -145,7 +149,7 @@ The checked T-CAN485 project includes the fixed-width `Esp.Idf` shim, a 64-bit m
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.8 programs |
+| `examples` | Checked draft 0.9 programs |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
 
@@ -171,7 +175,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.8 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.9 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

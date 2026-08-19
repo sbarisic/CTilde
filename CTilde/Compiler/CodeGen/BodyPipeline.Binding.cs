@@ -388,6 +388,18 @@ internal sealed partial class BodyPipeline
         if (syntax.OperatorKind == SyntaxKind.EqualsToken)
         {
             var value = Convert(LowerExpression(syntax.Right), target.Type, syntax.Right, false);
+            if (target.Type.Kind is CTypeKind.Opaque or CTypeKind.Pointer && target.LValue.Local is { } resourceTarget)
+            {
+                if (resourceTarget.NativeResourceState is NativeResourceState.Owned or NativeResourceState.Deferred)
+                    Report("CT1262", $"Owned native resource '{resourceTarget.Name}' cannot be overwritten before its ownership is discharged.", syntax.Left);
+                if (value.Ownership == OwnershipKind.Owned)
+                {
+                    ConsumeOwnedExpression(value, syntax.Right);
+                    resourceTarget.NativeResourceState = NativeResourceState.Owned;
+                }
+                else
+                    resourceTarget.NativeResourceState = value.Type.Kind == CTypeKind.Null ? NativeResourceState.None : NativeResourceState.Borrowed;
+            }
             prelude.AddRange(value.Prelude);
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(target.Type, temp)} = {value.Code};");
@@ -625,7 +637,7 @@ internal sealed partial class BodyPipeline
             return new LoweredExpression { Type = target, Code = castCode, Prelude = expression.Prelude };
         }
         var code = sourceType.Kind == CTypeKind.Null
-            ? $"({_emitter.CCastType(target)})NULL"
+            ? target.Kind == CTypeKind.Opaque ? $"({_emitter.CCastType(target)})0" : $"({_emitter.CCastType(target)})NULL"
             : sourceType.IsPointerLike || target.IsPointerLike
                 ? $"({_emitter.CCastType(target)})(void*)({expression.Code})"
                 : $"({_emitter.CCastType(target)})({expression.Code})";

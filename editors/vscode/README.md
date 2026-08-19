@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.8 syntax and semantic classification for native integers, `ref`/`in`/`out`, `void*`, `stackalloc`, intrinsic native buffers, named delegates, method groups, and `delegate* unmanaged<...>` signatures.
+- Draft 0.9 syntax and semantic classification for native integers, by-reference calls, buffers, `NativeUtf8String`, opaque declarations, native ownership attributes, exports, named delegates, callback adapters, and unmanaged function pointers.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
 - Live compiler diagnostics with related locations.

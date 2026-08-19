@@ -17,7 +17,7 @@
 
 ## Compiler architecture completion
 
-Draft 0.8 uses the release pipeline completed for draft 0.7:
+Draft 0.9 uses the release pipeline completed for draft 0.7:
 
 - [x] Bind methods, accessors, constructors, and initializers into immutable bound nodes and semantic maps.
 - [x] Record lookup, access, overload, conversion, constant, flow, extern-use, ARC ownership, and allocation-effect results during binding.
@@ -26,7 +26,7 @@ Draft 0.8 uses the release pipeline completed for draft 0.7:
 - [x] Make lazy C emission consume `TypedIrProgram` and remove the old `MethodLowerer` and line classifier.
 - [x] Split non-generated C# implementation and conformance files below 900 physical lines.
 
-The migration retained the original 74 conformance checks and byte-identical hosted and ESP-IDF C baselines. Draft 0.8 adds four native-ABI checks without changing generated C for draft 0.7 programs.
+The migration retained the original 74 conformance checks and byte-identical hosted and ESP-IDF C baselines. Drafts 0.8 and 0.9 add six native-ABI and resource-entry checks while preserving old generated C outside explicitly changed ESP error APIs.
 
 Later exception work includes filters, inner exceptions, stack traces, specialized subclasses, thread-local handler state, and a defined native-boundary policy.
 
@@ -53,13 +53,13 @@ The hardware MVP has removed the entry-point, failure, process-exit, and symbol-
 These limits remain:
 
 - The CLI emits C but does not duplicate ESP-IDF linking, flashing, or monitoring.
-- `[Extern]` supports synchronous scalar, by-reference, and flattened native-buffer calls but not exported C~ methods or retained callbacks.
+- `[Extern]` supports synchronous scalar, by-reference, buffer, UTF-8, opaque-handle, and delegate/context calls. `[Export]` supports ABI-safe same-task entry. Retained callbacks remain unsupported.
 - Managed allocation uses single-threaded deterministic ARC; cycles leak.
 - Exception-handler state supports one C~ execution task.
 - `defer` provides deterministic block cleanup without heap registration.
 - `[NoAlloc]` verifies allocation-free generated call paths and trusts annotated native boundaries.
 
-The draft 0.8 language-side synchronous ABI now adds native-sized integers, by-reference parameters, `void*`, and scoped native buffers to the draft 0.7 object, ARC, and exception runtime. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when later ESP work changes runtime and emitter files.
+The draft 0.9 language-side synchronous ABI adds scoped UTF-8 input, nominal opaque handles, lexical native ownership, typed ESP errors, exports, headers, and same-task delegate/context adapters to the draft 0.8 native ABI. Preserve its managed header, descriptors, vtables, drop callbacks, ownership ABI, boxing behavior, handler semantics, and fatal-runtime-failure boundary when later ESP work changes runtime and emitter files.
 
 ### Design rules
 
@@ -250,11 +250,11 @@ The first target can use synchronous APIs from the C~ entry task. Full ESP-IDF u
 - [x] Add native-sized signed and unsigned integers for `intptr_t`, `uintptr_t`, and `size_t`.
 - [x] Add `ref`, `in`, and definitely assigned `out` parameters with exact pointer ABI mappings.
 - [x] Add unsafe `void*`, stack allocation, and explicit pointer-plus-length native buffer views.
-- [ ] Add scoped native UTF-8 string views. Do not pass a managed C~ `string` as `const char*` implicitly.
-- [ ] Add distinct opaque native handle types instead of representing every handle as an integer or unrestricted pointer.
-- [ ] Add ownership metadata for borrowed, created, consumed, nullable, and retained handles or pointers.
-- [ ] Expose `esp_err_t` as a value that preserves its numeric code, success test, and native error name instead of reducing every failure to `bool`.
-- [ ] Keep `defer` as the first deterministic release mechanism and diagnose discarded owned handles where practical.
+- [x] Add scoped native UTF-8 string views. Do not pass a managed C~ `string` as `const char*` implicitly.
+- [x] Add distinct opaque native handle types instead of representing every handle as an integer or unrestricted pointer.
+- [x] Add ownership metadata for borrowed, created, consumed, nullable, and retained handles or pointers.
+- [x] Expose `esp_err_t` as a value that preserves its numeric code, success test, and native error name instead of reducing every failure to `bool`.
+- [x] Keep `defer` as the first deterministic release mechanism and diagnose discarded owned handles.
 
 #### Phase 7b: Generate source-compatible ESP-IDF bindings
 
@@ -269,14 +269,15 @@ ESP-IDF guarantees public API source compatibility but not binary layout compati
 
 #### Phase 7c: Export methods and support callbacks
 
-- [ ] Add an `[Export("symbol")]` attribute for C-callable C~ methods.
-- [ ] Generate a native header for exported symbols and shared runtime layouts.
+- [x] Add an `[Export("symbol")]` attribute for C-callable C~ methods.
+- [x] Generate a native header for exported symbols and reachable unmanaged layouts.
 - [x] Add unsafe unmanaged function-pointer types with exact calling convention, parameter, return, and nullability rules.
 - [x] Add delegates as managed target-plus-method values. Delegates are not layout-compatible with unmanaged function pointers.
-- [ ] Add callback trampolines that pair an exported C entry point with an explicit `void*` user context.
+- [x] Add synchronous callback trampolines that pair a typed C entry point with an explicit `void*` user context.
 - [ ] Distinguish synchronous callbacks from retained callbacks and require explicit registration, unregistration, and rooted-lifetime rules for retained delegates.
-- [x] Permit direct unmanaged function pointers only in `unsafe` code and emit same-task static-method trampolines. Delegate-to-C context trampolines remain deferred.
-- [ ] Define callback-thread attachment before a callback can allocate, throw, use virtual dispatch, or access managed runtime state.
+- [x] Permit direct unmanaged function pointers only in `unsafe` code and emit same-task static-method and delegate-to-C context trampolines.
+- [x] Attach the generated entry task internally and reject synchronous export or callback entry from another thread/task with `CTT0001`.
+- [ ] Add public attachment for native-created tasks and retained or cross-task callbacks.
 - [x] Keep C~ exceptions from unwinding through native frames for the supported synchronous current-task callback profile by terminating with `CTE0003`.
 
 #### Phase 7d: FreeRTOS tasks, shared state, and interrupts
@@ -308,6 +309,7 @@ Do not call general C~ allocation, console, or virtual dispatch from an interrup
 - [x] Verify native-sized promotions, portable constants, wrapping, formatting, mangling, and target-width shifts.
 - [x] Verify `ref`/`in`/`out` addressability, readonly and definite-assignment flow, callable signatures, ARC replacement, and native pointer mappings.
 - [x] Verify native-buffer element restrictions, construction, conversion, bounds, stack-count checks, loop and escape rejection, flattening, and `[NoAlloc]` use.
+- [x] Verify opaque nominal typing, native ownership moves, cleanup reservations, scoped UTF-8 input, exact ESP errors, exports, deterministic headers, and synchronous delegate/context adapters.
 
 #### Toolchain tests
 
@@ -345,6 +347,15 @@ The 2026-08-19 Draft 0.7 run reported 298,012 bytes of free heap, a 295,468-byte
 - [x] Flash `RuntimeFailure.ct`, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore and recheck the Draft 0.8 self-test as the final board state.
 
 The 2026-08-19 Draft 0.8 run produced a 151,008-byte `esp32` binary and a 154,496-byte `esp32c3` binary. The T-CAN485 reported 297,964 bytes of free heap, a 295,420-byte minimum, and 6,960 bytes of stack high-water headroom. All Draft 0.8 markers passed, more than ten GPIO4 WS2812 cycles ran without a watchdog reset, the failure image produced the required abort/reset sequence, and the self-test was restored and rechecked as the final board state.
+
+#### Draft 0.9 closure
+
+- [x] Build and size the `esp32` and `esp32c3` native-resource and same-task-entry firmware with warnings as errors.
+- [x] Flash Draft 0.9 on `COM4` and confirm `native utf8: ok`, `opaque defer: ok`, `esp error: ESP_OK`, `delegate context: 42`, and `export: 42` plus every existing marker.
+- [x] Observe more than ten GPIO4 WS2812 cycles without watchdog resets and record fresh heap and stack readings after the managed self-tests return.
+- [x] Flash `RuntimeFailure.ct`, confirm `CTN0001`, `abort()`, and `SW_CPU_RESET`, then restore and recheck the Draft 0.9 self-test as the final board state.
+
+The 2026-08-19 Draft 0.9 builds produced 153,165-byte `esp32` and 156,744-byte `esp32c3` images. The T-CAN485 reported 297,700 bytes of free heap, a 295,112-byte minimum, and 6,552 bytes of stack high-water headroom. Every new marker passed, more than ten UART-confirmed GPIO4 WS2812 cycles ran without a watchdog reset, the failure image repeatedly produced the required abort/reset sequence, and the Draft 0.9 self-test was restored and rechecked as the final board state.
 
 ### First-release acceptance criteria
 

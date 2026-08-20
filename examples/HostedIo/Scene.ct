@@ -4,8 +4,9 @@ namespace HostedIoExample;
 
 public static class Scene
 {
-    public static HittableList CreateFinal(RandomGenerator random)
+    public static HittableList CreateFinal(uint sceneSeed)
     {
+        RandomGenerator random = new RandomGenerator(sceneSeed);
         HittableList world = new HittableList();
         Material ground = new Lambertian(new Vec3(0.5f, 0.5f, 0.5f));
         world.Add(new Sphere(new Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, ground));

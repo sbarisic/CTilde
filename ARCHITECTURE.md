@@ -2,7 +2,7 @@
 
 ## Overview
 
-The C~ compiler is a .NET 10 library with one output format, deterministic GNU C23, and two target profiles: hosted and ESP-IDF.
+The C~ compiler is a .NET 10 library with one backend, deterministic GNU C23, two artifact layouts, and two target profiles: hosted and ESP-IDF.
 
 ```text
 UTF-8 source files
@@ -15,7 +15,7 @@ UTF-8 source files
     -> Target validation
     -> Structured typed three-address IR and cleanup actions
     -> Reachability and semantics-preserving IR optimization
-    -> Deterministic GNU C23 emission
+    -> Deterministic unity or modular GNU C23 artifacts
     -> External C compiler
     -> Native executable
 ```
@@ -40,7 +40,8 @@ The `CTilde.Compiler` assembly owns the complete language implementation.
 - `TypedIrLowerer` consumes bound bodies and produces typed values, basic blocks, loads, stores, calls, conversions, allocations, checks, ownership operations, branches, throws, returns, and cleanup actions. It never classifies rendered C lines.
 - `TargetValidator` rejects ABI, generated-symbol, unavailable-platform API, and target-profile conflicts before output starts.
 - `TypedIrOptimizer` computes reachable methods from entrypoints, exports, module initializers, address-taken and virtual targets, bound calls, and implicit runtime roots. The emitter receives only that closed program and derives the user layouts and metadata it must retain.
-- `CEmitter` owns common runtime emission plus hosted or ESP-IDF entry, failure, console, and source-path policy. Translation-local definitions use portable unused annotations where conservative runtime retention remains necessary; no target emits a symbol-retention routine.
+- `CEmitter` owns reusable runtime, public-header, internal-header, namespace, entry/lifecycle, symbol-map, and CMake fragments plus hosted or ESP-IDF policy. Unity and modular layouts consume the same reachable optimized `TypedIrProgram`; partitioning never changes semantic lowering. Translation-local definitions use portable unused annotations where conservative runtime retention remains necessary; no target emits a symbol-retention routine.
+- `NameMangler` owns canonical identities and the 96-bit SHA-256 compact symbol scheme. `EmitSymbolMap` serializes the deterministic identity ledger used to diagnose collisions and debug generated output.
 
 Internal compiler phases share one `DiagnosticBag`. Public callers receive immutable `Diagnostic` values.
 
@@ -50,9 +51,9 @@ The CLI is the file-system and native-build adapter. It reads `.ct` files, creat
 
 Directory mode checks the first line before it removes stale output. It removes only files with the C~ generated-file banner. It preserves handwritten C files.
 
-Emit-only mode stops at deterministic C. Native build mode locks the output directory and then delegates to an installed MSVC, GCC, Clang, or ESP-IDF toolchain. Hosted compiler discovery and ESP-IDF activation are CLI concerns; they do not enter syntax, binding, typed IR, C emission, or the generated ABI.
+Emit-only mode stops at deterministic C artifacts. Native build mode locks the output directory and then delegates to an installed MSVC, GCC, Clang, or ESP-IDF toolchain. Hosted modular builds compile source files separately and cache objects by generated content, both shared-header hashes, compiler identity, configuration, and flags; linking begins only after every object succeeds. ESP-IDF receives the generated CMake source fragment and owns incremental compilation. Hosted compiler discovery and ESP-IDF activation are CLI concerns; they do not enter syntax, binding, typed IR, C emission, or the generated ABI.
 
-`CTildeProjectFile` is shared with editor tooling. A `ctilde.json` manifest supplies source and exclusion globs, one compilation target, and optional generated/native build settings. Paths are confined to the manifest directory, deduplicated, and sorted before parsing. Hosted builds directly compile the generated translation unit; advanced native sources and link graphs remain external build-system work. ESP-IDF builds always delegate their graph to CMake and `idf.py`.
+`CTildeProjectFile` is shared with editor tooling. A `ctilde.json` manifest supplies source and exclusion globs, one compilation target, `cLayout`, generated paths, optional symbol map, and native build settings including hosted Release LTO. Paths are confined to the manifest directory, deduplicated, and sorted before parsing. Generated-bundle replacement prunes only compiler-marked files and refuses to overwrite handwritten files. ESP-IDF builds always delegate their graph to CMake and `idf.py`.
 
 ### CTilde.LanguageServer
 
@@ -162,7 +163,7 @@ Bound statements preserve lexical scopes, control-flow constructs, catches, fina
 
 ## C emission
 
-The emitter assembles one translation unit in this order:
+The emitter first assembles reusable fragments in this order:
 
 1. Standard headers and runtime support.
 2. String literal data.
@@ -173,14 +174,14 @@ The emitter assembles one translation unit in this order:
 7. Function, constructor-initializer, and accessor prototypes.
 8. Runtime descriptors, vtables, delegate thunks, and unmanaged callback trampolines.
 9. Method, constructor, and accessor definitions.
-10. Deterministic static initialization.
-11. Hosted C `main` or ESP-IDF `app_main` wrapper.
+10. Deterministic module initialization and reverse finalization.
+11. Hosted C `main` or ESP-IDF `app_main` runtime-lifecycle wrapper.
 
-Emission lazily lowers the already validated bound program to typed IR, computes a reachability closure, and then renders the retained functions. The body optimizer removes unused cleanup boundaries and blanket parameter reads, direct `defer` records avoid exception frames, and fused scalar string builds evaluate segments once from left to right. Calling `GetDiagnostics()` never initializes typed IR or emitter artifacts.
+Emission lazily lowers the already validated bound program to typed IR, computes a reachability closure, and then renders the retained functions. Unity concatenates the fragments. Modular output shares runtime and internal headers, writes one runtime source, partitions definitions by reachable namespace, and writes an entry/lifecycle source, symbol map, and CMake source fragment. The body optimizer removes unused cleanup boundaries and blanket parameter reads, direct `defer` records avoid exception frames, and fused scalar string builds evaluate segments once from left to right. Calling `GetDiagnostics()` never initializes typed IR or emitter artifacts.
 
-Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` declarations. Compilation detects exact vector identifiers and loads only the corresponding embedded source, while language-service snapshots load all three for discovery and navigation. Draft 0.13 adds a raw inline-assembly syntax node, typed operand bindings, a side-effecting typed-IR instruction, and GNU extended-asm rendering. Assembly text never becomes C identifiers or ordinary expression fragments. Every translation-unit banner identifies draft 0.13, while the managed runtime, ARC header, exception/thread state, export ABI, and generated public-header contract remain draft 0.10 compatible.
+Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` declarations. Compilation detects exact vector identifiers and loads only the corresponding embedded source, while language-service snapshots load all three for discovery and navigation. Draft 0.13 adds a raw inline-assembly syntax node, typed operand bindings, a side-effecting typed-IR instruction, and GNU extended-asm rendering. Draft 0.14 replaces the process runtime, storage layouts, module lifecycle, and generated names. Assembly text never becomes C identifiers or ordinary expression fragments.
 
-Generated identifiers use deterministic UTF-8 byte encoding. User text is never copied directly into a C identifier.
+Generated global identifiers use kind-specific prefixes and the first 96 bits of SHA-256 over centralized canonical identities. The versioned symbol map preserves full identities and source locations. User text is never copied directly into a global C identifier.
 
 ## Planned native interop layer
 
@@ -195,20 +196,18 @@ This design follows ESP-IDF's source-compatibility boundary. Native configuratio
 
 The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, scoped pointer-plus-length native buffers, scoped UTF-8 views, nominal opaque handles, and lexical native ownership. The compiler flattens buffers and UTF-8 inputs and renders qualified declarators from structured types. `defer` reserves opaque release obligations without making native resources managed objects. Broad ESP-IDF coverage still requires header-driven source-compatible binding generation.
 
-Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.10 emits body-bearing export wrappers and callback trampolines that accept any attached native thread. The entrypoint attaches an automatic primary state; native-created threads use the generated-header `ct_thread_attach` and `ct_thread_detach` ABI. Wrappers convert escaping exceptions to fatal `CTE0003`; unattached entry fails with `CTT0001`. Retained callback lifetimes and ISR entry remain later profiles because their blocking, allocation, and IRAM-safety rules differ.
+Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Draft 0.14 emits body-bearing export wrappers and callback trampolines that accept any attached native thread. The entrypoint initializes the one process runtime and its primary thread; native-created threads use the generated-header `ct_thread_attach` and `ct_thread_detach` ABI. Wrappers convert escaping exceptions to panic `CTE0003`; unattached entry panics with `CTT0001`. Retained callback lifetimes and ISR entry remain later profiles because their blocking, allocation, and IRAM-safety rules differ.
 
 ## Runtime ownership
 
-The generated translation unit embeds a small runtime:
+Unity output embeds one small runtime; modular output defines the same runtime once and imports it from every generated module:
 
 - Zero-initialized allocation and target-aware deallocation.
 - Atomic, non-moving ARC with immortal static strings and a per-thread allocation-free iterative release worklist.
-- Generated drop callbacks for classes, arrays, strings, boxes, and reference-bearing structures.
+- Generated drop callbacks for classes, contiguous arrays and strings, boxes, and reference-bearing structures.
 - A common managed-object header, deterministic type descriptors, identity hashes, and typed virtual dispatch.
 - Checked reference casts, safe casts, type tests, boxing, and exact unboxing.
-- Array allocation and bounds checks.
-- Null checks.
-- Checked division failure.
+- Allocation-free throws of immortal built-in runtime-fault exceptions with per-thread diagnostic origins.
 - Deterministic 32-bit and 64-bit two's-complement wrapping, division, remainder, negation, and arithmetic-shift helpers.
 - Immutable UTF-8 strings and concatenation.
 - Console output, hosted UTF-8 input, owned hosted binary-file handles, and process exit.
@@ -217,11 +216,11 @@ The generated translation unit embeds a small runtime:
 - ARC-aware delegate descriptors, receiver ownership, typed invocation thunks, structural C function-pointer types, and attached-thread callback exception barriers.
 - Scoped UTF-8 owner views, nominal opaque-handle ownership checks, deterministic export headers, and conditional entry-task guards.
 
-Managed storage is reclaimed on the thread that atomically releases its reference count to zero. Reference cycles leak, static fields own values until termination, and immortal strings are never released. Exception/defer control state and ownership cleanup records are stack-backed and linked from the current `ct_thread_state`. C~ source has no `delete`, destructor, or finalizer operation.
+Managed storage is reclaimed on the thread that atomically releases its reference count to zero. Reference cycles leak, static fields own values until module finalization, and immortal strings and fault objects are never released. Exception/defer control state and ownership cleanup records are stack-backed and linked from the current `ct_thread_state`. C~ source has no `delete`, destructor, or finalizer operation.
 
-The runtime phase publishes completed static initialization before public attachment becomes legal. Hosted output stores the state pointer in C thread-local storage. ESP-IDF stores it in a reserved FreeRTOS task-local-storage slot with a task-deletion callback. ARC atomics protect lifetime only; ordinary managed fields and slots still require native synchronization when shared.
+`ct_runtime_initialize` attaches the primary thread, creates fault singletons, validates runtime ABI 14, initializes the module descriptor, and publishes ready. `ct_runtime_shutdown` rejects attached secondary threads, finalizes managed static fields in reverse order, drains ARC work, and detaches the primary thread. Hosted output stores the state pointer in C thread-local storage. ESP-IDF stores it in a reserved FreeRTOS task-local-storage slot with a task-deletion callback. ARC atomics protect lifetime only; ordinary managed fields and slots still require native synchronization when shared.
 
-Runtime faults remain fatal and bypass the exception stack. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
+Recoverable runtime faults enter the ordinary exception stack through immortal standard exception singletons and allocate nothing. Runtime-phase, attachment, ABI, ARC, cleanup, and native-boundary violations remain panics. `Environment.Exit` also bypasses cleanup. C~ exceptions use managed `System.Exception` objects and descriptor-chain catch matching.
 
 A class layout starts with its complete base-class structure. `System.Object` starts with `ct_object`, which contains the descriptor, immutable identity hash, four-byte atomic reference count, and intrusive release link. Strings, arrays, and boxes use the same header. Descriptors contain generated drop callbacks. Class allocation installs the most-derived descriptor before any initializer runs. Non-allocating constructor initializer functions then execute the base or same-type chain on that allocation; a throwing initializer releases the partial object through the current thread's cleanup stack.
 

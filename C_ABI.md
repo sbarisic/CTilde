@@ -2,11 +2,11 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.10. Draft 0.10 makes ARC atomic, moves cleanup and exception state into attached-thread storage, and adds native attachment to the draft 0.9 export and callback ABI. Every generated translation unit uses the new runtime, so draft 0.10 generated objects and runtime entry points are ABI-incompatible with draft 0.9.
+This document defines the generated C contract for C~ draft 0.14. Draft 0.14 is a breaking runtime and storage ABI: it defines one runtime per process, adds explicit lifecycle and panic configuration, makes built-in runtime faults catchable without allocation, makes strings and arrays contiguous allocations, formalizes constructive `out` writes, adds versioned module descriptors, and replaces readable generated names with compact canonical-identity hashes.
 
-C~ draft 0.11 adds source-level arithmetic operators without changing this ABI. Draft 0.12 uses them for allocation-free standard-library vectors and intentionally changes internal generated C through reachability pruning, direct-defer cleanup, scalar string-build fusion, and removal of `ct_keep_symbols`; it does not change the public-header signature prefix. Operator functions remain internal `ct_op_*` symbols and are never exported directly. A vector layout appears in a generated header only when an ordinary exported signature uses that unmanaged structure. Managed layouts, reference-return conventions, runtime entry points, and native ownership contracts remain draft 0.10 compatible.
+Draft 0.11 arithmetic operators, draft 0.12 reachability and cleanup optimization, and draft 0.13 inline assembly remain part of the language. Draft 0.14 output is not ABI-compatible with older generated modules. `[Export]`, `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts.
 
-The output is a single GNU C23 translation unit for a selected target profile. GCC-compatible extensions are permitted by default. The C source format is deterministic, but generated internal symbol names are a compiler ABI rather than a user-facing source API. Changes to this document require conformance tests.
+The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `.c` file per reachable namespace, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
 
 ## Target requirements
 
@@ -51,31 +51,25 @@ Signed arithmetic uses generated helpers to avoid C signed-overflow undefined be
 
 The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
-## Name encoding
+## Generated names and symbol map
 
-Every user name is encoded from its UTF-8 bytes:
+The compiler first constructs canonical identities for types, fields, methods, constructors, operators, accessors, descriptors, vtables, and generated thunks. A method identity includes its fully qualified containing type, semantic member name, parameter passing kinds, canonical parameter types, and result type. Composite types use recursive canonical forms, so future generic instantiations can extend the identity grammar without changing the mangling scheme.
 
-1. Prefix the component with an underscore, its decimal byte length, and another underscore.
-2. Copy ASCII letters and digits.
-3. Encode every other byte as an underscore followed by two uppercase hexadecimal digits.
-
-Dots, underscores, Unicode bytes, and C punctuation therefore cannot collide.
+Except for `[Export]`, `[Extern]`, entry, and runtime ABI names, a globally visible generated name is a category prefix followed by the lowercase first 96 bits of SHA-256 over its canonical identity. The compiler diagnoses any collision before writing output. Names are compact and deterministic under input reordering.
 
 Generated prefixes identify symbol kinds:
 
 | Prefix | Meaning |
 | --- | --- |
-| `ct_t` | User type |
+| `ct_t_` | User type |
 | `ct_m_` | User method |
-| `ct_ctor_` | Constructor factory |
+| `ct_c_` | Constructor factory |
 | `ct_f_` | Static field |
-| `ct_get_`, `ct_set_` | Property accessors |
+| `ct_g_`, `ct_s_` | Property accessors |
+| `ct_o_` | Operator method |
+| `ct_d_`, `ct_v_`, `ct_h_` | Descriptor, vtable, and thunk |
+| `ct_i_`, `ct_x_`, `ct_n_`, `ct_k_` | Constructor initializer, drop helper, delegate factory, and native callback adapter |
 | `ct_a_` | Specialized array type |
-| `ct_desc_` | Runtime type descriptor |
-| `ct_vtable_`, `ct_vthunk_` | Virtual dispatch table and receiver thunk |
-| `ct_new_delegate_`, `ct_drop_delegate_`, `ct_delegate_thunk_` | Managed delegate factory, drop callback, and invocation thunk |
-| `ct_callback_` | C ABI trampoline for a C~ static method address |
-| `ct_init_` | Non-allocating class constructor initializer |
 | `ct_box_`, `ct_unbox_` | Value box layout and conversion helper |
 | `ct_l_` | User local |
 | `ct_lp_`, `ct_pp_` | Durable automatic local and parameter slot used by exception lowering |
@@ -83,9 +77,9 @@ Generated prefixes identify symbol kinds:
 | `ct_eh_` | Lexical exception handler frame |
 | `ct_ep_`, `ct_ex_`, `ct_er_` | Pending cleanup action, exception, and return payload |
 
-Method names append a structural code for every parameter type. `nint` and `nuint` use `ni` and `nu`. A non-value parameter prefixes its type code with `ref`, `in`, or `out`; existing value-parameter names are unchanged. Overloads therefore have distinct C symbols without hashes.
+Unity definitions use translation-unit-local linkage where possible. Modular definitions used by another artifact have internal-header declarations and external linkage but remain compiler-private. `public` and `internal` are C~ access rules; they do not export a native symbol.
 
-All generated user definitions have translation-unit-local linkage. `public` and `internal` are C~ access rules; they do not export a native symbol. The exceptions are C `main` and declarations created by `[Extern]`.
+`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 14.
 
 ## Managed object header
 
@@ -152,7 +146,7 @@ C~ methods, constructors, delegates, externs, and unmanaged function pointers us
 | `in T value` | `const T* value` |
 | `out T value` | `T* value` |
 
-C~ calls pass an address. An `out` destination containing managed references is dropped and zeroed before the call. The callee uses normal strong-slot replacement and must assign every `out` parameter on normal return. Extern and unmanaged-function-pointer by-reference element types must be unmanaged ABI-safe.
+C~ calls pass an address. `out T` is an uninitialized destination, not a preexisting strong slot. The caller drops an initialized managed value, clears the destination to a safe empty state, and marks it uninitialized before entry. The callee's first assignment constructs or moves directly into the destination without reading, retaining, or dropping its old contents. Later assignments use normal strong-slot replacement. The same rule applies to methods, constructors, delegates, unmanaged function pointers, externs, and exported declarations. The callee must assign every `out` parameter on normal return. Extern and unmanaged-function-pointer by-reference element types must be unmanaged ABI-safe.
 
 ## Native buffers and stack allocation
 
@@ -181,7 +175,7 @@ Every used element type receives one array structure:
 typedef struct ct_a_... {
     ct_object Object;
     int32_t Length;
-    element_type* Data;
+    element_type Data[CT_FLEXIBLE_ARRAY];
 } ct_a_...;
 ```
 
@@ -193,7 +187,7 @@ An array value is a pointer to this structure. Array construction checks:
 
 Indexing checks the receiver for null and verifies `0 <= index < Length` before accessing `Data[index]`.
 
-Zero-length arrays have a null `Data` pointer and a non-null array object.
+The object header, length, and aligned element storage occupy one checked allocation. Zero-length arrays remain non-null and have no element storage. Array drop walks reference-bearing elements in reverse ownership order and frees only the enclosing allocation.
 
 ## Strings
 
@@ -203,21 +197,21 @@ Zero-length arrays have a null `Data` pointer and a non-null array object.
 typedef struct ct_string {
     ct_object Object;
     int32_t Length;
-    const uint8_t* Data;
+    uint8_t Data[CT_FLEXIBLE_ARRAY];
 } ct_string;
 ```
 
 `Length` counts UTF-8 code units. `Data` is followed by a zero byte for native boundary convenience, but embedded zero bytes are valid and all C~ operations use `Length`.
 
-String literals use static byte arrays and string objects. Every dynamic string stores `Data[Length] == 0`, including concatenation results. A null concatenation operand is treated as an empty string. Nested concatenations containing built-in scalar `ToString()` calls are flattened, evaluated once from left to right, formatted into bounded automatic buffers, and copied into one allocated string object and one allocated byte array. User-defined `ToString()` calls remain ordinary calls.
+Dynamic strings use one checked allocation containing the object, length, UTF-8 bytes, and trailing zero. Static strings use compatible wrapper layouts and are immortal. Every string stores `Data[Length] == 0`. A null concatenation operand is treated as an empty string. Nested concatenations containing built-in scalar `ToString()` calls are flattened, evaluated once from left to right, formatted into bounded automatic buffers, and copied into one string allocation. User-defined `ToString()` calls remain ordinary calls.
 
 String equality compares contents. Other class and array equality compares pointer identity.
 
 ## Static initialization
 
-Static storage is emitted with a C zero initializer. The generated `ct_module_init` function then evaluates explicit field initializers.
+Static storage is emitted with a C zero initializer. Every program emits an ABI-versioned `ct_module_descriptor` with module name and initialize/finalize callbacks.
 
-Types are initialized in ordinal fully qualified name order. Fields within one type use source declaration order. The selected entry wrapper calls `ct_module_init` exactly once before the C~ entry method.
+Types initialize in ordinal fully qualified name order. Fields within one type use source declaration order. Finalization drops managed static fields in exact reverse order and clears every slot. Partial initialization failure invokes the same reverse finalizer for fields constructed so far.
 
 The language does not expose the generated initialization function.
 
@@ -230,8 +224,9 @@ The hosted wrapper is:
 ```c
 int main(void)
 {
-    ct_module_init();
+    ct_runtime_initialize(NULL);
     mangled_entry_method();
+    ct_runtime_shutdown();
     return EXIT_SUCCESS;
 }
 ```
@@ -243,8 +238,9 @@ void app_main(void)
 {
     setvbuf(stdout, NULL, _IONBF, 0);
     setvbuf(stderr, NULL, _IONBF, 0);
-    ct_module_init();
+    ct_runtime_initialize(NULL);
     mangled_entry_method();
+    ct_runtime_shutdown();
 }
 ```
 
@@ -292,7 +288,26 @@ An extern function must not raise a C~ exception or call `longjmp` into C~ handl
 
 `EmitCHeader` emits a deterministic guarded header with `<stdbool.h>`, `<stddef.h>`, `<stdint.h>`, required native headers, `extern "C"`, reachable unmanaged enum and structure layouts, ownership comments, exported prototypes, an opaque `ct_object`, and the attachment and ARC entry points. CLI `--header` generates the C translation unit and header in memory before replacing either requested output.
 
-Every draft 0.10 program emits thread-entry machinery. Hosted output keeps a `ct_thread_state*` in C thread-local storage. ESP output stores it in the configured `CTILDE_FREERTOS_TLS_INDEX` FreeRTOS application slot and registers a task-deletion check. The entrypoint installs an automatic primary state before module initialization. Native-created threads call `ct_thread_attach` after initialization and `ct_thread_detach` before exit.
+One `ct_runtime_initialize`/`ct_runtime_shutdown` pair owns the process runtime. Generated modules import this state; they do not embed independent ARC, thread-local, exception, or lifetime state. Hosted output keeps a `ct_thread_state*` in C thread-local storage. ESP output stores it in the configured `CTILDE_FREERTOS_TLS_INDEX` FreeRTOS application slot and registers a task-deletion check.
+
+```c
+typedef struct ct_runtime_config {
+    uint32_t Size;
+    ct_panic_handler PanicHandler;
+    void* PanicContext;
+} ct_runtime_config;
+
+void ct_runtime_initialize(const ct_runtime_config* config);
+void ct_runtime_shutdown(void);
+void ct_thread_attach(void);
+void ct_thread_detach(void);
+void ct_retain(ct_object* value);
+void ct_release(ct_object* value);
+```
+
+Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler with the diagnostic and context; returning from the handler continues to the platform's default fatal termination. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
+
+Modules cannot unload while any descriptor, vtable, delegate, object, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.14.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -302,7 +317,7 @@ ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.10.
+This section records constraints that remain after draft 0.14.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
 
@@ -338,43 +353,35 @@ Finally lowering stores one pending action: normal completion, return, break, co
 
 `Environment.Exit` calls native process termination directly. It does not unwind C~ handlers and does not run finally blocks or defers.
 
-## Runtime failures
+## Runtime faults and panics
 
-The runtime prints one line to standard error. Hosted output exits with `EXIT_FAILURE`; ESP-IDF output uses compact source filenames and calls `abort()`.
+Recoverable runtime checks throw immortal, preinitialized standard-library exception objects without allocating. Per-thread origin metadata retains the original diagnostic code, file, and line across calls, cleanup, and rethrow. Unhandled faults print that origin and terminate through the platform policy.
 
 | Code | Failure |
 | --- | --- |
-| `CTN0001` | Managed null access |
-| `CTA0001` | Negative array length |
-| `CTA0002` | Array allocation-size overflow |
-| `CTA0003` | Array or string index out of range |
-| `CTM0001` | Allocation failure |
+| `CTN0001`, `CTO0002`, `CTE0002` | `NullReferenceException` |
+| `CTA0001`, `CTA0002`, `CTB0002`, `CTB0003`, `CTS0001` | `OverflowException` |
+| `CTA0003`, `CTB0001` | `IndexOutOfRangeException` |
+| `CTM0001` after attachment | `OutOfMemoryException` |
 | `CTM0002` | Reference-count overflow or invalid retain |
 | `CTM0003` | Invalid release, underflow, or cleanup corruption |
-| `CTI0001` | Integer division or remainder by zero |
-| `CTS0001` | String length overflow |
+| `CTI0001` | `DivideByZeroException` |
 | `CTS0002` | Native scalar formatting failure |
-| `CTS0003` | Embedded NUL in a dynamic `NativeUtf8String` borrow |
-| `CTO0001` | Invalid managed reference cast |
-| `CTO0002` | Null unboxing |
-| `CTO0003` | Boxed type mismatch |
+| `CTS0003` | `ArgumentException` at a native UTF-8 boundary |
+| `CTO0001`, `CTO0003` | `InvalidCastException` |
 | `CTE0001` | Unhandled C~ exception |
-| `CTE0002` | Null thrown reference |
 | `CTE0003` | C~ exception escaped a native export or callback barrier |
 | `CTT0001` | Native entry or ARC operation occurred on an unattached thread or task |
 | `CTT0002` | Attachment, detachment, task exit, or runtime shutdown violated the thread lifecycle |
-| `CTB0001` | Native-buffer index out of range |
-| `CTB0002` | Negative stack-allocation count |
-| `CTB0003` | Stack-allocation size overflow |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 
-The existing null, array, allocation, division, string, cast, and unboxing failures remain fatal. They do not enter the exception handler stack.
+`CTM0002`, `CTM0003`, `CTE0003`, `CTT0001`, `CTT0002`, ABI mismatch, and cleanup corruption remain panics. Allocation failure before thread attachment is also a panic. `CTILDE_CONFORMANCE` enables allocation-failure injection for tests only; production builds expose no injection API. `Environment.Exit`, native `abort`, reset, and power loss bypass managed cleanup.
 
 ## Lifetime
 
 Class instances, arrays, dynamic strings, boxes, exception objects, and reference-bearing structure values use automatic reference counting. Strong-slot replacement retains the new value, moves out the old value, stores the new value, and releases the old value. Owned temporaries and locals register automatic cleanup records; transfer operations disarm the corresponding record. Parameters and `this` are borrowed, while managed and reference-bearing structure returns are owned.
 
-`ct_retain` uses an atomic compare/exchange loop. `ct_release` performs a release decrement and an acquire fence before the zero-count thread pushes the object through `ReleaseNext` onto its thread-local LIFO worklist. A drain already in progress pushes newly dead objects onto that same worklist, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing elements and `Data`, dynamic strings free `Data`, and boxes and structures recursively drop nested references. Matching generated retain helpers preserve nested structure ownership during by-value copies.
+`ct_retain` uses an atomic compare/exchange loop. `ct_release` performs a release decrement and an acquire fence before the zero-count thread pushes the object through `ReleaseNext` onto its thread-local LIFO worklist. A drain already in progress pushes newly dead objects onto that same worklist, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing inline elements, and boxes and structures recursively drop nested references. String and array drops free only their single enclosing allocations. Matching generated retain helpers preserve nested structure ownership during by-value copies.
 
 Exception frames, pending actions, defer captures, and ownership cleanup records use automatic storage and do not call `ct_alloc`. Static fields own their values until process termination; static and empty strings are immortal. Reference cycles leak. `CT_MEMORY_DIAGNOSTICS` enables conformance-only live-object and live-allocation counters without adding a production API or cost.

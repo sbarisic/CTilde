@@ -53,10 +53,11 @@ public sealed class Camera
         }
     }
 
-    public void Render(FileHandle image, Hittable world, RandomGenerator random)
+    public void Render(FileHandle image, Hittable world, uint renderSeed)
     {
         Initialize();
         File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString() + "\n255\n");
+        RandomGenerator random = new RandomGenerator(renderSeed);
 
         int row = 0;
         int lastProgressPercent = 0;
@@ -69,6 +70,7 @@ public sealed class Camera
                 int sample = 0;
                 while (sample < SamplesPerPixel)
                 {
+                    random.Reseed(RandomGenerator.SampleSeed(renderSeed, column, row, sample));
                     Ray ray = GetRay(column, row, random);
                     color += RayColor(ray, MaxDepth, world, random);
                     sample++;

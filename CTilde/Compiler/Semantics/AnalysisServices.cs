@@ -47,7 +47,7 @@ internal sealed class AnalysisServices : ILoweringServices
             .Concat(_arrayTypes.Select(type => CEmitter.ArrayDescriptorName(type.ElementType!)))
             .Concat(_stringLiterals.Values.SelectMany(id => new[] { $"ct_sl_{id}", $"ct_slb_{id}" }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class)
-                .SelectMany(type => new[] { CEmitter.DescriptorName(type), $"ct_vtable_{NameMangler.Identifier(type.FullName)}" }))
+                .SelectMany(type => new[] { CEmitter.DescriptorName(type), CEmitter.VTableName(type) }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { CEmitter.DescriptorName(type), CEmitter.DelegateFactoryName(type), CEmitter.DelegateDropName(type) }))
             .Concat(_delegateThunks.Values)
@@ -55,13 +55,13 @@ internal sealed class AnalysisServices : ILoweringServices
             .Concat(Model.UserTypes.SelectMany(type => type.Constructors).Select(CEmitter.ConstructorInitializerName))
             .Concat(Model.UserTypes.SelectMany(type => type.Methods)
                 .Where(method => method.IsVirtual && !method.ContainingType.IsObject)
-                .Select(method => $"ct_vthunk_{NameMangler.Identifier(method.CName)}"))
+                .Select(CEmitter.VirtualMethodThunkName))
             .Concat(Model.UserTypes.SelectMany(type => type.Properties)
                 .Where(property => property.IsVirtual)
                 .SelectMany(property => new[]
                 {
-                    $"ct_vthunk_get_{NameMangler.Identifier(property.ContainingType.FullName + "." + property.Name)}",
-                    $"ct_vthunk_set_{NameMangler.Identifier(property.ContainingType.FullName + "." + property.Name)}",
+                    CEmitter.VirtualPropertyThunkName(property, true),
+                    CEmitter.VirtualPropertyThunkName(property, false),
                 }))
             .Concat(_boxedTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal).SelectMany(type =>
             {
@@ -251,7 +251,7 @@ internal sealed class AnalysisServices : ILoweringServices
         var key = (delegateType, method, virtualDispatch);
         if (_delegateThunks.TryGetValue(key, out var existing))
             return existing;
-        var name = $"ct_delegate_thunk_{NameMangler.Identifier(delegateType.FullName)}_{NameMangler.Identifier(method.CName)}_{(virtualDispatch ? "virtual" : "direct")}";
+        var name = NameMangler.Artifact("ct_h_", $"delegate-thunk:{NameMangler.TypeIdentity(delegateType)}:{NameMangler.MethodIdentity(method)}:{(virtualDispatch ? "virtual" : "direct")}");
         _delegateThunks.Add(key, name);
         return name;
     }
@@ -262,7 +262,7 @@ internal sealed class AnalysisServices : ILoweringServices
         if (_functionPointerTrampolines.TryGetValue(key, out var existing))
             return existing;
         RegisterExceptions();
-        var name = $"ct_callback_{NameMangler.Identifier(method.CName)}_{NameMangler.TypeCode(type)}";
+        var name = NameMangler.Artifact("ct_k_", $"function-pointer-callback:{NameMangler.CanonicalType(type)}:{NameMangler.MethodIdentity(method)}");
         _functionPointerTrampolines.Add(key, name);
         return name;
     }
@@ -277,7 +277,7 @@ internal sealed class AnalysisServices : ILoweringServices
     {
     }
 
-    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => $"ct_delegate_callback_{NameMangler.Identifier(delegateType.FullName)}";
+    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => NameMangler.Artifact("ct_k_", $"callback-adapter:{NameMangler.TypeIdentity(delegateType)}");
 
     public string MethodSignature(MethodSymbol method, string? name = null, bool prototype = false)
     {

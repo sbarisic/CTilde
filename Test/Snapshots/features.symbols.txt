@@ -1,101 +1,25 @@
-typedef struct ct_type_descriptor ct_type_descriptor;
-struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); };
-typedef struct ct_t_8_Examples_7_Counter ct_t_8_Examples_7_Counter;
-typedef struct ct_t_8_Examples_14_IntTransformer ct_t_8_Examples_14_IntTransformer;
-typedef struct ct_t_8_Examples_15_LongTransformer ct_t_8_Examples_15_LongTransformer;
-typedef struct ct_t_8_Examples_13_NativeInterop ct_t_8_Examples_13_NativeInterop;
-typedef struct ct_t_8_Examples_5_Point ct_t_8_Examples_5_Point;
-typedef struct ct_t_8_Examples_7_Program ct_t_8_Examples_7_Program;
-typedef struct ct_t_6_System_7_Console ct_t_6_System_7_Console;
-typedef struct ct_t_6_System_9_Exception ct_t_6_System_9_Exception;
-typedef struct ct_t_6_System_4_Math ct_t_6_System_4_Math;
-typedef struct ct_t_6_System_6_Object ct_t_6_System_6_Object;
-typedef struct ct_t_6_System_13_ObjectRuntime ct_t_6_System_13_ObjectRuntime;
-typedef struct ct_t_14_System_2ERuntime_16_NativeUtf8String ct_t_14_System_2ERuntime_16_NativeUtf8String;
-typedef struct ct_a_i32 ct_a_i32;
-typedef uint8_t ct_t_8_Examples_9_Direction;
-struct ct_t_6_System_6_Object
-struct ct_t_8_Examples_7_Counter
-struct ct_t_8_Examples_14_IntTransformer
-struct ct_t_8_Examples_15_LongTransformer
-struct ct_t_8_Examples_13_NativeInterop
-struct ct_t_8_Examples_5_Point
-struct ct_t_8_Examples_7_Program
-struct ct_t_6_System_7_Console
-struct ct_t_6_System_9_Exception
-struct ct_t_6_System_4_Math
-struct ct_t_6_System_13_ObjectRuntime
-struct ct_t_14_System_2ERuntime_16_NativeUtf8String
-struct ct_a_i32 { ct_object Object; int32_t Length; int32_t* Data; };
-static CT_UNUSED ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue);
-static CT_UNUSED void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self);
-static CT_UNUSED int32_t ct_m__16_Examples_2ECounter_3_Add_i32(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_delta);
-static CT_UNUSED int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self);
-static CT_UNUSED void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value);
-static CT_UNUSED ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y);
-static CT_UNUSED int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self);
-static CT_UNUSED int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value);
-static CT_UNUSED uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value);
-static CT_UNUSED int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value);
-static CT_UNUSED void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result);
-static CT_UNUSED int32_t ct_m__16_Examples_2EProgram_3_Add_i32_i32(int32_t u_4_left, int32_t u_5_right);
-static CT_UNUSED void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void);
-static CT_UNUSED void ct_m__16_Examples_2EProgram_4_Main(void);
-static CT_UNUSED void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_c8(uint8_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_i32(int32_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_u32(uint32_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_f32(float u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_i64(int64_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_u64(uint64_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_ni(intptr_t u_5_value);
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_nu(uintptr_t u_5_value);
-static CT_UNUSED ct_string* ct_m__16_System_2EException_8_ToString(ct_t_6_System_9_Exception* ct_self);
-static CT_UNUSED ct_string* ct_get__16_System_2EException_7_Message(ct_t_6_System_9_Exception* ct_self);
-static CT_UNUSED ct_t_6_System_6_Object* ct_ctor__13_System_2EObject_6_Object(void);
-static CT_UNUSED ct_string* ct_m__13_System_2EObject_8_ToString(ct_t_6_System_6_Object* ct_self);
-static CT_UNUSED bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject(ct_t_6_System_6_Object* ct_self, ct_t_6_System_6_Object* u_5_value);
-static CT_UNUSED int32_t ct_m__13_System_2EObject_11_GetHashCode(ct_t_6_System_6_Object* ct_self);
-static CT_UNUSED bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right);
-static CT_UNUSED bool ct_m__13_System_2EObject_15_ReferenceEquals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right);
-static CT_UNUSED ct_native_utf8_string ct_get__31_System_2ERuntime_2ENativeUtf8String_4_Null(void);
-static CT_UNUSED ct_string* ct_vthunk_u_38_ct_5Fm_5F_5F16_5FSystem_5F2EException_5F8_5FToString(ct_object* self) { return ct_m__16_System_2EException_8_ToString((ct_t_6_System_9_Exception*)(void*)self); }
-static CT_UNUSED ct_t_8_Examples_7_Counter* ct_ctor__16_Examples_2ECounter_7_Counter_i32(int32_t u_12_initialValue)
-static CT_UNUSED void ct_m__16_Examples_2ECounter_9_Increment(ct_t_8_Examples_7_Counter* ct_self)
-static CT_UNUSED int32_t ct_m__16_Examples_2ECounter_3_Add_i32(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_delta)
-static CT_UNUSED int32_t ct_get__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self)
-static CT_UNUSED void ct_set__16_Examples_2ECounter_5_Value(ct_t_8_Examples_7_Counter* ct_self, int32_t u_5_value)
-static CT_UNUSED ct_t_8_Examples_5_Point ct_ctor__14_Examples_2EPoint_5_Point_i32_i32(int32_t u_1_x, int32_t u_1_y)
-static CT_UNUSED int32_t ct_m__14_Examples_2EPoint_3_Sum(ct_t_8_Examples_5_Point* ct_self)
-static CT_UNUSED int32_t ct_m__16_Examples_2EProgram_5_Twice_i32(int32_t u_5_value)
-static CT_UNUSED uint32_t ct_m__16_Examples_2EProgram_5_Twice_u32(uint32_t u_5_value)
-static CT_UNUSED int64_t ct_m__16_Examples_2EProgram_13_TransformLong_i64(int64_t u_5_value)
-static CT_UNUSED void ct_m__16_Examples_2EProgram_12_UpdateNative_refi32_ini32_outu32(int32_t* u_5_value, const int32_t* u_5_delta, uint32_t* u_6_result)
-static CT_UNUSED int32_t ct_m__16_Examples_2EProgram_3_Add_i32_i32(int32_t u_4_left, int32_t u_5_right)
-static CT_UNUSED void ct_m__16_Examples_2EProgram_19_ShowDeferredCleanup(void)
-static CT_UNUSED void ct_m__16_Examples_2EProgram_4_Main(void)
-static CT_UNUSED void ct_m__14_System_2EConsole_5_Write_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_str(ct_string* u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_c8(uint8_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_i32(int32_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_u32(uint32_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_f32(float u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_b(bool u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_i64(int64_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_u64(uint64_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_r_13_System_2EObject(ct_t_6_System_6_Object* u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_ni(intptr_t u_5_value)
-static CT_UNUSED void ct_m__14_System_2EConsole_9_WriteLine_nu(uintptr_t u_5_value)
-static CT_UNUSED ct_string* ct_m__16_System_2EException_8_ToString(ct_t_6_System_9_Exception* ct_self)
-static CT_UNUSED ct_string* ct_get__16_System_2EException_7_Message(ct_t_6_System_9_Exception* ct_self)
-static CT_UNUSED ct_t_6_System_6_Object* ct_ctor__13_System_2EObject_6_Object(void)
-static CT_UNUSED ct_string* ct_m__13_System_2EObject_8_ToString(ct_t_6_System_6_Object* ct_self)
-static CT_UNUSED bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject(ct_t_6_System_6_Object* ct_self, ct_t_6_System_6_Object* u_5_value)
-static CT_UNUSED int32_t ct_m__13_System_2EObject_11_GetHashCode(ct_t_6_System_6_Object* ct_self)
-static CT_UNUSED bool ct_m__13_System_2EObject_6_Equals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right)
-static CT_UNUSED bool ct_m__13_System_2EObject_15_ReferenceEquals_r_13_System_2EObject_r_13_System_2EObject(ct_t_6_System_6_Object* u_4_left, ct_t_6_System_6_Object* u_5_right)
-static CT_UNUSED ct_native_utf8_string ct_get__31_System_2ERuntime_2ENativeUtf8String_4_Null(void)
-int main(void)
+method ct_c_0fdc14f70ffb09e702d22e91 method:Examples.Point::.ctor(:int,:int)->Examples.Point -> Examples.Point
+method ct_c_2acdc55a2c19aa8d3aadbdb1 method:Examples.Counter::.ctor(:int)->Examples.Counter -> Examples.Counter
+field ct_f_323289753b6d24048112ea37 field:Examples.Program::seed:int -> int
+field ct_f_40f553759451d30cac4d4750 field:Examples.Program::Factor:int -> int
+field ct_f_afeb92f1f872df7c84146066 field:Examples.Direction::<underlying>:byte -> byte
+getter ct_g_07780b31c16ed41789b3ebf6 getter:Examples.Counter::Value:int -> int
+method ct_m_03d103cae071ee988cc52f2f method:Examples.Program::Main()->void -> void
+method ct_m_06e76735b8d8031ed4f09336 method:Examples.Program::TransformLong(:long)->long -> long
+method ct_m_237af3989f146031e9f98cfd method:Examples.Program::Twice(:int)->int -> int
+method ct_m_a051e3320acc9798d0748595 method:Examples.Program::Add(:int,:int)->int -> int
+method ct_m_ae8a6b3a881250962777c558 method:Examples.Program::UpdateNative(ref:int,in:int,out:uint)->void -> void
+method ct_m_b5aeaf95652a3e62a68409db method:Examples.Point::Sum()->int -> int
+method ct_m_c6a0a677cdfaef93d1ef8fc5 method:Examples.Counter::Increment()->void -> void
+method ct_m_c7ae14bd949d06dbca728549 method:Examples.Program::ShowDeferredCleanup()->void -> void
+method ct_m_d570ebcf544a7dd5c4ef686f method:Examples.Counter::Add(:int)->int -> int
+method ct_m_ebebd95add60453f721bff21 method:Examples.Program::Twice(:uint)->uint -> uint
+setter ct_s_215f270e70cd8133b84de410 setter:Examples.Counter::Value:int -> void
+type ct_t_01679443df45d0d3a977d592 type:Examples.Counter -> Examples.Counter
+type ct_t_0ffa27a15bb455db28f4783d type:Examples.Program -> Examples.Program
+type ct_t_3adee983a944ba512f823e6a type:Examples.Point -> Examples.Point
+type ct_t_5b42a6370eb8dcde4a263c12 type:Examples.IntTransformer -> Examples.IntTransformer
+type ct_t_7f4ca7e2c7953ee3e3766e9c type:Examples.NativeInterop -> Examples.NativeInterop
+type ct_t_82b2e3fee7101c0a882a8e1b type:Examples.LongTransformer -> Examples.LongTransformer
+type ct_t_ca7b837c57e0933f6eaab30a type:Examples.Direction -> Examples.Direction
+type ct_t_ea54855c4648ca4c1de5bad4 type:Examples.NativeResource -> Examples.NativeResource

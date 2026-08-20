@@ -29,10 +29,10 @@ internal static partial class ConformanceTests
         return writer.ToString();
     }
 
-    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null)
-        => CompileAndRun([SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics, nativeSuffix, threads, standardInput, standardInputBytes, captureFile);
+    static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null, bool conformance = false)
+        => CompileAndRun([SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics, nativeSuffix, threads, standardInput, standardInputBytes, captureFile, conformance);
 
-    static ProcessResult CompileAndRun(IEnumerable<SyntaxTree> sources, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null)
+    static ProcessResult CompileAndRun(IEnumerable<SyntaxTree> sources, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null, bool conformance = false)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(directory);
@@ -41,7 +41,7 @@ internal static partial class ConformanceTests
             var cPath = Path.Combine(directory, "program.c");
             var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
             File.WriteAllText(cPath, Emit(sources) + nativeSuffix, new UTF8Encoding(false));
-            var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads);
+            var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics, threads, conformance);
             Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
             var workingDirectory = standardInput is null && standardInputBytes is null && captureFile is null ? null : directory;
             var result = RunCompiledProgram(executablePath, standardInput, standardInputBytes, workingDirectory);
@@ -63,9 +63,13 @@ internal static partial class ConformanceTests
         }
     }
 
-    static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false)
+    static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false)
     {
-        var diagnosticDefine = memoryDiagnostics ? "CT_MEMORY_DIAGNOSTICS" : null;
+        var diagnosticDefines = new List<string>();
+        if (memoryDiagnostics)
+            diagnosticDefines.Add("CT_MEMORY_DIAGNOSTICS");
+        if (conformance)
+            diagnosticDefines.Add("CTILDE_CONFORMANCE");
         var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
         if (!string.IsNullOrWhiteSpace(configured))
         {
@@ -74,7 +78,7 @@ internal static partial class ConformanceTests
                 var compiler = configured[4..];
                 var linuxSource = WslPath(cPath);
                 var linuxOutput = WslPath(executablePath);
-                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics, threads);
+                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics, threads, conformance);
             }
             var compilerName = Path.GetFileNameWithoutExtension(configured);
             var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
@@ -82,18 +86,18 @@ internal static partial class ConformanceTests
                 : null;
             if (arguments is not null)
             {
-                if (diagnosticDefine is not null)
-                    arguments.Add($"/D{diagnosticDefine}");
+                foreach (var define in diagnosticDefines)
+                    arguments.Add($"/D{define}");
                 arguments.Add($"/Fe:{executablePath}");
                 arguments.Add(cPath);
             }
             return arguments is not null
                 ? RunProcess(configured, arguments)
-                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics, threads);
+                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics, threads, conformance);
         }
 
         if (!OperatingSystem.IsWindows())
-            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics, threads);
+            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics, threads, conformance);
 
         var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
         Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -102,17 +106,21 @@ internal static partial class ConformanceTests
         var installation = discovery.StandardOutput.Trim();
         var vcVars = Path.Combine(installation, "VC", "Auxiliary", "Build", "vcvars64.bat");
         var commandFile = Path.Combine(Path.GetDirectoryName(cPath)!, "compile.cmd");
-        var defineArgument = diagnosticDefine is null ? "" : $" /D{diagnosticDefine}";
+        var defineArgument = string.Concat(diagnosticDefines.Select(define => $" /D{define}"));
         var objectPath = Path.Combine(Path.GetDirectoryName(cPath)!, "program.obj");
         File.WriteAllText(commandFile, $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /W4 /WX /wd4702{defineArgument} /Fo:\"{objectPath}\" /Fe:\"{executablePath}\" \"{cPath}\"{Environment.NewLine}", Encoding.ASCII);
         return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
     }
 
-    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false)
+    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false)
     {
         var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
         var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
-        var diagnosticArguments = memoryDiagnostics ? new[] { "-DCT_MEMORY_DIAGNOSTICS" } : [];
+        var diagnosticArguments = new List<string>();
+        if (memoryDiagnostics)
+            diagnosticArguments.Add("-DCT_MEMORY_DIAGNOSTICS");
+        if (conformance)
+            diagnosticArguments.Add("-DCTILDE_CONFORMANCE");
         var threadArguments = threads ? new[] { "-pthread" } : [];
         var addressSanitizers = Environment.GetEnvironmentVariable("CTILDE_SANITIZERS") == "1";
         var sanitizerArguments = threads && Environment.GetEnvironmentVariable("CTILDE_THREAD_SANITIZER") == "1"
@@ -210,24 +218,27 @@ internal static partial class ConformanceTests
     {
         var result = new StringBuilder();
         var captureBlock = false;
+        var typeNames = System.Text.RegularExpressions.Regex.Matches(generated, "\\{ \\\"Examples\\.(?:Base|Derived)\\\".*?sizeof\\((ct_t_[0-9a-f]{24})\\)")
+            .Select(match => match.Groups[1].Value)
+            .ToHashSet(StringComparer.Ordinal);
         foreach (var line in Normalize(generated).Split('\n'))
         {
             if (line.StartsWith("struct ct_vtable", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_t_8_Examples_4_Base", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_t_8_Examples_7_Derived", StringComparison.Ordinal) ||
-                line.StartsWith("static const ct_vtable ct_vtable_", StringComparison.Ordinal))
+                typeNames.Any(name => line.StartsWith("struct " + name, StringComparison.Ordinal)) ||
+                line.StartsWith("static const ct_vtable ct_v_", StringComparison.Ordinal))
                 captureBlock = true;
 
             var singleLine = line.StartsWith("typedef struct ct_object", StringComparison.Ordinal) ||
+                line.StartsWith("typedef struct ct_string", StringComparison.Ordinal) ||
                 line.StartsWith("typedef struct ct_box_", StringComparison.Ordinal) ||
-                line.StartsWith("static ct_type_descriptor ct_desc_", StringComparison.Ordinal) ||
+                line.StartsWith("static ct_type_descriptor ct_d_", StringComparison.Ordinal) ||
                 line.StartsWith("static ct_object* ct_checked_cast", StringComparison.Ordinal) ||
                 line.StartsWith("static ct_object* ct_safe_cast", StringComparison.Ordinal) ||
-                line.Contains("ct_init_ct_ctor_", StringComparison.Ordinal) ||
+                line.Contains("ct_i_", StringComparison.Ordinal) ||
                 line.Contains("ct_l_", StringComparison.Ordinal) &&
                     (line.Contains("ct_checked_cast", StringComparison.Ordinal) || line.Contains("ct_safe_cast", StringComparison.Ordinal)) ||
                 line.StartsWith("static ", StringComparison.Ordinal) &&
-                    (line.Contains(" ct_vthunk_", StringComparison.Ordinal) ||
+                    (line.Contains(" ct_h_", StringComparison.Ordinal) ||
                      line.Contains(" ct_box_", StringComparison.Ordinal) ||
                      line.Contains(" ct_unbox_", StringComparison.Ordinal));
 

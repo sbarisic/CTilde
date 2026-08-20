@@ -1,5 +1,6 @@
 using System.Collections.Immutable;
 using System.Numerics;
+using System.Security.Cryptography;
 using System.Text;
 
 namespace CTilde;
@@ -236,20 +237,49 @@ internal sealed class LocalSymbol
 
 internal static class NameMangler
 {
-    public static string Type(TypeSymbol type) => $"ct_t{Encode(type.Namespace)}{Encode(type.Name)}";
+    public static string Type(TypeSymbol type) => Compact("ct_t_", TypeIdentity(type));
     public static string Array(CType elementType) => $"ct_a_{TypeCode(elementType)}";
-    public static string Member(MemberSymbol member) => $"ct_f_{Encode(member.ContainingType.FullName)}{Encode(member.Name)}";
+    public static string Member(MemberSymbol member) => Compact("ct_f_", MemberIdentity(member));
     public static string Method(MethodSymbol method)
     {
-        var parameters = string.Concat(method.Parameters.Select(parameter => $"_{PassingCode(parameter.PassingKind)}{TypeCode(parameter.Type)}"));
-        if (method.IsOperator)
-            return $"ct_op_{Encode(method.ContainingType.FullName)}{Encode(OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length))}{parameters}";
-        var prefix = method.IsConstructor ? "ct_ctor_" : "ct_m_";
-        return $"{prefix}{Encode(method.ContainingType.FullName)}{Encode(method.Name)}{parameters}";
+        var prefix = method.IsOperator ? "ct_o_" : method.IsConstructor ? "ct_c_" : "ct_m_";
+        return Compact(prefix, MethodIdentity(method));
     }
-    public static string Getter(PropertySymbol property) => $"ct_get_{Encode(property.ContainingType.FullName)}{Encode(property.Name)}";
-    public static string Setter(PropertySymbol property) => $"ct_set_{Encode(property.ContainingType.FullName)}{Encode(property.Name)}";
+    public static string Getter(PropertySymbol property) => Compact("ct_g_", PropertyIdentity(property, true));
+    public static string Setter(PropertySymbol property) => Compact("ct_s_", PropertyIdentity(property, false));
+    public static string Artifact(string prefix, string identity) => Compact(prefix, identity);
     public static string Identifier(string identifier) => $"u{Encode(identifier)}";
+
+    public static string TypeIdentity(TypeSymbol type) => $"type:{type.FullName}";
+    public static string MemberIdentity(MemberSymbol member) => member switch
+    {
+        FieldSymbol field => $"field:{field.ContainingType.FullName}::{field.Name}:{CanonicalType(field.Type)}",
+        PropertySymbol property => $"property:{property.ContainingType.FullName}::{property.Name}:{CanonicalType(property.Type)}",
+        MethodSymbol method => MethodIdentity(method),
+        _ => $"member:{member.ContainingType.FullName}::{member.Name}",
+    };
+    public static string PropertyIdentity(PropertySymbol property, bool getter) =>
+        $"{(getter ? "getter" : "setter")}:{property.ContainingType.FullName}::{property.Name}:{CanonicalType(property.Type)}";
+    public static string MethodIdentity(MethodSymbol method)
+    {
+        var name = method.IsOperator
+            ? OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length)
+            : method.IsConstructor ? ".ctor" : method.Name;
+        var parameters = string.Join(",", method.Parameters.Select(parameter => $"{PassingCode(parameter.PassingKind)}:{CanonicalType(parameter.Type)}"));
+        return $"method:{method.ContainingType.FullName}::{name}({parameters})->{CanonicalType(method.IsConstructor ? method.ContainingType.Type : method.ReturnType)}";
+    }
+
+    public static string CanonicalType(CType type) => type.Kind switch
+    {
+        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.EspError => type.Symbol!.FullName,
+        CTypeKind.Array => $"array<{CanonicalType(type.ElementType!)}>",
+        CTypeKind.Pointer => $"pointer<{CanonicalType(type.ElementType!)}>",
+        CTypeKind.FunctionPointer => $"fn({string.Join(",", type.FunctionPointer!.ParameterTypes.Select((parameter, index) => $"{PassingCode(type.FunctionPointer.PassingKinds[index])}:{CanonicalType(parameter)}"))})->{CanonicalType(type.FunctionPointer.ReturnType)}",
+        CTypeKind.NativeBuffer => $"native-buffer<{CanonicalType(type.ElementType!)}>",
+        CTypeKind.ReadOnlyNativeBuffer => $"readonly-native-buffer<{CanonicalType(type.ElementType!)}>",
+        CTypeKind.NativeUtf8String => "native-utf8",
+        _ => type.Kind.ToString().ToLowerInvariant(),
+    };
 
     public static string TypeCode(CType type) => type.Kind switch
     {
@@ -268,17 +298,17 @@ internal static class NameMangler
         CTypeKind.Nuint => "nu",
         CTypeKind.Float => "f32",
         CTypeKind.String => "str",
-        CTypeKind.Class => $"r{Encode(type.Symbol!.FullName)}",
-        CTypeKind.Struct => $"s{Encode(type.Symbol!.FullName)}",
-        CTypeKind.Enum => $"e{Encode(type.Symbol!.FullName)}",
-        CTypeKind.Delegate => $"d{Encode(type.Symbol!.FullName)}",
-        CTypeKind.Opaque => $"o{Encode(type.Symbol!.FullName)}",
+        CTypeKind.Class => $"r{Hash96(CanonicalType(type))}",
+        CTypeKind.Struct => $"s{Hash96(CanonicalType(type))}",
+        CTypeKind.Enum => $"e{Hash96(CanonicalType(type))}",
+        CTypeKind.Delegate => $"d{Hash96(CanonicalType(type))}",
+        CTypeKind.Opaque => $"o{Hash96(CanonicalType(type))}",
         CTypeKind.EspError => "esperr",
-        CTypeKind.Array => $"a{TypeCode(type.ElementType!)}",
-        CTypeKind.Pointer => $"p{TypeCode(type.ElementType!)}",
-        CTypeKind.FunctionPointer => $"fp{string.Concat(type.FunctionPointer!.ParameterTypes.Select((parameter, index) => "_" + PassingCode(type.FunctionPointer.PassingKinds[index]) + TypeCode(parameter)))}_r{TypeCode(type.FunctionPointer.ReturnType)}",
-        CTypeKind.NativeBuffer => $"nb{TypeCode(type.ElementType!)}",
-        CTypeKind.ReadOnlyNativeBuffer => $"rnb{TypeCode(type.ElementType!)}",
+        CTypeKind.Array => $"a{Hash96(CanonicalType(type))}",
+        CTypeKind.Pointer => $"p{Hash96(CanonicalType(type))}",
+        CTypeKind.FunctionPointer => $"f{Hash96(CanonicalType(type))}",
+        CTypeKind.NativeBuffer => $"n{Hash96(CanonicalType(type))}",
+        CTypeKind.ReadOnlyNativeBuffer => $"q{Hash96(CanonicalType(type))}",
         CTypeKind.NativeUtf8String => "nu8",
         _ => "err",
     };
@@ -290,6 +320,11 @@ internal static class NameMangler
         ParameterPassingKind.Out => "out",
         _ => string.Empty,
     };
+
+    private static string Compact(string prefix, string identity) => prefix + Hash96(identity);
+
+    private static string Hash96(string identity) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity))).AsSpan(0, 24).ToString().ToLowerInvariant();
 
     private static string Encode(string text)
     {

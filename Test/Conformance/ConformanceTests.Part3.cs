@@ -104,7 +104,8 @@ internal static partial class ConformanceTests
             Assert(first.Contains("if (setjmp(*ct_eh_0_finally->Target) == 0)", StringComparison.Ordinal), "The lexical finally handler was not emitted in controlling-expression form.");
             Assert(first.Contains("ct_exception_top = ct_eh_0_finally->Previous;", StringComparison.Ordinal), "A handler-pop path was not emitted.");
             Assert(first.Contains("ct_state.ct_ep_0 = 1;", StringComparison.Ordinal), "The pending return cleanup action was not emitted.");
-            Assert(!Emit("public static class Program { [EntryPoint] public static void Main() { } }").Contains("#include <setjmp.h>", StringComparison.Ordinal), "A program without exception syntax included setjmp support.");
+            var faultReady = Emit("public static class Program { [EntryPoint] public static void Main() { } }");
+            Assert(faultReady.Contains("#include <setjmp.h>", StringComparison.Ordinal) && faultReady.Contains("ct_runtime_faults_init", StringComparison.Ordinal), "A program without explicit throw syntax omitted catchable runtime-fault support.");
             var durable = Emit("using System; public static class Program { private static void M(int value) { int local = value; try { local = 2; throw new Exception(); } catch { Console.WriteLine(local); } } [EntryPoint] public static void Main() { M(1); } }");
             Assert(!durable.Contains("int32_t ct_pp_0;", StringComparison.Ordinal) && durable.Contains("int32_t ct_lp_0;", StringComparison.Ordinal), "Exception liveness did not isolate the modified local from the unchanged parameter.");
             Assert(durable.Contains("volatile struct", StringComparison.Ordinal), "Exception methods did not place durable state in an automatic volatile aggregate.");
@@ -773,9 +774,9 @@ internal static partial class ConformanceTests
                 """;
             const string nativeSuffix = """
         
-                static ct_t_6_System_6_Object* native_saved = NULL;
-                void native_keep(ct_t_6_System_6_Object* value) { native_saved = value; }
-                ct_t_6_System_6_Object* native_borrow(void) { return native_saved; }
+                static ct_managed_object* native_saved = NULL;
+                void native_keep(ct_managed_object* value) { native_saved = value; }
+                ct_managed_object* native_borrow(void) { return native_saved; }
                 void native_clear(void) { ct_release((ct_object*)(void*)native_saved); native_saved = NULL; }
                 """;
             var result = CompileAndRun(source, memoryDiagnostics: true, nativeSuffix: nativeSuffix);

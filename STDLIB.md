@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.12. Object, exception, console output, single-precision math, mutable single-precision vectors, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.12 retains the draft 0.10 native ABI.
+This document is the canonical standard-library reference for C~ draft 0.14. Object, standard runtime-fault exceptions, console output, single-precision math, mutable single-precision vectors, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.14 changes the runtime and storage ABI.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -51,6 +51,8 @@ public class Exception
 The parameterless constructor uses an empty message. The string constructor also converts a null message to an empty string.
 
 `ToString()` returns the fully qualified runtime type name. It appends `": "` and `Message` when the message is not empty. Derived exception classes inherit this behavior, so the result uses the derived runtime type name.
+
+The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, and `OutOfMemoryException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
 
 ## Console
 
@@ -225,7 +227,7 @@ public static class Environment
 
 ## Runtime memory
 
-`System.Runtime.Memory` exposes two unsafe interop operations:
+`System.Runtime.Memory` exposes two unsafe production interop operations:
 
 ```csharp
 public static class Memory
@@ -239,6 +241,8 @@ public static class Memory
 ```
 
 `Retain` and `Release` manipulate an additional untracked ARC ownership count. `null` is a no-op. These methods require an unsafe method or block. Unbalanced calls can leak memory, create dangling references, or double-release an object. Normal C~ code does not need them.
+
+Conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFailAllocationAfter(int successfulAllocations)`. It injects managed allocation failure for runtime tests and is not available in production output.
 
 ## Runtime native buffers
 
@@ -351,7 +355,7 @@ string text = value.ToString();
 Console.WriteLine("value: " + text);
 ```
 
-Numeric, Boolean, and character conversions allocate immutable strings. Their descriptors and null-terminated UTF-8 data live until process exit. The terminating zero byte is not included in `Length`; converting the zero `char` still produces a string with `Length == 1`.
+Numeric, Boolean, and character conversions allocate immutable strings in one contiguous object-and-data allocation. The terminating zero byte is not included in `Length`; converting the zero `char` still produces a string with `Length == 1`.
 
 `string.ToString()` does not allocate. It checks the receiver for null and returns the same reference.
 
@@ -371,13 +375,13 @@ These operations are compiler intrinsics rather than declarations in the bundled
 
 ## Runtime behavior
 
-The GNU C23 runtime is part of each generated translation unit. Managed allocations use atomic automatic reference counting and are reclaimed on the thread that releases the last owned reference. Each attached thread has independent exception, cleanup, and iterative-release state. Static managed fields live until termination, static strings are immortal, and reference cycles leak. Fatal failures, `Environment.Exit`, abort, reset, and power loss do not promise ARC or defer cleanup.
+The GNU C23 program defines one runtime. Unity output embeds it once; modular sources import the shared implementation. Managed allocations use atomic automatic reference counting and are reclaimed on the thread that releases the last owned reference. Each attached thread has independent exception, cleanup, origin-diagnostic, and iterative-release state. Static managed fields live until reverse module finalization, static strings and fault objects are immortal, and reference cycles leak. Panics, `Environment.Exit`, abort, reset, and power loss do not promise ARC or defer cleanup.
 
-Invalid casts report `CTO0001`. Null unboxing reports `CTO0002`. Type-mismatched unboxing reports `CTO0003`.
+Invalid casts and type-mismatched unboxing throw `InvalidCastException` with origin codes `CTO0001` and `CTO0003`. Null unboxing throws `NullReferenceException` with `CTO0002`.
 
-An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its non-empty message. Throwing a null exception reference reports `CTE0002`. An exception escaping a supported synchronous unmanaged callback reports fatal `CTE0003`. Hosted failures exit with `EXIT_FAILURE`; ESP-IDF failures call `abort()` after writing the diagnostic.
+An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its origin. Throwing a null exception reference throws `NullReferenceException` with `CTE0002`. An exception escaping a supported synchronous unmanaged callback panics with `CTE0003`. Hosted fatal termination exits with `EXIT_FAILURE`; ESP-IDF calls `abort()` after writing the diagnostic.
 
-Other runtime failures remain fatal and are not catchable in draft 0.12. Hosted console and file failures are the exception: they create catchable `System.IO.IOException` values. Unattached native entry reports `CTT0001`, invalid attach/detach lifecycle reports `CTT0002`, and dynamic embedded NUL reports `CTS0003`. Attachment is a native ABI operation and intentionally has no C~ standard-library wrapper.
+Null, bounds, divide-by-zero, cast/unbox, size-overflow, embedded-NUL, and attached managed-OOM conditions are catchable through the built-in allocation-free exceptions. Hosted console and file failures continue to create catchable `System.IO.IOException` values. Unattached native entry (`CTT0001`), invalid lifecycle (`CTT0002`), ABI mismatch, ARC corruption, cleanup corruption, and native-boundary exception escape remain panics. Runtime and thread lifecycle are native ABI operations and intentionally have no C~ standard-library wrapper.
 
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 

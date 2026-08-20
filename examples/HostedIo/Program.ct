@@ -12,10 +12,10 @@ public static class Program
         defer File.Close(image);
 
         Console.WriteLine("Rendering image.ppm...");
-        RandomGenerator random = new RandomGenerator(RandomGenerator.DefaultSeed);
-        HittableList world = Scene.CreateFinal(random);
+        HittableList world = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
+        Hittable renderWorld = world.BuildBvh();
         Camera camera = Scene.CreateBookCamera();
-        camera.Render(image, world, random);
+        camera.Render(image, renderWorld, RandomGenerator.DefaultRenderSeed);
         Console.WriteLine("Done: 1200x675.");
     }
 }

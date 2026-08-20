@@ -9,6 +9,10 @@ public static class Memory
     [Extern("ct_memory_release")]
     [NoAlloc]
     public static unsafe void Release(object value);
+
+    [Extern("ct_runtime_test_fail_allocation_after")]
+    [NoAlloc]
+    public static void TestFailAllocationAfter(int successfulAllocations);
 }
 
 // CTILDE_NATIVE_UTF8_DECLARATION

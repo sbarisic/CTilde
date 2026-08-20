@@ -13,7 +13,7 @@ internal sealed partial class CEmitter
                 .ToArray();
             writer.WriteLine(CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
             writer.WriteLine("{");
-            writer.WriteLine("    (void)ct_thread_require_attached();");
+            writer.WriteLine("    ct_runtime_require_ready();");
             writer.WriteLine("    jmp_buf ct_export_target;");
             writer.WriteLine("    ct_exception_frame ct_export_frame = { &ct_export_target, ct_exception_top, ct_cleanup_top };");
             writer.WriteLine("    if (setjmp(ct_export_target) != 0)");
@@ -25,7 +25,6 @@ internal sealed partial class CEmitter
             writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-export>\", 0);");
             writer.WriteLine("    }");
             writer.WriteLine("    ct_exception_top = &ct_export_frame;");
-            writer.WriteLine("    ct_module_init();");
             var arguments = new List<string>();
             foreach (var parameter in method.Parameters)
             {

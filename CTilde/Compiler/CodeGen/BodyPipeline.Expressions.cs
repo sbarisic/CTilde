@@ -500,7 +500,7 @@ internal sealed partial class BodyPipeline
         count = Materialize(count, syntax.Count);
         var prelude = new List<string>(count.Prelude);
         if (count.Type == CType.Int)
-            prelude.Add($"if ({count.Code} < 0) ct_fail(\"CTB0002\", {_emitter.SourceArgument(syntax)});");
+            prelude.Add($"if ({count.Code} < 0) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0002\", {_emitter.SourceArgument(syntax)});");
         var bytes = $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
         var pointer = $"((size_t){count.Code} == 0u ? NULL : ({_emitter.CTypeName(element)}*)CT_ALLOCA({bytes}))";
         return new LoweredExpression { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
@@ -794,7 +794,7 @@ internal sealed partial class BodyPipeline
                         Report("CT2172", "Readonly storage can be passed only with 'in'.", syntax.Arguments[index]);
                     if (signature.PassingKinds[index] == ParameterPassingKind.Out)
                     {
-                        if (argument.Type.ContainsManagedReferences)
+                        if (argument.Type.ContainsManagedReferences && !IsUninitializedOut(argument.LValue))
                             prelude.Add(_emitter.DropValueStatement(argument.Type, address));
                         prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
                         MarkAssigned(argument.LValue);

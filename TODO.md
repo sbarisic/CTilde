@@ -1,5 +1,19 @@
 # C~ TODO
 
+## Draft 0.14 architecture hardening and renderer acceleration
+
+- [x] Define one process runtime with public initialize/shutdown, thread attach/detach, retain/release, panic callback, runtime ABI 14, and module init/fini descriptor.
+- [x] Convert recoverable runtime checks to allocation-free immortal exception singletons while retaining origin diagnostics and strict `[NoAlloc]`.
+- [x] Formalize first-write construction for `out` across managed and native callable forms.
+- [x] Convert dynamic strings and managed arrays to checked contiguous allocations with compatible immortal static-string wrappers.
+- [x] Add shared unity/modular emission, immutable bundle artifacts, deterministic symbol maps, reachability partitioning, safe generated-file pruning, hosted object caching, and Release LTO flags.
+- [x] Replace globally visible generated names with category-prefixed 96-bit SHA-256 names over canonical identities.
+- [x] Add robust AABBs, deterministic BVH construction/traversal, separate scene/render seeds, and schedule-independent per-sample streams to HostedIo.
+- [x] Record the full 1200x675x500 Release+LTO BVH render: 4,420.348 seconds and SHA-256 `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`.
+- [ ] Flash and monitor the ABI 14 T-CAN485 runtime regression workload. Until performed, hardware validation remains unverified.
+- [ ] Add independent DLL loading, unloading safety, and dynamic runtime registration only in a later ABI design.
+- [ ] Add parallel renderer workers only after retaining the per-sample deterministic output gate.
+
 ## Hosted standard-library I/O
 
 - [x] Add hosted `Console.Read` and UTF-8 `Console.ReadLine` while preserving common console output.

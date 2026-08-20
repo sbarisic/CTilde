@@ -4,7 +4,8 @@
     "Program.ct"
   ],
   "build": {
-    "generatedC": "main/generated/ctilde_program.c",
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
     "generatedHeader": "main/generated/ctilde_exports.h",
     "espIdfProjectDirectory": "."
   }

@@ -1,5 +1,7 @@
+include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_sources.cmake")
+
 idf_component_register(
-    SRCS "generated/ctilde_program.c" "ctilde_esp_shim.c"
+    SRCS ${CTILDE_GENERATED_SOURCES} "ctilde_esp_shim.c"
     INCLUDE_DIRS "."
     PRIV_REQUIRES esp_driver_gpio esp_system esp_timer freertos led_strip)
 

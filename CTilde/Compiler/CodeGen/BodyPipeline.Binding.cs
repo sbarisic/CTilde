@@ -414,7 +414,12 @@ internal sealed partial class BodyPipeline
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(target.Type, temp)} = {value.Code};");
             if (target.Type.ContainsManagedReferences)
-                AddStrongStore(prelude, target, temp);
+            {
+                if (IsUninitializedOut(target.LValue))
+                    AddConstructStore(prelude, target, temp);
+                else
+                    AddStrongStore(prelude, target, temp);
+            }
             else
                 prelude.Add(target.LValue.Store(temp) + ";");
             MarkAssigned(target.LValue);
@@ -535,6 +540,10 @@ internal sealed partial class BodyPipeline
         if (lvalue.Parameter?.PassingKind == ParameterPassingKind.Out)
             _assignedOutParameters.Add(lvalue.Parameter);
     }
+
+    private bool IsUninitializedOut(LoweredLValue lvalue) =>
+        lvalue.Parameter is { PassingKind: ParameterPassingKind.Out } parameter &&
+        !_assignedOutParameters.Contains(parameter);
 
     private void ValidateOutParameters(SyntaxNode syntax)
     {

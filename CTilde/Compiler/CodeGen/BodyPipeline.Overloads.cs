@@ -148,7 +148,7 @@ internal sealed partial class BodyPipeline
                     Report("CT2172", "Readonly storage can be passed only with 'in'.", argumentSyntax);
                 if (parameter.PassingKind == ParameterPassingKind.Out)
                 {
-                    if (argument.Type.ContainsManagedReferences)
+                    if (argument.Type.ContainsManagedReferences && !IsUninitializedOut(argument.LValue))
                         prelude.Add(_emitter.DropValueStatement(argument.Type, address));
                     prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
                     MarkAssigned(argument.LValue);

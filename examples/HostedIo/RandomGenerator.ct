@@ -5,15 +5,41 @@ namespace HostedIoExample;
 public sealed class RandomGenerator
 {
     public const uint DefaultSeed = 0x00C0FFEEu;
+    public const uint DefaultSceneSeed = 0x00C0FFEEu;
+    public const uint DefaultRenderSeed = 0x5EED1234u;
 
     private uint state;
 
     public RandomGenerator(uint seed)
     {
+        Reseed(seed);
+    }
+
+    [NoAlloc]
+    public void Reseed(uint seed)
+    {
         if (seed == 0u)
             state = DefaultSeed;
         else
             state = seed;
+    }
+
+    // This 32-bit avalanche mix derives an independent stream for each pixel sample.
+    [NoAlloc]
+    public static uint SampleSeed(uint globalSeed, int column, int row, int sample)
+    {
+        uint value = globalSeed;
+        value = value ^ ((uint)column * 0x9E3779B9u);
+        value = value ^ ((uint)row * 0x85EBCA6Bu);
+        value = value ^ ((uint)sample * 0xC2B2AE35u);
+        value = value ^ (value >> 16);
+        value = value * 0x7FEB352Du;
+        value = value ^ (value >> 15);
+        value = value * 0x846CA68Bu;
+        value = value ^ (value >> 16);
+        if (value == 0u)
+            return DefaultSeed;
+        return value;
     }
 
     [NoAlloc]

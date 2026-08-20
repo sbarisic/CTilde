@@ -1,4 +1,5 @@
 using System.Text;
+using System.Security.Cryptography;
 using CTilde;
 
 namespace CTilde.Cli;
@@ -145,50 +146,141 @@ internal static class HostedBuildDriver
         var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
             ? new[] { "/Od", "/Zi" }
             : ["/O2"];
-        var arguments = new List<string> { "/nologo", "/std:clatest", "/W4", "/WX", "/wd4702" };
-        arguments.AddRange(configuration);
-        arguments.Add($"/Fe:{request.ExecutablePath}");
-        arguments.Add(request.GeneratedCPath!);
-        var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+        var common = new List<string> { "/nologo", "/std:clatest", "/W4", "/WX", "/wd4702" };
+        common.AddRange(configuration);
+        if (request.Lto)
+            common.Add("/GL");
+        var objects = new List<string>();
+        foreach (var source in request.GeneratedSourcePaths)
+        {
+            var objectPath = CachedObjectPath(request, compiler, source, string.Join('\n', common), ".obj");
+            objects.Add(objectPath);
+            if (File.Exists(objectPath))
+            {
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: reused native object {Path.GetFileName(objectPath)}");
+                continue;
+            }
+            var arguments = new List<string>(common)
+            {
+                "/c",
+                $"/Fo:{objectPath}",
+                $"/Fd:{Path.ChangeExtension(objectPath, ".pdb")}",
+                source,
+            };
+            var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+                Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
+            if (result.ExitCode != 0)
+                return result.ExitCode;
+        }
+
+        var link = new List<string> { "/nologo", $"/Fe:{request.ExecutablePath}" };
+        link.AddRange(objects);
+        link.Add("/link");
+        if (request.Configuration == CTildeNativeBuildConfiguration.Debug)
+            link.Add("/DEBUG");
+        if (request.Lto)
+            link.Add("/LTCG");
+        var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
-        return result.ExitCode;
+        return linked.ExitCode;
     }
 
     private static async Task<int> CompileGnuAsync(HostedCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
     {
-        var generatedC = request.GeneratedCPath!;
         var executable = request.ExecutablePath!;
         var prefix = Array.Empty<string>();
         if (compiler.Kind == HostedCompilerKind.WslGnu)
         {
-            generatedC = await WslPathAsync(compiler.Command, generatedC, request.RootDirectory, cancellationToken);
             executable = await WslPathAsync(compiler.Command, executable, request.RootDirectory, cancellationToken);
             prefix = ["--exec", compiler.WslCompiler!];
         }
         var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
             ? new[] { "-O0", "-g" }
             : ["-O2"];
-        var arguments = new List<string>(prefix) { "-std=gnu23" };
-        arguments.AddRange(configuration);
-        arguments.AddRange(["-Wall", "-Wextra", "-Werror", "-o", executable, generatedC]);
-        if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
-            arguments.Add("-lm");
-        var first = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
-            Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment, ForwardOutput: false), cancellationToken);
-        if (first.ExitCode == 0)
-            return first.ExitCode;
-        if (!RejectedCStandard(first))
+        var common = new List<string> { "-std=gnu23" };
+        common.AddRange(configuration);
+        if (request.Lto)
+            common.Add("-flto");
+        common.AddRange(["-Wall", "-Wextra", "-Werror"]);
+
+        var objects = new List<string>();
+        foreach (var originalSource in request.GeneratedSourcePaths)
         {
-            Console.Out.Write(first.StandardOutput);
-            Console.Error.Write(first.StandardError);
-            return first.ExitCode;
+            var objectPath = CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
+            objects.Add(objectPath);
+            if (File.Exists(objectPath))
+            {
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: reused native object {Path.GetFileName(objectPath)}");
+                continue;
+            }
+            var source = originalSource;
+            var output = objectPath;
+            if (compiler.Kind == HostedCompilerKind.WslGnu)
+            {
+                source = await WslPathAsync(compiler.Command, source, request.RootDirectory, cancellationToken);
+                output = await WslPathAsync(compiler.Command, output, request.RootDirectory, cancellationToken);
+            }
+            var arguments = new List<string>(prefix);
+            arguments.AddRange(common);
+            arguments.AddRange(["-c", source, "-o", output]);
+            var first = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+                Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment, ForwardOutput: false), cancellationToken);
+            if (first.ExitCode != 0 && RejectedCStandard(first))
+            {
+                arguments[prefix.Length] = "-std=gnu2x";
+                if (request.Trace)
+                    Console.Error.WriteLine("trace: compiler rejected gnu23; retrying with gnu2x");
+                first = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+                    Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment, ForwardOutput: false), cancellationToken);
+            }
+            if (first.ExitCode != 0)
+            {
+                Console.Out.Write(first.StandardOutput);
+                Console.Error.Write(first.StandardError);
+                return first.ExitCode;
+            }
         }
-        arguments[prefix.Length] = "-std=gnu2x";
-        if (request.Trace)
-            Console.Error.WriteLine("trace: compiler rejected gnu23; retrying with gnu2x");
-        var fallback = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+
+        var linkedObjects = objects.ToArray();
+        if (compiler.Kind == HostedCompilerKind.WslGnu)
+            for (var index = 0; index < linkedObjects.Length; index++)
+                linkedObjects[index] = await WslPathAsync(compiler.Command, linkedObjects[index], request.RootDirectory, cancellationToken);
+        var link = new List<string>(prefix);
+        link.AddRange(linkedObjects);
+        link.AddRange(["-o", executable]);
+        if (request.Lto)
+            link.Add("-flto");
+        if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
+            link.Add("-lm");
+        var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
-        return fallback.ExitCode;
+        return linked.ExitCode;
+    }
+
+    private static string CachedObjectPath(BuildRequest request, HostedCompiler compiler, string source, string flags, string extension)
+    {
+        var cache = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
+        Directory.CreateDirectory(cache);
+        var identity = new StringBuilder()
+            .Append("draft-0.14\n")
+            .Append(compiler.Command).Append('\n')
+            .Append(compiler.WslCompiler).Append('\n')
+            .Append(File.Exists(compiler.Command) ? File.GetLastWriteTimeUtc(compiler.Command).Ticks : 0L).Append('\n')
+            .Append(request.Configuration).Append('\n')
+            .Append(flags).Append('\n')
+            .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
+        if (request.CLayout == GeneratedCLayout.Modules)
+        {
+            foreach (var header in new[] { "ctilde_internal.h", "ctilde_runtime.h" })
+            {
+                var path = Path.Combine(request.GeneratedDirectory!, header);
+                identity.Append(header).Append(':').Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
+            }
+        }
+        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
+        return Path.Combine(cache, key + extension);
     }
 
     private static async Task<string> WslPathAsync(string wsl, string path, string workingDirectory, CancellationToken cancellationToken)
@@ -228,10 +320,19 @@ internal static class EspIdfBuildDriver
         var componentFile = Path.Combine(componentDirectory, "CMakeLists.txt");
         if (!File.Exists(componentFile))
             throw new NativeBuildException($"ESP-IDF project '{project}' must contain main/CMakeLists.txt.");
-        var generatedRelativePath = Path.GetRelativePath(componentDirectory, request.GeneratedCPath!).Replace('\\', '/');
-        if (generatedRelativePath.StartsWith("../", StringComparison.Ordinal) ||
-            !File.ReadAllText(componentFile).Contains(generatedRelativePath, StringComparison.Ordinal))
-            throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must register generated source '{generatedRelativePath}'.");
+        var componentContents = File.ReadAllText(componentFile);
+        if (request.CLayout == GeneratedCLayout.Modules)
+        {
+            var fragment = Path.GetRelativePath(componentDirectory, Path.Combine(request.GeneratedDirectory!, "ctilde_sources.cmake")).Replace('\\', '/');
+            if (fragment.StartsWith("../", StringComparison.Ordinal) || !componentContents.Contains(fragment, StringComparison.Ordinal))
+                throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must include generated fragment '{fragment}'.");
+        }
+        else
+        {
+            var generatedRelativePath = Path.GetRelativePath(componentDirectory, request.GeneratedCPath!).Replace('\\', '/');
+            if (generatedRelativePath.StartsWith("../", StringComparison.Ordinal) || !componentContents.Contains(generatedRelativePath, StringComparison.Ordinal))
+                throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must register generated source '{generatedRelativePath}'.");
+        }
 
         var idfCommand = NativeToolDiscovery.FindOnPath("idf.py");
         NativeProcessRequest process;

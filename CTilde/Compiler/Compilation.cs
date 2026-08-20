@@ -8,6 +8,7 @@ public sealed class Compilation
     private ImmutableArray<Diagnostic> _diagnostics;
     private string? _generatedC;
     private string? _generatedHeader;
+    private CEmitterOutput? _generatedOutput;
     private BoundProgram? _boundProgram;
     private bool _analyzed;
 
@@ -98,12 +99,45 @@ public sealed class Compilation
         return new EmitResult(success, _diagnostics);
     }
 
+    public CBundleEmitResult EmitCBundle()
+    {
+        EnsureAnalyzed();
+        var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        if (!success)
+            return new CBundleEmitResult(false, [], _diagnostics);
+        lock (_gate)
+            EnsureGeneratedOutput();
+        return new CBundleEmitResult(true, _generatedOutput!.Artifacts, _diagnostics);
+    }
+
+    public EmitResult EmitSymbolMap(TextWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        EnsureAnalyzed();
+        var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        if (success)
+        {
+            lock (_gate)
+                EnsureGeneratedOutput();
+            writer.Write(_generatedOutput!.SymbolMap);
+        }
+        return new EmitResult(success, _diagnostics);
+    }
+
     private string GenerateC()
     {
+        EnsureGeneratedOutput();
+        return _generatedOutput!.Unity;
+    }
+
+    private void EnsureGeneratedOutput()
+    {
+        if (_generatedOutput is not null)
+            return;
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot());
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
-        return emitter.Emit(optimizedIr);
+        _generatedOutput = emitter.EmitOutput(optimizedIr, new CHeaderEmitter(_boundProgram).Emit());
     }
 
     private string? ValidateSourceRoot(DiagnosticBag diagnostics, CompilationTarget target)

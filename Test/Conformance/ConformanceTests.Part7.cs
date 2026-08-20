@@ -64,6 +64,33 @@ internal static partial class ConformanceTests
                     public static uint LiveObjects();
                 }
 
+                public sealed class CountingHittable : Hittable
+                {
+                    public static int Calls;
+                    private Hittable inner;
+
+                    public CountingHittable(Hittable inner)
+                    {
+                        this.inner = inner;
+                    }
+
+                    [NoAlloc]
+                    public override bool Hit(Ray ray, Interval interval, out HitRecord hit)
+                    {
+                        Calls++;
+                        HitRecord result;
+                        bool found = inner.Hit(ray, interval, out result);
+                        hit = result;
+                        return found;
+                    }
+
+                    [NoAlloc]
+                    public override Aabb BoundingBox()
+                    {
+                        return inner.BoundingBox();
+                    }
+                }
+
                 public static class TestProgram
                 {
                     private static bool Close(float left, float right)
@@ -108,6 +135,42 @@ internal static partial class ConformanceTests
                             bool foundClosest = closest.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out closestHit);
                             Console.WriteLine(foundClosest && Close(closestHit.Distance, 0.5f));
 
+                            Hittable accelerated = closest.BuildBvh();
+                            HitRecord acceleratedHit;
+                            bool foundAccelerated = accelerated.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out acceleratedHit);
+                            Console.WriteLine(foundAccelerated == foundClosest && Close(acceleratedHit.Distance, closestHit.Distance));
+
+                            Aabb box = new Aabb(new Vec3(-1.0f, -1.0f, -1.0f), Vec3.One);
+                            Console.WriteLine(box.Hit(new Ray(new Vec3(0.0f, 0.0f, 2.0f), new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.0f, 100.0f)));
+                            Console.WriteLine(!box.Hit(new Ray(new Vec3(2.0f, 0.0f, 0.0f), Vec3.UnitY), new Interval(0.0f, 100.0f)));
+
+                            RandomGenerator scheduled = new RandomGenerator(1u);
+                            uint sampleSeed = RandomGenerator.SampleSeed(RandomGenerator.DefaultRenderSeed, 7, 3, 2);
+                            scheduled.Reseed(sampleSeed);
+                            uint scheduledFirst = scheduled.NextUInt();
+                            scheduled.Reseed(RandomGenerator.SampleSeed(RandomGenerator.DefaultRenderSeed, 1, 9, 4));
+                            scheduled.NextUInt();
+                            scheduled.Reseed(sampleSeed);
+                            Console.WriteLine(scheduled.NextUInt() == scheduledFirst);
+
+                            HittableList measured = new HittableList();
+                            int measuredIndex = 0;
+                            while (measuredIndex < 32)
+                            {
+                                measured.Add(new CountingHittable(new Sphere(new Vec3(0.0f, 0.0f, -2.0f - (float)measuredIndex * 2.0f), 0.25f, matte)));
+                                measuredIndex++;
+                            }
+                            Hittable measuredBvh = measured.BuildBvh();
+                            CountingHittable.Calls = 0;
+                            HitRecord measuredListHit;
+                            bool measuredListFound = measured.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out measuredListHit);
+                            int listCalls = CountingHittable.Calls;
+                            CountingHittable.Calls = 0;
+                            HitRecord measuredBvhHit;
+                            bool measuredBvhFound = measuredBvh.Hit(new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)), new Interval(0.001f, 100.0f), out measuredBvhHit);
+                            int bvhCalls = CountingHittable.Calls;
+                            Console.WriteLine(measuredListFound == measuredBvhFound && Close(measuredListHit.Distance, measuredBvhHit.Distance) && bvhCalls * 4 <= listCalls);
+
                             bool capacityFailed = false;
                             try
                             {
@@ -151,8 +214,7 @@ internal static partial class ConformanceTests
                             bool internallyReflected = glass.Scatter(new Ray(Vec3.Zero, grazing), materialHit, samples, out attenuation, out scattered);
                             Console.WriteLine(internallyReflected && scattered.Direction.X > 0.0f && scattered.Direction.Y < 0.0f);
 
-                            RandomGenerator sceneRandom = new RandomGenerator(RandomGenerator.DefaultSeed);
-                            HittableList finalScene = Scene.CreateFinal(sceneRandom);
+                            HittableList finalScene = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
                             Console.WriteLine(finalScene.Count > 400 && finalScene.Count <= 488);
                         }
                         Console.WriteLine(MemoryDiagnostics.LiveObjects() == baseline);
@@ -161,7 +223,7 @@ internal static partial class ConformanceTests
                 """;
             var result = CompileAndRun(HostedIoSources(harness), memoryDiagnostics: true);
             Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 19)), result.StandardOutput);
+            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 24)), result.StandardOutput);
         });
 
         suite.Run("hosted path tracer deterministic native render", () =>
@@ -182,14 +244,14 @@ internal static partial class ConformanceTests
                         FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
                         defer File.Close(image);
                         Console.WriteLine("Rendering test image...");
-                        RandomGenerator random = new RandomGenerator(RandomGenerator.DefaultSeed);
-                        HittableList world = Scene.CreateFinal(random);
+                        HittableList world = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
+                        Hittable accelerated = world.BuildBvh();
                         Camera camera = Scene.CreateBookCamera();
                         camera.ImageWidth = 256;
                         camera.SamplesPerPixel = 4;
                         camera.MaxDepth = 8;
                         camera.ProgressRows = 48;
-                        camera.Render(image, world, random);
+                        camera.Render(image, accelerated, RandomGenerator.DefaultRenderSeed);
                         Console.WriteLine("Done: 256x144.");
                     }
                 }
@@ -197,7 +259,7 @@ internal static partial class ConformanceTests
             var sources = HostedIoSources(harness);
             var generated = Emit(sources);
             Assert(generated.Contains("ct_math_sqrt(", StringComparison.Ordinal) && generated.Contains("ct_math_tan(", StringComparison.Ordinal), "The path tracer omitted its camera or scattering math dependencies.");
-            Assert(generated.Contains("ct_vthunk_", StringComparison.Ordinal), "The path tracer did not emit virtual hittable/material dispatch.");
+            Assert(generated.Contains("ct_h_", StringComparison.Ordinal), "The path tracer did not emit virtual hittable/material dispatch.");
             Assert(generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The path tracer did not emit hosted file output.");
             Assert(!generated.Contains("ct_console_read()", StringComparison.Ordinal) && !generated.Contains("ct_console_read_line()", StringComparison.Ordinal), "The path tracer unexpectedly reads console input.");
 
@@ -214,7 +276,7 @@ internal static partial class ConformanceTests
             const int width = 256;
             const int height = 144;
             var imageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstImage));
-            Assert(imageHash == "A7099E2431144A542753BA5496880735DBD2A6708A6A9716C3079588D07B3507", $"The deterministic 256x144 PPM hash changed: {imageHash}.");
+            Assert(imageHash == "5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF", $"The deterministic 256x144 PPM hash changed: {imageHash}.");
             var tokens = Encoding.ASCII.GetString(firstImage).Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             Assert(tokens.Length == 4 + width * height * 3, $"The PPM contained {tokens.Length} tokens instead of {4 + width * height * 3}.");
             Assert(tokens[0] == "P3" && tokens[1] == "256" && tokens[2] == "144" && tokens[3] == "255", "The acceptance-render PPM header was incorrect.");

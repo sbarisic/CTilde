@@ -2,8 +2,11 @@
   "target": "hosted",
   "sources": ["*.ct"],
   "build": {
-    "generatedC": "build/generated/ctilde_program.c",
+    "cLayout": "modules",
+    "generatedDirectory": "build/generated/modules",
     "generatedHeader": "build/generated/ctilde_exports.h",
-    "configuration": "release"
+    "symbolMap": "build/generated/ctilde_symbols.json",
+    "configuration": "release",
+    "lto": true
   }
 }

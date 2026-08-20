@@ -18,7 +18,11 @@ internal sealed record CommandLineOptions(
     string? Compiler,
     string? NativeOutput,
     string? EspIdfProject,
-    string? EspIdfPath)
+    string? EspIdfPath,
+    GeneratedCLayout? CLayout,
+    string? OutputDirectory,
+    string? SymbolMap,
+    bool Lto)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -39,11 +43,15 @@ internal sealed record CommandLineOptions(
         string? nativeOutput = null;
         string? idfProject = null;
         string? idfPath = null;
+        string? outputDirectory = null;
+        string? symbolMap = null;
         var check = false;
         var trace = false;
         var build = false;
         var target = CompilationTarget.Hosted;
         var targetSpecified = false;
+        var lto = false;
+        GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
 
         for (var index = 0; index < args.Length; index++)
@@ -68,6 +76,21 @@ internal sealed record CommandLineOptions(
                 case "--native-output": nativeOutput = RequireValue(); break;
                 case "--idf-project": idfProject = RequireValue(); break;
                 case "--idf-path": idfPath = RequireValue(); break;
+                case "--output-directory": outputDirectory = RequireValue(); break;
+                case "--symbol-map": symbolMap = RequireValue(); break;
+                case "--lto": lto = true; break;
+                case "--c-layout":
+                    var layoutValue = RequireValue();
+                    cLayout = layoutValue switch
+                    {
+                        "unity" => GeneratedCLayout.Unity,
+                        "modules" => GeneratedCLayout.Modules,
+                        null => null,
+                        _ => (GeneratedCLayout)(-1),
+                    };
+                    if (cLayout is not null && !Enum.IsDefined(cLayout.Value))
+                        parseError = $"Unknown C layout '{layoutValue}'; expected unity or modules.";
+                    break;
                 case "--check": check = true; break;
                 case "--trace": trace = true; break;
                 case "--build": build = true; break;
@@ -111,7 +134,7 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath);
+            targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto);
         return true;
     }
 }

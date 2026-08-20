@@ -29,3 +29,38 @@ public class Exception
         return typeName + ": " + message;
     }
 }
+
+public sealed class NullReferenceException : Exception
+{
+    public NullReferenceException() : base("Object reference is null.") { }
+}
+
+public sealed class IndexOutOfRangeException : Exception
+{
+    public IndexOutOfRangeException() : base("Index is outside the valid range.") { }
+}
+
+public sealed class DivideByZeroException : Exception
+{
+    public DivideByZeroException() : base("Integer division by zero.") { }
+}
+
+public sealed class InvalidCastException : Exception
+{
+    public InvalidCastException() : base("The value has an incompatible runtime type.") { }
+}
+
+public sealed class OverflowException : Exception
+{
+    public OverflowException() : base("A checked size operation overflowed.") { }
+}
+
+public sealed class ArgumentException : Exception
+{
+    public ArgumentException() : base("An argument is invalid.") { }
+}
+
+public sealed class OutOfMemoryException : Exception
+{
+    public OutOfMemoryException() : base("Managed allocation failed.") { }
+}

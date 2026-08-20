@@ -34,27 +34,54 @@ internal sealed partial class CompilationModel
             "ct_atomic_compare_exchange_relaxed", "ct_atomic_compare_exchange_release", "ct_atomic_fetch_add_relaxed", "ct_atomic_fetch_sub_release", "ct_atomic_acquire_fence",
             "ct_thread_state", "ct_thread_current_state", "ct_thread_current", "ct_thread_set_current", "ct_thread_require_attached", "ct_thread_attach_primary",
             "ct_thread_publish_ready", "ct_thread_begin_shutdown", "ct_thread_state_deleted", "ct_thread_attach", "ct_thread_detach", "ct_runtime_phase", "ct_attached_thread_count",
+            "ct_runtime_initialize", "ct_runtime_shutdown", "ct_runtime_test_fail_allocation_after",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)
         {
             generatedSymbols.Add(NameMangler.Type(type));
+            generatedSymbols.Add(CEmitter.DescriptorName(type));
+            if (type.Kind == DeclaredTypeKind.Class)
+            {
+                generatedSymbols.Add(CEmitter.VTableName(type));
+                generatedSymbols.Add(CEmitter.ObjectDropName(type));
+            }
+            else if (type.Kind == DeclaredTypeKind.Delegate)
+            {
+                generatedSymbols.Add(CEmitter.DelegateFactoryName(type));
+                generatedSymbols.Add(CEmitter.DelegateDropName(type));
+            }
             foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>"))
                 generatedSymbols.Add(field.CName);
             foreach (var value in type.EnumValues)
                 generatedSymbols.Add(NameMangler.Identifier(type.FullName + "." + value.Name));
             foreach (var constructor in type.Constructors)
+            {
                 generatedSymbols.Add(NameMangler.Method(constructor));
+                generatedSymbols.Add(CEmitter.ConstructorInitializerName(constructor));
+            }
             foreach (var method in type.Methods.Where(method => method.ExternName is null))
+            {
                 generatedSymbols.Add(NameMangler.Method(method));
+                if (method.IsVirtual && !method.ContainingType.IsObject)
+                    generatedSymbols.Add(CEmitter.VirtualMethodThunkName(method));
+            }
             foreach (var parameter in type.Methods.SelectMany(method => method.Parameters).Where(parameter => parameter.IsSynchronousCallback && parameter.Type.Symbol is not null))
-                generatedSymbols.Add($"ct_delegate_callback_{NameMangler.Identifier(parameter.Type.Symbol!.FullName)}");
+                generatedSymbols.Add(NameMangler.Artifact("ct_k_", $"callback-adapter:{NameMangler.TypeIdentity(parameter.Type.Symbol!)}"));
             foreach (var property in type.Properties)
             {
                 if (property.Getter is not null)
+                {
                     generatedSymbols.Add(NameMangler.Getter(property));
+                    if (property.IsVirtual)
+                        generatedSymbols.Add(CEmitter.VirtualPropertyThunkName(property, true));
+                }
                 if (property.Setter is not null)
+                {
                     generatedSymbols.Add(NameMangler.Setter(property));
+                    if (property.IsVirtual)
+                        generatedSymbols.Add(CEmitter.VirtualPropertyThunkName(property, false));
+                }
             }
         }
 

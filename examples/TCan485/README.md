@@ -1,6 +1,6 @@
 # T-CAN485 WS2812 hardware test
 
-This ESP-IDF project compiles one C~ program into `main/generated/ctilde_program.c`, emits `main/generated/ctilde_exports.h`, and uses the CLI's native build stage to invoke `idf.py build`. ESP-IDF still owns chip selection, component resolution, linking, flashing, and monitoring. The native shim is compiled by the component CMake project. It targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
+This ESP-IDF project emits the draft 0.14 modular C bundle under `main/generated`: shared runtime headers, one runtime implementation, reachable namespace sources, the entry/module-lifecycle source, a symbol map, and a CMake source fragment. The component includes that fragment, and the CLI's native build stage invokes `idf.py build`. ESP-IDF still owns chip selection, component resolution, incremental compilation, linking, flashing, and monitoring. The native shim is compiled by the component CMake project. It targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
 
 From PowerShell:
 
@@ -20,6 +20,8 @@ To verify the fatal runtime boundary:
 The monitor must show `CTILDE_ESP_FAILURE_TEST` followed by runtime code `CTN0001`. Reflash `Program.ct` afterward.
 
 ## Hardware evidence
+
+The draft 0.14 ABI 14 sources and inline-assembly fixture pass strict syntax checks and complete modular links for both ESP32/Xtensa and ESP32-C3/RISC-V with ESP-IDF 6.0.2. No T-CAN485 serial device was connected during the draft 0.14 validation run on 2026-08-20, so the required ABI 14 flash, runtime regression workload, shutdown/lifetime observation, and monitor gate remain unverified. The draft 0.12 run below is the latest physical-board evidence and must not be treated as draft 0.14 hardware acceptance.
 
 An earlier 2026-08-18 run on an ESP32-D0WDQ6-V3 revision 3.1 at `COM4` established the managed-runtime, failure, heap, stack, and yielding-delay behavior. That firmware alternated ordinary GPIO2 commands, which did not constitute a visible blink test after the hardware was identified as T-CAN485: GPIO2 is the SD MISO signal and the onboard light is an addressable WS2812 on GPIO4.
 

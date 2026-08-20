@@ -13,7 +13,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .Where(method => method.ExportName is not null)
             .OrderBy(method => method.ExportName, StringComparer.Ordinal)
             .ToArray();
-        var signatureText = "draft-0.10\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
+        var signatureText = "draft-0.14\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -24,11 +24,20 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         if (ExportTypes(exports).Any(type => type.Kind == CTypeKind.EspError))
             writer.Append("#include <esp_err.h>\n");
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
-        writer.Append("typedef struct ct_object ct_object;\n\n");
+        writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(14)\n\n");
+        writer.Append("typedef struct ct_object ct_object;\n");
+        writer.Append("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;\n");
+        writer.Append("typedef void (*ct_panic_handler)(const ct_panic_info* info, void* context);\n");
+        writer.Append("typedef struct ct_runtime_config { uint32_t Size; ct_panic_handler PanicHandler; void* PanicContext; } ct_runtime_config;\n\n");
+        writer.Append("void ct_runtime_initialize(const ct_runtime_config* config);\n");
+        writer.Append("void ct_runtime_shutdown(void);\n");
         writer.Append("void ct_thread_attach(void);\n");
         writer.Append("void ct_thread_detach(void);\n");
         writer.Append("void ct_retain(ct_object* value);\n");
         writer.Append("void ct_release(ct_object* value);\n\n");
+        writer.Append("#if defined(CTILDE_CONFORMANCE)\n");
+        writer.Append("void ct_runtime_test_fail_allocation_after(int32_t successful_allocations);\n");
+        writer.Append("#endif\n\n");
 
         foreach (var type in ExportTypes(exports).Where(type => type.Kind == CTypeKind.Enum).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
         {

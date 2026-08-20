@@ -4,15 +4,15 @@ Last reviewed: 2026-08-20
 
 ## Current state
 
-C~ draft 0.13 has one compiler path:
+C~ draft 0.14 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> hosted or ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file and can independently emit a deterministic public header for `[Export]` methods and the native ARC/thread attachment ABI. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission or invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain. Self-contained single-file CLI distributions bundle .NET but not native toolchains.
+The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable namespace, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for `[Export]` methods and runtime ABI 14. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission or invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
 
 ## Measured baseline
 
@@ -22,7 +22,9 @@ The current workspace passes:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner includes managed and native checks plus end-to-end LSP protocol and VS Code Extension Host checks. Coverage includes operator declaration rules, resolution, ARC-aware calls, evaluation order, compound assignment, editor navigation, `System.Math`, `System.Vec2`, `System.Vec3`, `System.Vec4`, and HostedIo's exact 256×144 deterministic PPM hash. HostedIo's production profile compiles at 1200×675, 500 samples per pixel, and 50 bounces but is not executed by the automated suite.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner includes managed and native checks plus end-to-end LSP protocol and VS Code Extension Host checks. Draft 0.14 coverage includes runtime-fault catches and injected OOM, lifecycle finalization and panic callbacks, deterministic modular artifacts and symbol maps, unity/modular native behavior, contiguous storage, constructive `out`, BVH/list hit equivalence, AABB edge rays, schedule-independent per-sample RNG, and the exact reduced-image SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`.
+
+The modular MSVC Release+LTO production renderer completed the full 1200x675, 500-sample, 50-bounce BVH profile in 4,420.348 seconds (1:13:40.348) on the reviewed machine. Its P3 PPM SHA-256 is `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`. The reduced image remains the automated deterministic gate; the production elapsed time is a recorded machine-specific measurement.
 
 Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `19.44.35225` and compiled generated files with:
 
@@ -90,6 +92,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Base and same-type constructor chains | Implemented | Constructor order and cycle tests |
 | `System.Object` and `object` | Implemented | Instance, static, null, and override tests |
 | `System.Exception` | Implemented | Constructors, message, inherited runtime name, and unhandled output tests |
+| Built-in runtime-fault exceptions | Implemented | Allocation-free immortal null, bounds, divide, cast, overflow, argument, and OOM objects with origin metadata |
 | `throw` and rethrow | Implemented | Cross-call throw, null throw, rethrow identity, and replacement tests |
 | Typed and catch-all handlers | Implemented | Source-order matching, reachability diagnostics, and native dispatch tests |
 | `finally` cleanup | Implemented | Normal, return, break, continue, and exception cleanup tests |
@@ -119,7 +122,9 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Numeric, enum, null, and pointer conversions | Implemented | Positive and negative conversion tests |
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
 | `void*` data-pointer conversions | Implemented | Explicit typed conversion and operation-rejection tests |
-| `ref`, `in`, and `out` parameters | Implemented | Methods, constructors, delegates, function pointers, externs, flow, readonly, ARC, mangling, and pointer ABI tests |
+| `ref`, `in`, and constructive `out` parameters | Implemented | First-write construction, repeated replacement, methods, constructors, delegates, function pointers, externs, flow, readonly, ARC, mangling, and pointer ABI tests |
+| Runtime ABI 14 lifecycle | Implemented | Process initialization/shutdown, module descriptor, reverse static finalization, thread gates, and panic callback tests |
+| Unity and modular C artifacts | Implemented | Deterministic shuffled-input bundles, reachability partitioning, strict native builds, object cache, symbol maps, and LTO flag mapping |
 | Scoped native buffers and `stackalloc` | Implemented | Construction, conversion, flattening, bounds, count checks, escape diagnostics, and native fixtures |
 | Scoped `NativeUtf8String` | Implemented | Owner retention, zero allocation, NUL diagnostics, nullable input, ABI flattening, and escape checks |
 | Nominal opaque handles and native ownership | Implemented | Native typedef headers, moves, created/consumed/retained contracts, defer reservations, and leak diagnostics |
@@ -180,13 +185,13 @@ The full examples in [examples/Features.ct](examples/Features.ct), [examples/Obj
 
 ## Runtime status
 
-Managed objects use atomic, non-moving automatic reference counting. Classes, arrays, dynamic strings, boxes, and nested reference-bearing structures release deterministically on the thread that atomically drops the last owned reference. Static strings are immortal; static fields live until termination; cycles intentionally leak. Generated class, array, string, box, and structure drop helpers use a per-thread allocation-free LIFO worklist, so cascading destruction does not recurse on the C stack.
+Managed objects use atomic, non-moving automatic reference counting. Classes, contiguous arrays, contiguous dynamic strings, boxes, and nested reference-bearing structures release deterministically on the thread that atomically drops the last owned reference. Static strings and runtime-fault objects are immortal; static fields live until module finalization; cycles intentionally leak. Generated class, array, string, box, and structure drop helpers use a per-thread allocation-free LIFO worklist, so cascading destruction does not recurse on the C stack.
 
-The runtime provides deterministic failures for null access, casts, unboxing, arrays, allocation, integer division, string overflow, unhandled exceptions, and null throws. Existing runtime faults remain fatal and are not catchable.
+Recoverable runtime checks throw preinitialized `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, or `OutOfMemoryException` objects. Raising them allocates nothing and preserves diagnostic code and source origin per thread. Runtime phase, attachment, ABI, reference-count, cleanup, and native-boundary violations remain panics; a configured panic callback runs before the default platform termination.
 
 Each attached thread has independent `setjmp`/`longjmp` handlers, current-exception ownership, automatic cleanup records, and iterative release state. Only real `try` regions create exception frames. CFG liveness moves values into volatile durable storage only when they are modified after `setjmp` and remain live after a possible `longjmp`. Ordinary `defer` uses direct automatic cleanup records and does not manufacture an exception frame.
 
-The entrypoint installs an automatic primary `ct_thread_state` before static initialization and publishes a ready phase afterward. Native-created threads use `ct_thread_attach` and `ct_thread_detach`; exports, callback trampolines, retain, and release reject unattached use. Hosted builds use C thread-local storage, while ESP-IDF uses a configured FreeRTOS task-local-storage slot with deletion checking. ARC atomics protect lifetime only; sharing ordinary object state still requires synchronization.
+The entrypoint calls `ct_runtime_initialize`, which attaches the primary thread, initializes fault singletons and the ABI-versioned module descriptor, and publishes ready. `ct_runtime_shutdown` requires secondary threads detached, finalizes static fields in reverse order, drains ARC work, and detaches the primary thread. Native-created threads use `ct_thread_attach` and `ct_thread_detach`; exports, callback trampolines, retain, and release reject unattached use. Hosted builds use C thread-local storage, while ESP-IDF uses a configured FreeRTOS task-local-storage slot with deletion checking. ARC atomics protect lifetime only; sharing ordinary object state still requires synchronization.
 
 The C ABI uses native target-width pointers and `nint`/`nuint`. Scoped native buffers use checked pointer-plus-length values, and scoped UTF-8 input retains its managed owner without allocating before flattening to `const char*`. Nominal opaque native handles carry lexical move-only ownership obligations. Stack allocation does not use the managed heap.
 
@@ -196,9 +201,9 @@ Hosted compilations add `Console.Read`, UTF-8 `Console.ReadLine`, and synchronou
 
 Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
 
-Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. Draft 0.12 adds a reachability optimizer, direct-defer cleanup facts, leaf cleanup elision, durable-state liveness, fused scalar string builds, and user metadata pruning. The rendered-line classifier and `MethodLowerer` are gone. The remaining `BodyPipeline` function renderer still walks syntax with bound semantic hints, so instruction-only C body emission and removal of `LoweredExpression` remain open architecture work. `GetDiagnostics()` is analysis-only and constructs no `CEmitter`, `CWriter`, typed IR, or generated C.
+Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. Reachability, direct-defer cleanup facts, leaf cleanup elision, durable-state liveness, fused scalar string builds, and user metadata pruning run before artifact layout. Draft 0.14 then renders reusable runtime and program fragments and partitions only the reachable program for modular output. The rendered-line classifier and `MethodLowerer` are gone. The remaining `BodyPipeline` function renderer still walks syntax with bound semantic hints, so instruction-only C body emission and removal of `LoweredExpression` remain open architecture work. `GetDiagnostics()` is analysis-only and constructs no `CEmitter`, `CWriter`, typed IR, or generated C.
 
-Draft 0.13 adds full-fidelity raw `asm` blocks. Binding resolves scalar local and parameter operands, applies definite-assignment and `[NoAlloc]` rules, and records a side-effecting typed-IR instruction. C emission converts standalone operand names to GNU symbolic operands, preserves raw target instructions, and emits volatile extended asm with explicit constraints and clobbers. Language services classify and navigate operand references inside the raw body. Hosted GCC and Clang and both ESP-IDF toolchains are supported; the CLI rejects hosted MSVC native builds containing `asm`.
+Draft 0.13 adds full-fidelity raw `asm` blocks. Binding resolves scalar local and parameter operands, applies definite-assignment and `[NoAlloc]` rules, and records a side-effecting typed-IR instruction. C emission converts standalone operand names to GNU symbolic operands, preserves raw target instructions, and emits volatile extended asm with explicit constraints and clobbers. Language services classify and navigate operand references inside the raw body. Hosted GCC and Clang and both ESP-IDF toolchains are supported; the CLI rejects hosted MSVC native builds containing `asm`. Draft 0.14 preserves this surface across unity and modular layouts.
 
 Every dynamic string helper now stores a trailing zero byte. A fused concatenation flattens nested string additions, formats supported built-in scalars into bounded automatic buffers, checks aggregate length, and allocates exactly one managed string object and one byte buffer. User-defined `ToString()` remains an ordinary owned call.
 
@@ -226,7 +231,7 @@ The hardware MVP compiler and project support are implemented. `CompilationOptio
 
 Draft 0.9 intentionally changes the GPIO configuration/write and WS2812 operation results from `bool` to `EspError`. Boolean sensor data such as `Gpio.Read` remains unchanged.
 
-ESP-IDF 6.0.2 complete firmware builds pass with `-Wall -Wextra -Werror` for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. Fresh Hello, Exceptions, ARC, Math, operator, and vector output also passes both cross-compilers in GNU C23 syntax checks.
+ESP-IDF 6.0.2 complete modular firmware builds pass for both `esp32` using Xtensa GCC 15.2.0 and `esp32c3` using RISC-V GCC 15.2.0. The ABI 14 T-CAN485 program and the draft 0.13 inline-assembly fixture both link on both targets. Fresh Hello, Exceptions, ARC, Math, operator, vector, and inline-assembly output also passes both cross-compilers in GNU C23 syntax checks with `-Wall -Wextra -Werror`.
 
 Measured self-test firmware sizes are:
 
@@ -247,10 +252,12 @@ The optimized Draft 0.12 firmware was built with ESP-IDF 6.0.2 and GCC 15.2.0 fo
 
 ## Deliberately deferred
 
-These features are outside draft 0.13:
+These features are outside draft 0.14:
 
 - Interfaces and abstract types.
 - General user-defined generics; only intrinsic native-buffer forms exist.
+- Independent DLL loading, unloading, and dynamic runtime module registration.
+- Parallel renderer row workers; the per-sample RNG contract is ready for them but draft 0.14 remains single-threaded.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
 - General exceptions across native boundaries.
 - Lambdas, closures, multicast delegates, retained callbacks, and callback registration lifetime management.
@@ -271,7 +278,7 @@ These features are outside draft 0.13:
 
 ## Release gate
 
-A draft 0.13 release requires:
+A draft 0.14 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -281,4 +288,4 @@ A draft 0.13 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-Draft 0.13 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. The inline-assembly addition retains the draft 0.10 atomic ARC and attached-thread runtime ABI, draft 0.11 operator lowering, and draft 0.12 vectors and optimizer. The Draft 0.12 dual-core Xtensa hardware sequence remains the current hardware baseline; draft 0.13 requires dual-architecture compilation and linking but no new flash gate. Instruction-only function-body emission remains an architecture blocker rather than a hardware blocker.
+Draft 0.14 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts must agree under every supported hosted toolchain. The Draft 0.12 dual-core Xtensa run remains the last confirmed hardware baseline until ABI 14 firmware is flashed and monitored; draft 0.14 hardware status must be reported as unverified until that run occurs. Instruction-only function-body emission remains an architecture blocker rather than a runtime ABI blocker.

@@ -80,7 +80,12 @@ internal static class CTildeCommand
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, request.SourceRoot));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
-            var diagnostics = request.CheckOnly ? compilation.GetDiagnostics() : compilation.EmitC(generated).Diagnostics;
+            CBundleEmitResult? bundle = null;
+            var diagnostics = request.CheckOnly
+                ? compilation.GetDiagnostics()
+                : request.CLayout == GeneratedCLayout.Unity
+                    ? compilation.EmitC(generated).Diagnostics
+                    : (bundle = compilation.EmitCBundle()).Diagnostics;
             if (!request.CheckOnly && request.GeneratedHeaderPath is not null && !HasErrors(diagnostics))
                 diagnostics = compilation.EmitCHeader(generatedHeader).Diagnostics;
             foreach (var diagnostic in diagnostics)
@@ -88,7 +93,7 @@ internal static class CTildeCommand
             if (HasErrors(diagnostics))
             {
                 if (request.BuildNative)
-                    RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath);
+                    RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath);
                 return new CompilationOutcome(1, compilation.UsesInlineAssembly);
             }
 
@@ -99,13 +104,22 @@ internal static class CTildeCommand
                 return new CompilationOutcome(0, compilation.UsesInlineAssembly);
             }
 
-            WriteAtomically(request.GeneratedCPath!, generated.ToString());
+            if (request.CLayout == GeneratedCLayout.Unity)
+                WriteAtomically(request.GeneratedCPath!, generated.ToString());
+            else
+                WriteBundle(request.GeneratedDirectory!, bundle!.Artifacts, request.GeneratedHeaderPath);
             if (request.GeneratedHeaderPath is not null)
                 WriteAtomically(request.GeneratedHeaderPath, generatedHeader.ToString());
+            if (request.SymbolMapPath is not null)
+            {
+                using var map = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+                compilation.EmitSymbolMap(map);
+                WriteAtomically(request.SymbolMapPath, map.ToString());
+            }
             if (request.Trace)
             {
                 Console.Error.WriteLine("trace: semantic analysis and GNU C23 lowering complete");
-                Console.Error.WriteLine($"trace: wrote {request.GeneratedCPath}");
+                Console.Error.WriteLine($"trace: wrote {(request.CLayout == GeneratedCLayout.Unity ? request.GeneratedCPath : request.GeneratedDirectory)}");
                 if (request.GeneratedHeaderPath is not null)
                     Console.Error.WriteLine($"trace: wrote {request.GeneratedHeaderPath}");
             }
@@ -114,7 +128,7 @@ internal static class CTildeCommand
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
             if (request.BuildNative)
-                RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath);
+                RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath);
             Console.Error.WriteLine($"ctilde: {exception.Message}");
             return new CompilationOutcome(1, false);
         }
@@ -126,7 +140,8 @@ internal static class CTildeCommand
             return UsageError("--source-root is valid only for hosted compilations.");
         if (options.Inputs.Count != 0 || options.Output is not null || options.HeaderOutput is not null ||
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
-            options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null)
+            options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
+            options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto)
             return UsageError("--compile-directory cannot be combined with inputs, project, output, check, build, or native-build options.");
         try
         {
@@ -142,7 +157,8 @@ internal static class CTildeCommand
             {
                 var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
                 var request = new BuildRequest([input], options.Target, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
-                    null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null);
+                    null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null,
+                    GeneratedCLayout.Unity, null, null, false);
                 if (Compile(request).ExitCode != 0)
                 {
                     RemoveStaleGeneratedOutput(request.GeneratedCPath);
@@ -201,17 +217,56 @@ internal static class CTildeCommand
         }
     }
 
+    private static void WriteBundle(string outputDirectory, IEnumerable<GeneratedCArtifact> artifacts, string? additionalOutput)
+    {
+        Directory.CreateDirectory(outputDirectory);
+        var materialized = artifacts.ToArray();
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var expected = materialized.Select(artifact => Path.GetFullPath(Path.Combine(outputDirectory, artifact.RelativePath)))
+            .ToHashSet(comparer);
+        if (additionalOutput is not null)
+            expected.Add(Path.GetFullPath(additionalOutput));
+
+        foreach (var artifact in materialized)
+        {
+            var path = Path.GetFullPath(Path.Combine(outputDirectory, artifact.RelativePath));
+            var relative = Path.GetRelativePath(outputDirectory, path);
+            if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+                throw new IOException($"Generated artifact '{artifact.RelativePath}' escapes the output directory.");
+            if (File.Exists(path) && !IsCompilerMarked(path) && !File.ReadAllText(path).Equals(artifact.Content, StringComparison.Ordinal))
+                throw new IOException($"Refusing to overwrite handwritten file '{path}'.");
+        }
+
+        foreach (var artifact in materialized)
+            WriteAtomically(Path.Combine(outputDirectory, artifact.RelativePath), artifact.Content);
+
+        foreach (var path in Directory.EnumerateFiles(outputDirectory, "*", SearchOption.TopDirectoryOnly))
+        {
+            var fullPath = Path.GetFullPath(path);
+            if (!expected.Contains(fullPath) && IsCompilerMarked(fullPath))
+                File.Delete(fullPath);
+        }
+    }
+
+    private static bool IsCompilerMarked(string path)
+    {
+        using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        var prefix = new char[256];
+        var length = reader.Read(prefix, 0, prefix.Length);
+        var text = new string(prefix, 0, length);
+        return text.StartsWith("/* Generated by C~", StringComparison.Ordinal) ||
+            text.StartsWith("# Generated by C~", StringComparison.Ordinal) ||
+            text.StartsWith("#ifndef CTILDE_", StringComparison.Ordinal) ||
+            text.Contains("\"generator\": \"C~ draft 0.14\"", StringComparison.Ordinal);
+    }
+
     private static void RemoveStaleGeneratedOutput(params string?[] paths)
     {
         foreach (var path in paths.Where(path => path is not null).Cast<string>())
         {
             if (!File.Exists(path))
                 continue;
-            using var reader = new StreamReader(path, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
-            var firstLine = reader.ReadLine();
-            reader.Close();
-            if (firstLine?.StartsWith("/* Generated by C~", StringComparison.Ordinal) == true ||
-                firstLine?.StartsWith("#ifndef CTILDE_", StringComparison.Ordinal) == true)
+            if (IsCompilerMarked(path))
                 File.Delete(path);
         }
     }
@@ -225,11 +280,11 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]");
-        Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path>");
+        Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
     }
 }

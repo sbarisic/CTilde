@@ -58,6 +58,8 @@ internal sealed partial class CEmitter
             AddSemantics(initializer.Body.Semantics.Values);
         }
         AddType(Model.Types.GetValueOrDefault("System.Object"));
+        foreach (var name in RuntimeFaultTypeNames)
+            AddType(Model.Types.GetValueOrDefault(name));
         if (Model.Types.ContainsKey("System.IO.IOException"))
         {
             AddType(Model.Types.GetValueOrDefault("System.IO.IOException"));

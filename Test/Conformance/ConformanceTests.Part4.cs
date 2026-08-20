@@ -106,7 +106,9 @@ internal static partial class ConformanceTests
 
             var generated = Emit(source);
             Assert(generated.Contains("int32_t* u_5_value, const int32_t* u_3_add, uint32_t* u_6_result", StringComparison.Ordinal), "By-reference C declarations did not use pointer/const-pointer ABI mappings.");
-            Assert(generated.Contains("Adjust_refi32_ini32_outu32", StringComparison.Ordinal), "By-reference passing kinds were not encoded in mangled names.");
+            var compilation = Compile(source);
+            using var map = new StringWriter();
+            Assert(compilation.EmitSymbolMap(map).Success && map.ToString().Contains("method:Program::Adjust(ref:int,in:int,out:uint)", StringComparison.Ordinal), "By-reference passing kinds were not encoded in canonical symbol identities.");
         });
 
         suite.Run("draft 0.8 native ABI foundations", () =>
@@ -346,7 +348,7 @@ internal static partial class ConformanceTests
             Assert(firstWriter.ToString().Contains("void ct_thread_attach(void);", StringComparison.Ordinal) && firstWriter.ToString().Contains("void ct_release(ct_object* value);", StringComparison.Ordinal), "Export header omitted the runtime ownership and attachment ABI.");
             var generated = Emit(source);
             Assert(generated.Contains("int32_t (*u_8_callback)(int32_t, void*), void* u_8_callback_context", StringComparison.Ordinal), "Synchronous delegate ABI did not place context adjacent to the callback.");
-            Assert(generated.Contains("ct_delegate_callback_", StringComparison.Ordinal), "Synchronous delegate adapter was not emitted.");
+            Assert(generated.Contains("ct_k_", StringComparison.Ordinal), "Synchronous delegate adapter was not emitted.");
             Assert(generated.Contains("ct_thread_require_attached", StringComparison.Ordinal) && generated.Contains("CTT0001", StringComparison.Ordinal) && generated.Contains("CTT0002", StringComparison.Ordinal), "Attached-thread native-entry validation was not emitted.");
             Assert(generated.Contains("int32_t ctilde_add(int32_t u_4_left, int32_t u_5_right)", StringComparison.Ordinal), "Export wrapper was not emitted.");
 

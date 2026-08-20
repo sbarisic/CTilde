@@ -20,6 +20,10 @@ public enum CTildeNativeBuildConfiguration
 public sealed record CTildeProjectBuildConfiguration(
     string GeneratedCPath,
     string GeneratedHeaderPath,
+    GeneratedCLayout CLayout,
+    string GeneratedDirectory,
+    string? SymbolMapPath,
+    bool Lto,
     CTildeNativeBuildConfiguration Configuration,
     string Compiler,
     string? ExecutablePath,
@@ -143,8 +147,15 @@ public static class CTildeProjectFile
         if (target == CompilationTarget.Hosted && document?.EspIdfProjectDirectory is not null)
             throw new CTildeProjectException($"Property 'build.espIdfProjectDirectory' in '{manifestPath}' is valid only for ESP-IDF projects.");
         if (target == CompilationTarget.EspIdf &&
-            (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null))
-            throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', and 'build.executable' in '{manifestPath}' are valid only for hosted projects.");
+            (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null || document?.Lto == true))
+            throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', 'build.executable', and 'build.lto' in '{manifestPath}' are valid only for hosted projects.");
+
+        var cLayout = document?.CLayout switch
+        {
+            null or "unity" => GeneratedCLayout.Unity,
+            "modules" => GeneratedCLayout.Modules,
+            _ => throw new CTildeProjectException($"Unknown C layout '{document.CLayout}' in '{manifestPath}'; expected unity or modules."),
+        };
 
         var generatedCDefault = target == CompilationTarget.EspIdf
             ? "main/generated/ctilde_program.c"
@@ -154,6 +165,9 @@ public static class CTildeProjectFile
             : "build/generated/ctilde_exports.h";
         var generatedC = ResolveProjectPath(document?.GeneratedC ?? generatedCDefault, "build.generatedC", root, manifestPath, isDirectory: false);
         var generatedHeader = ResolveProjectPath(document?.GeneratedHeader ?? generatedHeaderDefault, "build.generatedHeader", root, manifestPath, isDirectory: false);
+        var generatedDirectoryDefault = target == CompilationTarget.EspIdf ? "main/generated" : "build/generated/modules";
+        var generatedDirectory = ResolveProjectPath(document?.GeneratedDirectory ?? generatedDirectoryDefault, "build.generatedDirectory", root, manifestPath, isDirectory: true);
+        var symbolMap = document?.SymbolMap is null ? null : ResolveProjectPath(document.SymbolMap, "build.symbolMap", root, manifestPath, isDirectory: false);
         if (PathsEqual(generatedC, generatedHeader))
             throw new CTildeProjectException($"Properties 'build.generatedC' and 'build.generatedHeader' in '{manifestPath}' must name different files.");
         if (sourceFiles.Any(path => PathsEqual(path, generatedC) || PathsEqual(path, generatedHeader)))
@@ -165,6 +179,9 @@ public static class CTildeProjectFile
             "release" => CTildeNativeBuildConfiguration.Release,
             _ => throw new CTildeProjectException($"Unknown build configuration '{document.Configuration}' in '{manifestPath}'; expected debug or release."),
         };
+        var lto = document?.Lto ?? false;
+        if (lto && configuration != CTildeNativeBuildConfiguration.Release)
+            throw new CTildeProjectException($"Property 'build.lto' in '{manifestPath}' requires build.configuration 'release'.");
         var compiler = document?.Compiler ?? "auto";
         if (string.IsNullOrWhiteSpace(compiler))
             throw new CTildeProjectException($"Property 'build.compiler' in '{manifestPath}' cannot be empty.");
@@ -188,7 +205,8 @@ public static class CTildeProjectFile
             espIdfProjectDirectory = ResolveProjectPath(document?.EspIdfProjectDirectory ?? ".", "build.espIdfProjectDirectory", root, manifestPath, isDirectory: true);
         }
 
-        return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, configuration, compiler, executable, espIdfProjectDirectory);
+        return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, lto,
+            configuration, compiler, executable, espIdfProjectDirectory);
     }
 
     private static string ResolveProjectPath(string value, string property, string root, string manifestPath, bool isDirectory)
@@ -250,6 +268,10 @@ public static class CTildeProjectFile
     private sealed record BuildDocument(
         [property: JsonPropertyName("generatedC")] string? GeneratedC,
         [property: JsonPropertyName("generatedHeader")] string? GeneratedHeader,
+        [property: JsonPropertyName("cLayout")] string? CLayout,
+        [property: JsonPropertyName("generatedDirectory")] string? GeneratedDirectory,
+        [property: JsonPropertyName("symbolMap")] string? SymbolMap,
+        [property: JsonPropertyName("lto")] bool? Lto,
         [property: JsonPropertyName("configuration")] string? Configuration,
         [property: JsonPropertyName("compiler")] string? Compiler,
         [property: JsonPropertyName("executable")] string? Executable,

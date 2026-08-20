@@ -93,7 +93,7 @@ internal sealed partial class BodyPipeline
         };
         prelude.Add($"char {buffer}[{capacity}];");
         prelude.Add($"int {length} = snprintf({buffer}, sizeof({buffer}), {format}, {argument});");
-        prelude.Add($"if ({length} < 0 || (size_t){length} >= sizeof({buffer})) ct_fail(\"CTS0002\", {_emitter.SourceArgument(syntax)});");
+        prelude.Add($"if ({length} < 0 || (size_t){length} >= sizeof({buffer})) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTS0002\", {_emitter.SourceArgument(syntax)});");
         prelude.Add($"{buildName}_parts[{index}] = (const uint8_t*){buffer};");
         prelude.Add($"{buildName}_lengths[{index}] = (int32_t){length};");
         return true;

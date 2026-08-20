@@ -2,8 +2,14 @@ using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 using System.Text;
+using System.Text.Json;
 
 namespace CTilde;
+
+internal sealed record CEmitterOutput(
+    string Unity,
+    ImmutableArray<GeneratedCArtifact> Artifacts,
+    string SymbolMap);
 
 internal sealed partial class CEmitter : ILoweringServices
 {
@@ -22,7 +28,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private readonly string? _sourceRoot;
-    private bool _usesExceptions;
+    private bool _usesExceptions = true;
     private bool _usesHostedIo;
     private bool _usesNativeIntegers;
     private bool _usesNativeUtf8;
@@ -69,9 +75,9 @@ internal sealed partial class CEmitter : ILoweringServices
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
             .Concat(_arrayTypes.Select(type => ArrayDescriptorName(type.ElementType!)))
-            .Concat(_stringLiterals.Values.SelectMany(id => new[] { $"ct_sl_{id}", $"ct_slb_{id}" }))
+            .Concat(_stringLiterals.Values.Select(id => $"ct_sl_{id}"))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class)
-                .SelectMany(type => new[] { DescriptorName(type), $"ct_vtable_{NameMangler.Identifier(type.FullName)}" }))
+                .SelectMany(type => new[] { DescriptorName(type), VTableName(type) }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { DescriptorName(type), DelegateFactoryName(type), DelegateDropName(type) }))
             .Concat(_delegateThunks.Values)
@@ -80,13 +86,13 @@ internal sealed partial class CEmitter : ILoweringServices
             .Concat(Model.UserTypes.SelectMany(type => type.Constructors).Select(ConstructorInitializerName))
             .Concat(Model.UserTypes.SelectMany(type => type.Methods)
                 .Where(method => method.IsVirtual && !method.ContainingType.IsObject)
-                .Select(method => $"ct_vthunk_{NameMangler.Identifier(method.CName)}"))
+                .Select(VirtualMethodThunkName))
             .Concat(Model.UserTypes.SelectMany(type => type.Properties)
                 .Where(property => property.IsVirtual)
                 .SelectMany(property => new[]
                 {
-                    $"ct_vthunk_get_{NameMangler.Identifier(property.ContainingType.FullName + "." + property.Name)}",
-                    $"ct_vthunk_set_{NameMangler.Identifier(property.ContainingType.FullName + "." + property.Name)}",
+                    VirtualPropertyThunkName(property, true),
+                    VirtualPropertyThunkName(property, false),
                 }))
             .Concat(BoxedTypes.SelectMany(type =>
             {
@@ -144,46 +150,293 @@ internal sealed partial class CEmitter : ILoweringServices
         }
     }
 
-    public string Emit(TypedIrProgram program)
+    public string Emit(TypedIrProgram program) => EmitOutput(program, string.Empty).Unity;
+
+    public CEmitterOutput EmitOutput(TypedIrProgram program, string runtimeHeader)
     {
         _reachableMethods = program.Functions.Select(function => function.Method).ToImmutableHashSet();
         _reachableProperties = program.Functions.Where(function => function.Property is not null)
             .Select(function => function.Property!).ToImmutableHashSet();
         ComputeReachableTypes(program);
         RegisterDeclaredTypes();
-        var definitions = program.Functions.Select(RenderFunction).ToImmutableArray();
-        var moduleInitializer = RenderModuleInitializer(program.ModuleInitializers);
+        var definitions = program.Functions.Select(function => (Function: function, Text: RenderFunction(function))).ToImmutableArray();
+        var moduleLifecycle = RenderModuleLifecycle(program.ModuleInitializers);
+        var prefix = new CWriter();
+        EmitPreamble(prefix);
+        EmitStringLiterals(prefix);
+        EmitForwardDeclarations(prefix);
+        EmitTypeLayouts(prefix);
+        EmitArrayLayouts(prefix);
+        EmitBoxLayouts(prefix);
+        EmitGlobals(prefix);
+        EmitOwnershipHelpers(prefix);
+        EmitPrototypes(prefix);
+        EmitObjectMetadata(prefix);
+        EmitRuntimeFaultSupport(prefix);
+        EmitMathSupport(prefix);
+        EmitHostedIoSupport(prefix);
+        EmitDelegateSupport(prefix);
+        EmitSynchronousDelegateAdapters(prefix);
+        EmitFunctionPointerTrampolines(prefix);
+        EmitDirectDeferSupport(prefix);
+        prefix.WriteLine();
+
+        var suffix = new CWriter();
+        suffix.WriteBlock(moduleLifecycle.TrimEnd().Split('\n'));
+        suffix.WriteLine();
+        EmitExports(suffix);
+        if (HasExports)
+            suffix.WriteLine();
+        EmitMain(suffix);
+
         var writer = new CWriter();
-        EmitPreamble(writer);
-        EmitStringLiterals(writer);
-        EmitForwardDeclarations(writer);
-        EmitTypeLayouts(writer);
-        EmitArrayLayouts(writer);
-        EmitBoxLayouts(writer);
-        EmitGlobals(writer);
-        EmitOwnershipHelpers(writer);
-        EmitPrototypes(writer);
-        EmitObjectMetadata(writer);
-        EmitMathSupport(writer);
-        EmitHostedIoSupport(writer);
-        EmitDelegateSupport(writer);
-        EmitSynchronousDelegateAdapters(writer);
-        EmitFunctionPointerTrampolines(writer);
-        EmitDirectDeferSupport(writer);
+        writer.WriteBlock(prefix.ToString().TrimEnd().Split('\n'));
         writer.WriteLine();
         foreach (var definition in definitions)
         {
-            writer.WriteBlock(definition.TrimEnd().Split('\n'));
+            writer.WriteBlock(definition.Text.TrimEnd().Split('\n'));
             writer.WriteLine();
         }
-        writer.WriteBlock(moduleInitializer.TrimEnd().Split('\n'));
-        writer.WriteLine();
-        EmitExports(writer);
-        if (HasExports)
-            writer.WriteLine();
-        EmitMain(writer);
+        writer.WriteBlock(suffix.ToString().TrimEnd().Split('\n'));
         var output = writer.ToString();
-        return MarkUnusedDefinitions(output);
+        var unity = MarkUnusedDefinitions(output);
+        var symbolMap = EmitSymbolMapJson(program);
+        var artifacts = BuildModularArtifacts(prefix.ToString(), suffix.ToString(), definitions, runtimeHeader, symbolMap);
+        return new CEmitterOutput(unity, artifacts, symbolMap);
+    }
+
+    private ImmutableArray<GeneratedCArtifact> BuildModularArtifacts(
+        string prefix,
+        string suffix,
+        ImmutableArray<(IrFunction Function, string Text)> definitions,
+        string runtimeHeader,
+        string symbolMap)
+    {
+        var artifacts = ImmutableArray.CreateBuilder<GeneratedCArtifact>();
+        var definitionNames = definitions.Select(definition => definition.Function.Property is null
+                ? definition.Function.Method.CName
+                : definition.Function.IsGetter
+                    ? NameMangler.Getter(definition.Function.Property)
+                    : NameMangler.Setter(definition.Function.Property))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var constructor in definitions.Select(definition => definition.Function.Method)
+                     .Where(method => method.IsConstructor && method.ContainingType.Kind == DeclaredTypeKind.Class))
+            definitionNames.Add(ConstructorInitializerName(constructor));
+        var externalRuntimeNames = Model.Types.Values.SelectMany(type => type.Methods.Concat(type.Constructors))
+            .Select(method => method.ExternName)
+            .Where(name => name is not null)
+            .Cast<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        var markedPrefix = MarkUnusedDefinitions(prefix);
+        var internalHeader = BuildInternalHeader(markedPrefix, definitionNames, externalRuntimeNames);
+        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.h", runtimeHeader, GeneratedCArtifactKind.RuntimeHeader));
+        artifacts.Add(new GeneratedCArtifact("ctilde_internal.h", internalHeader, GeneratedCArtifactKind.InternalHeader));
+        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", ExternalizeDefinitions(markedPrefix, runtimeUnit: true), GeneratedCArtifactKind.RuntimeSource));
+
+        foreach (var group in definitions.GroupBy(definition => definition.Function.Method.ContainingType.Namespace, StringComparer.Ordinal)
+                     .OrderBy(group => group.Key, StringComparer.Ordinal))
+        {
+            var name = "namespace_" + Hash96(group.Key.Length == 0 ? "<global>" : group.Key) + ".c";
+            var contents = new StringBuilder();
+            contents.Append("/* Generated by C~ draft 0.14. Do not edit. */\n#include \"ctilde_internal.h\"\n\n");
+            foreach (var definition in group.OrderBy(item => item.Function.Method.CName, StringComparer.Ordinal))
+                contents.Append(ExternalizeDefinitions(MarkUnusedDefinitions(definition.Text), runtimeUnit: false)).Append('\n');
+            artifacts.Add(new GeneratedCArtifact(name, contents.ToString(), GeneratedCArtifactKind.NamespaceSource));
+        }
+
+        var entry = "/* Generated by C~ draft 0.14. Do not edit. */\n#include \"ctilde_internal.h\"\n\n" +
+            ExternalizeDefinitions(MarkUnusedDefinitions(suffix), runtimeUnit: false);
+        artifacts.Add(new GeneratedCArtifact("ctilde_entry.c", entry, GeneratedCArtifactKind.EntrySource));
+        artifacts.Add(new GeneratedCArtifact("ctilde_symbols.json", symbolMap, GeneratedCArtifactKind.SymbolMap));
+
+        var sources = artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.RuntimeSource or GeneratedCArtifactKind.NamespaceSource or GeneratedCArtifactKind.EntrySource)
+            .Select(artifact => artifact.RelativePath)
+            .OrderBy(path => path, StringComparer.Ordinal)
+            .ToArray();
+        var cmake = new StringBuilder("# Generated by C~ draft 0.14. Do not edit.\nset(CTILDE_GENERATED_SOURCES\n");
+        foreach (var source in sources)
+            cmake.Append("    ${CMAKE_CURRENT_LIST_DIR}/").Append(source).Append('\n');
+        cmake.Append(")\n");
+        artifacts.Add(new GeneratedCArtifact("ctilde_sources.cmake", cmake.ToString(), GeneratedCArtifactKind.CMakeFragment));
+        return artifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal).ToImmutableArray();
+    }
+
+    private static string BuildInternalHeader(string prefix, HashSet<string> definitionNames, HashSet<string> externalRuntimeNames)
+    {
+        var writer = new StringBuilder("#ifndef CTILDE_INTERNAL_DRAFT_014_H\n#define CTILDE_INTERNAL_DRAFT_014_H\n\n");
+        var skipInitializer = false;
+        var skipFunction = false;
+        var skipFunctionDepth = 0;
+        foreach (var sourceLine in prefix.Split('\n'))
+        {
+            var line = sourceLine.TrimEnd('\r');
+            if (skipFunction)
+            {
+                skipFunctionDepth += line.Count(character => character == '{') - line.Count(character => character == '}');
+                if (skipFunctionDepth <= 0 && line.Contains('}'))
+                    skipFunction = false;
+                continue;
+            }
+            if (skipInitializer)
+            {
+                if (line.TrimEnd().EndsWith("};", StringComparison.Ordinal))
+                    skipInitializer = false;
+                continue;
+            }
+
+            const string staticPrefix = "static CT_UNUSED ";
+            if (line.StartsWith(staticPrefix, StringComparison.Ordinal))
+            {
+                var declaration = line[staticPrefix.Length..];
+                var externalDefinition = externalRuntimeNames.FirstOrDefault(name => declaration.Contains(name + "(", StringComparison.Ordinal));
+                if (externalDefinition is not null && !declaration.EndsWith(';'))
+                {
+                    var opens = declaration.Count(character => character == '{');
+                    var closes = declaration.Count(character => character == '}');
+                    if (opens == 0 || opens > closes)
+                    {
+                        skipFunction = true;
+                        skipFunctionDepth = opens - closes;
+                    }
+                    continue;
+                }
+                var equals = declaration.IndexOf('=');
+                var openParenthesis = declaration.IndexOf('(');
+                var openBrace = declaration.IndexOf('{');
+                var isVariableInitializer = equals >= 0 && (openBrace < 0 || equals < openBrace || declaration.StartsWith("struct ", StringComparison.Ordinal));
+                if (isVariableInitializer)
+                {
+                    writer.Append("extern ").Append(declaration.AsSpan(0, equals).TrimEnd()).Append(";\n");
+                    if (!line.TrimEnd().EndsWith(';'))
+                        skipInitializer = true;
+                    continue;
+                }
+                var isTentativeVariable = declaration.EndsWith(';') && openParenthesis < 0;
+                if (isTentativeVariable)
+                {
+                    writer.Append("extern ").Append(declaration).Append('\n');
+                    continue;
+                }
+                var isExternalPrototype = declaration.EndsWith(';') &&
+                    (definitionNames.Any(name => declaration.Contains(name + "(", StringComparison.Ordinal)) ||
+                     declaration.Contains("ct_module_init(", StringComparison.Ordinal) ||
+                     declaration.Contains("ct_module_fini(", StringComparison.Ordinal));
+                if (isExternalPrototype)
+                {
+                    writer.Append("extern ").Append(declaration).Append('\n');
+                    continue;
+                }
+            }
+            else if (LooksLikePublicFunction(line))
+            {
+                var externalDefinition = externalRuntimeNames.FirstOrDefault(name => line.Contains(name + "(", StringComparison.Ordinal));
+                if (externalDefinition is not null)
+                {
+                    var opens = line.Count(character => character == '{');
+                    var closes = line.Count(character => character == '}');
+                    if (opens == 0 || opens > closes)
+                    {
+                        skipFunction = true;
+                        skipFunctionDepth = opens - closes;
+                    }
+                    continue;
+                }
+                line = "static CT_UNUSED " + line;
+            }
+
+            writer.Append(line).Append('\n');
+        }
+        writer.Append("\n#endif\n");
+        return writer.ToString();
+    }
+
+    private static bool LooksLikePublicFunction(string line)
+    {
+        if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] == '#' || line.StartsWith("typedef ", StringComparison.Ordinal) ||
+            line.StartsWith("struct ", StringComparison.Ordinal) || line.StartsWith("enum ", StringComparison.Ordinal) ||
+            line.StartsWith("static", StringComparison.Ordinal) || line.StartsWith("CT_NORETURN static", StringComparison.Ordinal))
+            return false;
+        var open = line.IndexOf('(');
+        return open > 0 && !line.EndsWith(';');
+    }
+
+    private static string ExternalizeDefinitions(string source, bool runtimeUnit)
+    {
+        var writer = new StringBuilder();
+        foreach (var sourceLine in source.Split('\n'))
+        {
+            var line = sourceLine.TrimEnd('\r');
+            if (runtimeUnit && line.Contains("ct_module_descriptor ct_program_module;", StringComparison.Ordinal))
+            {
+                writer.Append("extern ct_module_descriptor ct_program_module;\n");
+                continue;
+            }
+            line = line.Replace("CT_NORETURN static CT_UNUSED ", "CT_NORETURN ", StringComparison.Ordinal)
+                .Replace("CT_NORETURN static ", "CT_NORETURN ", StringComparison.Ordinal);
+            if (line.StartsWith("static CT_UNUSED ", StringComparison.Ordinal))
+                line = line["static CT_UNUSED ".Length..];
+            else if (line.StartsWith("static ", StringComparison.Ordinal))
+                line = line["static ".Length..];
+            writer.Append(line).Append('\n');
+        }
+        return writer.ToString();
+    }
+
+    private string EmitSymbolMapJson(TypedIrProgram program)
+    {
+        var symbols = new List<object>();
+        foreach (var type in EmittedTypes.OrderBy(type => type.FullName, StringComparer.Ordinal))
+            symbols.Add(SymbolMapEntry(NameMangler.Type(type), NameMangler.TypeIdentity(type), "type", type.FullName, type.Syntax));
+        foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic).OrderBy(field => NameMangler.Member(field), StringComparer.Ordinal))
+            symbols.Add(SymbolMapEntry(NameMangler.Member(field), NameMangler.MemberIdentity(field), "field", field.Type.DisplayName, field.Syntax));
+        foreach (var function in program.Functions.OrderBy(function => function.Method.CName, StringComparer.Ordinal))
+        {
+            var method = function.Method;
+            if (method.ExternName is not null)
+                continue;
+            var cName = function.Property is null ? method.CName : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+            var identity = function.Property is null ? NameMangler.MethodIdentity(method) : NameMangler.PropertyIdentity(function.Property, function.IsGetter);
+            symbols.Add(SymbolMapEntry(cName, identity, function.Property is null ? "method" : function.IsGetter ? "getter" : "setter",
+                NameMangler.CanonicalType(method.ReturnType), method.Syntax));
+        }
+
+        var ordered = symbols.Cast<Dictionary<string, object?>>().OrderBy(entry => (string)entry["name"]!, StringComparer.Ordinal).ToArray();
+        var collisions = ordered.GroupBy(entry => (string)entry["name"]!, StringComparer.Ordinal)
+            .Where(group => group.Select(entry => (string)entry["identity"]!).Distinct(StringComparer.Ordinal).Skip(1).Any())
+            .ToArray();
+        if (collisions.Length != 0)
+            throw new InvalidOperationException($"Generated C symbol collision for '{collisions[0].Key}'.");
+        return JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["generator"] = "C~ draft 0.14",
+            ["version"] = 1,
+            ["runtimeAbi"] = 14,
+            ["symbols"] = ordered,
+        }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
+    private static Dictionary<string, object?> SymbolMapEntry(string name, string identity, string kind, string signature, SyntaxNode? syntax)
+    {
+        SourceLocation? location = syntax is null ? null : syntax.Source.GetLocation(syntax.Span);
+        return new Dictionary<string, object?>
+        {
+            ["name"] = name,
+            ["identity"] = identity,
+            ["kind"] = kind,
+            ["signature"] = signature,
+            ["source"] = location is null ? null : new Dictionary<string, object?>
+            {
+                ["file"] = location.Value.FilePath.Replace('\\', '/'),
+                ["line"] = location.Value.Line,
+                ["column"] = location.Value.Column,
+            },
+        };
+    }
+
+    private static string Hash96(string value)
+    {
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash.AsSpan(0, 12)).ToLowerInvariant();
     }
 
     private string RenderFunction(IrFunction function)
@@ -196,17 +449,14 @@ internal sealed partial class CEmitter : ILoweringServices
         return new CBodyLowerer(this, function.Body, method, name, function.Property, function.IsGetter).LowerDefinition();
     }
 
-    private string RenderModuleInitializer(ImmutableArray<IrStaticInitializer> initializers)
+    private string RenderModuleLifecycle(ImmutableArray<IrStaticInitializer> initializers)
     {
         var writer = new CWriter();
+        writer.WriteLine("static uint32_t ct_module_phase = 0u;");
         writer.WriteLine("static void ct_module_init(void)");
         writer.WriteLine("{");
-        if (HasExports)
-        {
-            writer.WriteLine("    static bool ct_initialized = false;");
-            writer.WriteLine("    if (ct_initialized) return;");
-            writer.WriteLine("    ct_initialized = true;");
-        }
+        writer.WriteLine("    if (ct_module_phase != 0u) ct_fail(\"CTT0003\", \"<module-init>\", 0);");
+        writer.WriteLine("    ct_module_phase = 1u;");
         var initializerIndex = 0;
         foreach (var initializer in initializers)
         {
@@ -230,7 +480,18 @@ internal sealed partial class CEmitter : ILoweringServices
             else
                 writer.WriteLine($"    {field.CName} = {value.Code};");
         }
+        writer.WriteLine("    ct_module_phase = 2u;");
         writer.WriteLine("}");
+        writer.WriteLine("static void ct_module_fini(void)");
+        writer.WriteLine("{");
+        writer.WriteLine("    if (ct_module_phase != 1u && ct_module_phase != 2u) ct_fail(\"CTT0003\", \"<module-fini>\", 0);");
+        foreach (var field in Model.UserTypes.SelectMany(type => type.Fields)
+                     .Where(field => field.IsStatic && field.Name != "<underlying>" && field.Type.ContainsManagedReferences)
+                     .Reverse())
+            writer.WriteLine($"    {DropValueStatement(field.Type, $"&{field.CName}")}");
+        writer.WriteLine("    ct_module_phase = 3u;");
+        writer.WriteLine("}");
+        writer.WriteLine("static ct_module_descriptor ct_program_module = { CTILDE_RUNTIME_ABI_VERSION, \"program\", ct_module_init, ct_module_fini };");
         return writer.ToString();
     }
 
@@ -297,7 +558,7 @@ internal sealed partial class CEmitter : ILoweringServices
         return $"{CTypeName(delegateType.DelegateReturnType!)} (*{name})({string.Join(", ", parameters)})";
     }
 
-    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => $"ct_delegate_callback_{NameMangler.Identifier(delegateType.FullName)}";
+    public string SynchronousCallbackAdapterName(TypeSymbol delegateType) => NameMangler.Artifact("ct_k_", $"callback-adapter:{NameMangler.TypeIdentity(delegateType)}");
 
     private static IEnumerable<string> ParameterArgumentNames(ParameterSymbol parameter, string name) => parameter.Type.IsNativeBuffer
         ? [$"{name}_data", $"{name}_length"]
@@ -443,7 +704,7 @@ internal sealed partial class CEmitter : ILoweringServices
             id = _stringLiterals.Count;
             _stringLiterals.Add(value, id);
         }
-        return $"(&ct_sl_{id})";
+        return $"((ct_string*)(void*)&ct_sl_{id})";
     }
 
     public static string EscapeCString(string value)
@@ -522,21 +783,24 @@ internal sealed partial class CEmitter : ILoweringServices
         _ => value.ToString(CultureInfo.InvariantCulture),
     };
 
-    public static string DescriptorName(TypeSymbol type) => $"ct_desc_{NameMangler.Identifier(type.FullName)}";
-    public static string ArrayDescriptorName(CType elementType) => $"ct_desc_{NameMangler.Array(elementType)}";
-    public static string ConstructorInitializerName(MethodSymbol constructor) => $"ct_init_{constructor.CName}";
-    public static string ObjectDropName(TypeSymbol type) => $"ct_drop_object_{NameMangler.Identifier(type.FullName)}";
+    public static string DescriptorName(TypeSymbol type) => NameMangler.Artifact("ct_d_", $"descriptor:{NameMangler.TypeIdentity(type)}");
+    public static string ArrayDescriptorName(CType elementType) => NameMangler.Artifact("ct_d_", $"descriptor:array<{NameMangler.CanonicalType(elementType)}>");
+    public static string VTableName(TypeSymbol type) => NameMangler.Artifact("ct_v_", $"vtable:{NameMangler.TypeIdentity(type)}");
+    public static string VirtualMethodThunkName(MethodSymbol method) => NameMangler.Artifact("ct_h_", $"virtual-thunk:{NameMangler.MethodIdentity(method)}");
+    public static string VirtualPropertyThunkName(PropertySymbol property, bool getter) => NameMangler.Artifact("ct_h_", $"virtual-thunk:{NameMangler.PropertyIdentity(property, getter)}");
+    public static string ConstructorInitializerName(MethodSymbol constructor) => NameMangler.Artifact("ct_i_", $"initializer:{NameMangler.MethodIdentity(constructor)}");
+    public static string ObjectDropName(TypeSymbol type) => NameMangler.Artifact("ct_x_", $"object-drop:{NameMangler.TypeIdentity(type)}");
     public static string ArrayDropName(CType elementType) => $"ct_drop_array_{NameMangler.TypeCode(elementType)}";
     public static string BoxDropName(CType type) => $"ct_drop_box_{NameMangler.TypeCode(type)}";
-    public static string DelegateFactoryName(TypeSymbol type) => $"ct_new_delegate_{NameMangler.Identifier(type.FullName)}";
-    public static string DelegateDropName(TypeSymbol type) => $"ct_drop_delegate_{NameMangler.Identifier(type.FullName)}";
+    public static string DelegateFactoryName(TypeSymbol type) => NameMangler.Artifact("ct_n_", $"delegate-factory:{NameMangler.TypeIdentity(type)}");
+    public static string DelegateDropName(TypeSymbol type) => NameMangler.Artifact("ct_x_", $"delegate-drop:{NameMangler.TypeIdentity(type)}");
 
     public string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch)
     {
         var key = (delegateType, method, virtualDispatch);
         if (_delegateThunks.TryGetValue(key, out var existing))
             return existing;
-        var name = $"ct_delegate_thunk_{NameMangler.Identifier(delegateType.FullName)}_{NameMangler.Identifier(method.CName)}_{(virtualDispatch ? "virtual" : "direct")}";
+        var name = NameMangler.Artifact("ct_h_", $"delegate-thunk:{NameMangler.TypeIdentity(delegateType)}:{NameMangler.MethodIdentity(method)}:{(virtualDispatch ? "virtual" : "direct")}");
         _delegateThunks.Add(key, name);
         return name;
     }
@@ -547,7 +811,7 @@ internal sealed partial class CEmitter : ILoweringServices
         if (_functionPointerTrampolines.TryGetValue(key, out var existing))
             return existing;
         RegisterExceptions();
-        var name = $"ct_callback_{NameMangler.Identifier(method.CName)}_{NameMangler.TypeCode(type)}";
+        var name = NameMangler.Artifact("ct_k_", $"function-pointer-callback:{NameMangler.CanonicalType(type)}:{NameMangler.MethodIdentity(method)}");
         _functionPointerTrampolines.Add(key, name);
         return name;
     }

@@ -73,7 +73,10 @@ internal sealed partial class BodyPipeline
             EmitPrelude(writer, expression.Prelude);
             exceptionCode = expression.Code;
         }
-        writer.WriteLine($"ct_throw((ct_object*)(void*){exceptionCode}, {_emitter.SourceArgument(syntax)});");
+        if (syntax.Expression is null)
+            writer.WriteLine($"ct_rethrow((ct_object*)(void*){exceptionCode});");
+        else
+            writer.WriteLine($"ct_throw((ct_object*)(void*){exceptionCode}, {_emitter.SourceArgument(syntax)});");
     }
 
     private FlowResult EmitTry(ILoweringWriter writer, TryStatementSyntax syntax)
@@ -144,7 +147,7 @@ internal sealed partial class BodyPipeline
 
         if (finallyFlow.FallsThrough)
         {
-            writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 4) ct_throw((ct_object*)(void*){Durable($"ct_ex_{id}")}, {_emitter.SourceArgument(syntax)});");
+            writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 4) ct_rethrow((ct_object*)(void*){Durable($"ct_ex_{id}")});");
             if (!_method.IsConstructor && _method.ReturnType != CType.Void)
             {
                 writer.WriteLine($"if ({Durable($"ct_ep_{id}")} == 1)");
@@ -248,7 +251,7 @@ internal sealed partial class BodyPipeline
                 }
             }
             if (!catches.Any(boundCatch => boundCatch.Type is null))
-                writer.WriteLine($"ct_throw(ct_caught_{id}, {_emitter.SourceArgument(syntax)});");
+                writer.WriteLine($"ct_rethrow(ct_caught_{id});");
         }
         if (fallthroughStates.Count != 0)
             writer.WriteLine($"{done}:;");
@@ -453,6 +456,15 @@ internal sealed partial class BodyPipeline
         prelude.Add($"{_emitter.CDeclaration(type, old)} = {target.Code};");
         prelude.Add(target.LValue.Store(next) + ";");
         prelude.Add(_emitter.DropValueStatement(type, $"&{old}"));
+    }
+
+    private void AddConstructStore(List<string> prelude, LoweredExpression target, string value)
+    {
+        var type = target.Type;
+        var next = NewTemp();
+        prelude.Add($"{_emitter.CDeclaration(type, next)} = {value};");
+        prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
+        prelude.Add(target.LValue!.Store(next) + ";");
     }
 
     private LoweredExpression OwnResult(CType type, string code, IEnumerable<string> sourcePrelude, bool borrowed = false, object? symbol = null)

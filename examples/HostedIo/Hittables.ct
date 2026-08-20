@@ -2,6 +2,85 @@ using System;
 
 namespace HostedIoExample;
 
+public struct Aabb
+{
+    public Vec3 Min;
+    public Vec3 Max;
+
+    public Aabb(Vec3 min, Vec3 max)
+    {
+        Min = min;
+        Max = max;
+    }
+
+    [NoAlloc]
+    public Vec3 Centroid()
+    {
+        return (Min + Max) * 0.5f;
+    }
+
+    [NoAlloc]
+    public int LongestAxis()
+    {
+        Vec3 extent = Max - Min;
+        if (extent.X >= extent.Y && extent.X >= extent.Z)
+            return 0;
+        if (extent.Y >= extent.Z)
+            return 1;
+        return 2;
+    }
+
+    [NoAlloc]
+    public static Aabb Union(Aabb left, Aabb right)
+    {
+        return new Aabb(
+            new Vec3(Math.Min(left.Min.X, right.Min.X), Math.Min(left.Min.Y, right.Min.Y), Math.Min(left.Min.Z, right.Min.Z)),
+            new Vec3(Math.Max(left.Max.X, right.Max.X), Math.Max(left.Max.Y, right.Max.Y), Math.Max(left.Max.Z, right.Max.Z)));
+    }
+
+    [NoAlloc]
+    public bool Hit(Ray ray, Interval interval)
+    {
+        float entry;
+        return Hit(ray, interval, out entry);
+    }
+
+    [NoAlloc]
+    public bool Hit(Ray ray, Interval interval, out float entry)
+    {
+        float near = interval.Min;
+        float far = interval.Max;
+        if (!IntersectAxis(ray.Origin.X, ray.Direction.X, Min.X, Max.X, ref near, ref far) ||
+            !IntersectAxis(ray.Origin.Y, ray.Direction.Y, Min.Y, Max.Y, ref near, ref far) ||
+            !IntersectAxis(ray.Origin.Z, ray.Direction.Z, Min.Z, Max.Z, ref near, ref far))
+        {
+            entry = interval.Max;
+            return false;
+        }
+        entry = near;
+        return true;
+    }
+
+    [NoAlloc]
+    private static bool IntersectAxis(float origin, float direction, float min, float max, ref float near, ref float far)
+    {
+        if (Math.Abs(direction) < 0.000000000001f)
+            return origin >= min && origin <= max;
+        float inverse = 1.0f / direction;
+        float first = (min - origin) * inverse;
+        float second = (max - origin) * inverse;
+        if (first > second)
+        {
+            float swap = first;
+            first = second;
+            second = swap;
+        }
+        near = Math.Max(near, first);
+        far = Math.Min(far, second);
+        return far >= near;
+    }
+}
+
 public struct HitRecord
 {
     public Vec3 Point;
@@ -28,6 +107,12 @@ public class Hittable
     {
         hit = new HitRecord();
         return false;
+    }
+
+    [NoAlloc]
+    public virtual Aabb BoundingBox()
+    {
+        return new Aabb(Vec3.Zero, Vec3.Zero);
     }
 }
 
@@ -73,6 +158,14 @@ public sealed class Sphere : Hittable
         hit = result;
         return true;
     }
+
+    [NoAlloc]
+    public override Aabb BoundingBox()
+    {
+        float extent = Math.Abs(radius);
+        Vec3 half = new Vec3(extent, extent, extent);
+        return new Aabb(center - half, center + half);
+    }
 }
 
 public sealed class HittableList : Hittable
@@ -111,6 +204,13 @@ public sealed class HittableList : Hittable
         count = 0;
     }
 
+    public Hittable BuildBvh()
+    {
+        if (count == 0)
+            return this;
+        return BvhNode.Build(objects, 0, count);
+    }
+
     [NoAlloc]
     public override bool Hit(Ray ray, Interval interval, out HitRecord hit)
     {
@@ -131,6 +231,157 @@ public sealed class HittableList : Hittable
             index++;
         }
         hit = closestHit;
+        return hitAnything;
+    }
+
+    [NoAlloc]
+    public override Aabb BoundingBox()
+    {
+        if (count == 0)
+            return new Aabb(Vec3.Zero, Vec3.Zero);
+        Aabb bounds = objects[0].BoundingBox();
+        int index = 1;
+        while (index < count)
+        {
+            bounds = Aabb.Union(bounds, objects[index].BoundingBox());
+            index++;
+        }
+        return bounds;
+    }
+}
+
+public sealed class BvhNode : Hittable
+{
+    private Hittable left;
+    private Hittable right;
+    private bool hasRight;
+    private Aabb leftBounds;
+    private Aabb rightBounds;
+    private Aabb bounds;
+
+    private BvhNode(Hittable left, Hittable right, bool hasRight)
+    {
+        this.left = left;
+        this.right = right;
+        this.hasRight = hasRight;
+        leftBounds = left.BoundingBox();
+        if (hasRight)
+        {
+            rightBounds = right.BoundingBox();
+            bounds = Aabb.Union(leftBounds, rightBounds);
+        }
+        else
+        {
+            rightBounds = leftBounds;
+            bounds = leftBounds;
+        }
+    }
+
+    public static Hittable Build(Hittable[] objects, int start, int end)
+    {
+        int length = end - start;
+        if (length == 1)
+            return new BvhNode(objects[start], null, false);
+
+        Aabb aggregate = objects[start].BoundingBox();
+        int index = start + 1;
+        while (index < end)
+        {
+            aggregate = Aabb.Union(aggregate, objects[index].BoundingBox());
+            index++;
+        }
+        int axis = aggregate.LongestAxis();
+        StableSort(objects, start, end, axis);
+        int midpoint = start + length / 2;
+        Hittable left;
+        Hittable right;
+        if (length == 2)
+        {
+            left = objects[start];
+            right = objects[start + 1];
+        }
+        else
+        {
+            left = Build(objects, start, midpoint);
+            right = Build(objects, midpoint, end);
+        }
+        return new BvhNode(left, right, true);
+    }
+
+    private static void StableSort(Hittable[] objects, int start, int end, int axis)
+    {
+        int index = start + 1;
+        while (index < end)
+        {
+            Hittable value = objects[index];
+            float centroid = Axis(value.BoundingBox().Centroid(), axis);
+            int insertion = index;
+            while (insertion > start && Axis(objects[insertion - 1].BoundingBox().Centroid(), axis) > centroid)
+            {
+                objects[insertion] = objects[insertion - 1];
+                insertion--;
+            }
+            objects[insertion] = value;
+            index++;
+        }
+    }
+
+    [NoAlloc]
+    private static float Axis(Vec3 value, int axis)
+    {
+        if (axis == 0)
+            return value.X;
+        if (axis == 1)
+            return value.Y;
+        return value.Z;
+    }
+
+    [NoAlloc]
+    public override Aabb BoundingBox()
+    {
+        return bounds;
+    }
+
+    [NoAlloc]
+    public override bool Hit(Ray ray, Interval interval, out HitRecord hit)
+    {
+        hit = new HitRecord();
+        if (!bounds.Hit(ray, interval))
+            return false;
+
+        float leftEntry;
+        bool canHitLeft = leftBounds.Hit(ray, interval, out leftEntry);
+        float rightEntry = interval.Max;
+        bool canHitRight = hasRight && rightBounds.Hit(ray, interval, out rightEntry);
+        if (!canHitLeft && !canHitRight)
+            return false;
+
+        Hittable first = left;
+        Hittable second = right;
+        bool canHitFirst = canHitLeft;
+        bool canHitSecond = canHitRight;
+        if (canHitRight && (!canHitLeft || rightEntry < leftEntry))
+        {
+            first = right;
+            second = left;
+            canHitFirst = canHitRight;
+            canHitSecond = canHitLeft;
+        }
+
+        bool hitAnything = false;
+        float closest = interval.Max;
+        HitRecord candidate;
+        if (canHitFirst && first.Hit(ray, interval, out candidate))
+        {
+            hitAnything = true;
+            closest = candidate.Distance;
+            hit = candidate;
+        }
+        if (canHitSecond && second.Hit(ray, new Interval(interval.Min, closest), out candidate))
+        {
+            hitAnything = true;
+            hit = candidate;
+        }
         return hitAnything;
     }
 }

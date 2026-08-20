@@ -1,41 +1,43 @@
 typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;
-struct ct_t_8_Examples_4_Base
+typedef struct ct_string { ct_object Object; int32_t Length; uint8_t Data[CT_FLEXIBLE_ARRAY]; } ct_string;
+struct ct_t_99b091a0f75882e3ce5f2c48
 {
-    ct_t_6_System_6_Object ct_base;
+    ct_t_85f9bec51c25eec663cd1245 ct_base;
     int32_t u_6_number;
 };
-struct ct_t_8_Examples_7_Derived
+struct ct_t_2f638cfd2bd153fc62b7c90a
 {
-    ct_t_8_Examples_4_Base ct_base;
+    ct_t_99b091a0f75882e3ce5f2c48 ct_base;
 };
-typedef struct ct_box_s_13_Examples_2EPair { ct_object Object; ct_t_8_Examples_4_Pair Value; } ct_box_s_13_Examples_2EPair;
-static CT_UNUSED void ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32(ct_t_8_Examples_4_Base* ct_self, int32_t u_6_number);
-static CT_UNUSED void ct_init_ct_ctor__16_Examples_2EDerived_7_Derived(ct_t_8_Examples_7_Derived* ct_self);
-static CT_UNUSED void ct_init_ct_ctor__13_System_2EObject_6_Object(ct_t_6_System_6_Object* ct_self);
+typedef struct ct_box_s0237cc9215d75be72c301de3 { ct_object Object; ct_t_07d8db452ff62ca29afa85bc Value; } ct_box_s0237cc9215d75be72c301de3;
+static CT_UNUSED void ct_i_5b2fca84d28f14e98d6cac67(ct_t_99b091a0f75882e3ce5f2c48* ct_self, int32_t u_6_number);
+static CT_UNUSED void ct_i_cae3e82561de713c516791af(ct_t_2f638cfd2bd153fc62b7c90a* ct_self);
+static CT_UNUSED void ct_i_59caa031b078430018f1b81f(ct_t_85f9bec51c25eec663cd1245* ct_self);
 struct ct_vtable
 {
     ct_string* (*ToString)(ct_object*);
     bool (*Equals)(ct_object*, ct_object*);
     int32_t (*GetHashCode)(ct_object*);
-    int32_t (*m_u_31_ct_5Fm_5F_5F13_5FExamples_5F2EBase_5F4_5FRead)(ct_object*);
-    int32_t (*g_u_34_ct_5Fget_5F_5F13_5FExamples_5F2EBase_5F5_5FValue)(ct_object*);
+    int32_t (*m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1)(ct_object*);
+    int32_t (*g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4)(ct_object*);
 };
-static CT_UNUSED int32_t ct_vthunk_u_31_ct_5Fm_5F_5F13_5FExamples_5F2EBase_5F4_5FRead(ct_object* self) { return ct_m__13_Examples_2EBase_4_Read((ct_t_8_Examples_4_Base*)(void*)self); }
-static CT_UNUSED int32_t ct_vthunk_get_u_19_Examples_2EBase_2EValue(ct_object* self) { return ct_get__13_Examples_2EBase_5_Value((ct_t_8_Examples_4_Base*)(void*)self); }
-static CT_UNUSED int32_t ct_vthunk_u_34_ct_5Fm_5F_5F16_5FExamples_5F2EDerived_5F4_5FRead(ct_object* self) { return ct_m__16_Examples_2EDerived_4_Read((ct_t_8_Examples_7_Derived*)(void*)self); }
-static CT_UNUSED int32_t ct_vthunk_get_u_22_Examples_2EDerived_2EValue(ct_object* self) { return ct_get__16_Examples_2EDerived_5_Value((ct_t_8_Examples_7_Derived*)(void*)self); }
-static CT_UNUSED ct_string* ct_vthunk_u_38_ct_5Fm_5F_5F16_5FSystem_5F2EException_5F8_5FToString(ct_object* self) { return ct_m__16_System_2EException_8_ToString((ct_t_6_System_9_Exception*)(void*)self); }
-static CT_UNUSED ct_string* ct_box_to_string_s_13_Examples_2EPair(ct_object* value) { ct_box_s_13_Examples_2EPair* box = (ct_box_s_13_Examples_2EPair*)(void*)value; (void)box; return ct_string_from_bytes((const uint8_t*)"Examples.Pair", 13, "<runtime>", 0); }
-static CT_UNUSED bool ct_box_equals_s_13_Examples_2EPair(ct_object* a, ct_object* b) { if (b == NULL || b->Type != &ct_desc_box_s_13_Examples_2EPair) return false; ct_box_s_13_Examples_2EPair* left = (ct_box_s_13_Examples_2EPair*)(void*)a; ct_box_s_13_Examples_2EPair* right = (ct_box_s_13_Examples_2EPair*)(void*)b; return (left->Value.u_1_X == right->Value.u_1_X) && (left->Value.u_1_Y == right->Value.u_1_Y); }
-static CT_UNUSED int32_t ct_box_hash_s_13_Examples_2EPair(ct_object* value) { ct_box_s_13_Examples_2EPair* box = (ct_box_s_13_Examples_2EPair*)(void*)value; uint32_t result = UINT32_C(2166136261);
-static CT_UNUSED ct_t_6_System_6_Object* ct_box_value_s_13_Examples_2EPair(ct_t_8_Examples_4_Pair value, const char* file, int line) { ct_box_s_13_Examples_2EPair* box = (ct_box_s_13_Examples_2EPair*)ct_alloc(sizeof(ct_box_s_13_Examples_2EPair), file, line); ct_init_object(box, &ct_desc_box_s_13_Examples_2EPair); box->Value = value; return (ct_t_6_System_6_Object*)(void*)box; }
-static CT_UNUSED ct_t_8_Examples_4_Pair ct_unbox_value_s_13_Examples_2EPair(ct_t_6_System_6_Object* value, const char* file, int line) { if (value == NULL) ct_fail("CTO0002", file, line); ct_object* object = (ct_object*)(void*)value; if (object->Type != &ct_desc_box_s_13_Examples_2EPair) ct_fail("CTO0003", file, line); ct_t_8_Examples_4_Pair result = ((ct_box_s_13_Examples_2EPair*)(void*)value)->Value; return result; }
-    ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32(ct_self, u_6_number);
-static CT_UNUSED void ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32(ct_t_8_Examples_4_Base* ct_self, int32_t u_6_number)
-    ct_init_ct_ctor__13_System_2EObject_6_Object((ct_t_6_System_6_Object*)(void*)ct_self);
-    ct_init_ct_ctor__16_Examples_2EDerived_7_Derived(ct_self);
-static CT_UNUSED void ct_init_ct_ctor__16_Examples_2EDerived_7_Derived(ct_t_8_Examples_7_Derived* ct_self)
-    ct_init_ct_ctor__13_Examples_2EBase_4_Base_i32((ct_t_8_Examples_4_Base*)(void*)ct_self, (4));
-    ct_t_8_Examples_7_Derived* ct_tmp_7 = (ct_t_8_Examples_7_Derived*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_desc_u_16_Examples_2EDerived, "test.ct", 63);
-    ct_init_ct_ctor__13_System_2EObject_6_Object(ct_self);
-static CT_UNUSED void ct_init_ct_ctor__13_System_2EObject_6_Object(ct_t_6_System_6_Object* ct_self)
+static CT_UNUSED int32_t ct_h_7b9707b395b97783dff6be0e(ct_object* self) { return ct_m_30b65dcc4fc13875b80f24d1((ct_t_99b091a0f75882e3ce5f2c48*)(void*)self); }
+static CT_UNUSED int32_t ct_h_d45e8153d027417592669de0(ct_object* self) { return ct_g_ef628fd20b3b237fa46556d4((ct_t_99b091a0f75882e3ce5f2c48*)(void*)self); }
+static CT_UNUSED int32_t ct_h_fe2dd57ebabac108479d6767(ct_object* self) { return ct_m_8e988b1c681c8e668ad90fdf((ct_t_2f638cfd2bd153fc62b7c90a*)(void*)self); }
+static CT_UNUSED int32_t ct_h_607c130d16baabccef81f2a2(ct_object* self) { return ct_g_93024e4f0cd9e6b993df6505((ct_t_2f638cfd2bd153fc62b7c90a*)(void*)self); }
+static CT_UNUSED ct_string* ct_h_8a2ef55374b6ffcf35b5d89a(ct_object* self) { return ct_m_ee9d37ca73e9ac88c39d7575((ct_t_8e21a5e2fb9f095e7f0daf1a*)(void*)self); }
+static CT_UNUSED ct_string* ct_box_to_string_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; (void)box; return ct_string_from_bytes((const uint8_t*)"Examples.Pair", 13, "<runtime>", 0); }
+static CT_UNUSED bool ct_box_equals_s0237cc9215d75be72c301de3(ct_object* a, ct_object* b) { if (b == NULL || b->Type != &ct_desc_box_s0237cc9215d75be72c301de3) return false; ct_box_s0237cc9215d75be72c301de3* left = (ct_box_s0237cc9215d75be72c301de3*)(void*)a; ct_box_s0237cc9215d75be72c301de3* right = (ct_box_s0237cc9215d75be72c301de3*)(void*)b; return (left->Value.u_1_X == right->Value.u_1_X) && (left->Value.u_1_Y == right->Value.u_1_Y); }
+static CT_UNUSED int32_t ct_box_hash_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; uint32_t result = UINT32_C(2166136261);
+static CT_UNUSED ct_t_85f9bec51c25eec663cd1245* ct_box_value_s0237cc9215d75be72c301de3(ct_t_07d8db452ff62ca29afa85bc value, const char* file, int line) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)ct_alloc(sizeof(ct_box_s0237cc9215d75be72c301de3), file, line); ct_init_object(box, &ct_desc_box_s0237cc9215d75be72c301de3); box->Value = value; return (ct_t_85f9bec51c25eec663cd1245*)(void*)box; }
+static CT_UNUSED ct_t_07d8db452ff62ca29afa85bc ct_unbox_value_s0237cc9215d75be72c301de3(ct_t_85f9bec51c25eec663cd1245* value, const char* file, int line) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, "CTO0002", file, line); ct_object* object = (ct_object*)(void*)value; if (object->Type != &ct_desc_box_s0237cc9215d75be72c301de3) ct_raise_runtime_fault(CT_FAULT_CAST, "CTO0003", file, line); ct_t_07d8db452ff62ca29afa85bc result = ((ct_box_s0237cc9215d75be72c301de3*)(void*)value)->Value; return result; }
+static CT_UNUSED int32_t ct_h_3cb401122e1aee4d30d5074d(ct_object* ct_target)
+    ct_i_5b2fca84d28f14e98d6cac67(ct_self, u_6_number);
+static CT_UNUSED void ct_i_5b2fca84d28f14e98d6cac67(ct_t_99b091a0f75882e3ce5f2c48* ct_self, int32_t u_6_number)
+    ct_i_59caa031b078430018f1b81f((ct_t_85f9bec51c25eec663cd1245*)(void*)ct_self);
+    ct_i_cae3e82561de713c516791af(ct_self);
+static CT_UNUSED void ct_i_cae3e82561de713c516791af(ct_t_2f638cfd2bd153fc62b7c90a* ct_self)
+    ct_i_5b2fca84d28f14e98d6cac67((ct_t_99b091a0f75882e3ce5f2c48*)(void*)ct_self, (4));
+    ct_t_2f638cfd2bd153fc62b7c90a* ct_tmp_7 = (ct_t_2f638cfd2bd153fc62b7c90a*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_d_b0f849cefa55ba4450045683, "test.ct", 63);
+    ct_i_59caa031b078430018f1b81f(ct_self);
+static CT_UNUSED void ct_i_59caa031b078430018f1b81f(ct_t_85f9bec51c25eec663cd1245* ct_self)

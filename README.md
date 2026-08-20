@@ -1,8 +1,8 @@
 # C~
 
-C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits one GNU C23 translation unit, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
+C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits deterministic GNU C23 as one translation unit or a modular source bundle, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
 
-The current language is draft 0.13. It adds unsafe GNU inline assembly with typed scalar operands, explicit constraints, and explicit clobbers. It retains draft 0.12 allocation-free vectors, draft 0.11 arithmetic operators, and the draft 0.10 atomic ARC and native ABI unchanged. It does not require a CLR or C# runtime.
+The current language is draft 0.14. It defines one process runtime with explicit lifecycle APIs, catchable allocation-free runtime faults, contiguous strings and arrays, constructive `out` writes, ABI-versioned module descriptors, compact generated symbols, and optional modular C output. The hosted path tracer now uses a deterministic BVH and per-sample random streams. Draft 0.13 GNU inline assembly remains supported. C~ does not require a CLR or C# runtime.
 
 ```csharp
 public static Vector3 operator +(Vector3 left, Vector3 right) { ... }
@@ -68,13 +68,15 @@ The program prints:
 The CLI accepts multiple input files as one compilation:
 
 ```text
-ctilde <input.ct>... -o <program.c> [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]
+ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <map.json>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]
 ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]
 ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]
 ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]
 ```
 
 - `-o` selects the generated C file.
+- `--c-layout unity|modules` selects the default unity file or a bundle with shared headers, one runtime implementation, one source per reachable namespace, an entry source, a symbol map, and a CMake source fragment. `--output-directory` selects the modular bundle directory.
+- `--symbol-map` writes the deterministic versioned JSON mapping from compact C names to canonical source identities. Unity emission does not write a map unless requested.
 - `--header` emits a deterministic C/C++-compatible header for `[Export]` methods. Direct emit-only mode requires `-o`; project and native-build modes have default generated paths. It cannot be combined with `--check` or directory mode.
 - `--check` parses and checks the program without writing C.
 - `--trace` reports compiler phase progress to standard error.
@@ -82,7 +84,7 @@ ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root 
 - `--source-root` makes hosted source locations reproducible by emitting normalized `/`-separated paths relative to an absolute root. Relative CLI roots resolve from the invocation directory. The API requires an absolute root and reports `CT4106` when a rooted input is outside it. ESP-IDF continues to use compact filenames.
 - `--project` loads deterministic source globs and the target from `ctilde.json`. It cannot be combined with direct inputs or `--target`.
 - `--build` emits C and a native header, then invokes MSVC/GCC/Clang for hosted projects or `idf.py build` for ESP-IDF projects.
-- `--configuration debug|release`, `--compiler`, and `--native-output` override hosted build settings. Debug is the default.
+- `--configuration debug|release`, `--compiler`, and `--native-output` override hosted build settings. Debug is the default. Release-only `--lto` maps to `/GL` and `/LTCG` for MSVC or `-flto` for GCC and Clang; ESP-IDF LTO remains an `sdkconfig` choice.
 - `--idf-project` and `--idf-path` select an ESP-IDF project and installation. Chip selection remains in the ESP-IDF project.
 - `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
 
@@ -143,13 +145,13 @@ using var header = new StringWriter();
 EmitResult headerResult = compilation.EmitCHeader(header);
 ```
 
-`Compilation.GetDiagnostics()` returns structured diagnostics from immutable bound bodies without initializing C emission or typed IR. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location. `EmitC()` lazily lowers the validated bound program and caches byte-identical output.
+`Compilation.GetDiagnostics()` returns structured diagnostics from immutable bound bodies without initializing C emission or typed IR. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location. `EmitC()` lazily lowers the validated bound program and caches byte-identical output. `EmitCBundle()` returns immutable generated artifacts and diagnostics from the same optimized program. `EmitSymbolMap()` writes the optional unity debug map.
 
 The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
 
 Omit `CompilationOptions` to retain hosted output and full source paths. Use `new CompilationOptions(SourceRoot: absoluteRoot)` for reproducible hosted paths.
 
-Draft 0.12 emission runs a reachability and body-optimization pass before rendering C. It removes unreachable user functions and metadata, omits cleanup machinery from value-only leaves, registers `defer` directly on the cleanup stack without manufacturing exception frames, and fuses nested built-in string formatting into one string-object allocation plus one data allocation. The hosted path-tracer gate renders an exact 256×144 PPM with SHA-256 `A7099E2431144A542753BA5496880735DBD2A6708A6A9716C3079588D07B3507`.
+Emission runs reachability and body optimization before unity or modular partitioning. It removes unreachable functions and metadata, omits cleanup machinery from value-only leaves, and registers `defer` directly on the cleanup stack. Dynamic strings and arrays use one checked contiguous allocation. The hosted path-tracer gate renders an exact 256×144 PPM with SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF` through the BVH.
 
 `LanguageServiceSnapshot` provides editor-neutral completion, lazy symbol documentation, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. C#-style `///` XML comments supply summaries, parameter and return descriptions, exceptions, remarks, resolved references, and explicit inherited documentation. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same documented target-specific standard library as `Compilation`.
 
@@ -189,7 +191,7 @@ The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and
 | `CTilde.Cli` | The `ctilde` command-line compiler |
 | `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
 | `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.13 programs |
+| `examples` | Checked draft 0.14 programs |
 | `examples/HostedIo` | Deterministic hosted path tracer with materials, defocus blur, and owned PPM output |
 | `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
 | [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
@@ -216,7 +218,7 @@ The driver uses `gnu23` first and retries with `gnu2x` only when the compiler re
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.13 language specification.
+- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.14 language specification.
 - [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
 - [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
 - [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.

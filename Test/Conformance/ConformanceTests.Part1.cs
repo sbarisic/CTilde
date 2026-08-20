@@ -465,13 +465,21 @@ internal static partial class ConformanceTests
             const string runtime = "public static class Program { [Extern(\"ct_alloc\")] public static int Native(); [EntryPoint] public static void Main() { } }";
             Assert(Compile(runtime).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A runtime external collision was not rejected.");
 
-            const string generated = "public static class Program { private static void Helper() { } [Extern(\"ct_m__7_Program_6_Helper\")] public static int Native(); [EntryPoint] public static void Main() { } }";
+            const string generatedBaseline = "public static class Program { private static void Helper() { } [EntryPoint] public static void Main() { Helper(); } }";
+            var generatedCompilation = Compile(generatedBaseline);
+            using var generatedMap = new StringWriter();
+            Assert(generatedCompilation.EmitSymbolMap(generatedMap).Success, "Could not emit the generated-symbol collision map.");
+            using var generatedDocument = System.Text.Json.JsonDocument.Parse(generatedMap.ToString());
+            var helperName = generatedDocument.RootElement.GetProperty("symbols").EnumerateArray()
+                .Single(symbol => symbol.GetProperty("identity").GetString()!.Contains("Program::Helper", StringComparison.Ordinal))
+                .GetProperty("name").GetString()!;
+            var generated = $"public static class Program {{ private static void Helper() {{ }} [Extern(\"{helperName}\")] public static int Native(); [EntryPoint] public static void Main() {{ Helper(); }} }}";
             Assert(Compile(generated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated external collision was not rejected.");
 
             const string dynamicGenerated = "public static class Program { [Extern(\"ct_new_ct_a_i32\")] public static int Native(); [EntryPoint] public static void Main() { int[] values = new int[1]; } }";
             Assert(Compile(dynamicGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated array-allocator collision was not rejected.");
 
-            const string objectGenerated = "public class Value { public virtual int Read() { return 1; } } public static class Program { [Extern(\"ct_vtable_u_5_Value\")] public static int Native(); [EntryPoint] public static void Main() { object value = new Value(); } }";
+            const string objectGenerated = "public class Value { public virtual int Read() { return 1; } } public static class Program { [Extern(\"ct_v_adf7d9ba8d8122f0c937620e\")] public static int Native(); [EntryPoint] public static void Main() { object value = new Value(); } }";
             Assert(Compile(objectGenerated).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A generated object-vtable collision was not rejected.");
 
             const string boxGenerated = "public static class Program { [Extern(\"ct_box_value_i32\")] public static int Native(); [EntryPoint] public static void Main() { object value = 1; } }";

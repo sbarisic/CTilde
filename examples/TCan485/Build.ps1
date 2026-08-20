@@ -32,7 +32,6 @@ if (-not (Test-Path -LiteralPath $sourcePath)) {
 }
 
 $generatedDirectory = Join-Path $projectDirectory "main\generated"
-$generatedPath = Join-Path $generatedDirectory "ctilde_program.c"
 $generatedHeaderPath = Join-Path $generatedDirectory "ctilde_exports.h"
 New-Item -ItemType Directory -Force -Path $generatedDirectory | Out-Null
 
@@ -59,13 +58,22 @@ if ($activeIdfPath -ne $resolvedIdfPath -or $null -eq (Get-Command idf.py -Error
 
 Push-Location $projectDirectory
 try {
+    # ESP-IDF evaluates component CMake files during set-target. Emit the modular
+    # source list first so the generated include already exists for that pass.
+    if ([IO.Path]::GetFullPath($sourcePath) -eq [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))) {
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- --project (Join-Path $projectDirectory "ctilde.json") --trace
+    } else {
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath --c-layout modules --output-directory $generatedDirectory --header $generatedHeaderPath --target esp-idf --trace
+    }
+    if ($LASTEXITCODE -ne 0) { throw "C~ modular emission failed with exit code $LASTEXITCODE." }
+
     & idf.py set-target $Target
     if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed with exit code $LASTEXITCODE." }
 
     if ([IO.Path]::GetFullPath($sourcePath) -eq [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))) {
         & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- --project (Join-Path $projectDirectory "ctilde.json") --build --trace
     } else {
-        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath -o $generatedPath --header $generatedHeaderPath --target esp-idf --build --idf-project $projectDirectory --trace
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath --c-layout modules --output-directory $generatedDirectory --header $generatedHeaderPath --target esp-idf --build --idf-project $projectDirectory --trace
     }
     if ($LASTEXITCODE -ne 0) { throw "C~ native build failed with exit code $LASTEXITCODE." }
 

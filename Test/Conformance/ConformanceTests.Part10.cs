@@ -27,7 +27,7 @@ internal static partial class ConformanceTests
                 }
                 """;
             var generated = Emit(source);
-            Assert(generated.Contains("data[length] = 0;", StringComparison.Ordinal), "Dynamic strings were not explicitly NUL-terminated.");
+            Assert(generated.Contains("result->Data[length] = 0;", StringComparison.Ordinal), "Dynamic strings were not explicitly NUL-terminated.");
             Assert(generated.Contains("ct_string_build(", StringComparison.Ordinal), "The concatenation tree did not use the fused string builder.");
             var result = CompileAndRun(source, captureFile: "joined-42.bin");
             Assert(result.ExitCode == 0, result.StandardError);
@@ -56,7 +56,8 @@ internal static partial class ConformanceTests
                 """;
             var allocationResult = CompileAndRun(allocations, memoryDiagnostics: true);
             Assert(allocationResult.ExitCode == 0, allocationResult.StandardError);
-            Assert(Normalize(allocationResult.StandardOutput) == "2\nvalue=42.\n", "A fused scalar concatenation did not use exactly one string object and one data allocation.");
+            var allocationOutput = Normalize(allocationResult.StandardOutput);
+            Assert(allocationOutput == "1\nvalue=42.\n", $"A fused scalar concatenation did not use one contiguous result allocation. Output: {allocationOutput}");
         });
 
         suite.Run("draft 0.12 cleanup and reachability emission", () =>
@@ -71,8 +72,14 @@ internal static partial class ConformanceTests
                 """;
             var generated = Emit(source);
             Assert(!generated.Contains("ct_keep_symbols", StringComparison.Ordinal), "Generated C retained ct_keep_symbols.");
-            Assert(!generated.Contains("_6_Unused", StringComparison.Ordinal), "An unreachable user method was emitted.");
-            var leafStart = generated.IndexOf("_4_Leaf_i32", StringComparison.Ordinal);
+            var compilation = Compile(source);
+            using var map = new StringWriter();
+            Assert(compilation.EmitSymbolMap(map).Success, "The reachability symbol map failed.");
+            using var document = System.Text.Json.JsonDocument.Parse(map.ToString());
+            var symbols = document.RootElement.GetProperty("symbols").EnumerateArray().ToArray();
+            Assert(!symbols.Any(symbol => symbol.GetProperty("identity").GetString()!.Contains("::Unused", StringComparison.Ordinal)), "An unreachable user method was emitted.");
+            var leafName = symbols.Single(symbol => symbol.GetProperty("identity").GetString()!.Contains("::Leaf", StringComparison.Ordinal)).GetProperty("name").GetString()!;
+            var leafStart = generated.IndexOf(leafName, StringComparison.Ordinal);
             Assert(leafStart >= 0, "The reachable leaf method was not emitted.");
             var leafEnd = generated.IndexOf("\n}\n", leafStart, StringComparison.Ordinal);
             var leaf = generated[leafStart..leafEnd];

@@ -7,18 +7,15 @@ internal static partial class ConformanceTests
         suite.Run("feature C symbol snapshot", () =>
         {
             var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
-            var generated = Emit(source);
-            var projection = string.Join('\n', generated.Split('\n').Where(line =>
-                line.StartsWith("typedef struct ct_t", StringComparison.Ordinal) && !line.StartsWith("typedef struct ct_thread_state", StringComparison.Ordinal) ||
-                line.StartsWith("typedef struct ct_a", StringComparison.Ordinal) ||
-                line.StartsWith("typedef uint", StringComparison.Ordinal) && line.Contains("ct_t_", StringComparison.Ordinal) ||
-                line.StartsWith("typedef int", StringComparison.Ordinal) && line.Contains("ct_t_", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_t", StringComparison.Ordinal) ||
-                line.StartsWith("struct ct_a", StringComparison.Ordinal) ||
-                line.StartsWith("static ", StringComparison.Ordinal) && (line.Contains(" ct_ctor_", StringComparison.Ordinal) || line.Contains(" ct_m_", StringComparison.Ordinal) || line.Contains(" ct_get_", StringComparison.Ordinal) || line.Contains(" ct_set_", StringComparison.Ordinal)) ||
-                line == "int main(void)")) + "\n";
+            var compilation = Compile(source);
+            using var writer = new StringWriter();
+            Assert(compilation.EmitSymbolMap(writer).Success, "Feature symbol-map emission failed.");
+            using var document = System.Text.Json.JsonDocument.Parse(writer.ToString());
+            var projection = string.Join('\n', document.RootElement.GetProperty("symbols").EnumerateArray()
+                .Where(symbol => symbol.GetProperty("identity").GetString()!.Contains("Examples.", StringComparison.Ordinal))
+                .Select(symbol => $"{symbol.GetProperty("kind").GetString()} {symbol.GetProperty("name").GetString()} {symbol.GetProperty("identity").GetString()} -> {symbol.GetProperty("signature").GetString()}")) + "\n";
             var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "features.symbols.txt")));
-            Assert(projection == expected, "Generated C symbol snapshot changed.");
+            Assert(projection == expected, $"Generated C symbol snapshot changed.{Environment.NewLine}{projection}");
         });
 
         suite.Run("object ABI snapshot", () =>
@@ -26,7 +23,7 @@ internal static partial class ConformanceTests
             var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
             var projection = ProjectObjectAbi(Emit(source));
             var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt")));
-            Assert(projection == expected, "Generated object ABI snapshot changed.");
+            Assert(projection == expected, $"Generated object ABI snapshot changed.{Environment.NewLine}{projection}");
         });
 
         suite.Run("bounds failure", () =>
@@ -190,7 +187,7 @@ internal static partial class ConformanceTests
                     ct_test_delegate_fn delegate_callback;
                     ct_test_pointer_fn pointer_callback;
                     void* callback_context;
-                    ct_t_6_System_6_Object* object;
+                    ct_managed_object* object;
                 } ct_test_thread_context;
 
                 #if defined(_WIN32)
@@ -263,7 +260,7 @@ internal static partial class ConformanceTests
                     return context.result;
                 }
 
-                void ct_test_arc_threads(ct_t_6_System_6_Object* object)
+                void ct_test_arc_threads(ct_managed_object* object)
                 {
                     ct_test_thread_context contexts[4] = { 0 };
                     #if defined(_WIN32)
@@ -361,7 +358,7 @@ internal static partial class ConformanceTests
                     return 1;
                 }
 
-                static ct_t_6_System_6_Object* ct_test_deferred_object = NULL;
+                static ct_managed_object* ct_test_deferred_object = NULL;
                 static uint32_t ct_test_deferred_baseline = 0;
                 static int32_t ct_test_deferred_result = 0;
                 #if defined(_WIN32)
@@ -399,7 +396,7 @@ internal static partial class ConformanceTests
                 }
                 #endif
 
-                void ct_test_start_deferred_release(ct_t_6_System_6_Object* object)
+                void ct_test_start_deferred_release(ct_managed_object* object)
                 {
                     ct_test_deferred_object = object;
                     ct_test_deferred_baseline = ct_memory_diagnostic_live_objects() - 1u;

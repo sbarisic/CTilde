@@ -1,106 +1,12 @@
 # C~
 
-C~ is a small, statically typed systems language with C#-style syntax. The compiler accepts `.ct` source files, emits deterministic GNU C23 as one translation unit or a modular source bundle, and can invoke an installed hosted C compiler or ESP-IDF to produce native output. GCC-compatible extensions are enabled by default.
+C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-The current language is draft 0.14. It defines one process runtime with explicit lifecycle APIs, catchable allocation-free runtime faults, contiguous strings and arrays, constructive `out` writes, ABI-versioned module descriptors, compact generated symbols, and optional modular C output. The hosted path tracer now uses a deterministic BVH and per-sample random streams. Draft 0.13 GNU inline assembly remains supported. C~ does not require a CLR or C# runtime.
+Draft 0.14 includes classes and structures, deterministic automatic reference counting, exceptions and `defer`, arrays and UTF-8 strings, user-defined arithmetic operators, native interop, raw GNU inline assembly, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
-```csharp
-public static Vector3 operator +(Vector3 left, Vector3 right) { ... }
-public static Vector3 operator *(Vector3 value, float scale) { ... }
-```
+## A taste of C~
 
-The standard library uses those declarations directly:
-
-```csharp
-Vec3 direction = (Vec3.UnitX + Vec3.UnitY).Normalize();
-Vec3 normal = Vec3.UnitX.Cross(Vec3.UnitY);
-```
-
-GNU builds can use raw inline instructions without wrapping each line in a string:
-
-```csharp
-[NoAlloc]
-asm (in value, out result, clobber("cc")) {
-    leal 1(value), result
-}
-```
-
-Inline assembly requires `unsafe`. GCC and Clang support it for hosted and ESP-IDF targets; native MSVC builds reject programs that contain `asm`.
-
-## Quick start
-
-Build the .NET 10 solution:
-
-```powershell
-dotnet build .\CTilde.sln
-```
-
-Build the example as a hosted executable:
-
-```powershell
-dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct --build --native-output .\bin\hello.exe
-.\bin\hello.exe
-```
-
-Use `--compiler gcc`, `--compiler clang`, or `--compiler msvc` to select a toolchain. `auto` checks `CTILDE_CC` and then discovers an installed compiler. The equivalent emit-only and manual GCC flow remains available:
-
-```powershell
-dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\bin\hello.c
-gcc -std=gnu23 -Wall -Wextra -Werror -o .\bin\hello.exe .\bin\hello.c
-.\bin\hello.exe
-```
-
-Older GCC and Clang versions can use `-std=gnu2x`. The CLI and conformance driver retry after an unsupported `gnu23` option.
-
-MSVC remains supported as a compatibility toolchain through its latest C mode:
-
-```powershell
-cl /std:clatest /W4 /WX /Fe:.\bin\hello.exe .\bin\hello.c
-.\bin\hello.exe
-```
-
-The program prints:
-
-```text
-5
-```
-
-The CLI accepts multiple input files as one compilation:
-
-```text
-ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <map.json>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]
-ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]
-ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]
-ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]
-```
-
-- `-o` selects the generated C file.
-- `--c-layout unity|modules` selects the default unity file or a bundle with shared headers, one runtime implementation, one source per reachable namespace, an entry source, a symbol map, and a CMake source fragment. `--output-directory` selects the modular bundle directory.
-- `--symbol-map` writes the deterministic versioned JSON mapping from compact C names to canonical source identities. Unity emission does not write a map unless requested.
-- `--header` emits a deterministic C/C++-compatible header for `[Export]` methods. Direct emit-only mode requires `-o`; project and native-build modes have default generated paths. It cannot be combined with `--check` or directory mode.
-- `--check` parses and checks the program without writing C.
-- `--trace` reports compiler phase progress to standard error.
-- `--target` selects `hosted` by default or emits an ESP-IDF `app_main` profile.
-- `--source-root` makes hosted source locations reproducible by emitting normalized `/`-separated paths relative to an absolute root. Relative CLI roots resolve from the invocation directory. The API requires an absolute root and reports `CT4106` when a rooted input is outside it. ESP-IDF continues to use compact filenames.
-- `--project` loads deterministic source globs and the target from `ctilde.json`. It cannot be combined with direct inputs or `--target`.
-- `--build` emits C and a native header, then invokes MSVC/GCC/Clang for hosted projects or `idf.py build` for ESP-IDF projects.
-- `--configuration debug|release`, `--compiler`, and `--native-output` override hosted build settings. Debug is the default. Release-only `--lto` maps to `/GL` and `/LTCG` for MSVC or `-flto` for GCC and Clang; ESP-IDF LTO remains an `sdkconfig` choice.
-- `--idf-project` and `--idf-path` select an ESP-IDF project and installation. Chip selection remains in the ESP-IDF project.
-- `--compile-directory` compiles each top-level `.ct` file independently and writes a same-named `.c` file beside it.
-
-Running `CTilde.Cli` from Visual Studio uses `--compile-directory data/programs --trace`, so every file in `CTilde.Cli/data/programs` is compiled automatically.
-
-The compiler generates requested C and header text in memory before atomically replacing successful outputs. Native builds lock their build directory and do not run after C~ errors. Directory mode removes stale generated output after an error. Generated-file checks preserve handwritten C.
-
-Publish a self-contained compiler that does not require an installed .NET runtime:
-
-```powershell
-.\CTilde.Cli\Publish.ps1 -Runtime win-x64
-```
-
-The archive still requires an external hosted C toolchain or ESP-IDF.
-
-## Language example
+This complete program uses standard-library vectors, operator overloads, a managed array, `foreach`, string construction, and deterministic deferred cleanup:
 
 ```csharp
 using System;
@@ -112,68 +18,124 @@ public static class Program
     [EntryPoint]
     public static void Main()
     {
-        int[] values = new int[3];
-        values[0] = 2;
-        values[1] = 3;
-        values[2] = 4;
+        defer Console.WriteLine("done");
+
+        Vec3 direction = (Vec3.UnitX + Vec3.UnitY).Normalize();
+        int[] samples = new int[3];
+        samples[0] = 2;
+        samples[1] = 3;
+        samples[2] = 4;
 
         int total = 0;
-        foreach (int value in values)
+        foreach (int sample in samples)
         {
-            total += value;
+            total += sample;
         }
 
-        Console.WriteLine(total);
+        Console.WriteLine("samples: " + total.ToString());
+        Console.WriteLine("direction: " + direction.X.ToString() + ", " + direction.Y.ToString());
     }
 }
 ```
 
-See [examples/Features.ct](examples/Features.ct) for the general language surface, including native integers, by-reference calls, stack buffers, delegates, and unmanaged function pointers. [examples/HostedIo](examples/HostedIo/README.md) is a deterministic hosted path tracer with antialiasing, recursive Lambertian/metal/dielectric scattering, a positionable defocus camera, and owned PPM output. [examples/ObjectModel.ct](examples/ObjectModel.ct) proves that a delegate retains its receiver and preserves virtual dispatch. [examples/Exceptions.ct](examples/Exceptions.ct) invokes throwing code through a delegate to cover catch/finally cleanup. [LANGUAGE.md](LANGUAGE.md) defines `defer`, ownership, buffers, callbacks, and `[NoAlloc]` rules.
+C~ evaluates calls and operands from left to right, automatically owns managed values with non-moving ARC, and runs the deferred call on every ordinary exit from its block. The bundled `Vec3` operators and methods are allocation-free.
 
-## Public compiler API
+For a broad executable language tour, see [examples/Features.ct](examples/Features.ct). The [hosted path tracer](examples/HostedIo/README.md) exercises the object model, virtual dispatch, vector operators, exceptions, deterministic random sampling, and owned file I/O in a larger program.
 
-```csharp
-var tree = SyntaxTree.Parse(SourceText.From(source, "program.ct"));
-var compilation = Compilation.Create(
-    new[] { tree },
-    new CompilationOptions(CompilationTarget.EspIdf));
+## Quick start
 
-using var output = new StringWriter();
-EmitResult result = compilation.EmitC(output);
+You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to build the compiler and an installed native toolchain when using `--build`:
 
-using var header = new StringWriter();
-EmitResult headerResult = compilation.EmitCHeader(header);
+- MSVC, GCC, or Clang for hosted programs.
+- ESP-IDF 6 for ESP32-family projects.
+
+Build the solution and compile the checked hello-world example:
+
+```powershell
+dotnet build .\CTilde.sln
+dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct --build
+.\build\program.exe
 ```
 
-`Compilation.GetDiagnostics()` returns structured diagnostics from immutable bound bodies without initializing C emission or typed IR. Each diagnostic has a stable code, severity, message, file, line, column, and optional related location. `EmitC()` lazily lowers the validated bound program and caches byte-identical output. `EmitCBundle()` returns immutable generated artifacts and diagnostics from the same optimized program. `EmitSymbolMap()` writes the optional unity debug map.
+On Linux or macOS, run the generated executable as `./build/program`. The example prints `5`.
 
-The full-fidelity syntax API intentionally breaks the prototype node API. Tokens expose trivia, missing-token state, `Span`, and `FullSpan`. Nodes expose `ChildNodesAndTokens()` and exact `ToFullString()` output.
+The compiler can also stop after emitting portable C:
 
-Omit `CompilationOptions` to retain hosted output and full source paths. Use `new CompilationOptions(SourceRoot: absoluteRoot)` for reproducible hosted paths.
+```powershell
+dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\build\hello.c
+gcc -std=gnu23 -Wall -Wextra -Werror -o .\build\hello .\build\hello.c
+```
 
-Emission runs reachability and body optimization before unity or modular partitioning. It removes unreachable functions and metadata, omits cleanup machinery from value-only leaves, and registers `defer` directly on the cleanup stack. Dynamic strings and arrays use one checked contiguous allocation. The hosted path-tracer gate renders an exact 256×144 PPM with SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF` through the BVH.
+GCC versions that have not adopted the final C23 option spelling can use `-std=gnu2x`; the CLI retries that spelling automatically when its discovered GNU compiler rejects `gnu23`.
 
-`LanguageServiceSnapshot` provides editor-neutral completion, lazy symbol documentation, hover, signature, definition, diagnostic, symbol, and semantic-token queries using UTF-16 source offsets. C#-style `///` XML comments supply summaries, parameter and return descriptions, exceptions, remarks, resolved references, and explicit inherited documentation. Semantic tokens classify resolved namespaces, types, members, parameters, and locals while retaining TextMate fallback for unresolved or purely lexical syntax. The snapshot includes the same documented target-specific standard library as `Compilation`.
+## What the language provides
 
-## Visual Studio Code
+- C#-style namespaces, classes, structures, enums, constructors, properties, overloads, and single inheritance.
+- Fixed-width and native-width integers, checked arrays, immutable UTF-8 strings, pointers, native buffers, and stack allocation.
+- Virtual dispatch, boxing, named single-cast delegates, unmanaged function pointers, and user-defined `+`, `-`, `*`, and `/` operators.
+- Typed exceptions, `try`/`catch`/`finally`, deterministic `defer`, and catchable allocation-free runtime faults.
+- Non-moving atomic reference counting with deterministic destruction of acyclic managed values. Reference cycles intentionally leak.
+- Explicit native contracts through attributes such as `[Extern]`, `[Export]`, `[NoAlloc]`, and ownership annotations.
+- Raw GNU inline assembly with typed operands for GCC and Clang builds. Programs containing `asm` are rejected by the MSVC native-build path.
 
-The extension in [`editors/vscode`](editors/vscode) adds compiler-aware semantic highlighting, lazily documented completion, live compiler diagnostics, documented hover and signature help, go-to-definition, document/workspace symbols, and TextMate fallback highlighting. It launches the bundled framework-dependent language server through an installed .NET 10 runtime.
+The bundled standard library supplies objects and exceptions, console I/O, single-precision math and vectors, runtime memory operations, hosted binary file I/O, and a small target-specific ESP-IDF surface. See [STDLIB.md](STDLIB.md) for signatures and runtime behavior.
 
-Use `ctilde.json` when several files form one compilation:
+## Ownership, failures, and native boundaries
+
+Managed objects, arrays, strings, boxes, and reference-bearing structures use automatic reference counting. Parameters are borrowed; managed results are owned; fields, array slots, locals, and temporaries retain or transfer values as required. `defer` also provides deterministic cleanup for move-only native resources.
+
+Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, invalid arguments, and managed allocation failure are ordinary catchable exceptions backed by allocation-free runtime objects. ABI, lifecycle, attachment, ARC-corruption, and native-boundary violations are panics. Each attached native thread has independent exception, cleanup, and release state.
+
+The generated native header exposes `[Export]` methods plus the ABI 14 runtime lifecycle, thread attachment, retain, and release operations. [C_ABI.md](C_ABI.md) defines the generated layouts and interop contract.
+
+## Files, projects, and native builds
+
+Compile one or more files directly, or use a `ctilde.json` manifest when several files form one program:
 
 ```json
 {
   "target": "hosted",
   "sources": ["src/**/*.ct"],
-  "exclude": ["src/generated/**"]
+  "exclude": ["src/generated/**"],
+  "build": {
+    "cLayout": "modules",
+    "configuration": "release",
+    "lto": true
+  }
 }
 ```
 
-Patterns and optional build outputs are relative to the manifest and cannot leave its directory. Without a manifest, each `.ct` file is analyzed as a standalone hosted program. Use **C~: Check Project**, **C~: Build Project**, or the generated C~ tasks from **Tasks: Run Task**. See the [extension documentation](editors/vscode/README.md) for compiler overrides, building, tracing, and packaging.
+```powershell
+dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --check
+dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --build
+```
 
-## ESP-IDF quick start
+Project globs and generated paths are deterministic and confined to the manifest directory. Unity output is one self-contained C file. Modular output contains shared headers, a runtime source, reachable namespace sources, an entry source, a versioned symbol map, and a CMake source fragment.
 
-ESP-IDF 6 builds the same generated C for Xtensa and RISC-V chips. `ctilde --build` invokes `idf.py build`; ESP-IDF still owns chip selection, component resolution, linking, flashing, and monitoring.
+Useful CLI workflows include:
+
+```text
+ctilde <input.ct>... --check
+ctilde <input.ct>... -o <program.c> [--header <exports.h>]
+ctilde <input.ct>... --build [--compiler auto|msvc|gcc|clang]
+ctilde --project <ctilde.json> [--check|--build]
+```
+
+Run `ctilde --help` for modular-layout, reproducible-path, toolchain, LTO, ESP-IDF, and directory-compilation options. Native builds write generated files atomically, lock their build directory, and never invoke the native toolchain after a C~ error.
+
+Publish a self-contained command-line compiler that does not require an installed .NET runtime:
+
+```powershell
+.\CTilde.Cli\Publish.ps1 -Runtime win-x64
+```
+
+The published compiler still requires an external hosted C toolchain or ESP-IDF to build native output.
+
+## ESP-IDF
+
+The ESP-IDF target emits `app_main` and uses the same language and GNU C23 backend as hosted builds. ESP-IDF remains responsible for chip selection, components, linking, flashing, and monitoring; C~ does not have separate per-chip backends.
+
+The checked T-CAN485 project builds modular firmware for Xtensa and RISC-V targets:
 
 ```powershell
 cd .\examples\TCan485
@@ -181,50 +143,73 @@ cd .\examples\TCan485
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The checked T-CAN485 project includes typed `EspError` results, scoped UTF-8 and opaque-resource fixtures, generated exports, synchronous delegate/context callbacks, native buffers, UART0 configuration, an 8 KiB main-task stack, an RMT-driven WS2812 on GPIO4, heap and stack reporting, and managed object/delegate/exception/ARC self-tests. See [the T-CAN485 example](examples/TCan485/README.md) for the failure test and current runtime limits.
+The project covers GPIO and an RMT-driven WS2812, FreeRTOS delays and counters, attached native tasks, exports, synchronous callbacks, opaque resources, runtime failures, and ARC recovery. Its [hardware guide](examples/TCan485/README.md) distinguishes the current ABI 14 cross-build results from the latest physical-board validation.
 
-## Projects
+## Compiler API
 
-| Project | Purpose |
+The compiler is also a .NET library:
+
+```csharp
+var tree = SyntaxTree.Parse(SourceText.From(source, "program.ct"));
+var compilation = Compilation.Create(
+    new[] { tree },
+    new CompilationOptions(CompilationTarget.Hosted));
+
+var diagnostics = compilation.GetDiagnostics();
+
+using var output = new StringWriter();
+EmitResult result = compilation.EmitC(output);
+```
+
+`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, and `EmitSymbolMap()` expose modular artifacts, exported declarations, and compact-name mappings. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
+
+## Editor support
+
+The extension in [editors/vscode](editors/vscode/README.md) provides compiler-aware semantic highlighting, completion, diagnostics, XML-documentation hover and signature help, definitions, document and workspace symbols, project checks and native builds, and navigation into the embedded standard library. It bundles the framework-dependent compiler and language server and therefore requires an installed .NET 10 runtime.
+
+Rename, references, formatting, debugging, code actions, auto-import edits, and semantic-token deltas are not yet implemented. Type-body completion currently has one known regression: it omits the `operator` declaration keyword, while operator hover, definition, symbols, usage classification, and ordinary member filtering continue to work.
+
+## Project status
+
+C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.204` builds the solution with zero warnings and zero errors. The conformance project registers 115 checks; 114 pass, and the operator type-body completion regression described above is the only observed failure. The Draft 0.14 release gate therefore remains open.
+
+The compiler and ESP-IDF firmware cross-build coverage are substantially broader than the current physical-hardware evidence. ABI 14 firmware links for Xtensa and RISC-V, but the last completed T-CAN485 flash-and-monitor run used Draft 0.12. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for remaining work.
+
+## Repository guide
+
+| Path | Purpose |
 | --- | --- |
-| `CTilde` | Lexer, parser, semantic analysis, lowering, and GNU C23 emission |
-| `CTilde.Cli` | The `ctilde` command-line compiler |
-| `CTilde.LanguageServer` | LSP 3.17 server for semantic highlighting, completion, diagnostics, and navigation |
-| `Test` | Compiler and native C conformance runner |
-| `examples` | Checked draft 0.14 programs |
-| `examples/HostedIo` | Deterministic hosted path tracer with materials, defocus blur, and owned PPM output |
-| `examples/TCan485` | T-CAN485 ESP-IDF hardware project and native API shim |
-| [`editors/vscode`](editors/vscode) | Visual Studio Code language client, highlighting, and project schema |
+| `CTilde` | Syntax, semantic analysis, lowering, standard library, and GNU C23 emission |
+| `CTilde.Cli` | Command-line emission and native-build driver |
+| `CTilde.LanguageServer` | LSP 3.17 language server |
+| `Test` | Managed, native, ABI, artifact, and language-service conformance checks |
+| `examples` | Focused language programs and hosted/ESP-IDF projects |
+| `editors/vscode` | VS Code client, grammar, project schema, and editor tests |
+
+The documentation is split by purpose:
+
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.14 language specification.
+- [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
+- [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.
+- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — measured feature and validation status.
+- [TODO.md](TODO.md) — concise outstanding roadmap and release blockers.
 
 ## Validation
 
 ```powershell
-dotnet build .\CTilde.sln
+dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
-Push-Location .\editors\vscode; npm test; npm run test:extension; Pop-Location
+Push-Location .\editors\vscode
+npm ci
+npm test
+npm run test:extension
+Pop-Location
 .\Test\Test-EspIdf.ps1
 ```
 
-The native tests discover Visual Studio C tools on Windows. Set `CTILDE_CC` to test another compiler:
-
-```powershell
-$env:CTILDE_CC = "clang"
-dotnet run --project .\Test\Test.csproj
-```
-
-Use `wsl:gcc` or `wsl:clang` to run the GNU compiler through WSL. Set `CTILDE_C_STANDARD` to force a dialect.
-
-The driver uses `gnu23` first and retries with `gnu2x` only when the compiler rejects the option. MSVC uses `/std:clatest /W4 /WX` as a compatibility check.
-
-## Documentation
-
-- [LANGUAGE.md](LANGUAGE.md) is the normative draft 0.14 language specification.
-- [STDLIB.md](STDLIB.md) specifies the bundled standard-library API and runtime behavior.
-- [ARCHITECTURE.md](ARCHITECTURE.md) describes the compiler phases and ownership boundaries.
-- [C_ABI.md](C_ABI.md) defines generated C layouts, names, initialization, and interop.
-- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) records the measured feature and validation status.
-- [TODO.md](TODO.md) defines planned work and acceptance criteria, including ESP-IDF target support.
+Set `CTILDE_CC` to a compiler name or path to exercise another hosted C compiler. `wsl:gcc` and `wsl:clang` run GNU toolchains through WSL, and `CTILDE_C_STANDARD` overrides the selected GNU dialect.
 
 ## License
 
-See [LICENSE](LICENSE).
+C~ is released under the [Unlicense](LICENSE).

@@ -16,13 +16,13 @@ The compiler emits one C file by default or an immutable modular bundle containi
 
 ## Measured baseline
 
-The current workspace passes:
+The current workspace builds with:
 
 ```powershell
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. The conformance runner includes managed and native checks plus end-to-end LSP protocol and VS Code Extension Host checks. Draft 0.14 coverage includes runtime-fault catches and injected OOM, lifecycle finalization and panic callbacks, deterministic modular artifacts and symbol maps, unity/modular native behavior, contiguous storage, constructive `out`, BVH/list hit equivalence, AABB edge rays, schedule-independent per-sample RNG, and the exact reduced-image SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`.
+The .NET 10 build uses SDK `10.0.204` and completes with zero warnings and zero errors. The conformance project registers 115 managed and native checks. In the reviewed workspace, 114 pass and `draft 0.11 operator language services` fails because type-member completion omits the `operator` declaration keyword. Operator hover, definition, document/workspace symbols, semantic classification, and exclusion from ordinary member completion remain implemented. Draft 0.14 coverage includes runtime-fault catches and injected OOM, lifecycle finalization and panic callbacks, deterministic modular artifacts and symbol maps, unity/modular native behavior, contiguous storage, constructive `out`, BVH/list hit equivalence, AABB edge rays, schedule-independent per-sample RNG, and the exact reduced-image SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`.
 
 The modular MSVC Release+LTO production renderer completed the full 1200x675, 500-sample, 50-bounce BVH profile in 4,420.348 seconds (1:13:40.348) on the reviewed machine. Its P3 PPM SHA-256 is `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`. The reduced image remains the automated deterministic gate; the production elapsed time is a recorded machine-specific measurement.
 
@@ -75,7 +75,7 @@ gcc -std=gnu2x -O2 -Wall -Wextra -Werror
 
 It exits successfully and produces the same checked output. The runner tries `gnu23` and retries with `gnu2x` only after an unsupported-option error. `CTILDE_CC` accepts compiler paths, `wsl:gcc`, and `wsl:clang`. `CTILDE_C_STANDARD` forces one dialect.
 
-Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O2 -Wall -Wextra -Werror`.
+Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with `-std=gnu23 -O2 -Wall -Wextra -Werror`. That historical native-toolchain result does not override the current operator-completion failure.
 
 ## Language support
 
@@ -106,7 +106,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 | Custom and automatic properties | Implemented | Native property tests |
 | Access modifiers | Implemented | Private member and setter diagnostics |
 | Method overloads | Implemented | Pairwise best-candidate and cross-argument ambiguity tests |
-| User-defined arithmetic operators | Implemented | Unary/binary declarations, scalar order, base lookup, ambiguity, ARC, evaluation order, compound targets, deterministic `ct_op_*` emission, and editor navigation tests |
+| User-defined arithmetic operators | Implemented; completion regression open | Unary/binary declarations, scalar order, base lookup, ambiguity, ARC, evaluation order, compound targets, deterministic `ct_op_*` emission, and editor navigation tests; type-body `operator` keyword completion currently fails |
 | `const` and delayed `readonly` | Implemented | Constant switch and branch-flow tests |
 | Definite assignment and reachability | Implemented | `do`, switch, read-only, constructor, and reachability tests |
 | Exact-width integers through `long`/`ulong` | Implemented | Suffix, boundary, promotion, wrapping, formatting, enum, boxing, and C ABI tests |
@@ -143,7 +143,7 @@ Ubuntu Clang 18.1.3 under WSL also passes the complete suite with `-std=gnu23 -O
 
 ## Conformance coverage
 
-The executable test project checks:
+The executable test project registers 115 checks. The current result is 114 passes and the one operator type-body completion failure described above. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -219,7 +219,7 @@ Documentation analysis accepts summaries, parameters, returns, remarks, exceptio
 
 `ctilde.json` defines deterministic source globs, exclusions, and a hosted or ESP-IDF target. The CLI and language server share the loader. Files without a manifest are analyzed as standalone hosted programs; files outside a manifest source set retain that manifest's target but do not join its compilation.
 
-The 0.3.1 extension bundles its JavaScript client and framework-dependent .NET 10 server. The user supplies the .NET 10 runtime. Protocol and Extension Host checks exercise initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit. Hosted snapshots include documented console-input and `System.IO` symbols; ESP-IDF snapshots omit them.
+The VS Code extension is version 0.4.0 and bundles its JavaScript client, a framework-dependent compiler, and the version 0.3.1 .NET 10 language server. The user supplies the .NET 10 runtime. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit. Hosted snapshots include documented console-input and `System.IO` symbols; ESP-IDF snapshots omit them. The shared language-service conformance suite currently exposes the type-body `operator` keyword completion regression; it does not affect the other operator editor services.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 
@@ -287,5 +287,7 @@ A draft 0.14 release requires:
 - MSVC latest-C compatibility compilation with warnings as errors for programs without inline assembly, plus a focused rejection check for programs containing `asm`.
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
+
+The current workspace does not meet this gate: one of the 115 conformance checks fails, and ABI 14 has not yet completed its physical-board flash-and-monitor validation.
 
 Draft 0.14 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts must agree under every supported hosted toolchain. The Draft 0.12 dual-core Xtensa run remains the last confirmed hardware baseline until ABI 14 firmware is flashed and monitored; draft 0.14 hardware status must be reported as unverified until that run occurs. Instruction-only function-body emission remains an architecture blocker rather than a runtime ABI blocker.

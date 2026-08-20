@@ -25,6 +25,8 @@ Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `
 
 Rename, references, formatting, debugging, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
 
+One type-body completion regression is currently open: completion omits the `operator` declaration keyword. Operator hover, go-to-definition, document/workspace symbols, semantic classification, and filtering from ordinary member completion continue to work.
+
 ## Projects
 
 Put `ctilde.json` at a project root to select the target and source set:

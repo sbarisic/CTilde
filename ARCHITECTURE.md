@@ -183,7 +183,7 @@ Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` dec
 
 Generated global identifiers use kind-specific prefixes and the first 96 bits of SHA-256 over centralized canonical identities. The versioned symbol map preserves full identities and source locations. User text is never copied directly into a global C identifier.
 
-## Planned native interop layer
+## Native interop and planned binding generation
 
 The current ESP target uses handwritten fixed-width shims. The intended next layer keeps the compiler independent from ESP-IDF while reducing repetitive wrapper code:
 
@@ -250,4 +250,4 @@ ESP-IDF is a target profile, not a separate language backend. It reuses the pars
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 
-See [TODO.md](TODO.md#esp-idf-target-support) for the implementation order and acceptance criteria.
+See the [ESP-IDF and native-interop roadmap](TODO.md#esp-idf-and-native-interop) for the remaining binding, callback, ISR, and hardware-validation work.

@@ -5,12 +5,12 @@ using System.Text;
 
 namespace CTilde;
 
-internal sealed class LoweredExpression
+internal sealed class IrExpressionValue
 {
     public required CType Type { get; init; }
     public required string Code { get; init; }
     public List<string> Prelude { get; init; } = [];
-    public LoweredLValue? LValue { get; init; }
+    public IrValueStorage? LValue { get; init; }
     public TypeSymbol? TypeReceiver { get; init; }
     public bool IsConstant { get; init; }
     public object? ConstantValue { get; init; }
@@ -21,11 +21,11 @@ internal sealed class LoweredExpression
     public object? Symbol { get; init; }
 }
 
-internal sealed record MethodGroupBinding(ImmutableArray<MethodSymbol> Candidates, LoweredExpression? Receiver, bool IsBaseReceiver);
+internal sealed record MethodGroupBinding(ImmutableArray<MethodSymbol> Candidates, IrExpressionValue? Receiver, bool IsBaseReceiver);
 
 internal enum OwnershipKind { None, Borrowed, Owned, Immortal }
 
-internal sealed class LoweredLValue
+internal sealed class IrValueStorage
 {
     public required Func<string, string> Store { get; init; }
     public string? Address { get; init; }
@@ -36,7 +36,7 @@ internal sealed class LoweredLValue
     public bool IsBaseReceiver { get; init; }
 }
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
     private readonly ILoweringServices _emitter;
     private readonly CompilationModel _model;
@@ -62,7 +62,7 @@ internal sealed partial class BodyPipeline
     private readonly List<ActiveHandler> _activeExceptionFrames = [];
     private readonly Stack<FinallyContext> _finallyContexts = [];
     private readonly Stack<(int BreakDepth, int ContinueDepth)> _finallyBarriers = [];
-    private readonly Dictionary<DeferStatementSyntax, LoweredExpression> _deferredCalls = [];
+    private readonly Dictionary<DeferStatementSyntax, IrExpressionValue> _deferredCalls = [];
     private readonly List<DirectDeferThunk> _directDefers = [];
     private readonly HashSet<MethodSymbol> _deferTargets = [];
     private readonly HashSet<FieldSymbol> _assignedFields = [];
@@ -84,7 +84,7 @@ internal sealed partial class BodyPipeline
     private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
     private bool _capturingDirectDefer;
 
-    public BodyPipeline(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null)
+    public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null)
     {
         _emitter = emitter;
         _model = emitter.Model;
@@ -418,9 +418,9 @@ internal sealed partial class BodyPipeline
         return syntax?.Kind == ConstructorInitializerKind.This;
     }
 
-    public LoweredExpression LowerStandalone(ExpressionSyntax expression) => LowerExpression(expression);
+    public IrExpressionValue LowerStandalone(ExpressionSyntax expression) => LowerExpression(expression);
 
-    public LoweredExpression ConvertStandalone(LoweredExpression expression, CType target, SyntaxNode syntax) => Convert(expression, target, syntax, false);
+    public IrExpressionValue ConvertStandalone(IrExpressionValue expression, CType target, SyntaxNode syntax) => Convert(expression, target, syntax, false);
 
     public BoundBody GetBoundBody()
     {

@@ -4,9 +4,9 @@ using System.Numerics;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
-    private LoweredExpression LowerExpression(ExpressionSyntax syntax)
+    private IrExpressionValue LowerExpression(ExpressionSyntax syntax)
     {
         var result = syntax switch
         {
@@ -31,7 +31,7 @@ internal sealed partial class BodyPipeline
         return RecordSemantic(syntax, result);
     }
 
-    private LoweredExpression RecordSemantic(ExpressionSyntax syntax, LoweredExpression expression)
+    private IrExpressionValue RecordSemantic(ExpressionSyntax syntax, IrExpressionValue expression)
     {
         var symbol = expression.Symbol ?? (object?)expression.LValue?.Local ?? expression.LValue?.Parameter ??
             expression.LValue?.Field ?? expression.LValue?.Property ?? expression.TypeReceiver ?? (object?)expression.MethodGroup;
@@ -49,18 +49,18 @@ internal sealed partial class BodyPipeline
         return expression;
     }
 
-    private LoweredExpression LowerArgument(ArgumentSyntax argument) => argument.PassingKind == ParameterPassingKind.Out
+    private IrExpressionValue LowerArgument(ArgumentSyntax argument) => argument.PassingKind == ParameterPassingKind.Out
         ? LowerAssignable(argument.Expression)
         : LowerExpression(argument.Expression);
 
-    private LoweredExpression LowerLiteral(LiteralExpressionSyntax syntax)
+    private IrExpressionValue LowerLiteral(LiteralExpressionSyntax syntax)
     {
         if (syntax.LiteralKind == SyntaxKind.TrueKeyword || syntax.LiteralKind == SyntaxKind.FalseKeyword)
             return Constant(CType.Bool, (bool)syntax.Value!, (bool)syntax.Value! ? "true" : "false");
         if (syntax.LiteralKind == SyntaxKind.NullKeyword)
             return Constant(CType.Null, null, "NULL");
         if (syntax.LiteralKind == SyntaxKind.StringToken)
-            return new LoweredExpression { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal };
+            return new IrExpressionValue { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal };
         if (syntax.LiteralKind == SyntaxKind.CharacterToken)
             return Constant(CType.Char, syntax.Value, ((byte)syntax.Value!).ToString(CultureInfo.InvariantCulture));
         if (syntax.Value is NumericLiteralValue numeric)
@@ -81,7 +81,7 @@ internal sealed partial class BodyPipeline
         return ErrorExpression();
     }
 
-    private LoweredExpression LowerName(NameExpressionSyntax syntax, bool forWrite)
+    private IrExpressionValue LowerName(NameExpressionSyntax syntax, bool forWrite)
     {
         var local = FindLocal(syntax.Name);
         if (local is not null)
@@ -95,11 +95,11 @@ internal sealed partial class BodyPipeline
             var address = local.IsDurable && local.Type.Kind != CTypeKind.FunctionPointer
                 ? $"({_emitter.CTypeName(local.Type)}*)(void*)(uintptr_t)&{local.CName}"
                 : $"&{local.CName}";
-            return new LoweredExpression
+            return new IrExpressionValue
             {
                 Type = local.Type,
                 Code = local.ConstantCode ?? local.CName,
-                LValue = new LoweredLValue { Store = value => $"{local.CName} = {value}", Address = address, Local = local },
+                LValue = new IrValueStorage { Store = value => $"{local.CName} = {value}", Address = address, Local = local },
                 IsConstant = local.IsConst,
                 ConstantValue = local.ConstantValue,
                 Ownership = local.NativeResourceState == NativeResourceState.Owned ? OwnershipKind.Owned : local.NativeResourceState is NativeResourceState.Borrowed or NativeResourceState.Deferred ? OwnershipKind.Borrowed : OwnershipKind.None,
@@ -118,11 +118,11 @@ internal sealed partial class BodyPipeline
             var code = parameter.Type.IsNativeBuffer
                 ? $"({_emitter.CTypeName(parameter.Type)}){{ {name}_data, {name}_length }}"
                 : byReference ? $"*({name})" : name;
-            return new LoweredExpression
+            return new IrExpressionValue
             {
                 Type = parameter.Type,
                 Code = code,
-                LValue = parameter.Type.IsNativeBuffer ? null : new LoweredLValue { Store = value => $"{code} = {value}", Address = byReference ? name : $"&{name}", Parameter = parameter },
+                LValue = parameter.Type.IsNativeBuffer ? null : new IrValueStorage { Store = value => $"{code} = {value}", Address = byReference ? name : $"&{name}", Parameter = parameter },
                 Symbol = parameter,
             };
         }
@@ -136,15 +136,15 @@ internal sealed partial class BodyPipeline
             .Where(candidate => candidate.Name == syntax.Name && (!_method.IsStatic || candidate.IsStatic))
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
         if (!forWrite && methods.Length != 0)
-            return new LoweredExpression { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
+            return new IrExpressionValue { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
         var type = _model.ResolveNamedType(syntax.Name, TreeFor(syntax));
         if (type is not null)
-            return new LoweredExpression { Type = CType.Error, Code = string.Empty, TypeReceiver = type };
+            return new IrExpressionValue { Type = CType.Error, Code = string.Empty, TypeReceiver = type };
         Report("CT1107", $"Name '{syntax.Name}' does not exist in the current context.", syntax);
         return ErrorExpression();
     }
 
-    private LoweredExpression LowerThis(ThisExpressionSyntax syntax)
+    private IrExpressionValue LowerThis(ThisExpressionSyntax syntax)
     {
         if (_method.IsStatic)
         {
@@ -152,16 +152,16 @@ internal sealed partial class BodyPipeline
             return ErrorExpression();
         }
         if (_method.ContainingType.Kind == DeclaredTypeKind.Struct)
-            return new LoweredExpression
+            return new IrExpressionValue
             {
                 Type = _method.ContainingType.Type,
                 Code = "(*ct_self)",
-                LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" },
+                LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" },
             };
-        return new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+        return new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
     }
 
-    private LoweredExpression LowerBase(BaseExpressionSyntax syntax)
+    private IrExpressionValue LowerBase(BaseExpressionSyntax syntax)
     {
         if (_method.IsStatic || _method.ContainingType.Kind != DeclaredTypeKind.Class || _method.ContainingType.BaseType is null)
         {
@@ -169,7 +169,7 @@ internal sealed partial class BodyPipeline
             return ErrorExpression();
         }
         var baseType = _method.ContainingType.BaseType;
-        return new LoweredExpression
+        return new IrExpressionValue
         {
             Type = baseType.Type,
             Code = $"({NameMangler.Type(baseType)}*)(void*)ct_self",
@@ -177,7 +177,7 @@ internal sealed partial class BodyPipeline
         };
     }
 
-    private LoweredExpression LowerMember(MemberAccessExpressionSyntax syntax, bool forWrite)
+    private IrExpressionValue LowerMember(MemberAccessExpressionSyntax syntax, bool forWrite)
     {
         var staticType = TryResolveTypeExpression(syntax.Receiver);
         if (staticType is not null)
@@ -198,7 +198,7 @@ internal sealed partial class BodyPipeline
                 .Where(candidate => candidate.Name == syntax.Name && candidate.IsStatic)
                 .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
             if (!forWrite && methods.Length != 0)
-                return new LoweredExpression { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
+                return new IrExpressionValue { Type = CType.Error, Code = string.Empty, MethodGroup = new MethodGroupBinding(methods, null, false) };
             Report("CT1108", $"Type '{staticType.FullName}' has no static member named '{syntax.Name}'.", syntax);
             return ErrorExpression();
         }
@@ -208,21 +208,21 @@ internal sealed partial class BodyPipeline
         {
             receiver = Materialize(receiver, syntax.Receiver);
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
-            return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
+            return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.Kind == CTypeKind.Array && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
-            return new LoweredExpression { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
+            return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.IsNativeBuffer && syntax.Name is "Length" or "Pointer")
         {
             RequireUnsafe(syntax);
             receiver = Materialize(receiver, syntax.Receiver);
             return syntax.Name == "Length"
-                ? new LoweredExpression { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.Length", Prelude = receiver.Prelude }
-                : new LoweredExpression { Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType), Code = $"{receiver.Code}.Data", Prelude = receiver.Prelude };
+                ? new IrExpressionValue { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.Length", Prelude = receiver.Prelude }
+                : new IrExpressionValue { Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType), Code = $"{receiver.Code}.Data", Prelude = receiver.Prelude };
         }
         if (receiver.Type.IsNativeUtf8String && syntax.Name is "ByteLength" or "Pointer")
         {
@@ -230,8 +230,8 @@ internal sealed partial class BodyPipeline
             if (syntax.Name == "Pointer")
                 RequireUnsafe(syntax);
             return syntax.Name == "ByteLength"
-                ? new LoweredExpression { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.ByteLength", Prelude = receiver.Prelude }
-                : new LoweredExpression { Type = new CType(CTypeKind.Pointer, ElementType: CType.Byte), Code = $"(uint8_t*)(void*){receiver.Code}.Data", Prelude = receiver.Prelude };
+                ? new IrExpressionValue { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.ByteLength", Prelude = receiver.Prelude }
+                : new IrExpressionValue { Type = new CType(CTypeKind.Pointer, ElementType: CType.Byte), Code = $"(uint8_t*)(void*){receiver.Code}.Data", Prelude = receiver.Prelude };
         }
         var type = receiver.Type.Symbol;
         if (type is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
@@ -251,12 +251,12 @@ internal sealed partial class BodyPipeline
             .Where(candidate => candidate.Name == syntax.Name && !candidate.IsStatic)
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToImmutableArray();
         if (!forWrite && instanceMethods.Length != 0)
-            return new LoweredExpression { Type = CType.Error, Code = string.Empty, Prelude = receiver.Prelude, MethodGroup = new MethodGroupBinding(instanceMethods, receiver, receiver.IsBaseReceiver) };
+            return new IrExpressionValue { Type = CType.Error, Code = string.Empty, Prelude = receiver.Prelude, MethodGroup = new MethodGroupBinding(instanceMethods, receiver, receiver.IsBaseReceiver) };
         Report("CT1109", $"Type '{type.FullName}' has no instance member named '{syntax.Name}'.", syntax);
         return ErrorExpression(receiver.Prelude);
     }
 
-    private LoweredExpression LowerField(FieldSymbol field, LoweredExpression? receiver, SyntaxNode syntax, bool forWrite)
+    private IrExpressionValue LowerField(FieldSymbol field, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
         if (field.Type.ContainsPointer)
             RequireUnsafe(syntax);
@@ -287,24 +287,24 @@ internal sealed partial class BodyPipeline
                 return ErrorExpression();
             }
             receiver ??= _method.ContainingType.Kind == DeclaredTypeKind.Struct
-                ? new LoweredExpression { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
-                : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+                ? new IrExpressionValue { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
+                : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
             var loweredReceiver = MaterializeReceiver(receiver, syntax);
             prelude.AddRange(loweredReceiver.Prelude);
             code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CName}";
         }
-        return new LoweredExpression
+        return new IrExpressionValue
         {
             Type = field.Type,
             Code = code,
             Prelude = prelude,
             IsConstant = field.IsConst,
-            LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})", Field = field },
+            LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})", Field = field },
             Symbol = field,
         };
     }
 
-    private LoweredExpression LowerProperty(PropertySymbol property, LoweredExpression? receiver, SyntaxNode syntax, bool forWrite)
+    private IrExpressionValue LowerProperty(PropertySymbol property, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
         if (property.Type.ContainsPointer)
             RequireUnsafe(syntax);
@@ -316,11 +316,11 @@ internal sealed partial class BodyPipeline
         {
             if (forWrite)
                 Report("CT1266", $"Property '{property.Name}' is read-only.", syntax);
-            receiver ??= new LoweredExpression { Type = property.ContainingType.Type, Code = "(*ct_self)" };
+            receiver ??= new IrExpressionValue { Type = property.ContainingType.Type, Code = "(*ct_self)" };
             receiver = Materialize(receiver, syntax);
             return property.Name == "Code"
-                ? new LoweredExpression { Type = CType.Int, Code = $"(int32_t){receiver.Code}", Prelude = receiver.Prelude, Symbol = property }
-                : new LoweredExpression { Type = CType.Bool, Code = $"({receiver.Code} == ESP_OK)", Prelude = receiver.Prelude, Symbol = property };
+                ? new IrExpressionValue { Type = CType.Int, Code = $"(int32_t){receiver.Code}", Prelude = receiver.Prelude, Symbol = property }
+                : new IrExpressionValue { Type = CType.Bool, Code = $"({receiver.Code} == ESP_OK)", Prelude = receiver.Prelude, Symbol = property };
         }
         var prelude = new List<string>();
         string receiverArgument = string.Empty;
@@ -333,8 +333,8 @@ internal sealed partial class BodyPipeline
                 return ErrorExpression();
             }
             receiver ??= _method.ContainingType.Kind == DeclaredTypeKind.Struct
-                ? new LoweredExpression { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
-                : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+                ? new IrExpressionValue { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
+                : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
             var loweredReceiver = MaterializeReceiver(receiver, syntax);
             prelude.AddRange(loweredReceiver.Prelude);
             receiverArgument = loweredReceiver.Code;
@@ -353,13 +353,13 @@ internal sealed partial class BodyPipeline
             : property.IsVirtual && !baseReceiver
                 ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(property)}({objectReceiver})"
                 : $"{NameMangler.Getter(property)}({typedReceiver})";
-        var result = new LoweredExpression
+        var result = new IrExpressionValue
         {
             Type = property.Type,
             Code = getterCode,
             Prelude = prelude,
             Symbol = property,
-            LValue = property.Setter is null ? null : new LoweredLValue
+            LValue = property.Setter is null ? null : new IrValueStorage
             {
                 Store = value => property.IsVirtual && !baseReceiver
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(property)}({objectReceiver}, {value})"
@@ -374,7 +374,7 @@ internal sealed partial class BodyPipeline
             : result;
     }
 
-    private LoweredExpression LowerIndex(IndexExpressionSyntax syntax, bool forWrite)
+    private IrExpressionValue LowerIndex(IndexExpressionSyntax syntax, bool forWrite)
     {
         var receiver = Materialize(LowerExpression(syntax.Receiver), syntax.Receiver);
         var indexType = receiver.Type.IsNativeBuffer ? CType.Nuint : CType.Int;
@@ -386,19 +386,19 @@ internal sealed partial class BodyPipeline
             prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             var code = $"{receiver.Code}->Data[{index.Code}]";
-            return new LoweredExpression
+            return new IrExpressionValue
             {
                 Type = receiver.Type.ElementType!,
                 Code = code,
                 Prelude = prelude,
-                LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" },
+                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" },
             };
         }
         if (receiver.Type.Kind == CTypeKind.String)
         {
             prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
-            return new LoweredExpression { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
+            return new IrExpressionValue { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
         }
         if (receiver.Type.IsNativeBuffer)
         {
@@ -408,12 +408,12 @@ internal sealed partial class BodyPipeline
             var writable = receiver.Type.Kind == CTypeKind.NativeBuffer;
             if (forWrite && !writable)
                 Report("CT2179", "ReadOnlyNativeBuffer<T> indexing is read-only.", syntax);
-            return new LoweredExpression
+            return new IrExpressionValue
             {
                 Type = receiver.Type.ElementType!,
                 Code = code,
                 Prelude = prelude,
-                LValue = writable ? new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" } : null,
+                LValue = writable ? new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" } : null,
             };
         }
         if (receiver.Type.Kind == CTypeKind.Pointer)
@@ -425,13 +425,13 @@ internal sealed partial class BodyPipeline
                 return ErrorExpression(prelude);
             }
             var code = $"{receiver.Code}[{index.Code}]";
-            return new LoweredExpression { Type = receiver.Type.ElementType!, Code = code, Prelude = prelude, LValue = new LoweredLValue { Store = value => $"{code} = {value}", Address = $"&({code})" } };
+            return new IrExpressionValue { Type = receiver.Type.ElementType!, Code = code, Prelude = prelude, LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" } };
         }
         Report("CT2118", $"Type '{receiver.Type.DisplayName}' cannot be indexed.", syntax.Receiver);
         return ErrorExpression(prelude);
     }
 
-    private LoweredExpression LowerNew(NewExpressionSyntax syntax)
+    private IrExpressionValue LowerNew(NewExpressionSyntax syntax)
     {
         var type = _model.ResolveType(syntax.Type, TreeFor(syntax));
         if (type.ContainsPointer)
@@ -459,7 +459,7 @@ internal sealed partial class BodyPipeline
             var pointer = Materialize(Convert(LowerExpression(syntax.Arguments[0].Expression), pointerType, syntax.Arguments[0], false), syntax.Arguments[0]);
             var length = Materialize(Convert(LowerExpression(syntax.Arguments[1].Expression), CType.Nuint, syntax.Arguments[1], false), syntax.Arguments[1]);
             var prelude = new List<string>(pointer.Prelude); prelude.AddRange(length.Prelude);
-            return new LoweredExpression { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer.Code}, (size_t){length.Code} }}", Prelude = prelude };
+            return new IrExpressionValue { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer.Code}, (size_t){length.Code} }}", Prelude = prelude };
         }
         if (type.Kind is not CTypeKind.Class and not CTypeKind.Struct)
         {
@@ -478,10 +478,10 @@ internal sealed partial class BodyPipeline
             _emitter.AllocationEffects.RecordDirect(_method, syntax, $"construction of class '{type.DisplayName}'");
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
         var construction = $"{constructor.CName}({string.Join(", ", lowered.Codes)})";
-        return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude, symbol: constructor) : new LoweredExpression { Type = type, Code = construction, Prelude = lowered.Prelude, Symbol = constructor };
+        return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude, symbol: constructor) : new IrExpressionValue { Type = type, Code = construction, Prelude = lowered.Prelude, Symbol = constructor };
     }
 
-    private LoweredExpression LowerStackAlloc(StackAllocExpressionSyntax syntax)
+    private IrExpressionValue LowerStackAlloc(StackAllocExpressionSyntax syntax)
     {
         RequireUnsafe(syntax);
         if (_repeatableLoopDepth > 0)
@@ -503,7 +503,7 @@ internal sealed partial class BodyPipeline
             prelude.Add($"if ({count.Code} < 0) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0002\", {_emitter.SourceArgument(syntax)});");
         var bytes = $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
         var pointer = $"((size_t){count.Code} == 0u ? NULL : ({_emitter.CTypeName(element)}*)CT_ALLOCA({bytes}))";
-        return new LoweredExpression { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
+        return new IrExpressionValue { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
     }
 
     private TypeSymbol? TryResolveTypeExpression(ExpressionSyntax expression)
@@ -522,7 +522,7 @@ internal sealed partial class BodyPipeline
         return _model.ResolveNamedType(qualified, TreeFor(expression));
     }
 
-    private LoweredExpression LowerCall(CallExpressionSyntax syntax, bool captureForDefer = false)
+    private IrExpressionValue LowerCall(CallExpressionSyntax syntax, bool captureForDefer = false)
     {
         var possibleDelegate = syntax.Target switch
         {
@@ -540,7 +540,7 @@ internal sealed partial class BodyPipeline
             return LowerFunctionPointerInvocation(syntax, possibleDelegate);
 
         TypeSymbol? containingType = null;
-        LoweredExpression? receiver = null;
+        IrExpressionValue? receiver = null;
         string methodName;
         bool requireStatic;
         if (syntax.Target is NameExpressionSyntax name)
@@ -622,8 +622,8 @@ internal sealed partial class BodyPipeline
         if (!selected.IsStatic)
         {
             receiver ??= _method.ContainingType.Kind == DeclaredTypeKind.Struct
-                ? new LoweredExpression { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new LoweredLValue { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
-                : new LoweredExpression { Type = _method.ContainingType.Type, Code = "ct_self" };
+                ? new IrExpressionValue { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
+                : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
             if ((selected.ContainingType.IsObject || selected.IsVirtual && receiver.Type.IsValueType) && receiver.Type != _model.Types["System.Object"].Type)
                 receiver = Convert(receiver, _model.Types["System.Object"].Type, syntax.Target, false);
             if (captureForDefer)
@@ -671,7 +671,7 @@ internal sealed partial class BodyPipeline
         if (captureForDefer)
             _deferId++;
         if (captureForDefer)
-            return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnType.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None, Symbol = selected };
+            return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnType.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None, Symbol = selected };
         if (loweredArguments.Postlude.Count != 0)
         {
             _emitter.AllocationEffects.RecordDirect(_method, syntax, "synchronous native delegate callback");
@@ -679,7 +679,7 @@ internal sealed partial class BodyPipeline
             {
                 prelude.Add(call + ";");
                 prelude.AddRange(loweredArguments.Postlude);
-                return new LoweredExpression { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+                return new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
             }
             var callbackResult = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(selected.ReturnType, callbackResult)} = {call};");
@@ -695,15 +695,15 @@ internal sealed partial class BodyPipeline
                 prelude.Add($"(void)ct_require_nonnull((void*){nativeResult}, {_emitter.SourceArgument(syntax)});");
                 call = nativeResult;
             }
-            return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnsOwned ? OwnershipKind.Owned : OwnershipKind.Borrowed, Symbol = selected };
+            return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnsOwned ? OwnershipKind.Owned : OwnershipKind.Borrowed, Symbol = selected };
         }
         return selected.ReturnType.ContainsManagedReferences
             ? OwnResult(selected.ReturnType, call, prelude, selected.ReturnsBorrowed, selected)
-            : new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+            : new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
     }
 
     private (List<string> Prelude, List<string> Codes, List<string> Postlude) CaptureDeferredArgumentsWithPostlude(
-        IReadOnlyList<LoweredExpression> arguments,
+        IReadOnlyList<IrExpressionValue> arguments,
         ImmutableArray<ParameterSymbol> parameters,
         ImmutableArray<ArgumentSyntax> syntax)
     {
@@ -713,7 +713,7 @@ internal sealed partial class BodyPipeline
 
     private static bool IsCallablePointer(CType? type) => type?.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer;
 
-    private LoweredExpression? TryLowerDelegateMember(MemberAccessExpressionSyntax syntax)
+    private IrExpressionValue? TryLowerDelegateMember(MemberAccessExpressionSyntax syntax)
     {
         var staticType = TryResolveTypeExpression(syntax.Receiver);
         if (staticType is not null)
@@ -740,7 +740,7 @@ internal sealed partial class BodyPipeline
         return instanceProperty is null ? null : LowerProperty(instanceProperty, receiver, syntax, false);
     }
 
-    private LoweredExpression LowerDelegateInvocation(CallExpressionSyntax syntax, LoweredExpression target)
+    private IrExpressionValue LowerDelegateInvocation(CallExpressionSyntax syntax, IrExpressionValue target)
     {
         var delegateType = target.Type.Symbol!;
         var parameters = delegateType.DelegateParameters;
@@ -761,10 +761,10 @@ internal sealed partial class BodyPipeline
         var returnType = delegateType.DelegateReturnType!;
         return returnType.ContainsManagedReferences
             ? OwnResult(returnType, call, prelude, symbol: delegateType)
-            : new LoweredExpression { Type = returnType, Code = call, Prelude = prelude, Symbol = delegateType };
+            : new IrExpressionValue { Type = returnType, Code = call, Prelude = prelude, Symbol = delegateType };
     }
 
-    private LoweredExpression LowerFunctionPointerInvocation(CallExpressionSyntax syntax, LoweredExpression target)
+    private IrExpressionValue LowerFunctionPointerInvocation(CallExpressionSyntax syntax, IrExpressionValue target)
     {
         RequireUnsafe(syntax);
         var signature = target.Type.FunctionPointer!;
@@ -817,14 +817,14 @@ internal sealed partial class BodyPipeline
         }
         prelude.Add($"(void)ct_require_nonnull((void*){target.Code}, {_emitter.SourceArgument(syntax.Target)});");
         _emitter.AllocationEffects.RecordDirect(_method, syntax, "unmanaged function-pointer invocation");
-        return new LoweredExpression { Type = signature.ReturnType, Code = $"{target.Code}({string.Join(", ", codes)})", Prelude = prelude, Symbol = target.Type };
+        return new IrExpressionValue { Type = signature.ReturnType, Code = $"{target.Code}({string.Join(", ", codes)})", Prelude = prelude, Symbol = target.Type };
     }
 
     private static bool SupportsBuiltInToString(CType type) => type.Kind is
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
         CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.String;
 
-    private LoweredExpression LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, LoweredExpression receiver, bool captureForDefer = false)
+    private IrExpressionValue LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, IrExpressionValue receiver, bool captureForDefer = false)
     {
         var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
         if (arguments.Length != 0)
@@ -838,7 +838,7 @@ internal sealed partial class BodyPipeline
             var prelude = new List<string>(receiver.Prelude);
             var slot = $"ct_df_{_deferId}_receiver";
             AddCapturedSlot(prelude, receiver.Type, slot, receiver.Code);
-            receiver = new LoweredExpression { Type = receiver.Type, Code = Durable(slot), Prelude = prelude };
+            receiver = new IrExpressionValue { Type = receiver.Type, Code = Durable(slot), Prelude = prelude };
             _deferId++;
         }
         else
@@ -846,7 +846,7 @@ internal sealed partial class BodyPipeline
         if (receiver.Type.Kind == CTypeKind.String)
         {
             if (captureForDefer)
-                return new LoweredExpression { Type = CType.String, Code = $"ct_string_v_to_string((ct_object*)(void*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)}))", Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned };
+                return new IrExpressionValue { Type = CType.String, Code = $"ct_string_v_to_string((ct_object*)(void*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)}))", Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned };
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)});");
             return OwnResult(CType.String, "ct_string_v_to_string((ct_object*)(void*)" + receiver.Code + ")", receiver.Prelude);
         }
@@ -873,7 +873,7 @@ internal sealed partial class BodyPipeline
         var code = $"{function}({argument}, {_emitter.SourceArgument(member)})";
         _emitter.AllocationEffects.RecordDirect(_method, syntax, $"conversion of '{receiver.Type.DisplayName}' to string");
         return captureForDefer
-            ? new LoweredExpression { Type = CType.String, Code = code, Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned }
+            ? new IrExpressionValue { Type = CType.String, Code = code, Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned }
             : OwnResult(CType.String, code, receiver.Prelude);
     }
 }

@@ -839,7 +839,8 @@ public sealed partial class LanguageServiceSnapshot
             return false;
         }
 
-        private static bool Contains(TextSpan span, int position) => position >= span.Start && position <= span.End;
+        private static bool Contains(TextSpan span, int position) =>
+            position >= span.Start && (position < span.End || span.Length == 0 && position == span.End);
     }
 
     private sealed class DocumentIndex

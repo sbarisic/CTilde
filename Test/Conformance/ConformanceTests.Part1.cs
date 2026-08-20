@@ -32,9 +32,9 @@ internal static partial class ConformanceTests
             Assert(first.Contains("static_assert(CHAR_BIT == 8", StringComparison.Ordinal), "Generated C does not use the C23 static_assert spelling.");
         });
 
-        suite.Run("bound analysis and lazy structured IR", () =>
+        suite.Run("bound analysis and typed IR-only emission", () =>
         {
-            const string source = "public static class Program { private static void Done() { } [EntryPoint] public static void Main() { int[] values = new int[1]; int value = 40 + 2; if (values[0] == 0) { values[0] = value; } defer Done(); return; } }";
+            const string source = "public static class Program { private static void Done() { } private static void Unused() { } [EntryPoint] public static void Main() { int[] values = new int[1]; int value = 40 + 2; if (values[0] == 0) { values[0] = value; } defer Done(); return; } }";
             var compilation = Compile(source);
             var compilerAssembly = typeof(Compilation).Assembly;
             var cWriterType = compilerAssembly.GetType("CTilde.CWriter", throwOnError: true)!;
@@ -59,19 +59,29 @@ internal static partial class ConformanceTests
             var lowererType = compilerAssembly.GetType("CTilde.TypedIrLowerer", throwOnError: true)!;
             Assert(instructionType.GetProperty("Text") is null, "Typed IR retained rendered C text.");
             Assert(lowererType.GetMethod("Classify", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic) is null, "Typed IR retained the line classifier.");
+            Assert(compilerAssembly.GetType("CTilde.BodyPipeline", throwOnError: false) is null, "The syntax-driven BodyPipeline transition layer still exists.");
+            Assert(compilerAssembly.GetType("CTilde.CBodyLowerer", throwOnError: false) is null, "CEmitter can still replay the CBodyLowerer transition layer.");
+            Assert(compilerAssembly.GetType("CTilde.LoweredExpression", throwOnError: false) is null, "The LoweredExpression transition type still exists.");
+
+            var typedIr = new TypedIrLowerer(bound).Lower();
+            Assert(typeof(TypedIrProgram).GetProperty("Emission") is null, "Typed IR retained a program-wide rendered C emission plan.");
+            Assert(typedIr.Functions.All(function => function.Emission is null), "Semantic typed IR eagerly rendered C function bodies.");
+            var mainIr = typedIr.Functions.Single(function => function.Method.IsEntryPoint);
+            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrBinary), "Typed IR did not contain the bound binary operation.");
+            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrCheck { Kind: IrCheckKind.Bounds }), "Typed IR did not contain a bounds check.");
+            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrCleanupAction { Kind: IrCleanupActionKind.RunDefer }), "Typed IR did not contain a defer cleanup action.");
+            Assert(mainIr.Blocks.Any(block => block.Terminator is IrConditionalTerminator), "Typed IR did not contain structured conditional control flow.");
 
             using var writer = new StringWriter(CultureInfo.InvariantCulture);
             var result = compilation.EmitC(writer);
             Assert(result.Success && writer.ToString().Contains("return", StringComparison.Ordinal), "Lazy emission did not produce C.");
             Assert(before.SequenceEqual(compilation.GetDiagnostics()), "Emission changed the analyzed diagnostics.");
 
-            var typedIr = new TypedIrLowerer(bound).Lower();
-            Assert(typeof(TypedIrProgram).GetProperty("Emission") is null, "Typed IR retained a rendered C emission plan.");
-            var mainIr = typedIr.Functions.Single(function => function.Method.IsEntryPoint);
-            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrBinary), "Typed IR did not contain the bound binary operation.");
-            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrCheck { Kind: IrCheckKind.Bounds }), "Typed IR did not contain a bounds check.");
-            Assert(mainIr.Blocks.SelectMany(block => block.Instructions).Any(instruction => instruction is IrCleanupAction { Kind: IrCleanupActionKind.RunDefer }), "Typed IR did not contain a defer cleanup action.");
-            Assert(mainIr.Blocks.Any(block => block.Terminator is IrConditionalTerminator), "Typed IR did not contain structured conditional control flow.");
+            var optimizedIr = new TypedIrOptimizer(bound).Optimize(typedIr);
+            var emissionEmitter = new CEmitter(bound.Model, CompilationTarget.Hosted, null);
+            var emissionIr = new TypedIrEmissionLowerer(emissionEmitter).Lower(optimizedIr);
+            Assert(emissionIr.Functions.All(function => function.Emission is not null), "Retained typed-IR functions did not receive immutable emission plans.");
+            Assert(emissionIr.Functions.Length < typedIr.Functions.Length, "Function-body emission ran before whole-program reachability pruning.");
         });
 
         suite.Run("ESP-IDF target profile", () =>

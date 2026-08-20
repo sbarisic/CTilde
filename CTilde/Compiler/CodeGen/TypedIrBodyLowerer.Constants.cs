@@ -4,9 +4,9 @@ using System.Numerics;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
-    private bool TryFoldUnary(UnaryExpressionSyntax syntax, LoweredExpression operand, out LoweredExpression result)
+    private bool TryFoldUnary(UnaryExpressionSyntax syntax, IrExpressionValue operand, out IrExpressionValue result)
     {
         result = ErrorExpression();
         try
@@ -57,7 +57,7 @@ internal sealed partial class BodyPipeline
         return false;
     }
 
-    private bool TryFoldBinary(BinaryExpressionSyntax syntax, LoweredExpression left, LoweredExpression right, out LoweredExpression result)
+    private bool TryFoldBinary(BinaryExpressionSyntax syntax, IrExpressionValue left, IrExpressionValue right, out IrExpressionValue result)
     {
         result = ErrorExpression();
         if (syntax.OperatorKind == SyntaxKind.PlusToken && left.Type == CType.String && right.Type == CType.String)
@@ -274,7 +274,7 @@ internal sealed partial class BodyPipeline
         };
     }
 
-    private bool TryConvertConstant(LoweredExpression expression, CType target, out LoweredExpression result)
+    private bool TryConvertConstant(IrExpressionValue expression, CType target, out IrExpressionValue result)
     {
         result = expression;
         if (!expression.IsConstant)
@@ -446,6 +446,6 @@ internal sealed partial class BodyPipeline
 
     private static string FormatCondition(string code) => code.StartsWith('(') && code.EndsWith(')') ? code : $"({code})";
 
-    private static LoweredExpression Constant(CType type, object? value, string code, object? symbol = null) => new() { Type = type, Code = code, IsConstant = true, ConstantValue = value, Symbol = symbol };
-    private static LoweredExpression ErrorExpression(IEnumerable<string>? prelude = null) => new() { Type = CType.Error, Code = "0", Prelude = prelude?.ToList() ?? [] };
+    private static IrExpressionValue Constant(CType type, object? value, string code, object? symbol = null) => new() { Type = type, Code = code, IsConstant = true, ConstantValue = value, Symbol = symbol };
+    private static IrExpressionValue ErrorExpression(IEnumerable<string>? prelude = null) => new() { Type = CType.Error, Code = "0", Prelude = prelude?.ToList() ?? [] };
 }

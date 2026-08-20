@@ -439,15 +439,8 @@ internal sealed partial class CEmitter : ILoweringServices
         return Convert.ToHexString(hash.AsSpan(0, 12)).ToLowerInvariant();
     }
 
-    private string RenderFunction(IrFunction function)
-    {
-        if (function.Property is null)
-            return new CBodyLowerer(this, function.Body, function.Method).LowerDefinition();
-
-        var method = GetAccessorMethod(function.Property, function.IsGetter);
-        var name = function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
-        return new CBodyLowerer(this, function.Body, method, name, function.Property, function.IsGetter).LowerDefinition();
-    }
+    private static string RenderFunction(IrFunction function) =>
+        function.Emission?.Definition ?? throw new InvalidOperationException($"Typed IR for '{function.Method.CName}' has no emission plan.");
 
     private string RenderModuleLifecycle(ImmutableArray<IrStaticInitializer> initializers)
     {
@@ -461,14 +454,9 @@ internal sealed partial class CEmitter : ILoweringServices
         foreach (var initializer in initializers)
         {
             var field = initializer.Field;
-            var lowerer = new CBodyLowerer(this, initializer.Body, initializer.Body.Method, temporaryPrefix: $"_mi_{initializerIndex++}");
-            var expression = lowerer.LowerExpression(field.Initializer!);
-            foreach (var line in expression.Prelude)
-                writer.WriteLine("    " + line);
-            var value = lowerer.ConvertExpression(expression, field.Type, field.Initializer!);
-            if (field.IsConst && !value.IsConstant)
-                Model.Diagnostics.Add("CT2140", $"Const field '{field.Name}' does not have a constant initializer.", field.Initializer!.Source, field.Initializer.Span);
-            foreach (var line in value.Prelude.Skip(expression.Prelude.Count))
+            var value = initializer.Emission ?? throw new InvalidOperationException($"Typed IR initializer for '{field.CName}' has no emission plan.");
+            initializerIndex++;
+            foreach (var line in value.Prelude)
                 writer.WriteLine("    " + line);
             if (field.Type.ContainsManagedReferences)
             {

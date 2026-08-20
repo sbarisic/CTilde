@@ -137,7 +137,8 @@ public sealed class Compilation
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot());
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
-        _generatedOutput = emitter.EmitOutput(optimizedIr, new CHeaderEmitter(_boundProgram).Emit());
+        var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);
+        _generatedOutput = emitter.EmitOutput(emissionIr, new CHeaderEmitter(_boundProgram).Emit());
     }
 
     private string? ValidateSourceRoot(DiagnosticBag diagnostics, CompilationTarget target)

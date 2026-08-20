@@ -2,11 +2,11 @@ using System.Collections.Immutable;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
-    private LoweredExpression LowerOperatorCall(
+    private IrExpressionValue LowerOperatorCall(
         SyntaxKind operatorKind,
-        IReadOnlyList<LoweredExpression> operands,
+        IReadOnlyList<IrExpressionValue> operands,
         IReadOnlyList<ExpressionSyntax> operandSyntax,
         SyntaxNode syntax)
     {
@@ -34,14 +34,14 @@ internal sealed partial class BodyPipeline
         var prelude = new List<string>(loweredArguments.Prelude);
         var call = $"{selected.CName}({string.Join(", ", loweredArguments.Codes)})";
         if (selected.ReturnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
-            return new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = OwnershipKind.Borrowed, Symbol = selected };
+            return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = OwnershipKind.Borrowed, Symbol = selected };
         return selected.ReturnType.ContainsManagedReferences
             ? OwnResult(selected.ReturnType, call, prelude, symbol: selected)
-            : new LoweredExpression { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+            : new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
     }
 
     private (List<string> Prelude, List<string> Codes) LowerOperatorArguments(
-        IReadOnlyList<LoweredExpression> operands,
+        IReadOnlyList<IrExpressionValue> operands,
         ImmutableArray<ParameterSymbol> parameters,
         ImmutableArray<ArgumentSyntax> syntax)
     {
@@ -65,6 +65,6 @@ internal sealed partial class BodyPipeline
         return (prelude, codes);
     }
 
-    private static bool HasUserDefinedOperatorOperand(params LoweredExpression[] operands) =>
+    private static bool HasUserDefinedOperatorOperand(params IrExpressionValue[] operands) =>
         operands.Any(operand => operand.Type.Symbol?.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct);
 }

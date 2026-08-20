@@ -2,13 +2,13 @@ using System.Globalization;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
     private bool IsKnownStringConcat(BinaryExpressionSyntax syntax) =>
         syntax.OperatorKind == SyntaxKind.PlusToken &&
         _semanticHints?.GetValueOrDefault(syntax)?.Type == CType.String;
 
-    private LoweredExpression LowerStringBuild(BinaryExpressionSyntax syntax)
+    private IrExpressionValue LowerStringBuild(BinaryExpressionSyntax syntax)
     {
         var segments = new List<ExpressionSyntax>();
         Flatten(syntax);

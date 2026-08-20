@@ -4,14 +4,11 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 
 ## Release blockers
 
-- [ ] Restore `operator` keyword completion in a type body. The other operator language-service paths—hover, definition, symbols, semantic classification, and ordinary-member filtering—remain covered.
-- [ ] Rerun all 115 managed and native conformance checks and require a clean result. The current workspace passes 114 and fails only the operator-completion check.
 - [ ] Flash and monitor the ABI 14 T-CAN485 runtime regression workload. Confirm lifecycle behavior, attached tasks, exports, callbacks, ARC recovery, exceptions, runtime faults, heap/stack measurements, and sustained GPIO4 WS2812 operation.
 - [ ] Keep `IMPLEMENTATION_STATUS.md` synchronized with the SDK, toolchain, test, firmware, and physical-hardware evidence used for the release decision.
 
 ## Compiler and runtime architecture
 
-- [ ] Make typed instructions the sole input for function-body emission, then remove the remaining syntax-driven `BodyPipeline`, `CBodyLowerer`, and `LoweredExpression` transition layers.
 - [ ] Prune common runtime helpers individually instead of retaining the conservative annotated runtime core.
 - [ ] Place immutable vtables, type descriptors, and string-literal data in read-only or flash storage where supported.
 - [ ] Measure object, box, array, string, vtable, and descriptor overhead on a 32-bit target, then set firmware-size and static-DRAM regression budgets.

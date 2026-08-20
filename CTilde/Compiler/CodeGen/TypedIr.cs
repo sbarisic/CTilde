@@ -35,13 +35,25 @@ internal sealed record IrReturnTerminator(CType Type) : IrTerminator;
 internal sealed record IrThrowTerminator : IrTerminator;
 
 internal sealed record IrBasicBlock(int Id, ImmutableArray<IrInstruction> Instructions, IrTerminator Terminator);
+internal sealed record IrFunctionEmission(string Definition);
+internal sealed record IrInitializerEmission(
+    ImmutableArray<string> Prelude,
+    string Code,
+    bool IsConstant,
+    OwnershipKind Ownership);
 internal sealed record IrFunction(
     MethodSymbol Method,
     BoundBody Body,
     PropertySymbol? Property,
     bool IsGetter,
-    ImmutableArray<IrBasicBlock> Blocks);
-internal sealed record IrStaticInitializer(FieldSymbol Field, BoundBody Body, CType Type, BoundSemanticEntry? Value);
+    ImmutableArray<IrBasicBlock> Blocks,
+    IrFunctionEmission? Emission = null);
+internal sealed record IrStaticInitializer(
+    FieldSymbol Field,
+    BoundBody Body,
+    CType Type,
+    BoundSemanticEntry? Value,
+    IrInitializerEmission? Emission = null);
 internal sealed record TypedIrProgram(
     ImmutableArray<IrFunction> Functions,
     ImmutableArray<IrStaticInitializer> ModuleInitializers);

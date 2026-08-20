@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
     private FlowResult EmitStatements(ILoweringWriter writer, ImmutableArray<StatementSyntax> statements, bool allowDefer = true)
     {
@@ -199,7 +199,7 @@ internal sealed partial class BodyPipeline
 
         var aliases = new HashSet<string>(StringComparer.Ordinal);
         var symbols = new HashSet<object>(ReferenceEqualityComparer.Instance);
-        var lowered = new List<(InlineAssemblyOperandSyntax Syntax, LoweredExpression Expression, string Constraint)>();
+        var lowered = new List<(InlineAssemblyOperandSyntax Syntax, IrExpressionValue Expression, string Constraint)>();
         for (var index = 0; index < syntax.Operands.Length; index++)
         {
             var operand = syntax.Operands[index];
@@ -342,7 +342,7 @@ internal sealed partial class BodyPipeline
             Report("CT1106", $"A local named '{syntax.Name}' is already active.", syntax);
         var tree = TreeFor(syntax);
         var type = syntax.Type.Name == "var" ? CType.Error : _model.ResolveType(syntax.Type, tree);
-        LoweredExpression? initializer = null;
+        IrExpressionValue? initializer = null;
         if (syntax.Initializer is not null)
         {
             initializer = LowerExpression(syntax.Initializer);
@@ -708,7 +708,7 @@ internal sealed partial class BodyPipeline
         return new FlowResult(exits);
     }
 
-    private bool TryConvertCaseConstant(LoweredExpression constant, CType governingType, out string key, out string code)
+    private bool TryConvertCaseConstant(IrExpressionValue constant, CType governingType, out string key, out string code)
     {
         key = string.Empty;
         code = "0";

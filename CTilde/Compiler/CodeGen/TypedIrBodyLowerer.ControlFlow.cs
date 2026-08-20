@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
     private void EmitReturn(ILoweringWriter writer, ReturnStatementSyntax syntax)
     {
@@ -441,7 +441,7 @@ internal sealed partial class BodyPipeline
         writer.WriteLine($"{slot} = {temporary};");
     }
 
-    private void AddStrongStore(List<string> prelude, LoweredExpression target, string value)
+    private void AddStrongStore(List<string> prelude, IrExpressionValue target, string value)
     {
         var type = target.Type;
         var next = NewTemp();
@@ -458,7 +458,7 @@ internal sealed partial class BodyPipeline
         prelude.Add(_emitter.DropValueStatement(type, $"&{old}"));
     }
 
-    private void AddConstructStore(List<string> prelude, LoweredExpression target, string value)
+    private void AddConstructStore(List<string> prelude, IrExpressionValue target, string value)
     {
         var type = target.Type;
         var next = NewTemp();
@@ -467,12 +467,12 @@ internal sealed partial class BodyPipeline
         prelude.Add(target.LValue!.Store(next) + ";");
     }
 
-    private LoweredExpression OwnResult(CType type, string code, IEnumerable<string> sourcePrelude, bool borrowed = false, object? symbol = null)
+    private IrExpressionValue OwnResult(CType type, string code, IEnumerable<string> sourcePrelude, bool borrowed = false, object? symbol = null)
     {
         if (!type.ContainsManagedReferences)
-            return new LoweredExpression { Type = type, Code = code, Prelude = [.. sourcePrelude], Symbol = symbol };
+            return new IrExpressionValue { Type = type, Code = code, Prelude = [.. sourcePrelude], Symbol = symbol };
         if (_method.Name == "<module_init>")
-            return new LoweredExpression { Type = type, Code = code, Prelude = [.. sourcePrelude], Ownership = borrowed ? OwnershipKind.Borrowed : OwnershipKind.Owned, Symbol = symbol };
+            return new IrExpressionValue { Type = type, Code = code, Prelude = [.. sourcePrelude], Ownership = borrowed ? OwnershipKind.Borrowed : OwnershipKind.Owned, Symbol = symbol };
         var prelude = new List<string>(sourcePrelude);
         var raw = NewTemp();
         var slotName = $"ct_owned_{_tempId++}";
@@ -485,7 +485,7 @@ internal sealed partial class BodyPipeline
             prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
         prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
         prelude.Add($"{slot} = {raw};");
-        return new LoweredExpression { Type = type, Code = slot, Prelude = prelude, Ownership = OwnershipKind.Owned, Symbol = symbol };
+        return new IrExpressionValue { Type = type, Code = slot, Prelude = prelude, Ownership = OwnershipKind.Owned, Symbol = symbol };
     }
 
     private void AddCapturedSlot(List<string> prelude, CType type, string slotName, string value)

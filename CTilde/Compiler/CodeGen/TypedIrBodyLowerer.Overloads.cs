@@ -3,12 +3,12 @@ using System.Numerics;
 
 namespace CTilde;
 
-internal sealed partial class BodyPipeline
+internal sealed partial class TypedIrBodyLowerer
 {
-    private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
+    private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
         => SelectOverload(candidates, arguments, argumentSyntax, syntax, "CT2122", "CT2123", $"No overload of '{name}' accepts the supplied argument types.", $"Call to '{name}' is ambiguous.");
 
-    private MethodSymbol? SelectOperatorOverload(IEnumerable<MethodSymbol> candidates, SyntaxKind operatorKind, IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
+    private MethodSymbol? SelectOperatorOverload(IEnumerable<MethodSymbol> candidates, SyntaxKind operatorKind, IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
         => SelectOverload(
             candidates,
             arguments,
@@ -21,7 +21,7 @@ internal sealed partial class BodyPipeline
 
     private MethodSymbol? SelectOverload(
         IEnumerable<MethodSymbol> candidates,
-        IReadOnlyList<LoweredExpression> arguments,
+        IReadOnlyList<IrExpressionValue> arguments,
         ImmutableArray<ArgumentSyntax> argumentSyntax,
         SyntaxNode syntax,
         string noMatchCode,
@@ -51,7 +51,7 @@ internal sealed partial class BodyPipeline
         return winners[0];
     }
 
-    private static bool IsBetterCandidate(MethodSymbol candidate, MethodSymbol other, IReadOnlyList<LoweredExpression> arguments)
+    private static bool IsBetterCandidate(MethodSymbol candidate, MethodSymbol other, IReadOnlyList<IrExpressionValue> arguments)
     {
         var better = false;
         for (var index = 0; index < arguments.Count; index++)
@@ -86,12 +86,12 @@ internal sealed partial class BodyPipeline
         return 0;
     }
 
-    private static bool CanConvertExpression(LoweredExpression expression, CType target) =>
+    private static bool CanConvertExpression(IrExpressionValue expression, CType target) =>
         expression.MethodGroup is { } group
             ? target.Kind == CTypeKind.Delegate && FindDelegateMethod(group, target.Symbol!) is not null
             : TypeFacts.CanImplicitlyConvert(expression.Type, target) || CanImplicitNativeConstant(expression, target);
 
-    private static bool CanImplicitNativeConstant(LoweredExpression expression, CType target)
+    private static bool CanImplicitNativeConstant(IrExpressionValue expression, CType target)
     {
         if (!expression.IsConstant || target.Kind is not CTypeKind.Nint and not CTypeKind.Nuint || !TryIntegralConstant(expression.ConstantValue, out var value))
             return false;
@@ -125,7 +125,7 @@ internal sealed partial class BodyPipeline
         return matches.Length == 1 ? matches[0] : null;
     }
 
-    private (List<string> Prelude, List<string> Codes, List<string> Postlude) LowerArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    private (List<string> Prelude, List<string> Codes, List<string> Postlude) LowerArguments(IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
     {
         var prelude = new List<string>();
         var codes = new List<string>();
@@ -199,7 +199,7 @@ internal sealed partial class BodyPipeline
         return (prelude, codes, postlude);
     }
 
-    private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<LoweredExpression> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    private (List<string> Prelude, List<string> Codes) CaptureDeferredArguments(IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
     {
         var prelude = new List<string>();
         var codes = new List<string>();
@@ -247,9 +247,9 @@ internal sealed partial class BodyPipeline
         return (prelude, codes);
     }
 
-    private static bool IsReadonly(LoweredLValue lvalue) => lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
+    private static bool IsReadonly(IrValueStorage lvalue) => lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
 
-    private void ConsumeOwnedExpression(LoweredExpression expression, SyntaxNode syntax)
+    private void ConsumeOwnedExpression(IrExpressionValue expression, SyntaxNode syntax)
     {
         if (expression.Ownership != OwnershipKind.Owned)
         {

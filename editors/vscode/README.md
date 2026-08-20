@@ -25,7 +25,7 @@ Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `
 
 Rename, references, formatting, debugging, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
 
-One type-body completion regression is currently open: completion omits the `operator` declaration keyword. Operator hover, go-to-definition, document/workspace symbols, semantic classification, and filtering from ordinary member completion continue to work.
+Type-body completion includes the `operator` declaration keyword. Operator hover, go-to-definition, document/workspace symbols, semantic classification, and filtering from ordinary member completion share the same regression coverage.
 
 ## Projects
 

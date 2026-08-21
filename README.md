@@ -68,6 +68,19 @@ gcc -std=gnu23 -Wall -Wextra -Werror -o .\build\hello .\build\hello.c
 
 GCC versions that have not adopted the final C23 option spelling can use `-std=gnu2x`; the CLI retries that spelling automatically when its discovered GNU compiler rejects `gnu23`.
 
+### Windows x64 inline assembly
+
+The checked [Windows x64 inline-assembly example](examples/InlineAssemblyWindows.ct) implements separate add, subtract, multiply, increment, negate, and rotate-left functions with typed GNU assembly operands. It requires a native Windows x64 GCC or Clang installation on `PATH`; MSVC does not support C~ `asm` programs.
+
+Build and run it with MinGW-w64 GCC:
+
+```powershell
+dotnet run --project .\CTilde.Cli -c Release --no-launch-profile -- .\examples\InlineAssemblyWindows.ct --build --compiler gcc --configuration release --native-output .\build\inline-assembly-windows.exe
+.\build\inline-assembly-windows.exe
+```
+
+Pass `--compiler clang` instead to use Clang. The example uses GNU AT&T x86 assembly, an early-clobber output constraint, and an explicit condition-code clobber. It is not portable to Windows on ARM64 or to the MSVC backend.
+
 ## What the language provides
 
 - C#-style namespaces, classes, structures, enums, constructors, properties, overloads, and single inheritance.

@@ -132,23 +132,10 @@ internal static partial class ConformanceTests
             var compiler = Environment.GetEnvironmentVariable("CTILDE_CC") ?? string.Empty;
             if (!compiler.Contains("gcc", StringComparison.OrdinalIgnoreCase) && !compiler.Contains("clang", StringComparison.OrdinalIgnoreCase))
                 return;
-            const string source = """
-                using System;
-                public static class Program
-                {
-                    [EntryPoint]
-                    public static unsafe void Main()
-                    {
-                        int value = 41;
-                        int result;
-                        [NoAlloc] asm (in value as source, out result, clobber("cc")) { leal 1(source), result }
-                        Console.WriteLine(result);
-                    }
-                }
-                """;
+            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "InlineAssemblyWindows.ct"));
             var result = CompileAndRun(source);
             Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == "42\n", result.StandardOutput);
+            Assert(Normalize(result.StandardOutput) == "add: 42\nsubtract: 42\nmultiply: 42\nincrement: 42\nnegate: 42\nrotate-left: 3\n", result.StandardOutput);
         });
     }
 

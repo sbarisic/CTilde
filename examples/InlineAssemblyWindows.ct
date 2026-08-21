@@ -1,0 +1,112 @@
+using System;
+
+namespace Examples;
+
+public static class AssemblyMath
+{
+    [NoAlloc]
+    public static unsafe int Add(int left, int right)
+    {
+        int result;
+        [NoAlloc]
+        asm (
+            in left as leftValue,
+            in right as rightValue,
+            out("&r") result,
+            clobber("cc")
+        ) {
+            movl leftValue, result
+            addl rightValue, result
+        }
+        return result;
+    }
+
+    [NoAlloc]
+    public static unsafe int Subtract(int left, int right)
+    {
+        int result;
+        [NoAlloc]
+        asm (
+            in left as leftValue,
+            in right as rightValue,
+            out("&r") result,
+            clobber("cc")
+        ) {
+            movl leftValue, result
+            subl rightValue, result
+        }
+        return result;
+    }
+
+    [NoAlloc]
+    public static unsafe int Multiply(int left, int right)
+    {
+        int result;
+        [NoAlloc]
+        asm (
+            in left as leftValue,
+            in right as rightValue,
+            out("&r") result,
+            clobber("cc")
+        ) {
+            movl leftValue, result
+            imull rightValue, result
+        }
+        return result;
+    }
+
+    [NoAlloc]
+    public static unsafe int Increment(int value)
+    {
+        [NoAlloc]
+        asm (ref value, clobber("cc")) {
+            addl $1, value
+        }
+        return value;
+    }
+
+    [NoAlloc]
+    public static unsafe int Negate(int value)
+    {
+        [NoAlloc]
+        asm (ref value, clobber("cc")) {
+            negl value
+        }
+        return value;
+    }
+
+    [NoAlloc]
+    public static unsafe uint RotateLeft(uint value, int bitCount)
+    {
+        [NoAlloc]
+        asm (
+            in("c") bitCount,
+            ref value,
+            clobber("cc")
+        ) {
+            roll %cl, value
+        }
+        return value;
+    }
+}
+
+public static class Program
+{
+    private static void PrintResult(string operation, int value)
+    {
+        Console.Write(operation);
+        Console.Write(": ");
+        Console.WriteLine(value);
+    }
+
+    [EntryPoint]
+    public static unsafe void Main()
+    {
+        PrintResult("add", AssemblyMath.Add(40, 2));
+        PrintResult("subtract", AssemblyMath.Subtract(50, 8));
+        PrintResult("multiply", AssemblyMath.Multiply(6, 7));
+        PrintResult("increment", AssemblyMath.Increment(41));
+        PrintResult("negate", AssemblyMath.Negate(-42));
+        PrintResult("rotate-left", (int)AssemblyMath.RotateLeft(0x80000001u, 1));
+    }
+}

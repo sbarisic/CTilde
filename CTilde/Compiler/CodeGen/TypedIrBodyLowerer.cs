@@ -175,9 +175,13 @@ internal sealed partial class TypedIrBodyLowerer
         var writer = CreateWriter();
         var typeName = NameMangler.Type(_method.ContainingType);
         var parameterNames = _method.Parameters.Select(parameter => NameMangler.Identifier(parameter.Name)).ToArray();
+        if (_emitter.EmitDebugInformation && _method.Syntax is not null)
+            writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
         writer.WriteLine(_emitter.MethodSignature(_method, _nameOverride));
         using (writer.Block())
         {
+            if (_emitter.EmitDebugInformation)
+                writer.WriteLine(_emitter.DebugGeneratedDirective());
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
             writer.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
             writer.WriteLine("(void)ct_cleanup_method;");
@@ -230,9 +234,13 @@ internal sealed partial class TypedIrBodyLowerer
         var writer = CreateWriter();
         if (_directDefers.Count != 0)
             _emitter.RegisterDirectDeferState(_method, _durableSlots, _directDefers);
+        if (_emitter.EmitDebugInformation && _method.Syntax is not null)
+            writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
         writer.WriteLine(signature);
         using (writer.Block())
         {
+            if (_emitter.EmitDebugInformation)
+                writer.WriteLine(_emitter.DebugGeneratedDirective());
             if (_durableSlots.Count != 0)
             {
                 if (_directDefers.Count == 0)

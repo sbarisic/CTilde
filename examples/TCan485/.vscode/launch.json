@@ -1,0 +1,28 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "ctilde",
+      "request": "launch",
+      "name": "Debug TCan485 on ESP32",
+      "project": "${workspaceFolder}/ctilde.json",
+      "backend": "auto",
+      "cwd": "${workspaceFolder}",
+      "stopAtEntry": false,
+      "showRuntimeFrames": false,
+      "serialPort": "COM4",
+      "baudRate": 460800
+    },
+    {
+      "type": "ctilde",
+      "request": "attach",
+      "name": "Attach to TCan485 on ESP32",
+      "project": "${workspaceFolder}/ctilde.json",
+      "backend": "auto",
+      "cwd": "${workspaceFolder}",
+      "showRuntimeFrames": false,
+      "serialPort": "COM4",
+      "baudRate": 460800
+    }
+  ]
+}

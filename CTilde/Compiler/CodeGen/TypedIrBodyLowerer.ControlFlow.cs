@@ -315,6 +315,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsDurable = true,
         };
         _scopes.Peek()[symbol.Name] = symbol;
+        _emitter.RegisterDebugLocal(_method, symbol);
         RegisterDurableSlot(symbol.StorageName, symbol.Type);
         EmitActivateOwnedSlot(writer, symbol.Type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
         EmitInitializeOwnedSlot(writer, symbol.Type, symbol.CName, $"({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode}");

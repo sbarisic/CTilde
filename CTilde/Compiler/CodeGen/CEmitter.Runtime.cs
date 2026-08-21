@@ -91,6 +91,19 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void ct_module_fini(void);");
         writer.WriteLine("static ct_module_descriptor ct_program_module;");
         writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;");
+        if (EmitDebugInformation)
+        {
+            writer.WriteLine("#if defined(_MSC_VER)");
+            writer.WriteLine("#define CT_DEBUG_NOINLINE __declspec(noinline)");
+            writer.WriteLine("#else");
+            writer.WriteLine("#define CT_DEBUG_NOINLINE __attribute__((noinline, used))");
+            writer.WriteLine("#endif");
+            writer.WriteLine("static volatile uintptr_t ct_debug_probe;");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled);");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line);");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; (void)code; (void)file; }");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe = (uintptr_t)(unsigned int)line; (void)code; (void)file; }");
+        }
         writer.WriteLine("static_assert(sizeof(ct_atomic_u32) == sizeof(uint32_t), \"C~ atomic reference counts must remain 32-bit\");");
         writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic reference counts must preserve managed-header alignment\");");
         writer.WriteLine("typedef void (*ct_drop_value_fn)(void*);");
@@ -131,6 +144,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void* ct_installed_panic_context = NULL;");
         writer.WriteLine("CT_NORETURN static void ct_fail(const char* code, const char* file, int line)");
         writer.WriteLine("{");
+        if (EmitDebugInformation)
+            writer.WriteLine("    ct_debug_fatal_hook(code, file, line);");
         writer.WriteLine("    ct_panic_info info = { code, file, (int32_t)line };");
         writer.WriteLine("    if (ct_installed_panic_handler != NULL) ct_installed_panic_handler(&info, ct_installed_panic_context);");
         writer.WriteLine("    (void)fprintf(stderr, \"C~ runtime error %s at %s:%d\\n\", code, file, line);");
@@ -205,6 +220,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
             writer.WriteLine("    state->ExceptionCode = code; state->ExceptionFile = file; state->ExceptionLine = (int32_t)line;");
+            if (EmitDebugInformation)
+                writer.WriteLine("    ct_debug_throw_hook(exception, code, file, line, ct_exception_top == NULL ? 1u : 0u);");
             writer.WriteLine("    if (ct_exception_top == NULL) { ct_retain(exception); ct_cleanup_unwind_to(NULL); ct_unhandled_exception(exception); }");
             writer.WriteLine("    ct_retain(exception);");
             writer.WriteLine("    ct_release(ct_current_exception);");

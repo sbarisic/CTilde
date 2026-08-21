@@ -90,6 +90,22 @@ export function resolveTaskProjectPath(project: string, workspaceFolderPath: str
     return path.resolve(workspaceFolderPath, value);
 }
 
+export function resolveDebugProjectPath(project: string, workspaceFolderPath: string | undefined): string {
+    const value = project.trim();
+    if (value.length === 0)
+        throw new Error('A C~ debug configuration requires a project path.');
+    if (workspaceFolderPath === undefined && value.includes('${workspaceFolder}'))
+        throw new Error('The C~ debug project uses ${workspaceFolder}, but no workspace folder is open.');
+    const expanded = workspaceFolderPath === undefined
+        ? value
+        : value.replaceAll('${workspaceFolder}', workspaceFolderPath);
+    if (path.isAbsolute(expanded))
+        return path.normalize(expanded);
+    if (workspaceFolderPath === undefined)
+        throw new Error('A relative C~ debug project path requires a workspace folder.');
+    return path.resolve(workspaceFolderPath, expanded);
+}
+
 export function findNearestProject(sourcePath: string, fileExists: (fileName: string) => boolean): string | undefined {
     let directory = path.dirname(path.resolve(sourcePath));
     while (true) {

@@ -1,0 +1,7 @@
+{
+  "cmake.configureOnOpen": false,
+  "cmake.buildDirectory": "${workspaceFolder}/.cmake-tools/build",
+  "ctilde.compiler.idfPath": "C:/esp/v6.0.2/esp-idf",
+  "ctilde.debugger.serialPort": "COM4",
+  "ctilde.debugger.baudRate": 460800
+}

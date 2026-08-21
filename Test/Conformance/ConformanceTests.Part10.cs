@@ -149,5 +149,76 @@ internal static partial class ConformanceTests
                     Directory.Delete(root, recursive: true);
             }
         });
+
+        suite.Run("draft 0.14 deterministic C~ debug information", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ctilde-debug-info", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            var sourcePath = Path.Combine(root, "src", "Program.ct");
+            const string source = """
+                using System;
+                public static class Program
+                {
+                    private static int Increment(int value)
+                    {
+                        int result = value + 1;
+                        return result;
+                    }
+
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        int answer = Increment(41);
+                        Console.WriteLine(answer);
+                    }
+                }
+                """;
+            Directory.CreateDirectory(Path.GetDirectoryName(sourcePath)!);
+            try
+            {
+                File.WriteAllText(sourcePath, source);
+                var options = new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Source);
+                var compilation = Compile(source, options, sourcePath);
+                using var generatedWriter = new StringWriter();
+                using var firstMapWriter = new StringWriter();
+                using var secondMapWriter = new StringWriter();
+                Assert(compilation.EmitC(generatedWriter).Success, "Debug C emission failed.");
+                Assert(compilation.EmitDebugMap(firstMapWriter).Success, "Debug-map emission failed.");
+                Assert(compilation.EmitDebugMap(secondMapWriter).Success, "Repeated debug-map emission failed.");
+                var generated = generatedWriter.ToString();
+                var debugMap = firstMapWriter.ToString();
+                Assert(generated.Contains("#line 6 \"src/Program.ct\"", StringComparison.Ordinal), "An executable C~ statement was not mapped with #line.");
+                Assert(generated.Contains("#line 1 \"<ctilde-generated>\"", StringComparison.Ordinal), "Generated runtime code did not reset source mapping.");
+                Assert(generated.Contains("ct_debug_throw_hook", StringComparison.Ordinal) && generated.Contains("ct_debug_fatal_hook", StringComparison.Ordinal), "Debug runtime hooks were not emitted.");
+                Assert(generated.Contains("uint32_t unhandled", StringComparison.Ordinal) && generated.Contains("ct_exception_top == NULL ? 1u : 0u", StringComparison.Ordinal), "The exception hook did not expose a stable 32-bit handled-state value.");
+                var bundle = compilation.EmitCBundle();
+                Assert(bundle.Success, "Modular debug C emission failed.");
+                var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+                var runtimeSource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
+                Assert(!internalHeader.Contains("CT_DEBUG_NOINLINE static", StringComparison.Ordinal) && !internalHeader.Contains("static CT_DEBUG_NOINLINE static", StringComparison.Ordinal), "The modular debug header emitted a duplicate or internal hook declaration.");
+                Assert(runtimeSource.Contains("CT_DEBUG_NOINLINE void ct_debug_throw_hook", StringComparison.Ordinal), "The modular runtime omitted the external debug hook definition.");
+                Assert(debugMap == secondMapWriter.ToString(), "Debug-map emission was not deterministic.");
+                Assert(debugMap.Contains("\"displayName\": \"Program.Increment\"", StringComparison.Ordinal), "The debug map omitted the source method name.");
+                Assert(debugMap.Contains("\"name\": \"result\"", StringComparison.Ordinal) && debugMap.Contains("\"storage\": \"ct_l_0\"", StringComparison.Ordinal), "The debug map omitted local storage metadata.");
+                Assert(debugMap.Contains("\"file\": \"src/Program.ct\"", StringComparison.Ordinal), "The debug map did not use a reproducible project-relative source path.");
+                Assert(!debugMap.Contains(root.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase), "The deterministic debug map leaked an absolute source root.");
+
+                var ordinary = Emit(source, path: sourcePath);
+                Assert(!ordinary.Contains("ct_debug_throw_hook", StringComparison.Ordinal) && !ordinary.Contains("<ctilde-generated>", StringComparison.Ordinal), "Ordinary emission unexpectedly enabled debug-only output.");
+
+                var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+                var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+                var cli = RunProcess("dotnet", [cliDll, "src/Program.ct", "-o", "cli-debug.c", "--source-root", ".", "--debug-info", "--debug-map", "cli-debug.json"], workingDirectory: root);
+                Assert(cli.ExitCode == 0, $"CLI debug-info emission failed: {cli.StandardError}");
+                Assert(File.ReadAllText(Path.Combine(root, "cli-debug.c")).Contains("ct_debug_throw_hook", StringComparison.Ordinal), "CLI --debug-info did not enable debug C emission.");
+                Assert(File.ReadAllText(Path.Combine(root, "cli-debug.json")).Contains("\"entryPoint\"", StringComparison.Ordinal), "CLI --debug-map did not write the deterministic debug map.");
+                var incompatible = RunProcess("dotnet", [cliDll, "src/Program.ct", "--check", "--debug-info"], workingDirectory: root);
+                Assert(incompatible.ExitCode == 2, "CLI --check accepted debug emission options.");
+            }
+            finally
+            {
+                if (Directory.Exists(root))
+                    Directory.Delete(root, recursive: true);
+            }
+        });
     }
 }

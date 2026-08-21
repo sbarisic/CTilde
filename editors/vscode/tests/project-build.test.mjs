@@ -9,6 +9,7 @@ const {
   compilerPathError,
   findNearestProject,
   resolveCompilerLaunch,
+  resolveDebugProjectPath,
   resolveTaskProjectPath,
 } = require("../out/projectBuild.js");
 
@@ -64,4 +65,19 @@ test("task project and nearest-manifest resolution are deterministic", () => {
   const expected = path.join(workspace, "project", "ctilde.json");
   assert.equal(findNearestProject(source, candidate => candidate === expected), expected);
   assert.equal(findNearestProject(source, () => false), undefined);
+});
+
+test("debug project resolution expands workspace variables before resolving paths", () => {
+  const workspace = path.resolve("workspace");
+  assert.equal(
+    resolveDebugProjectPath("${workspaceFolder}/ctilde.json", workspace),
+    path.join(workspace, "ctilde.json"));
+  assert.equal(
+    resolveDebugProjectPath("examples/TCan485/ctilde.json", workspace),
+    path.join(workspace, "examples", "TCan485", "ctilde.json"));
+  const absolute = path.resolve("other", "ctilde.json");
+  assert.equal(resolveDebugProjectPath(absolute, workspace), absolute);
+  assert.throws(
+    () => resolveDebugProjectPath("${workspaceFolder}/ctilde.json", undefined),
+    /no workspace folder is open/);
 });

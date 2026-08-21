@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "ctilde",
+      "request": "launch",
+      "name": "Debug TCan485 on ESP32",
+      "project": "${workspaceFolder}/examples/TCan485/ctilde.json",
+      "backend": "auto",
+      "cwd": "${workspaceFolder}/examples/TCan485",
+      "stopAtEntry": false,
+      "showRuntimeFrames": false
+    },
+    {
+      "type": "ctilde",
+      "request": "attach",
+      "name": "Attach to TCan485 on ESP32",
+      "project": "${workspaceFolder}/examples/TCan485/ctilde.json",
+      "backend": "auto",
+      "cwd": "${workspaceFolder}/examples/TCan485",
+      "showRuntimeFrames": false
+    }
+  ]
+}

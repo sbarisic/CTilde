@@ -19,9 +19,21 @@ To verify the fatal runtime boundary:
 
 The monitor must show `CTILDE_ESP_FAILURE_TEST` followed by runtime code `CTN0001`. Reflash `Program.ct` afterward.
 
+## UART GDB-stub debugging
+
+The C~ VS Code debugger can launch or attach through ESP-IDF's runtime UART GDB stub. The example declares `esp_gdbstub` as a private component dependency so its options remain available with `MINIMAL_BUILD`. Create a separate debug `sdkconfig` with these values before using **C~: Debug Project**:
+
+```text
+CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME=y
+CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y
+CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
+```
+
+Set `ctilde.debugger.serialPort` to the board port. This example uses 460800 baud for both the ESP-IDF console and the debugger; any external serial monitor must use the same rate. Debug Launch validates this configuration, builds and flashes the firmware, interrupts the initialized application over UART, and starts the architecture-specific GDB from the active ESP-IDF toolchain. Debug Attach reuses matching ELF and C~ debug-map artifacts. The adapter keeps the serial port in a small ESP-IDF-Python bridge for the complete session. The runtime stub therefore consumes UART input during debugging, so do not run an interactive monitor on the same port at the same time.
+
 ## Hardware evidence
 
-The draft 0.14 ABI 14 sources and inline-assembly fixture pass strict syntax checks and complete modular links for both ESP32/Xtensa and ESP32-C3/RISC-V with ESP-IDF 6.0.2. No T-CAN485 serial device was connected during the draft 0.14 validation run on 2026-08-20, so the required ABI 14 flash, runtime regression workload, shutdown/lifetime observation, and monitor gate remain unverified. The draft 0.12 run below is the latest physical-board evidence and must not be treated as draft 0.14 hardware acceptance.
+The draft 0.14 ABI 14 sources and inline-assembly fixture pass strict syntax checks and complete modular links for both ESP32/Xtensa and ESP32-C3/RISC-V with ESP-IDF 6.0.2. On 2026-08-21, a debug-configured ABI 14 image was flashed to the connected dual-core ESP32. The runtime UART stub accepted the architecture-specific GDB, reported five FreeRTOS tasks, hit a C~ source breakpoint, exposed C~ locals, stepped to the next C~ statement, stopped on a handled C~ exception, resumed, and detached cleanly. Continued UART output confirmed the WS2812 loop remained active after detach. This focused debugger run does not replace the complete ABI 14 runtime regression, shutdown/lifetime, and monitor acceptance gate. The draft 0.12 run below remains the latest complete physical-board acceptance.
 
 The Draft 0.12 acceptance image was flashed and monitored on 2026-08-20. Its stable output was:
 

@@ -132,6 +132,8 @@ ctilde <input.ct>... --check
 ctilde <input.ct>... -o <program.c> [--header <exports.h>]
 ctilde <input.ct>... --build [--compiler auto|msvc|gcc|clang]
 ctilde --project <ctilde.json> [--check|--build]
+ctilde --project <ctilde.json> --prepare-debug launch --debug-target <target.json>
+ctilde --project <ctilde.json> --prepare-debug attach --debug-target <target.json>
 ```
 
 Run `ctilde --help` for modular-layout, reproducible-path, toolchain, LTO, ESP-IDF, and directory-compilation options. Native builds write generated files atomically, lock their build directory, and never invoke the native toolchain after a C~ error.
@@ -174,17 +176,17 @@ using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
 ```
 
-`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, and `EmitSymbolMap()` expose modular artifacts, exported declarations, and compact-name mappings. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
+`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, `EmitSymbolMap()`, and `EmitDebugMap()` expose modular artifacts, exported declarations, compact-name mappings, and C~-aware debug metadata. `CompilationOptions.DebugInformation` enables source `#line` mappings and stable exception hooks. Ordinary and Release emission remains unchanged. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
 
 ## Editor support
 
-The extension in [editors/vscode](editors/vscode/README.md) provides compiler-aware semantic highlighting, completion, diagnostics, XML-documentation hover and signature help, definitions, document and workspace symbols, project checks and native builds, and navigation into the embedded standard library. It bundles the framework-dependent compiler and language server and therefore requires an installed .NET 10 runtime.
+The extension in [editors/vscode](editors/vscode/README.md) provides compiler-aware semantic highlighting, completion, diagnostics, XML-documentation hover and signature help, definitions, document and workspace symbols, project checks and native builds, C~-aware GDB debugging, and navigation into the embedded standard library. It bundles the framework-dependent compiler, language server, and Node debug adapter and therefore requires an installed .NET 10 runtime.
 
-Rename, references, formatting, debugging, code actions, auto-import edits, and semantic-token deltas are not yet implemented. Type-body completion includes arithmetic-operator declarations, while operator hover, definition, symbols, usage classification, and ordinary member filtering share the same language-service regression coverage.
+Rename, references, formatting, code actions, auto-import edits, and semantic-token deltas are not yet implemented. MSVC uses the Microsoft C/C++ debugger as a native-variable fallback; GCC, Clang, WSL, and ESP-IDF use the C~-aware GDB adapter. Type-body completion includes arithmetic-operator declarations, while operator hover, definition, symbols, usage classification, and ordinary member filtering share the same language-service regression coverage.
 
 ## Project status
 
-C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.400-preview.0.26322.102` builds the solution with zero warnings and zero errors, and all 115 registered conformance checks pass. The Draft 0.14 release gate remains open only for the physical ABI 14 T-CAN485 flash-and-monitor workload and evidence synchronization.
+C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.400-preview.0.26322.102` builds the solution with zero warnings and zero errors, and all 116 registered conformance checks pass. The Draft 0.14 release gate remains open only for the physical ABI 14 T-CAN485 flash-and-monitor workload and evidence synchronization.
 
 The compiler and ESP-IDF firmware cross-build coverage are substantially broader than the current physical-hardware evidence. ABI 14 firmware links for Xtensa and RISC-V, but the last completed T-CAN485 flash-and-monitor run used Draft 0.12. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for remaining work.
 

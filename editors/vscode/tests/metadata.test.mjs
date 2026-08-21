@@ -26,7 +26,10 @@ test("manifest registers the C~ language and grammar", async () => {
     "onUri:ctilde-stdlib",
     "onTaskType:ctilde",
     "onCommand:ctilde.project.check",
-    "onCommand:ctilde.project.build"
+    "onCommand:ctilde.project.build",
+    "onCommand:ctilde.project.debug",
+    "onCommand:ctilde.project.attach",
+    "onDebug:ctilde"
   ]);
   assert.equal(manifest.dependencies["vscode-languageclient"], "9.0.1");
   const configuration = manifest.contributes.configuration.properties;
@@ -44,11 +47,25 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.compiler.dotnetPath"].default, "dotnet");
   assert.equal(configuration["ctilde.compiler.nativeCompiler"].default, "");
   assert.equal(configuration["ctilde.compiler.idfPath"].default, "");
+  assert.equal(configuration["ctilde.compiler.idfPath"].scope, "machine-overridable");
+  assert.equal(configuration["ctilde.debugger.gdbPath"].scope, "machine");
+  assert.equal(configuration["ctilde.debugger.serialPort"].default, "");
+  assert.equal(configuration["ctilde.debugger.baudRate"].default, 115200);
+  assert.equal(configuration["ctilde.debugger.showRuntimeFrames"].default, false);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].required, ["project", "mode"]);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build"]);
   assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
   assert.equal(manifest.contributes.problemMatchers[0].owner, "ctilde-build");
   assert.ok(manifest.files.includes("compiler/**"));
+  assert.ok(manifest.files.includes("out/debugAdapter.js"));
+  assert.deepEqual(manifest.contributes.breakpoints, [{ language: "ctilde" }]);
+  const debuggerContribution = manifest.contributes.debuggers[0];
+  assert.equal(debuggerContribution.type, "ctilde");
+  assert.equal(debuggerContribution.program, "./out/debugAdapter.js");
+  assert.deepEqual(debuggerContribution.languages, ["ctilde"]);
+  assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ["project"]);
+  assert.equal(debuggerContribution.configurationAttributes.launch.properties.baudRate.default, 115200);
+  assert.equal(debuggerContribution.initialConfigurations.length, 2);
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   const semanticScopes = manifest.contributes.semanticTokenScopes[0];
   assert.equal(semanticScopes.language, "ctilde");

@@ -19,11 +19,11 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Hover, signature help, go-to-definition, document symbols, and workspace symbols.
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` project manifests.
-- Check and native Build commands plus discoverable tasks for every workspace project.
+- Check, native Build, Debug, and Attach commands for every workspace project.
 
 Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `exception`, `see`, `paramref`, and sole-element `inheritdoc`. Documentation warnings remain non-blocking. Links, documentation-tag completion, XML output files, raw Markdown/HTML, and block documentation comments are not implemented.
 
-Rename, references, formatting, debugging, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
+Rename, references, formatting, code actions, auto-import edits, and incremental semantic-token deltas are not implemented.
 
 Type-body completion includes the `operator` declaration keyword. Operator hover, go-to-definition, document/workspace symbols, semantic classification, and filtering from ordinary member completion share the same regression coverage.
 
@@ -61,7 +61,42 @@ The VSIX includes a framework-dependent compiler fallback. For compiler developm
 }
 ```
 
-An external self-contained `ctilde` executable is also accepted. `ctilde.compiler.dotnetPath` selects the host for DLLs, `ctilde.compiler.nativeCompiler` optionally overrides the hosted C compiler, and `ctilde.compiler.idfPath` locates an ESP-IDF installation when its environment is not active. The CLI process is short-lived, so rebuilding an external compiler requires no extension restart or shadow copy.
+An external self-contained `ctilde` executable is also accepted. `ctilde.compiler.dotnetPath` selects the host for DLLs, `ctilde.compiler.nativeCompiler` optionally overrides the hosted C compiler, and `ctilde.compiler.idfPath` locates an ESP-IDF installation when its environment is not active. The ESP-IDF path is machine-local but workspace-overridable, so an example opened as its own workspace can select its installed IDF version. The CLI process is short-lived, so rebuilding an external compiler requires no extension restart or shadow copy.
+
+## Debugging
+
+Use **C~: Debug Project** to save, build, and launch the nearest project. Use **C~: Attach Debugger** to validate and reuse the artifacts from its last debug launch. The extension also contributes `type: "ctilde"` Launch and Attach configurations for `launch.json`:
+
+```json
+{
+  "type": "ctilde",
+  "request": "launch",
+  "name": "Debug C~ Project",
+  "project": "${workspaceFolder}/ctilde.json",
+  "backend": "auto",
+  "gdbPath": "",
+  "cwd": "${workspaceFolder}",
+  "args": [],
+  "stopAtEntry": false,
+  "showRuntimeFrames": false,
+  "serialPort": "",
+  "baudRate": 115200
+}
+```
+
+Hosted GCC and Clang builds use the bundled C~-aware GDB/MI adapter. WSL builds start GDB in the same WSL environment. Breakpoints, conditional and hit-count breakpoints, logpoints, C~ function breakpoints, stepping, threads, stacks, locals, watches, and C~ exception filters use the compiler's deterministic debug map. Runtime and ARC frames are hidden unless `showRuntimeFrames` is enabled. Safe watch expressions are limited to identifiers, field chains, and array indices. Managed assignment, method or property calls, and general C~ expression evaluation are not supported.
+
+An automatically discovered MSVC build uses `cppvsdbg` and requires the Microsoft C/C++ extension. Source breakpoints and stepping map to `.ct` files, while variables and exceptions retain their generated native presentation. Manual `type: "ctilde"` configurations require GCC or Clang.
+
+ESP-IDF debugging uses the runtime UART GDB stub. Set `ctilde.debugger.serialPort` and ensure the built `sdkconfig` contains:
+
+```text
+CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME=y
+CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y
+CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
+```
+
+Launch builds and flashes before interrupting the running application over UART. Attach reuses existing ELF and debug-map artifacts and rejects changed sources. Because ESP-IDF's runtime-stub UART listener starts after the scheduler, v1 cannot stop at one-time startup code that has already executed; set breakpoints in code that will execute after attachment. The adapter selects the architecture-specific GDB from ESP-IDF project metadata; it never substitutes a host GDB. It forces GDB's `Z0` remote packet because the runtime stub implements instruction breakpoints through that packet even for flash code. ESP32 has two such breakpoint slots and ESP32-C3 has eight; source, function, and enabled exception breakpoints share them, so exception filters are disabled by default. An ESP-IDF-Python serial bridge keeps the port open for the complete GDB session, avoiding a lossy Windows close/reopen handoff. Runtime-stub mode therefore owns UART input during the session, so the same port cannot be used as an interactive application console. OpenOCD, JTAG, panic-only postmortem sessions, and ISR entry are outside this debugger profile.
 
 ## Development
 

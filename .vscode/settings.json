@@ -1,5 +1,8 @@
 {
   "ctilde.compiler.compilerPath": "${workspaceFolder}/CTilde.Cli/bin/Debug/net10.0/ctilde.dll",
+  "ctilde.compiler.idfPath": "C:/esp/v6.0.2/esp-idf",
+  "ctilde.debugger.serialPort": "COM4",
+  "ctilde.debugger.baudRate": 460800,
   "ctilde.languageServer.serverPath": "${workspaceFolder}/CTilde.LanguageServer/bin/Debug/net10.0/CTilde.LanguageServer.dll",
   "ctilde.languageServer.restartOnServerChange": true
 }

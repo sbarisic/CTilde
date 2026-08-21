@@ -22,7 +22,13 @@ internal sealed record CommandLineOptions(
     GeneratedCLayout? CLayout,
     string? OutputDirectory,
     string? SymbolMap,
-    bool Lto)
+    bool Lto,
+    bool DebugInfo,
+    string? DebugMap,
+    string? PrepareDebug,
+    string? DebugTarget,
+    string? SerialPort,
+    int BaudRate)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -45,12 +51,18 @@ internal sealed record CommandLineOptions(
         string? idfPath = null;
         string? outputDirectory = null;
         string? symbolMap = null;
+        string? debugMap = null;
+        string? prepareDebug = null;
+        string? debugTarget = null;
+        string? serialPort = null;
+        var baudRate = 115200;
         var check = false;
         var trace = false;
         var build = false;
         var target = CompilationTarget.Hosted;
         var targetSpecified = false;
         var lto = false;
+        var debugInfo = false;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
 
@@ -78,6 +90,20 @@ internal sealed record CommandLineOptions(
                 case "--idf-path": idfPath = RequireValue(); break;
                 case "--output-directory": outputDirectory = RequireValue(); break;
                 case "--symbol-map": symbolMap = RequireValue(); break;
+                case "--debug-map": debugMap = RequireValue(); break;
+                case "--debug-target": debugTarget = RequireValue(); break;
+                case "--serial-port": serialPort = RequireValue(); break;
+                case "--debug-info": debugInfo = true; break;
+                case "--prepare-debug":
+                    prepareDebug = RequireValue();
+                    if (prepareDebug is not null && prepareDebug is not ("launch" or "attach"))
+                        parseError = $"Unknown debug request '{prepareDebug}'; expected launch or attach.";
+                    break;
+                case "--baud-rate":
+                    var baudValue = RequireValue();
+                    if (baudValue is not null && (!int.TryParse(baudValue, out baudRate) || baudRate <= 0))
+                        parseError = $"Invalid baud rate '{baudValue}'; expected a positive integer.";
+                    break;
                 case "--lto": lto = true; break;
                 case "--c-layout":
                     var layoutValue = RequireValue();
@@ -134,7 +160,8 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto);
+            targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
+            debugInfo, debugMap, prepareDebug, debugTarget, serialPort, baudRate);
         return true;
     }
 }

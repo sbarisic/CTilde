@@ -1,4 +1,5 @@
-import { existsSync, readFileSync, rmSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs';
+import { createHash } from 'crypto';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import {
@@ -21,6 +22,7 @@ import {
     CTildeTaskMode,
     findNearestProject,
     resolveCompilerLaunch,
+    resolveDebugProjectPath,
     resolveTaskProjectPath,
 } from './projectBuild';
 
@@ -30,13 +32,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const provider = new StandardLibraryContentProvider();
     controller = new LanguageServerController(context, provider);
     const buildProvider = new CTildeTaskProvider(context);
+    const debugProvider = new CTildeDebugProjectProvider(context, buildProvider);
     context.subscriptions.push(
         vscode.workspace.registerTextDocumentContentProvider('ctilde-stdlib', provider),
         vscode.commands.registerCommand('ctilde.languageServer.restart', () => controller?.restart()),
         vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => controller?.showOutput()),
         vscode.commands.registerCommand('ctilde.project.check', () => buildProvider.runProject('check')),
         vscode.commands.registerCommand('ctilde.project.build', () => buildProvider.runProject('build')),
+        vscode.commands.registerCommand('ctilde.project.debug', () => debugProvider.runProject('launch')),
+        vscode.commands.registerCommand('ctilde.project.attach', () => debugProvider.runProject('attach')),
         vscode.tasks.registerTaskProvider('ctilde', buildProvider),
+        vscode.debug.registerDebugConfigurationProvider('ctilde', debugProvider),
         vscode.workspace.onDidChangeConfiguration(event => controller?.configurationChanged(event)),
     );
     await controller.start();
@@ -114,7 +120,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         return task;
     }
 
-    private readCompilerLaunch() {
+    public readCompilerLaunch() {
         const configuration = vscode.workspace.getConfiguration('ctilde.compiler');
         const compilerPath = configuration.get<string>('compilerPath', '');
         const dotnetPath = configuration.get<string>('dotnetPath', 'dotnet');
@@ -122,7 +128,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         return resolveCompilerLaunch(compilerPath, dotnetPath, this.context.extensionPath, workspacePath);
     }
 
-    private readProjectTarget(project: string): CTildeProjectTarget {
+    public readProjectTarget(project: string): CTildeProjectTarget {
         try {
             const document = JSON.parse(readFileSync(project, 'utf8')) as { target?: unknown };
             return document.target === 'esp-idf' ? 'esp-idf' : document.target === undefined || document.target === 'hosted' ? 'hosted' : 'unknown';
@@ -137,7 +143,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         return uris.map(uri => uri.fsPath).sort((left, right) => left.localeCompare(right));
     }
 
-    private async selectProject(): Promise<string | undefined> {
+    public async selectProject(): Promise<string | undefined> {
         const active = vscode.window.activeTextEditor?.document;
         if (active?.uri.scheme === 'file' && active.languageId === 'ctilde') {
             const nearest = findNearestProject(active.uri.fsPath, existsSync);
@@ -159,6 +165,168 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         }));
         return (await vscode.window.showQuickPick(choices, { placeHolder: 'Select the C~ project to build' }))?.project;
     }
+}
+
+interface PreparedDebugTarget {
+    readonly target: CTildeProjectTarget;
+    readonly backend: 'gdb' | 'msvc';
+    readonly program: string;
+    readonly sourceRoot: string;
+    readonly workingDirectory: string;
+    readonly serialPort?: string;
+    readonly baudRate?: number;
+}
+
+class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
+    public constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly projects: CTildeTaskProvider,
+    ) {
+    }
+
+    public async runProject(request: 'launch' | 'attach'): Promise<void> {
+        if (request === 'launch' && !await vscode.workspace.saveAll(false))
+            return;
+        const project = await this.projects.selectProject();
+        if (project === undefined)
+            return;
+        const folder = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(project));
+        const configuration = await this.prepare(project, request,
+            { type: 'ctilde', request, name: request === 'launch' ? 'Debug C~ Project' : 'Attach C~ Debugger' }, true);
+        if (configuration !== undefined)
+            await vscode.debug.startDebugging(folder, configuration);
+    }
+
+    public async resolveDebugConfiguration(
+        folder: vscode.WorkspaceFolder | undefined,
+        configuration: vscode.DebugConfiguration,
+    ): Promise<vscode.DebugConfiguration | undefined> {
+        if (typeof configuration.debugTarget === 'string')
+            return configuration;
+        if (typeof configuration.project !== 'string' || configuration.project.trim().length === 0) {
+            void vscode.window.showErrorMessage('A C~ debug configuration requires a ctilde.json project path.');
+            return undefined;
+        }
+        let project: string;
+        try {
+            project = resolveDebugProjectPath(configuration.project,
+                folder?.uri.fsPath ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
+        } catch (error) {
+            void vscode.window.showErrorMessage(String(error instanceof Error ? error.message : error));
+            return undefined;
+        }
+        if (configuration.request === 'launch' && !await vscode.workspace.saveAll(false))
+            return undefined;
+        return this.prepare(project, configuration.request === 'attach' ? 'attach' : 'launch', configuration, false);
+    }
+
+    private async prepare(
+        project: string,
+        request: 'launch' | 'attach',
+        supplied: vscode.DebugConfiguration,
+        allowMsvcFallback: boolean,
+    ): Promise<vscode.DebugConfiguration | undefined> {
+        try {
+            if (!existsSync(project))
+                throw new Error(`C~ project does not exist: ${project}`);
+            const launch = this.projects.readCompilerLaunch();
+            const launchError = compilerPathError(launch, existsSync);
+            if (launchError !== undefined)
+                throw new Error(launchError);
+            const target = this.projects.readProjectTarget(project);
+            if (target === 'unknown')
+                throw new Error(`Could not determine the C~ target in ${project}.`);
+
+            const projectResource = vscode.Uri.file(project);
+            const debuggerSettings = vscode.workspace.getConfiguration('ctilde.debugger', projectResource);
+            const compilerSettings = vscode.workspace.getConfiguration('ctilde.compiler', projectResource);
+            const serialPort = stringSetting(supplied.serialPort, debuggerSettings.get<string>('serialPort', ''));
+            const baudRate = positiveNumber(supplied.baudRate, debuggerSettings.get<number>('baudRate', 115200));
+            if (target === 'esp-idf' && serialPort.length === 0)
+                throw new Error('ESP-IDF debugging requires ctilde.debugger.serialPort or serialPort in launch.json.');
+
+            const descriptorDirectory = path.join(this.context.globalStorageUri.fsPath, 'debug-targets');
+            mkdirSync(descriptorDirectory, { recursive: true });
+            const descriptorName = createHash('sha256').update(path.resolve(project)).digest('hex').slice(0, 16) + '.json';
+            const descriptor = path.join(descriptorDirectory, descriptorName);
+            const args = [...launch.prefixArguments, '--project', project, '--prepare-debug', request, '--debug-target', descriptor];
+            if (target === 'hosted') {
+                const compiler = compilerSettings.get<string>('nativeCompiler', '').trim();
+                if (request === 'launch' && compiler.length !== 0)
+                    args.push('--compiler', compiler);
+            } else {
+                const idfPath = compilerSettings.get<string>('idfPath', '').trim();
+                if (idfPath.length !== 0)
+                    args.push('--idf-path', idfPath);
+                args.push('--serial-port', serialPort, '--baud-rate', String(baudRate));
+            }
+            if (!await this.executePreparation(project, launch.command, args))
+                return undefined;
+
+            const prepared = JSON.parse(readFileSync(descriptor, 'utf8')) as PreparedDebugTarget;
+            if (prepared.backend === 'msvc') {
+                if (!allowMsvcFallback)
+                    throw new Error('Manual type: ctilde configurations require a GDB-capable build. Select GCC or Clang, or use C~: Debug Project for MSVC fallback.');
+                if (vscode.extensions.getExtension('ms-vscode.cpptools') === undefined)
+                    throw new Error('MSVC debugging requires the Microsoft C/C++ extension (ms-vscode.cpptools).');
+                const result: vscode.DebugConfiguration = {
+                    type: 'cppvsdbg', request, name: supplied.name ?? 'Debug C~ Project',
+                    program: prepared.program,
+                    cwd: stringSetting(supplied.cwd, prepared.workingDirectory),
+                    args: supplied.args ?? [],
+                    stopAtEntry: supplied.stopAtEntry ?? false,
+                    sourceFileMap: { '.': prepared.sourceRoot },
+                };
+                if (request === 'attach')
+                    result.processId = supplied.processId ?? '${command:pickProcess}';
+                return result;
+            }
+
+            return {
+                ...supplied,
+                type: 'ctilde', request,
+                name: supplied.name ?? (request === 'launch' ? 'Debug C~ Project' : 'Attach C~ Debugger'),
+                debugTarget: descriptor,
+                gdbPath: stringSetting(supplied.gdbPath, debuggerSettings.get<string>('gdbPath', '')),
+                serialPort,
+                baudRate,
+                showRuntimeFrames: supplied.showRuntimeFrames ?? debuggerSettings.get<boolean>('showRuntimeFrames', false),
+                cwd: stringSetting(supplied.cwd, prepared.workingDirectory),
+                processId: request === 'attach' && target === 'hosted'
+                    ? supplied.processId ?? '${command:pickProcess}' : supplied.processId,
+            };
+        } catch (error) {
+            void vscode.window.showErrorMessage(String(error instanceof Error ? error.message : error));
+            return undefined;
+        }
+    }
+
+    private async executePreparation(project: string, command: string, args: string[]): Promise<boolean> {
+        const definition: vscode.TaskDefinition = { type: 'ctilde-debug-prepare', project };
+        const execution = new vscode.ProcessExecution(command, args, { cwd: path.dirname(project) });
+        const task = new vscode.Task(definition, vscode.TaskScope.Workspace, 'Prepare C~ Debugging', 'C~', execution,
+            ['$ctilde', '$gcc', '$msCompile']);
+        task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
+        const running = await vscode.tasks.executeTask(task);
+        return new Promise(resolve => {
+            const subscription = vscode.tasks.onDidEndTaskProcess(event => {
+                if (event.execution !== running)
+                    return;
+                subscription.dispose();
+                if (event.exitCode !== 0)
+                    void vscode.window.showErrorMessage(`C~ debug preparation failed with exit code ${event.exitCode ?? 'unknown'}.`);
+                resolve(event.exitCode === 0);
+            });
+        });
+    }
+}
+
+function stringSetting(value: unknown, fallback: string): string {
+    return typeof value === 'string' && value.trim().length !== 0 ? value.trim() : fallback.trim();
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+    return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
 }
 
 export async function deactivate(): Promise<void> {

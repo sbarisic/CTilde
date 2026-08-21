@@ -38,11 +38,23 @@ internal static class CTildeCommand
                 return exception is CommandLineException ? 2 : 1;
             }
 
+            if (request.PrepareDebug == "attach")
+                return DebugPreparation.ValidateAttach(request);
+
             await using var buildLock = request.BuildNative ? BuildLock.Acquire(request.LockDirectory) : null;
             var result = Compile(request);
             if (result.ExitCode != 0 || !request.BuildNative)
                 return result.ExitCode;
-            return await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
+            var nativeResult = await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
+            if (nativeResult.ExitCode != 0)
+                return nativeResult.ExitCode;
+            if (request.PrepareDebug == "launch")
+            {
+                if (request.Target == CompilationTarget.EspIdf)
+                    await EspIdfBuildDriver.PrepareDebugLaunchAsync(request, cancellation.Token);
+                DebugPreparation.WriteDescriptor(request, nativeResult);
+            }
+            return 0;
         }
         catch (BuildLockException exception)
         {
@@ -77,7 +89,11 @@ internal static class CTildeCommand
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
             }
             var trees = request.Inputs.Select(path => SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
-            var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, request.SourceRoot));
+            var sourceRoot = request.DebugInformation
+                ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
+                : request.SourceRoot;
+            var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
+                request.DebugInformation ? DebugInformationMode.Source : DebugInformationMode.None));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -93,7 +109,8 @@ internal static class CTildeCommand
             if (HasErrors(diagnostics))
             {
                 if (request.BuildNative)
-                    RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath);
+                    RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
+                        request.DebugMapPath, request.DebugTargetPath);
                 return new CompilationOutcome(1, compilation.UsesInlineAssembly);
             }
 
@@ -116,6 +133,12 @@ internal static class CTildeCommand
                 compilation.EmitSymbolMap(map);
                 WriteAtomically(request.SymbolMapPath, map.ToString());
             }
+            if (request.DebugMapPath is not null)
+            {
+                using var debugMap = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+                compilation.EmitDebugMap(debugMap);
+                WriteAtomically(request.DebugMapPath, debugMap.ToString());
+            }
             if (request.Trace)
             {
                 Console.Error.WriteLine("trace: semantic analysis and GNU C23 lowering complete");
@@ -128,7 +151,8 @@ internal static class CTildeCommand
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
             if (request.BuildNative)
-                RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath);
+                RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
+                    request.DebugMapPath, request.DebugTargetPath);
             Console.Error.WriteLine($"ctilde: {exception.Message}");
             return new CompilationOutcome(1, false);
         }
@@ -141,7 +165,8 @@ internal static class CTildeCommand
         if (options.Inputs.Count != 0 || options.Output is not null || options.HeaderOutput is not null ||
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
-            options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto)
+            options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
+            options.DebugInfo || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null)
             return UsageError("--compile-directory cannot be combined with inputs, project, output, check, build, or native-build options.");
         try
         {
@@ -280,11 +305,12 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
+        Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--serial-port <port>] [--baud-rate <rate>]");
     }
 }

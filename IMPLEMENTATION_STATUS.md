@@ -1,6 +1,6 @@
 # Implementation status
 
-Last reviewed: 2026-08-20
+Last reviewed: 2026-08-21
 
 ## Current state
 
@@ -12,7 +12,7 @@ C~ draft 0.14 has one compiler path:
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable namespace, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for `[Export]` methods and runtime ABI 14. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission or invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
+The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable namespace, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for `[Export]` methods and runtime ABI 14. Debug-enabled emission adds C~ source mappings, a deterministic debug map, and stable exception hooks without changing ordinary Release output. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain, or prepare verified Launch/Attach descriptors. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
 
 ## Measured baseline
 
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. All 115 registered managed and native conformance checks pass. Type-body completion again includes the `operator` declaration keyword; operator hover, definition, document/workspace symbols, semantic classification, and exclusion from ordinary member completion remain covered. Draft 0.14 coverage includes runtime-fault catches and injected OOM, lifecycle finalization and panic callbacks, deterministic modular artifacts and symbol maps, unity/modular native behavior, contiguous storage, constructive `out`, BVH/list hit equivalence, AABB edge rays, schedule-independent per-sample RNG, and the exact reduced-image SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. All 116 registered managed and native conformance checks pass. Type-body completion again includes the `operator` declaration keyword; operator hover, definition, document/workspace symbols, semantic classification, and exclusion from ordinary member completion remain covered. Draft 0.14 coverage includes deterministic C~ debug mappings and maps, runtime-fault catches and injected OOM, lifecycle finalization and panic callbacks, deterministic modular artifacts and symbol maps, unity/modular native behavior, contiguous storage, constructive `out`, BVH/list hit equivalence, AABB edge rays, schedule-independent per-sample RNG, and the exact reduced-image SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`.
 
 The modular MSVC Release+LTO production renderer completed the full 1200x675, 500-sample, 50-bounce BVH profile in 4,420.348 seconds (1:13:40.348) on the reviewed machine. Its P3 PPM SHA-256 is `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`. The reduced image remains the automated deterministic gate; the production elapsed time is a recorded machine-specific measurement.
 
@@ -125,6 +125,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | `ref`, `in`, and constructive `out` parameters | Implemented | First-write construction, repeated replacement, methods, constructors, delegates, function pointers, externs, flow, readonly, ARC, mangling, and pointer ABI tests |
 | Runtime ABI 14 lifecycle | Implemented | Process initialization/shutdown, module descriptor, reverse static finalization, thread gates, and panic callback tests |
 | Unity and modular C artifacts | Implemented | Deterministic shuffled-input bundles, reachability partitioning, strict native builds, object cache, symbol maps, and LTO flag mapping |
+| C~-aware native debugging | Implemented | Debug-only `#line` mappings and hooks, deterministic maps, validated CLI descriptors, GDB/MI DAP, WSL and ESP UART-stub resolution, and MSVC fallback |
 | Scoped native buffers and `stackalloc` | Implemented | Construction, conversion, flattening, bounds, count checks, escape diagnostics, and native fixtures |
 | Scoped `NativeUtf8String` | Implemented | Owner retention, zero allocation, NUL diagnostics, nullable input, ABI flattening, and escape checks |
 | Nominal opaque handles and native ownership | Implemented | Native typedef headers, moves, created/consumed/retained contracts, defer reservations, and leak diagnostics |
@@ -143,7 +144,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 
 ## Conformance coverage
 
-The executable test project registers 115 checks, and all 115 pass. Coverage includes:
+The executable test project registers 116 checks, and all 116 pass. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -219,7 +220,7 @@ Documentation analysis accepts summaries, parameters, returns, remarks, exceptio
 
 `ctilde.json` defines deterministic source globs, exclusions, and a hosted or ESP-IDF target. The CLI and language server share the loader. Files without a manifest are analyzed as standalone hosted programs; files outside a manifest source set retain that manifest's target but do not join its compilation.
 
-The VS Code extension is version 0.4.0 and bundles its JavaScript client, a framework-dependent compiler, and the version 0.3.1 .NET 10 language server. The user supplies the .NET 10 runtime. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit. Hosted snapshots include documented console-input and `System.IO` symbols; ESP-IDF snapshots omit them. Shared language-service conformance covers type-body operator completion together with operator hover, navigation, symbols, semantic classification, and ordinary-member filtering.
+The VS Code extension is version 0.4.0 and bundles its JavaScript client, framework-dependent compiler, version 0.3.1 .NET 10 language server, and Node GDB/MI debug adapter. The user supplies the .NET 10 runtime and native debugger. Debug Project and Attach Debugger use source-hash-validated CLI descriptors; GCC/Clang, WSL, and ESP-IDF receive C~-aware presentation, while MSVC uses `cppvsdbg`. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit. Hosted snapshots include documented console-input and `System.IO` symbols; ESP-IDF snapshots omit them. Shared language-service conformance covers type-body operator completion together with operator hover, navigation, symbols, semantic classification, and ordinary-member filtering.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 
@@ -249,6 +250,8 @@ The Draft 0.9 ESP acceptance source repeats mixed acyclic managed allocations fo
 The Draft 0.10 firmware adds two attached FreeRTOS workers, cross-task delegate and function-pointer callbacks, per-task exception/defer cleanup, and concurrent ARC lifetime operations. Complete Xtensa and RISC-V links pass. The final 155,360-byte Xtensa image was flashed to the connected dual-core ESP32 on 2026-08-19 and printed `threading: ok`, `exception: caught on ESP32`, `arc heap recovery: True`, and `CTILDE_ESP_OK`. It reported 297,620 bytes free, a 286,624-byte minimum, and 6,520 bytes of stack high-water headroom before continuing for more than ten GPIO4 WS2812 cycles without a watchdog reset.
 
 The optimized Draft 0.12 firmware was built with ESP-IDF 6.0.2 and GCC 15.2.0 for both architectures, then flashed to the same T-CAN485 on 2026-08-20. It passed every current marker, including `threading: ok`, `arc heap recovery: True`, and `CTILDE_ESP_OK`, and reported 297,692 bytes free, a 286,696-byte minimum, and 6,704 bytes of stack high-water headroom. UART showed more than 25 GPIO4 WS2812 transitions without a watchdog reset. The separate failure image produced `CTN0001`, called `abort()`, and rebooted with `SW_CPU_RESET`; the full self-test was reflashed and revalidated as the final board state.
+
+On 2026-08-21, a debug-enabled Draft 0.14 ABI 14 image was flashed to the connected dual-core ESP32 on COM4. The UART runtime stub connected through the ESP-IDF Xtensa GDB, enumerated five FreeRTOS tasks, hit and stepped a C~ source breakpoint, exposed C~ locals, classified a handled `CTE0001` hook stop correctly, resumed, and detached without losing the serial session. The application continued its WS2812 loop after detach. This is physical acceptance of the debugger transport and presentation path only; it does not close the complete ABI 14 firmware-runtime gate below.
 
 ## Deliberately deferred
 
@@ -288,6 +291,6 @@ A draft 0.14 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-The current workspace does not meet this gate: one of the 115 conformance checks fails, and ABI 14 has not yet completed its physical-board flash-and-monitor validation.
+The software gates currently pass. The release remains blocked because ABI 14 has not yet completed its physical-board flash-and-monitor validation.
 
 Draft 0.14 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts must agree under every supported hosted toolchain. The Draft 0.12 dual-core Xtensa run remains the last confirmed hardware baseline until ABI 14 firmware is flashed and monitored; draft 0.14 hardware status must be reported as unverified until that run occurs. Instruction-only function-body emission remains an architecture blocker rather than a runtime ABI blocker.

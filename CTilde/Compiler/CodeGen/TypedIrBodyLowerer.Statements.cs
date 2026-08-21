@@ -83,6 +83,17 @@ internal sealed partial class TypedIrBodyLowerer
 
     private FlowResult EmitStatement(ILoweringWriter writer, StatementSyntax statement)
     {
+        if (!_emitter.EmitDebugInformation)
+            return EmitStatementCore(writer, statement);
+        _emitter.RegisterDebugExecutable(_method, statement);
+        writer.WriteLine(_emitter.DebugSourceDirective(statement));
+        var result = EmitStatementCore(writer, statement);
+        writer.WriteLine(_emitter.DebugGeneratedDirective());
+        return result;
+    }
+
+    private FlowResult EmitStatementCore(ILoweringWriter writer, StatementSyntax statement)
+    {
         switch (statement)
         {
             case BlockStatementSyntax block:
@@ -388,6 +399,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (type.Kind is CTypeKind.Opaque or CTypeKind.Pointer && initializer?.Ownership == OwnershipKind.Owned)
             ConsumeOwnedExpression(initializer, syntax.Initializer!);
         _scopes.Peek()[syntax.Name] = symbol;
+        _emitter.RegisterDebugLocal(_method, symbol);
         if (symbol.IsDurable)
         {
             RegisterDurableSlot(symbol.StorageName, type);
@@ -593,6 +605,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = local;
+        _emitter.RegisterDebugLocal(_method, local);
         var index = NewTemp();
         writer.WriteLine($"int32_t {index} = 0;");
         var start = NewLabel("foreach_test");

@@ -16,6 +16,7 @@ public enum GeneratedCArtifactKind
     NamespaceSource,
     EntrySource,
     SymbolMap,
+    DebugMap,
     CMakeFragment,
 }
 

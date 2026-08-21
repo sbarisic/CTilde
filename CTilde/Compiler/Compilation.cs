@@ -124,6 +124,20 @@ public sealed class Compilation
         return new EmitResult(success, _diagnostics);
     }
 
+    public EmitResult EmitDebugMap(TextWriter writer)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        EnsureAnalyzed();
+        var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        if (success)
+        {
+            lock (_gate)
+                EnsureGeneratedOutput();
+            writer.Write(_generatedOutput!.DebugMap);
+        }
+        return new EmitResult(success, _diagnostics);
+    }
+
     private string GenerateC()
     {
         EnsureGeneratedOutput();
@@ -134,7 +148,7 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
-        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot());
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot(), Options.DebugInformation);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);
@@ -147,7 +161,7 @@ public sealed class Compilation
             return null;
 
         var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
-        if (target != CompilationTarget.Hosted)
+        if (target != CompilationTarget.Hosted && Options.DebugInformation == DebugInformationMode.None)
         {
             diagnostics.Add("CT4106", "A source root is supported only for the hosted target.", source, new TextSpan(0, 0));
             return null;
@@ -183,7 +197,9 @@ public sealed class Compilation
 
     private string? ValidatedSourceRoot()
     {
-        if (Options.SourceRoot is null || Options.Target != CompilationTarget.Hosted || !Path.IsPathFullyQualified(Options.SourceRoot))
+        if (Options.SourceRoot is null ||
+            (Options.Target != CompilationTarget.Hosted && Options.DebugInformation == DebugInformationMode.None) ||
+            !Path.IsPathFullyQualified(Options.SourceRoot))
             return null;
         try
         {

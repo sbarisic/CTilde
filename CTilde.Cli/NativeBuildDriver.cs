@@ -4,9 +4,11 @@ using CTilde;
 
 namespace CTilde.Cli;
 
+internal sealed record NativeBuildOutcome(int ExitCode, string Backend, string? CompilerCommand, string? WslCompiler = null);
+
 internal static class NativeBuildDriver
 {
-    public static Task<int> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken) =>
+    public static Task<NativeBuildOutcome> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken) =>
         request.Target == CompilationTarget.Hosted
             ? HostedBuildDriver.BuildAsync(request, usesInlineAssembly, cancellationToken)
             : EspIdfBuildDriver.BuildAsync(request, cancellationToken);
@@ -14,7 +16,7 @@ internal static class NativeBuildDriver
 
 internal static class HostedBuildDriver
 {
-    public static async Task<int> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken)
+    public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(request.ExecutablePath!)!);
         var compiler = await ResolveCompilerAsync(request.Compiler, request.RootDirectory, cancellationToken);
@@ -27,7 +29,8 @@ internal static class HostedBuildDriver
             : await CompileGnuAsync(compiler, request, cancellationToken);
         if (result == 0 && request.Trace)
             Console.Error.WriteLine($"trace: wrote native executable {request.ExecutablePath}");
-        return result;
+        return new NativeBuildOutcome(result, compiler.Kind == HostedCompilerKind.Msvc ? "msvc" : "gdb",
+            compiler.Command, compiler.WslCompiler);
     }
 
     private static async Task<HostedCompiler> ResolveCompilerAsync(string configured, string workingDirectory, CancellationToken cancellationToken)
@@ -196,7 +199,7 @@ internal static class HostedBuildDriver
             prefix = ["--exec", compiler.WslCompiler!];
         }
         var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new[] { "-O0", "-g" }
+            ? new[] { "-Og", "-g", "-fno-omit-frame-pointer" }
             : ["-O2"];
         var common = new List<string> { "-std=gnu23" };
         common.AddRange(configuration);
@@ -311,7 +314,7 @@ internal static class HostedBuildDriver
 
 internal static class EspIdfBuildDriver
 {
-    public static async Task<int> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
+    public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
     {
         var project = request.EspIdfProjectDirectory!;
         if (!Directory.Exists(project) || !File.Exists(Path.Combine(project, "CMakeLists.txt")))
@@ -334,17 +337,55 @@ internal static class EspIdfBuildDriver
                 throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must register generated source '{generatedRelativePath}'.");
         }
 
+        var process = CreateIdfRequest(request, ["build"]);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: running ESP-IDF build in {project}");
+        var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
+        return new NativeBuildOutcome(result.ExitCode, "gdb", null);
+    }
+
+    public static async Task PrepareDebugLaunchAsync(BuildRequest request, CancellationToken cancellationToken)
+    {
+        var project = request.EspIdfProjectDirectory!;
+        ValidateDebugConfiguration(project);
+        var process = CreateIdfRequest(request, ["-p", request.SerialPort!, "flash"]);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: flashing ESP-IDF debug firmware to {request.SerialPort}");
+        var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
+        if (result.ExitCode != 0)
+            throw new NativeBuildException($"ESP-IDF debug flash failed with exit code {result.ExitCode}.");
+    }
+
+    private static void ValidateDebugConfiguration(string project)
+    {
+        var sdkconfig = Path.Combine(project, "sdkconfig");
+        if (!File.Exists(sdkconfig))
+            throw new NativeBuildException($"ESP-IDF debug configuration was not generated: {sdkconfig}");
+        var settings = File.ReadAllLines(sdkconfig).ToHashSet(StringComparer.Ordinal);
+        foreach (var required in new[]
+        {
+            "CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME=y",
+            "CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y",
+            "CONFIG_COMPILER_OPTIMIZATION_DEBUG=y",
+        })
+            if (!settings.Contains(required))
+                throw new NativeBuildException($"ESP-IDF runtime debugging requires '{required}' in sdkconfig.");
+    }
+
+    private static NativeProcessRequest CreateIdfRequest(BuildRequest request, IReadOnlyList<string> arguments)
+    {
+        var project = request.EspIdfProjectDirectory!;
         var idfCommand = NativeToolDiscovery.FindOnPath("idf.py");
         NativeProcessRequest process;
         if (idfCommand is not null)
         {
             process = OperatingSystem.IsWindows()
-                ? CreateWindowsPythonRequest(idfCommand, project)
-                : new NativeProcessRequest(idfCommand, ["build"], project);
+                ? CreateWindowsPythonRequest(idfCommand, project, arguments)
+                : new NativeProcessRequest(idfCommand, arguments, project);
         }
         else
         {
-            var activeRequest = CreateActiveEnvironmentRequest(project, request.EspIdfPath);
+            var activeRequest = CreateActiveEnvironmentRequest(project, request.EspIdfPath, arguments);
             if (activeRequest is not null)
                 process = activeRequest;
             else
@@ -352,16 +393,13 @@ internal static class EspIdfBuildDriver
                 var idfPath = request.EspIdfPath ?? Environment.GetEnvironmentVariable("IDF_PATH");
                 if (string.IsNullOrWhiteSpace(idfPath) || !Directory.Exists(idfPath))
                     throw new NativeBuildException("ESP-IDF tools are not active. Open an ESP-IDF terminal or pass --idf-path.");
-                process = CreateActivatedRequest(Path.GetFullPath(idfPath), project);
+                process = CreateActivatedRequest(Path.GetFullPath(idfPath), project, arguments);
             }
         }
-        if (request.Trace)
-            Console.Error.WriteLine($"trace: running ESP-IDF build in {project}");
-        var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
-        return result.ExitCode;
+        return process;
     }
 
-    private static NativeProcessRequest? CreateActiveEnvironmentRequest(string project, string? requestedIdfPath)
+    private static NativeProcessRequest? CreateActiveEnvironmentRequest(string project, string? requestedIdfPath, IReadOnlyList<string> arguments)
     {
         var idfPath = Environment.GetEnvironmentVariable("IDF_PATH");
         var pythonEnvironment = Environment.GetEnvironmentVariable("IDF_PYTHON_ENV_PATH");
@@ -375,26 +413,29 @@ internal static class EspIdfBuildDriver
             ? Path.Combine(pythonEnvironment, "Scripts", "python.exe")
             : Path.Combine(pythonEnvironment, "bin", "python");
         return File.Exists(idfScript) && File.Exists(python)
-            ? new NativeProcessRequest(python, [idfScript, "build"], project)
+            ? new NativeProcessRequest(python, [idfScript, .. arguments], project)
             : null;
     }
 
-    private static NativeProcessRequest CreateWindowsPythonRequest(string idfCommand, string project)
+    private static NativeProcessRequest CreateWindowsPythonRequest(string idfCommand, string project, IReadOnlyList<string> arguments)
     {
         var python = NativeToolDiscovery.FindOnPath("python") ?? NativeToolDiscovery.FindOnPath("python.exe");
         if (python is null)
             throw new NativeBuildException("idf.py was found, but its Python interpreter was not available.");
-        return new NativeProcessRequest(python, [idfCommand, "build"], project);
+        return new NativeProcessRequest(python, [idfCommand, .. arguments], project);
     }
 
-    private static NativeProcessRequest CreateActivatedRequest(string idfPath, string project)
+    private static NativeProcessRequest CreateActivatedRequest(string idfPath, string project, IReadOnlyList<string> arguments)
     {
         if (OperatingSystem.IsWindows())
         {
             var exportScript = Path.Combine(idfPath, "export.ps1");
-            if (!File.Exists(exportScript))
+            var eimProfile = EspIdfEnvironment.FindWindowsProfile(idfPath);
+            if (eimProfile is null && !File.Exists(exportScript))
                 throw new NativeBuildException($"ESP-IDF activation script was not found: {exportScript}");
-            var script = $"$ErrorActionPreference='Stop'; . '{PowerShellQuote(exportScript)}' | Out-Host; & idf.py build; exit $LASTEXITCODE";
+            var windowsIdfArguments = string.Join(' ', arguments.Select(argument => $"'{PowerShellQuote(argument)}'"));
+            var activation = eimProfile ?? exportScript;
+            var script = $"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; . '{PowerShellQuote(activation)}' 6>$null; & idf.py {windowsIdfArguments}; exit $LASTEXITCODE";
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
             return new NativeProcessRequest("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], project);
         }
@@ -403,7 +444,8 @@ internal static class EspIdfBuildDriver
         if (!File.Exists(export))
             throw new NativeBuildException($"ESP-IDF activation script was not found: {export}");
         var shell = NativeToolDiscovery.FindOnPath("bash") ?? throw new NativeBuildException("bash is required to activate ESP-IDF.");
-        return new NativeProcessRequest(shell, ["-lc", $"source {ShellQuote(export)} >/dev/null && exec idf.py build"], project);
+        var idfArguments = string.Join(' ', arguments.Select(ShellQuote));
+        return new NativeProcessRequest(shell, ["-lc", $"source {ShellQuote(export)} >/dev/null && exec idf.py {idfArguments}"], project);
     }
 
     private static string PowerShellQuote(string value) => value.Replace("'", "''", StringComparison.Ordinal);

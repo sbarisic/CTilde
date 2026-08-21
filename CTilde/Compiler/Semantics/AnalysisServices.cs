@@ -41,6 +41,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     public bool UsesExceptions { get; private set; }
+    public bool EmitDebugInformation => false;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -245,6 +246,11 @@ internal sealed class AnalysisServices : ILoweringServices
                 : syntax.Source.FilePath.Replace('\\', '/');
         return $"\"{CEmitter.EscapeCString(path)}\", {syntax.Source.GetLocation(syntax.Span).Line}";
     }
+
+    public string DebugSourceDirective(SyntaxNode syntax) => string.Empty;
+    public string DebugGeneratedDirective() => string.Empty;
+    public void RegisterDebugExecutable(MethodSymbol method, SyntaxNode syntax) { }
+    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local) { }
 
     public string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch)
     {

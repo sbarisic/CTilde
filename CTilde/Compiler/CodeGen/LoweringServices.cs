@@ -9,6 +9,7 @@ internal interface ILoweringServices
     AllocationEffectRegistry AllocationEffects { get; }
     IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses { get; }
     IEnumerable<string> DynamicGeneratedSymbols { get; }
+    bool EmitDebugInformation { get; }
 
     string CTypeName(CType type);
     string CDeclaration(CType type, string name);
@@ -20,6 +21,10 @@ internal interface ILoweringServices
     string DescriptorExpression(CType type);
     string RegisterString(string value);
     string SourceArgument(SyntaxNode syntax);
+    string DebugSourceDirective(SyntaxNode syntax);
+    string DebugGeneratedDirective();
+    void RegisterDebugExecutable(MethodSymbol method, SyntaxNode syntax);
+    void RegisterDebugLocal(MethodSymbol method, LocalSymbol local);
     string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch);
     string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method);
     string DirectDeferThunkName(MethodSymbol method, int id);

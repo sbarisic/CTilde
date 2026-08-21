@@ -6,6 +6,13 @@ public enum CompilationTarget
     EspIdf,
 }
 
+public enum DebugInformationMode
+{
+    None,
+    Source,
+}
+
 public sealed record CompilationOptions(
     CompilationTarget Target = CompilationTarget.Hosted,
-    string? SourceRoot = null);
+    string? SourceRoot = null,
+    DebugInformationMode DebugInformation = DebugInformationMode.None);

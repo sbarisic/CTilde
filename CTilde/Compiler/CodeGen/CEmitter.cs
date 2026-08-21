@@ -9,7 +9,20 @@ namespace CTilde;
 internal sealed record CEmitterOutput(
     string Unity,
     ImmutableArray<GeneratedCArtifact> Artifacts,
-    string SymbolMap);
+    string SymbolMap,
+    string DebugMap);
+
+internal sealed record DebugLocalEntry(
+    MethodSymbol Method,
+    string Name,
+    string Storage,
+    string Type,
+    bool Durable,
+    string File,
+    int Line,
+    int Column,
+    int SpanStart,
+    int SpanLength);
 
 internal sealed partial class CEmitter : ILoweringServices
 {
@@ -28,6 +41,9 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private readonly string? _sourceRoot;
+    private readonly DebugInformationMode _debugInformation;
+    private readonly List<DebugLocalEntry> _debugLocals = [];
+    private readonly Dictionary<MethodSymbol, HashSet<(string File, int Line, int Column, int Start, int Length)>> _debugExecutable = [];
     private bool _usesExceptions = true;
     private bool _usesHostedIo;
     private bool _usesNativeIntegers;
@@ -35,12 +51,14 @@ internal sealed partial class CEmitter : ILoweringServices
     private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
-    public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
+    public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null,
+        DebugInformationMode debugInformation = DebugInformationMode.None)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
         _sourceRoot = sourceRoot;
+        _debugInformation = debugInformation;
         foreach (var type in model.Types.Values)
         {
             foreach (var field in type.Fields)
@@ -69,6 +87,7 @@ internal sealed partial class CEmitter : ILoweringServices
     public DiagnosticBag Diagnostics { get; }
     public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
+    public bool EmitDebugInformation => _debugInformation == DebugInformationMode.Source;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
     private bool HasExports => _reachableMethods.Any(method => method.ExportName is not null);
 
@@ -201,8 +220,9 @@ internal sealed partial class CEmitter : ILoweringServices
         var output = writer.ToString();
         var unity = MarkUnusedDefinitions(output);
         var symbolMap = EmitSymbolMapJson(program);
-        var artifacts = BuildModularArtifacts(prefix.ToString(), suffix.ToString(), definitions, runtimeHeader, symbolMap);
-        return new CEmitterOutput(unity, artifacts, symbolMap);
+        var debugMap = EmitDebugInformation ? EmitDebugMapJson(program) : string.Empty;
+        var artifacts = BuildModularArtifacts(prefix.ToString(), suffix.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
+        return new CEmitterOutput(unity, artifacts, symbolMap, debugMap);
     }
 
     private ImmutableArray<GeneratedCArtifact> BuildModularArtifacts(
@@ -210,7 +230,8 @@ internal sealed partial class CEmitter : ILoweringServices
         string suffix,
         ImmutableArray<(IrFunction Function, string Text)> definitions,
         string runtimeHeader,
-        string symbolMap)
+        string symbolMap,
+        string debugMap)
     {
         var artifacts = ImmutableArray.CreateBuilder<GeneratedCArtifact>();
         var definitionNames = definitions.Select(definition => definition.Function.Property is null
@@ -227,6 +248,11 @@ internal sealed partial class CEmitter : ILoweringServices
             .Where(name => name is not null)
             .Cast<string>()
             .ToHashSet(StringComparer.Ordinal);
+        if (EmitDebugInformation)
+        {
+            externalRuntimeNames.Add("ct_debug_throw_hook");
+            externalRuntimeNames.Add("ct_debug_fatal_hook");
+        }
         var markedPrefix = MarkUnusedDefinitions(prefix);
         var internalHeader = BuildInternalHeader(markedPrefix, definitionNames, externalRuntimeNames);
         artifacts.Add(new GeneratedCArtifact("ctilde_runtime.h", runtimeHeader, GeneratedCArtifactKind.RuntimeHeader));
@@ -248,6 +274,8 @@ internal sealed partial class CEmitter : ILoweringServices
             ExternalizeDefinitions(MarkUnusedDefinitions(suffix), runtimeUnit: false);
         artifacts.Add(new GeneratedCArtifact("ctilde_entry.c", entry, GeneratedCArtifactKind.EntrySource));
         artifacts.Add(new GeneratedCArtifact("ctilde_symbols.json", symbolMap, GeneratedCArtifactKind.SymbolMap));
+        if (EmitDebugInformation)
+            artifacts.Add(new GeneratedCArtifact("ctilde_debug.json", debugMap, GeneratedCArtifactKind.DebugMap));
 
         var sources = artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.RuntimeSource or GeneratedCArtifactKind.NamespaceSource or GeneratedCArtifactKind.EntrySource)
             .Select(artifact => artifact.RelativePath)
@@ -414,6 +442,152 @@ internal sealed partial class CEmitter : ILoweringServices
             ["symbols"] = ordered,
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
     }
+
+    private string EmitDebugMapJson(TypedIrProgram program)
+    {
+        var functions = program.Functions
+            .Where(function => function.Method.ExternName is null)
+            .Select(function =>
+            {
+                var method = function.Method;
+                var cName = function.Property is null
+                    ? method.CName
+                    : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+                var locals = _debugLocals.Where(local => ReferenceEquals(local.Method, method))
+                    .OrderBy(local => local.SpanStart)
+                    .ThenBy(local => local.Storage, StringComparer.Ordinal)
+                    .Select(local => new Dictionary<string, object?>
+                    {
+                        ["name"] = local.Name,
+                        ["storage"] = local.Storage,
+                        ["type"] = local.Type,
+                        ["durable"] = local.Durable,
+                        ["source"] = DebugSourceEntry(local.File, local.Line, local.Column, local.SpanStart, local.SpanLength),
+                    }).ToArray();
+                var executable = _debugExecutable.GetValueOrDefault(method, [])
+                    .OrderBy(location => location.File, StringComparer.Ordinal)
+                    .ThenBy(location => location.Line)
+                    .ThenBy(location => location.Column)
+                    .Select(location => DebugSourceEntry(location.File, location.Line, location.Column, location.Start, location.Length))
+                    .ToArray();
+                return new Dictionary<string, object?>
+                {
+                    ["name"] = cName,
+                    ["displayName"] = DebugMethodDisplayName(method, function.Property, function.IsGetter),
+                    ["returnType"] = method.ReturnType.DisplayName,
+                    ["source"] = method.Syntax is null ? null : DebugSourceEntry(method.Syntax),
+                    ["receiver"] = method.IsStatic || method.IsConstructor ? null : "ct_self",
+                    ["receiverType"] = method.IsStatic || method.IsConstructor ? null : method.ContainingType.FullName,
+                    ["parameters"] = method.Parameters.Select(parameter => new Dictionary<string, object?>
+                    {
+                        ["name"] = parameter.Name,
+                        ["storage"] = NameMangler.Identifier(parameter.Name),
+                        ["type"] = parameter.Type.DisplayName,
+                        ["passing"] = parameter.PassingKind.ToString().ToLowerInvariant(),
+                    }).ToArray(),
+                    ["locals"] = locals,
+                    ["executable"] = executable,
+                };
+            })
+            .OrderBy(function => (string)function["name"]!, StringComparer.Ordinal)
+            .ToArray();
+
+        var types = EmittedTypes.OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .Select(type => new Dictionary<string, object?>
+            {
+                ["name"] = type.FullName,
+                ["storage"] = NameMangler.Type(type),
+                ["kind"] = type.Kind.ToString().ToLowerInvariant(),
+                ["base"] = type.BaseType?.FullName,
+                ["source"] = type.Syntax is null ? null : DebugSourceEntry(type.Syntax),
+                ["values"] = type.EnumValues.OrderBy(value => value.Value).ThenBy(value => value.Name, StringComparer.Ordinal)
+                    .Select(value => new Dictionary<string, object?>
+                    {
+                        ["name"] = value.Name,
+                        ["value"] = value.Value.ToString(CultureInfo.InvariantCulture),
+                    }).ToArray(),
+                ["fields"] = type.Fields.Where(field => field.Name != "<underlying>")
+                    .OrderBy(field => field.Name, StringComparer.Ordinal)
+                    .Select(field => new Dictionary<string, object?>
+                    {
+                        ["name"] = field.Name,
+                        ["storage"] = field.CName,
+                        ["type"] = field.Type.DisplayName,
+                        ["static"] = field.IsStatic,
+                    }).ToArray(),
+            }).ToArray();
+        var arrays = _arrayTypes.OrderBy(type => type.DisplayName, StringComparer.Ordinal)
+            .Select(type => new Dictionary<string, object?>
+            {
+                ["type"] = type.DisplayName,
+                ["storage"] = CTypeName(type),
+                ["elementType"] = type.ElementType!.DisplayName,
+            }).ToArray();
+        var boxes = _boxedTypes.OrderBy(type => type.DisplayName, StringComparer.Ordinal)
+            .Select(type => new Dictionary<string, object?>
+            {
+                ["type"] = type.DisplayName,
+                ["storage"] = BoxName(type),
+                ["valueType"] = type.DisplayName,
+            }).ToArray();
+        var fileSet = new HashSet<string>(_debugLocals.Select(local => local.File), StringComparer.Ordinal);
+        foreach (var function in functions)
+        {
+            if (function["source"] is Dictionary<string, object?> source)
+                fileSet.Add((string)source["file"]!);
+            foreach (var executableSource in (Dictionary<string, object?>[])function["executable"]!)
+                fileSet.Add((string)executableSource["file"]!);
+        }
+        foreach (var type in types)
+            if (type["source"] is Dictionary<string, object?> source)
+                fileSet.Add((string)source["file"]!);
+        var files = fileSet.OrderBy(file => file, StringComparer.Ordinal).ToArray();
+        var entryPoint = program.Functions.FirstOrDefault(function => function.Method.IsEntryPoint)?.Method.CName;
+        return JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["generator"] = "C~ draft 0.14",
+            ["version"] = 1,
+            ["runtimeAbi"] = 14,
+            ["files"] = files,
+            ["functions"] = functions,
+            ["types"] = types,
+            ["arrays"] = arrays,
+            ["boxes"] = boxes,
+            ["entryPoint"] = entryPoint,
+            ["runtimeHooks"] = new Dictionary<string, object?>
+            {
+                ["throw"] = "ct_debug_throw_hook",
+                ["fatal"] = "ct_debug_fatal_hook",
+            },
+        }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
+    private static string DebugMethodDisplayName(MethodSymbol method, PropertySymbol? property, bool getter)
+    {
+        if (property is not null)
+            return $"{property.ContainingType.FullName}.{property.Name}.{(getter ? "get" : "set")}";
+        if (method.IsConstructor)
+            return $"{method.ContainingType.FullName}.{method.ContainingType.Name}";
+        if (method.IsOperator)
+            return $"{method.ContainingType.FullName}.operator {OperatorFacts.DisplayName(method.OperatorKind)}";
+        return $"{method.ContainingType.FullName}.{method.Name}";
+    }
+
+    private Dictionary<string, object?> DebugSourceEntry(SyntaxNode syntax)
+    {
+        var location = syntax.Source.GetLocation(syntax.Span);
+        return DebugSourceEntry(NormalizeDebugPath(syntax.Source.FilePath), location.Line, location.Column,
+            syntax.Span.Start, syntax.Span.Length);
+    }
+
+    private static Dictionary<string, object?> DebugSourceEntry(string file, int line, int column, int start, int length) => new()
+    {
+        ["file"] = file,
+        ["line"] = line,
+        ["column"] = column,
+        ["spanStart"] = start,
+        ["spanLength"] = length,
+    };
 
     private static Dictionary<string, object?> SymbolMapEntry(string name, string identity, string kind, string signature, SyntaxNode? syntax)
     {
@@ -717,6 +891,55 @@ internal sealed partial class CEmitter : ILoweringServices
                 ? Path.GetRelativePath(_sourceRoot, Path.GetFullPath(syntax.Source.FilePath)).Replace('\\', '/')
                 : syntax.Source.FilePath.Replace('\\', '/');
         return $"\"{EscapeCString(path)}\", {syntax.Source.GetLocation(syntax.Span).Line}";
+    }
+
+    public string DebugSourceDirective(SyntaxNode syntax)
+    {
+        if (!EmitDebugInformation)
+            return string.Empty;
+        var location = syntax.Source.GetLocation(syntax.Span);
+        return $"#line {location.Line} \"{EscapeCString(NormalizeDebugPath(syntax.Source.FilePath))}\"";
+    }
+
+    public string DebugGeneratedDirective() => EmitDebugInformation
+        ? "#line 1 \"<ctilde-generated>\""
+        : string.Empty;
+
+    public void RegisterDebugExecutable(MethodSymbol method, SyntaxNode syntax)
+    {
+        if (!EmitDebugInformation)
+            return;
+        if (!_debugExecutable.TryGetValue(method, out var locations))
+        {
+            locations = [];
+            _debugExecutable.Add(method, locations);
+        }
+        var location = syntax.Source.GetLocation(syntax.Span);
+        locations.Add((NormalizeDebugPath(syntax.Source.FilePath), location.Line, location.Column,
+            syntax.Span.Start, syntax.Span.Length));
+    }
+
+    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local)
+    {
+        if (!EmitDebugInformation)
+            return;
+        var location = local.Syntax.Source.GetLocation(local.Syntax.Span);
+        var entry = new DebugLocalEntry(method, local.Name, local.CName, local.Type.DisplayName, local.IsDurable,
+            NormalizeDebugPath(local.Syntax.Source.FilePath), location.Line, location.Column,
+            local.Syntax.Span.Start, local.Syntax.Span.Length);
+        if (!_debugLocals.Contains(entry))
+            _debugLocals.Add(entry);
+    }
+
+    private string NormalizeDebugPath(string path)
+    {
+        if (_sourceRoot is not null && Path.IsPathFullyQualified(path))
+        {
+            var relative = Path.GetRelativePath(_sourceRoot, Path.GetFullPath(path));
+            if (relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathRooted(relative))
+                return relative.Replace('\\', '/');
+        }
+        return path.Replace('\\', '/');
     }
 
     public string DirectDeferThunkName(MethodSymbol method, int id) =>

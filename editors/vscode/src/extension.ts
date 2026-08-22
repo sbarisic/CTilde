@@ -175,6 +175,7 @@ interface PreparedDebugTarget {
     readonly workingDirectory: string;
     readonly serialPort?: string;
     readonly baudRate?: number;
+    readonly memoryDiagnostics?: 'off' | 'objects' | 'guarded';
 }
 
 class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
@@ -242,6 +243,9 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
             const compilerSettings = vscode.workspace.getConfiguration('ctilde.compiler', projectResource);
             const serialPort = stringSetting(supplied.serialPort, debuggerSettings.get<string>('serialPort', ''));
             const baudRate = positiveNumber(supplied.baudRate, debuggerSettings.get<number>('baudRate', 115200));
+            const memoryDiagnostics = request === 'launch'
+                ? memoryDiagnosticSetting(supplied.memoryDiagnostics, debuggerSettings.get<string>('memoryDiagnostics', 'objects'))
+                : undefined;
             if (target === 'esp-idf' && serialPort.length === 0)
                 throw new Error('ESP-IDF debugging requires ctilde.debugger.serialPort or serialPort in launch.json.');
 
@@ -250,6 +254,8 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
             const descriptorName = createHash('sha256').update(path.resolve(project)).digest('hex').slice(0, 16) + '.json';
             const descriptor = path.join(descriptorDirectory, descriptorName);
             const args = [...launch.prefixArguments, '--project', project, '--prepare-debug', request, '--debug-target', descriptor];
+            if (memoryDiagnostics !== undefined)
+                args.push('--debug-memory', memoryDiagnostics);
             if (target === 'hosted') {
                 const compiler = compilerSettings.get<string>('nativeCompiler', '').trim();
                 if (request === 'launch' && compiler.length !== 0)
@@ -290,6 +296,7 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                 gdbPath: stringSetting(supplied.gdbPath, debuggerSettings.get<string>('gdbPath', '')),
                 serialPort,
                 baudRate,
+                memoryDiagnostics: request === 'attach' ? prepared.memoryDiagnostics : memoryDiagnostics,
                 showRuntimeFrames: supplied.showRuntimeFrames ?? debuggerSettings.get<boolean>('showRuntimeFrames', false),
                 cwd: stringSetting(supplied.cwd, prepared.workingDirectory),
                 processId: request === 'attach' && target === 'hosted'
@@ -319,6 +326,13 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
             });
         });
     }
+}
+
+function memoryDiagnosticSetting(supplied: unknown, configured: string): 'off' | 'objects' | 'guarded' {
+    const value = typeof supplied === 'string' && supplied.length !== 0 ? supplied : configured;
+    if (value === 'off' || value === 'objects' || value === 'guarded')
+        return value;
+    throw new Error(`Invalid C~ memory diagnostics mode '${value}'. Expected off, objects, or guarded.`);
 }
 
 function stringSetting(value: unknown, fallback: string): string {

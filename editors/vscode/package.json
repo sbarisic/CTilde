@@ -45,14 +45,14 @@
   ],
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('out',{recursive:true,force:true});require('fs').rmSync('server',{recursive:true,force:true});require('fs').rmSync('compiler',{recursive:true,force:true})\"",
-    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/debugAdapter.ts --bundle --platform=node --format=cjs --outfile=./out/debugAdapter.js && esbuild ./src/serverDevelopment.ts --bundle --platform=node --format=cjs --outfile=./out/serverDevelopment.js && esbuild ./src/projectBuild.ts --bundle --platform=node --format=cjs --outfile=./out/projectBuild.js && esbuild ./src/gdbMi.ts --bundle --platform=node --format=cjs --outfile=./out/gdbMi.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
+    "compile": "tsc -p ./tsconfig.json --noEmit && esbuild ./src/extension.ts --bundle --platform=node --format=cjs --external:vscode --outfile=./out/extension.js && esbuild ./src/debugAdapter.ts --bundle --platform=node --format=cjs --outfile=./out/debugAdapter.js && esbuild ./src/debugModel.ts --bundle --platform=node --format=cjs --outfile=./out/debugModel.js && esbuild ./src/serverDevelopment.ts --bundle --platform=node --format=cjs --outfile=./out/serverDevelopment.js && esbuild ./src/projectBuild.ts --bundle --platform=node --format=cjs --outfile=./out/projectBuild.js && esbuild ./src/gdbMi.ts --bundle --platform=node --format=cjs --outfile=./out/gdbMi.js && esbuild ./src/test/runTest.ts --bundle --platform=node --format=cjs --packages=external --outfile=./out/test/runTest.js && esbuild ./src/test/suite/index.ts --bundle --platform=node --format=cjs --external:vscode --packages=external --outfile=./out/test/suite/index.js",
     "build:server": "dotnet publish ../../CTilde.LanguageServer/CTilde.LanguageServer.csproj -c Release --no-self-contained -o ./server",
     "build:compiler": "dotnet publish ../../CTilde.Cli/CTilde.Cli.csproj -c Release --no-self-contained -o ./compiler",
     "build": "npm run compile && npm run build:server && npm run build:compiler",
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies",
     "test": "npm run compile && npm run test:client && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run build:compiler && npm run test:server",
-    "test:client": "node --test ./tests/server-development.test.mjs ./tests/project-build.test.mjs ./tests/gdb-mi.test.mjs",
+    "test:client": "node --test ./tests/server-development.test.mjs ./tests/project-build.test.mjs ./tests/gdb-mi.test.mjs ./tests/debug-model.test.mjs",
     "test:metadata": "node --test ./tests/metadata.test.mjs",
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
     "test:sources": "node --test ./tests/source-tokenization.test.mjs",
@@ -177,11 +177,18 @@
           "scope": "machine",
           "description": "UART baud rate used while handing an ESP-IDF target to GDB."
         },
+        "ctilde.debugger.memoryDiagnostics": {
+          "type": "string",
+          "enum": ["off", "objects", "guarded"],
+          "default": "objects",
+          "scope": "machine",
+          "description": "ARC diagnostics for newly prepared instrumented debug images. Objects tracks live allocations; guarded also adds canaries, poisoning, and bounded quarantine."
+        },
         "ctilde.debugger.showRuntimeFrames": {
           "type": "boolean",
           "default": false,
           "scope": "window",
-          "description": "Show generated C~, ARC, and runtime frames in C~ debugger call stacks."
+          "description": "Show generated C~, ARC, and runtime frames plus raw logical-probe trap reports."
         }
       }
     },
@@ -243,6 +250,11 @@
                 "type": "number",
                 "default": 115200,
                 "minimum": 1
+              },
+              "memoryDiagnostics": {
+                "type": "string",
+                "enum": ["off", "objects", "guarded"],
+                "default": "objects"
               }
             }
           },
@@ -301,7 +313,8 @@
             "stopAtEntry": false,
             "showRuntimeFrames": false,
             "serialPort": "",
-            "baudRate": 115200
+            "baudRate": 115200,
+            "memoryDiagnostics": "objects"
           },
           {
             "type": "ctilde",

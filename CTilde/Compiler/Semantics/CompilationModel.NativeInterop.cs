@@ -35,6 +35,8 @@ internal sealed partial class CompilationModel
             "ct_thread_state", "ct_thread_current_state", "ct_thread_current", "ct_thread_set_current", "ct_thread_require_attached", "ct_thread_attach_primary",
             "ct_thread_publish_ready", "ct_thread_begin_shutdown", "ct_thread_state_deleted", "ct_thread_attach", "ct_thread_detach", "ct_runtime_phase", "ct_attached_thread_count",
             "ct_runtime_initialize", "ct_runtime_shutdown", "ct_runtime_test_fail_allocation_after",
+            "ct_debug_control", "ct_debug_site", "ct_debug_keep", "ct_debug_method_enter", "ct_debug_method_leave", "ct_debug_throw_hook", "ct_debug_fatal_hook",
+            "ct_debug_wait_for_client", "ct_debug_startup_probe", "ct_debug_live_head", "ct_debug_live_count", "ct_debug_allocation_count", "ct_debug_final_release_count",
         };
         var generatedSymbols = new HashSet<string>(StringComparer.Ordinal);
         foreach (var type in Types.Values)

@@ -47,6 +47,7 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly bool _isGetter;
     private readonly string _temporaryPrefix;
     private readonly Stack<Dictionary<string, LocalSymbol>> _scopes = [];
+    private readonly Stack<int> _debugScopeEnds = [];
     private readonly Stack<string> _cleanupBoundaries = [];
     private readonly Stack<string> _breakCleanupBoundaries = [];
     private readonly Stack<string> _continueCleanupBoundaries = [];
@@ -99,9 +100,12 @@ internal sealed partial class TypedIrBodyLowerer
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
+        _debugScopeEnds.Push(method.Body?.Span.End ?? method.Syntax?.Span.End ?? int.MaxValue);
         _cleanupBoundaries.Push("ct_cleanup_method");
         _externUseStart = _emitter.ExternUses.Count();
         _tryCount = CountTryStatements(method.Body) + (_analysisOnly ? CountDeferStatements(method.Body) : 0);
+        if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+            _cleanupRecords.Add("ct_cleanup_debug_frame");
         if (_tryCount != 0)
         {
             for (var index = 0; index < method.Parameters.Length; index++)
@@ -120,6 +124,7 @@ internal sealed partial class TypedIrBodyLowerer
         {
             body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
             body.WriteLine("(void)ct_cleanup_method;");
+            EmitDebugMethodEnter(body);
             EmitConstructorPrologue(body);
             EmitExceptionFrameStorage(body);
             EmitDurableParameterStorage(body);
@@ -201,6 +206,7 @@ internal sealed partial class TypedIrBodyLowerer
         {
             body.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
             body.WriteLine("(void)ct_cleanup_method;");
+            EmitDebugMethodEnter(body);
             body.WriteLine("(void)ct_self;");
             EmitExceptionFrameStorage(body);
             EmitDurableParameterStorage(body);
@@ -236,7 +242,7 @@ internal sealed partial class TypedIrBodyLowerer
             _emitter.RegisterDirectDeferState(_method, _durableSlots, _directDefers);
         if (_emitter.EmitDebugInformation && _method.Syntax is not null)
             writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
-        writer.WriteLine(signature);
+        writer.WriteLine($"{(_emitter.EmitDebugInstrumentation ? "CT_DEBUG_USER_NOINLINE " : string.Empty)}{signature}");
         using (writer.Block())
         {
             if (_emitter.EmitDebugInformation)
@@ -264,6 +270,32 @@ internal sealed partial class TypedIrBodyLowerer
         }
         writer.WriteLine();
         return writer.ToString() ?? string.Empty;
+    }
+
+    private void EmitDebugMethodEnter(ILoweringWriter writer)
+    {
+        if (!_emitter.EmitDebugInstrumentation || _analysisOnly)
+            return;
+        writer.WriteLine("ct_debug_method_frame ct_debug_frame = {0};");
+        writer.WriteLine("ct_debug_method_enter(&ct_debug_frame);");
+        writer.WriteLine("ct_cleanup_push(&ct_cleanup_debug_frame, (void*)&ct_debug_frame, ct_debug_method_leave);");
+        if (!_method.IsStatic && !_method.IsConstructor)
+            writer.WriteLine("ct_debug_keep((void*)&ct_self);");
+        foreach (var parameter in _method.Parameters)
+        {
+            var name = NameMangler.Identifier(parameter.Name);
+            writer.WriteLine(parameter.Type.IsNativeBuffer
+                ? $"ct_debug_keep((void*)&{name}_data); ct_debug_keep((void*)&{name}_length);"
+                : $"ct_debug_keep((void*)&{name});");
+        }
+        var source = _method.Syntax ?? _method.Body;
+        if (source is not null)
+        {
+            var site = _emitter.RegisterDebugSite(_method, source, "entry");
+            writer.WriteLine(_emitter.DebugSourceDirective(source));
+            writer.WriteLine($"ct_debug_site(UINT32_C({site}));");
+            writer.WriteLine(_emitter.DebugGeneratedDirective());
+        }
     }
 
     private string OptimizeGeneratedBody(string body)

@@ -161,6 +161,11 @@ internal static partial class ConformanceTests
                     private static int Increment(int value)
                     {
                         int result = value + 1;
+                        int[] items = new int[1];
+                        foreach (int item in items)
+                        {
+                            result = result + item;
+                        }
                         return result;
                     }
 
@@ -168,7 +173,27 @@ internal static partial class ConformanceTests
                     public static void Main()
                     {
                         int answer = Increment(41);
-                        Console.WriteLine(answer);
+                        if (answer > 0)
+                        {
+                            answer = answer - 1;
+                        }
+                        else
+                        {
+                            answer = 0;
+                        }
+                        defer Console.WriteLine("done");
+                        try
+                        {
+                            throw new Exception("test");
+                        }
+                        catch (Exception error)
+                        {
+                            Console.WriteLine(error.Message);
+                        }
+                        finally
+                        {
+                            Console.WriteLine(answer);
+                        }
                     }
                 }
                 """;
@@ -190,6 +215,7 @@ internal static partial class ConformanceTests
                 Assert(generated.Contains("#line 1 \"<ctilde-generated>\"", StringComparison.Ordinal), "Generated runtime code did not reset source mapping.");
                 Assert(generated.Contains("ct_debug_throw_hook", StringComparison.Ordinal) && generated.Contains("ct_debug_fatal_hook", StringComparison.Ordinal), "Debug runtime hooks were not emitted.");
                 Assert(generated.Contains("uint32_t unhandled", StringComparison.Ordinal) && generated.Contains("ct_exception_top == NULL ? 1u : 0u", StringComparison.Ordinal), "The exception hook did not expose a stable 32-bit handled-state value.");
+                Assert(!generated.Contains("ct_debug_control_block", StringComparison.Ordinal) && !generated.Contains("ct_debug_live_head", StringComparison.Ordinal), "Source-only debugging unexpectedly emitted instrumentation overhead.");
                 var bundle = compilation.EmitCBundle();
                 Assert(bundle.Success, "Modular debug C emission failed.");
                 var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
@@ -197,10 +223,57 @@ internal static partial class ConformanceTests
                 Assert(!internalHeader.Contains("CT_DEBUG_NOINLINE static", StringComparison.Ordinal) && !internalHeader.Contains("static CT_DEBUG_NOINLINE static", StringComparison.Ordinal), "The modular debug header emitted a duplicate or internal hook declaration.");
                 Assert(runtimeSource.Contains("CT_DEBUG_NOINLINE void ct_debug_throw_hook", StringComparison.Ordinal), "The modular runtime omitted the external debug hook definition.");
                 Assert(debugMap == secondMapWriter.ToString(), "Debug-map emission was not deterministic.");
+                Assert(debugMap.Contains("\"version\": 2", StringComparison.Ordinal) && debugMap.Contains("\"instrumented\": false", StringComparison.Ordinal), "Source debug metadata did not use the v2 non-instrumented contract.");
                 Assert(debugMap.Contains("\"displayName\": \"Program.Increment\"", StringComparison.Ordinal), "The debug map omitted the source method name.");
                 Assert(debugMap.Contains("\"name\": \"result\"", StringComparison.Ordinal) && debugMap.Contains("\"storage\": \"ct_l_0\"", StringComparison.Ordinal), "The debug map omitted local storage metadata.");
                 Assert(debugMap.Contains("\"file\": \"src/Program.ct\"", StringComparison.Ordinal), "The debug map did not use a reproducible project-relative source path.");
                 Assert(!debugMap.Contains(root.Replace('\\', '/'), StringComparison.OrdinalIgnoreCase), "The deterministic debug map leaked an absolute source root.");
+
+                var instrumentedOptions = new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Objects);
+                var instrumentedCompilation = Compile(source, instrumentedOptions, sourcePath);
+                using var instrumentedWriter = new StringWriter();
+                using var instrumentedMapWriter = new StringWriter();
+                Assert(instrumentedCompilation.EmitC(instrumentedWriter).Success, "Instrumented C emission failed.");
+                Assert(instrumentedCompilation.EmitDebugMap(instrumentedMapWriter).Success, "Instrumented debug-map emission failed.");
+                var instrumented = instrumentedWriter.ToString();
+                var instrumentedMap = instrumentedMapWriter.ToString();
+                Assert(instrumented.Contains("ct_debug_control_block", StringComparison.Ordinal) && instrumented.Contains("ct_debug_site(UINT32_C(", StringComparison.Ordinal), "Instrumented emission omitted its logical-probe runtime or call sites.");
+                Assert(instrumented.Contains("ct_debug_live_head", StringComparison.Ordinal) && instrumented.Contains("ct_debug_object_initialized", StringComparison.Ordinal), "Object memory diagnostics were not emitted.");
+                Assert(instrumentedMap.Contains("\"instrumented\": true", StringComparison.Ordinal) && instrumentedMap.Contains("\"memoryDiagnostics\": \"objects\"", StringComparison.Ordinal), "Instrumented debug metadata omitted its mode contract.");
+                Assert(instrumentedMap.Contains("\"kind\": \"entry\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"call\"", StringComparison.Ordinal), "Instrumented debug metadata omitted method-entry or call probe sites.");
+                Assert(instrumentedMap.Contains("\"kind\": \"defer\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"catch\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"finally\"", StringComparison.Ordinal), "Instrumented debug metadata omitted cleanup or exception probe sites.");
+                Assert(instrumentedMap.Contains("\"scopes\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"liveStart\"", StringComparison.Ordinal), "Instrumented debug metadata omitted lexical lifetime information.");
+                using (var instrumentedDocument = System.Text.Json.JsonDocument.Parse(instrumentedMap))
+                {
+                    var locals = instrumentedDocument.RootElement.GetProperty("functions").EnumerateArray()
+                        .SelectMany(function => function.GetProperty("locals").EnumerateArray()).ToArray();
+                    var resultLocal = locals.Single(local => local.GetProperty("name").GetString() == "result");
+                    var resultSource = resultLocal.GetProperty("source");
+                    Assert(resultLocal.GetProperty("liveStart").GetInt32() == resultSource.GetProperty("spanStart").GetInt32() + resultSource.GetProperty("spanLength").GetInt32(), "An ordinary local became visible before its initializer completed.");
+                    var answerLocal = locals.Single(local => local.GetProperty("name").GetString() == "answer");
+                    var answerSource = answerLocal.GetProperty("source");
+                    Assert(answerLocal.GetProperty("liveStart").GetInt32() == answerSource.GetProperty("spanStart").GetInt32() + answerSource.GetProperty("spanLength").GetInt32(), "A call-initialized local became visible during its initializer.");
+                    var catchLocal = locals.Single(local => local.GetProperty("name").GetString() == "error");
+                    Assert(catchLocal.GetProperty("liveStart").GetInt32() == catchLocal.GetProperty("source").GetProperty("spanStart").GetInt32(), "A catch local was not visible after its owned exception slot was initialized.");
+                    var foreachLocal = locals.Single(local => local.GetProperty("name").GetString() == "item");
+                    var foreachSource = foreachLocal.GetProperty("source");
+                    Assert(foreachLocal.GetProperty("liveStart").GetInt32() > foreachSource.GetProperty("spanStart").GetInt32() && foreachLocal.GetProperty("liveEnd").GetInt32() <= foreachSource.GetProperty("spanStart").GetInt32() + foreachSource.GetProperty("spanLength").GetInt32(), "A foreach local escaped its active iteration body.");
+                }
+                Assert(!System.Text.RegularExpressions.Regex.IsMatch(instrumented, @"if \([^\r\n]+\)\r?\n\s+(?:#line|ct_debug_)", System.Text.RegularExpressions.RegexOptions.CultureInvariant), "A structural block probe separated a generated if statement from its body.");
+                var instrumentedBundle = instrumentedCompilation.EmitCBundle();
+                Assert(instrumentedBundle.Success, "Instrumented modular C emission failed.");
+                var instrumentedHeader = instrumentedBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+                var instrumentedRuntime = instrumentedBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
+                var instrumentedNamespaces = instrumentedBundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content).ToArray();
+                Assert(instrumentedHeader.Contains("extern ct_debug_control_block ct_debug_control;", StringComparison.Ordinal), "The modular debug header defined the shared control block instead of declaring it.");
+                Assert(instrumentedRuntime.Contains("ct_debug_control_block ct_debug_control =", StringComparison.Ordinal), "The modular runtime omitted the debug control-block definition.");
+                Assert(instrumentedNamespaces.All(content => !content.Contains("CT_DEBUG_USER_NOINLINE static ", StringComparison.Ordinal)), "An instrumented modular method retained internal linkage despite its shared declaration.");
+                var instrumentationOnly = Emit(source, new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Off), sourcePath);
+                Assert(instrumentationOnly.Contains("ct_debug_control_block", StringComparison.Ordinal) && !instrumentationOnly.Contains("ct_debug_live_head", StringComparison.Ordinal), "Instrumentation-only mode did not isolate optional ARC diagnostics.");
+                var guarded = Emit(source, new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Guarded), sourcePath);
+                Assert(guarded.Contains("UINT32_C(0xC71DE14D)", StringComparison.Ordinal) && guarded.Contains("ct_debug_quarantine_count > 16u", StringComparison.Ordinal) && guarded.Contains("ct_debug_quarantine_bytes > 32768u", StringComparison.Ordinal), "Guarded memory diagnostics omitted canaries or bounded quarantine checks.");
+                const string reservedDebugSymbol = "public static class Native { [Extern(\"ct_debug_control\")] public static int Read(); } public static class P { [EntryPoint] public static void Main() { } }";
+                Assert(Compile(reservedDebugSymbol).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A private debugger runtime symbol conflict was not diagnosed.");
 
                 var ordinary = Emit(source, path: sourcePath);
                 Assert(!ordinary.Contains("ct_debug_throw_hook", StringComparison.Ordinal) && !ordinary.Contains("<ctilde-generated>", StringComparison.Ordinal), "Ordinary emission unexpectedly enabled debug-only output.");
@@ -213,6 +286,8 @@ internal static partial class ConformanceTests
                 Assert(File.ReadAllText(Path.Combine(root, "cli-debug.json")).Contains("\"entryPoint\"", StringComparison.Ordinal), "CLI --debug-map did not write the deterministic debug map.");
                 var incompatible = RunProcess("dotnet", [cliDll, "src/Program.ct", "--check", "--debug-info"], workingDirectory: root);
                 Assert(incompatible.ExitCode == 2, "CLI --check accepted debug emission options.");
+                var invalidMemoryMode = RunProcess("dotnet", [cliDll, "src/Program.ct", "-o", "invalid.c", "--debug-memory", "objects"], workingDirectory: root);
+                Assert(invalidMemoryMode.ExitCode == 2, "CLI accepted --debug-memory outside debug Launch preparation.");
             }
             finally
             {

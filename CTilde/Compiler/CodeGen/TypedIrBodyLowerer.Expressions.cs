@@ -28,6 +28,8 @@ internal sealed partial class TypedIrBodyLowerer
             StackAllocExpressionSyntax stackAlloc => LowerStackAlloc(stackAlloc),
             _ => ErrorExpression(),
         };
+        if (syntax is CallExpressionSyntax && _emitter.EmitDebugInstrumentation && !_analysisOnly)
+            result.Prelude.Insert(0, $"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, syntax, "call")}));");
         return RecordSemantic(syntax, result);
     }
 

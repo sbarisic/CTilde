@@ -10,6 +10,7 @@ internal interface ILoweringServices
     IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses { get; }
     IEnumerable<string> DynamicGeneratedSymbols { get; }
     bool EmitDebugInformation { get; }
+    bool EmitDebugInstrumentation { get; }
 
     string CTypeName(CType type);
     string CDeclaration(CType type, string name);
@@ -24,7 +25,8 @@ internal interface ILoweringServices
     string DebugSourceDirective(SyntaxNode syntax);
     string DebugGeneratedDirective();
     void RegisterDebugExecutable(MethodSymbol method, SyntaxNode syntax);
-    void RegisterDebugLocal(MethodSymbol method, LocalSymbol local);
+    void RegisterDebugLocal(MethodSymbol method, LocalSymbol local, int liveStart, int? liveEnd);
+    int RegisterDebugSite(MethodSymbol method, SyntaxNode syntax, string kind);
     string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch);
     string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method);
     string DirectDeferThunkName(MethodSymbol method, int id);

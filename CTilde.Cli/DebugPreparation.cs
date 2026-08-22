@@ -48,7 +48,7 @@ internal static class DebugPreparation
         var descriptor = new Dictionary<string, object?>
         {
             ["generator"] = "C~ draft 0.14",
-            ["version"] = 1,
+            ["version"] = 2,
             ["runtimeAbi"] = 14,
             ["target"] = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf",
             ["backend"] = backend,
@@ -64,6 +64,8 @@ internal static class DebugPreparation
             ["espProject"] = request.EspIdfProjectDirectory,
             ["serialPort"] = request.SerialPort,
             ["baudRate"] = request.BaudRate,
+            ["instrumented"] = request.DebugInformation == CTilde.DebugInformationMode.Instrumented,
+            ["memoryDiagnostics"] = request.DebugMemory.ToString().ToLowerInvariant(),
             ["sources"] = sources,
         };
         WriteAtomically(request.DebugTargetPath!, JsonSerializer.Serialize(descriptor,
@@ -81,7 +83,8 @@ internal static class DebugPreparation
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
-            if (root.GetProperty("version").GetInt32() != 1 || root.GetProperty("runtimeAbi").GetInt32() != 14)
+            if (root.GetProperty("version").GetInt32() != 2 || root.GetProperty("runtimeAbi").GetInt32() != 14 ||
+                !root.GetProperty("instrumented").GetBoolean())
                 throw new NativeBuildException("Existing debug metadata was produced by an incompatible compiler/runtime. Run a debug Launch first.");
             var expectedTarget = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf";
             if (!root.GetProperty("target").GetString()!.Equals(expectedTarget, StringComparison.Ordinal))

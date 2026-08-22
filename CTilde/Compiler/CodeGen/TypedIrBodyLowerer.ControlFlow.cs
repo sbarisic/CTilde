@@ -135,6 +135,8 @@ internal sealed partial class TypedIrBodyLowerer
         _finallyContexts.Pop();
 
         writer.WriteLine($"{cleanup}:;");
+        if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+            writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, syntax.Finally!, "finally")}));");
         var protectedAssignments = SnapshotAssignments();
         RestoreAssignments(before);
         _finallyBarriers.Push((_breakLabels.Count, _continueLabels.Count));
@@ -235,8 +237,10 @@ internal sealed partial class TypedIrBodyLowerer
                 using (writer.Block())
                 {
                     RestoreAssignments(before);
-                    BeginScope(writer);
+                    BeginScope(writer, boundCatch.Syntax.Body.Span.End);
                     DeclareCatchLocal(writer, boundCatch, $"ct_caught_{id}");
+                    if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+                        writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, boundCatch.Syntax, "catch")}));");
                     _catchExceptions.Push($"ct_caught_{id}");
                     var catchFlow = EmitStatements(writer, boundCatch.Syntax.Body.Statements);
                     _catchExceptions.Pop();
@@ -315,7 +319,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsDurable = true,
         };
         _scopes.Peek()[symbol.Name] = symbol;
-        _emitter.RegisterDebugLocal(_method, symbol);
+        _emitter.RegisterDebugLocal(_method, symbol, boundCatch.Syntax.Span.Start, boundCatch.Syntax.Body.Span.End);
         RegisterDurableSlot(symbol.StorageName, symbol.Type);
         EmitActivateOwnedSlot(writer, symbol.Type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
         EmitInitializeOwnedSlot(writer, symbol.Type, symbol.CName, $"({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode}");
@@ -507,11 +511,12 @@ internal sealed partial class TypedIrBodyLowerer
         prelude.Add($"{slot} = {raw};");
     }
 
-    private void BeginScope(ILoweringWriter writer)
+    private void BeginScope(ILoweringWriter writer, int debugScopeEnd)
     {
         var boundary = EmitCleanupBoundary(writer, "scope");
         _cleanupBoundaries.Push(boundary);
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
+        _debugScopeEnds.Push(debugScopeEnd);
     }
 
     private string EmitCleanupBoundary(ILoweringWriter writer, string kind)
@@ -528,6 +533,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (fallsThrough)
             writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
         var scope = _scopes.Pop();
+        _debugScopeEnds.Pop();
         if (fallsThrough)
             foreach (var local in scope.Values.Where(local => local.NativeResourceState == NativeResourceState.Owned))
                 Report("CT1258", $"Owned native resource '{local.Name}' must be returned, consumed, retained, or scheduled with defer.", local.Syntax);

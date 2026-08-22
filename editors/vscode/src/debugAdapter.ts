@@ -4,7 +4,6 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import {
     Breakpoint,
-    BreakpointEvent,
     ContinuedEvent,
     Handles,
     InitializedEvent,
@@ -19,6 +18,7 @@ import {
 } from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { GdbMi, MiRecord, MiTuple, miArray, miString, miTuple } from './gdbMi';
+import { buildEnabledSiteWords, encodeDebugControlValue, espTrapResumeExpression, findExecutableSite, gdbResumeCommand, isTruthyGdbValue, parseHitCondition, resolveLogicalFrameSite, TargetConsoleBuffer } from './debugModel';
 
 const espSerialBridgeSource = [
     'import os,serial,sys,threading,time',
@@ -60,16 +60,28 @@ const espSerialBridgeSource = [
 ].join('\n');
 
 interface DebugSource { readonly file: string; readonly line: number; readonly column: number; }
-interface DebugVariable { readonly name: string; readonly storage: string; readonly type: string; readonly durable?: boolean; }
+interface DebugVariable {
+    readonly name: string;
+    readonly storage: string;
+    readonly type: string;
+    readonly durable?: boolean;
+    readonly scopeId?: number;
+    readonly liveStart?: number;
+    readonly liveEnd?: number;
+}
+interface DebugSite { readonly id: number; readonly kind: string; readonly source: DebugSource & { readonly spanStart?: number; readonly spanLength?: number }; }
+interface DebugScope { readonly id: number; readonly parent?: number; readonly source: DebugSource & { readonly spanStart?: number; readonly spanLength?: number }; }
 interface DebugFunction {
     readonly name: string;
     readonly displayName: string;
-    readonly source?: DebugSource;
+    readonly source?: DebugSource | null;
     readonly receiver?: string;
     readonly receiverType?: string;
     readonly parameters: readonly DebugVariable[];
     readonly locals: readonly DebugVariable[];
     readonly executable: readonly DebugSource[];
+    readonly sites: readonly DebugSite[];
+    readonly scopes?: readonly DebugScope[];
 }
 interface DebugTypeField { readonly name: string; readonly storage: string; readonly type: string; readonly static: boolean; }
 interface DebugType { readonly name: string; readonly storage: string; readonly kind: string; readonly base?: string; readonly fields: readonly DebugTypeField[]; readonly values?: readonly { name: string; value: string }[]; }
@@ -80,7 +92,9 @@ interface DebugMap {
     readonly functions: readonly DebugFunction[];
     readonly types: readonly DebugType[];
     readonly boxes?: readonly { type: string; storage: string; valueType: string }[];
-    readonly runtimeHooks: { readonly throw: string; readonly fatal: string };
+    readonly instrumented: boolean;
+    readonly memoryDiagnostics: 'off' | 'objects' | 'guarded';
+    readonly runtimeHooks: { readonly throw: string; readonly fatal: string; readonly control?: string; readonly trap?: string };
 }
 interface DebugTarget {
     readonly version: number;
@@ -96,6 +110,8 @@ interface DebugTarget {
     readonly espTarget?: string;
     readonly serialPort?: string;
     readonly baudRate?: number;
+    readonly instrumented: boolean;
+    readonly memoryDiagnostics: 'off' | 'objects' | 'guarded';
 }
 interface CTildeDebugArguments {
     readonly debugTarget: string;
@@ -108,22 +124,42 @@ interface CTildeDebugArguments {
     readonly gdbPath?: string;
     readonly serialPort?: string;
     readonly baudRate?: number;
+    readonly memoryDiagnostics?: 'off' | 'objects' | 'guarded';
 }
 interface VariableContainer {
     readonly expression: string;
     readonly type: string;
     readonly frameId: number;
 }
+interface LogicalBreakpoint {
+    readonly siteId: number;
+    readonly fn: DebugFunction;
+    readonly condition?: string;
+    readonly hitCondition?: number;
+    readonly logMessage?: string;
+    readonly temporary?: boolean;
+    hits: number;
+}
+
+const debugEventThrow = 1;
+const debugEventUnhandled = 2;
+const debugEventFatal = 4;
+const debugEventAllocation = 8;
+const debugEventRelease = 16;
+const debugEventLeak = 32;
+const debugEventStartup = 64;
 
 export class CTildeDebugSession extends LoggingDebugSession {
     private readonly gdb = new GdbMi();
     private readonly variableHandles = new Handles<VariableContainer>();
     private readonly frameLevels = new Map<number, number>();
     private readonly frameFunctions = new Map<number, DebugFunction | undefined>();
-    private readonly sourceBreakpoints = new Map<string, number[]>();
-    private functionBreakpoints: number[] = [];
-    private readonly logpoints = new Map<number, { message: string; fn?: DebugFunction }>();
-    private exceptionBreakpoints: number[] = [];
+    private readonly frameSites = new Map<number, DebugSite | undefined>();
+    private readonly sourceBreakpoints = new Map<string, LogicalBreakpoint[]>();
+    private functionBreakpoints: LogicalBreakpoint[] = [];
+    private readonly runtimeFunctionBreakpoints = new Set<string>();
+    private readonly temporaryBreakpoints = new Map<number, LogicalBreakpoint>();
+    private readonly dataBreakpoints = new Map<string, { id: number; thread: string; activation: string }>();
     private exceptionFilters = new Set<string>();
     private target: DebugTarget | undefined;
     private debugMap: DebugMap | undefined;
@@ -133,17 +169,44 @@ export class CTildeDebugSession extends LoggingDebugSession {
     private launchArguments: CTildeDebugArguments | undefined;
     private stoppedException: { id: string; description: string; breakMode: 'always' | 'unhandled' } | undefined;
     private espBridgePath: string | undefined;
-    private pendingRuntimeHook: 'throw' | 'fatal' | undefined;
-    private suppressNextRunningEvent = false;
+    private bootstrapBreakpoint: number | undefined;
+    private controlReady = false;
+    private targetRunning = false;
     private suppressNextTargetStop = false;
+    private pendingControlSync = false;
+    private resumeAfterControlSync = false;
+    private currentSite: DebugSite | undefined;
+    private currentThreadState = '0';
+    private currentActivation = '0';
+    private currentDepth = 0;
+    private currentStoppedThreadId = 0;
+    private pendingLogicalStep: { mode: 1 | 2 | 3; origin?: DebugSite; originFunction?: string; threadId: number } | undefined;
+    private readonly stopWaiters: (() => void)[] = [];
+    private disconnecting = false;
+    private translatingStop = false;
+    private readonly targetConsoleOutput = new TargetConsoleBuffer();
+    private readonly controlAddresses = new Map<string, string>();
 
     public constructor() {
         super('ctilde-debug.txt');
         this.setDebuggerLinesStartAt1(true);
         this.setDebuggerColumnsStartAt1(true);
-        this.gdb.onOutput = (category, text) => this.sendEvent(new OutputEvent(text, category === 'stdout' ? 'stdout' : category === 'stderr' ? 'stderr' : 'console'));
-        this.gdb.onAsync = record => void this.handleAsync(record);
+        this.gdb.onOutput = (category, output) => {
+            if (category === 'console' && (this.targetRunning || this.translatingStop)) {
+                this.targetConsoleOutput.append(output);
+                return;
+            }
+            this.sendEvent(new OutputEvent(output, category === 'stdout' ? 'stdout' : category === 'stderr' ? 'stderr' : 'console'));
+        };
+        this.gdb.onAsync = record => {
+            void this.handleAsync(record).catch(error => {
+                this.finishTargetConsoleOutput(false);
+                this.sendEvent(new OutputEvent(`C~ debugger could not process a native stop: ${String(error)}\n`, 'stderr'));
+                this.sendEvent(new StoppedEvent('pause', 1, 'Native target stop could not be translated completely.'));
+            });
+        };
         this.gdb.onExit = () => {
+            this.clearTargetConsoleOutput();
             this.removeEspBridge();
             this.sendEvent(new TerminatedEvent());
         };
@@ -160,6 +223,10 @@ export class CTildeDebugSession extends LoggingDebugSession {
             supportsTerminateRequest: true,
             supportsRestartRequest: true,
             supportsCancelRequest: true,
+            supportsLogPoints: true,
+            supportsGotoTargetsRequest: true,
+            supportsDataBreakpoints: true,
+            supportsReadMemoryRequest: true,
             supportTerminateDebuggee: true,
             exceptionBreakpointFilters: [
                 { filter: 'ctilde-thrown', label: 'All thrown C~ exceptions', default: false },
@@ -183,13 +250,14 @@ export class CTildeDebugSession extends LoggingDebugSession {
         try {
             this.request = request;
             this.launchArguments = args;
+            this.controlAddresses.clear();
             const targetPath = path.resolve(args.debugTarget);
             if (!existsSync(targetPath))
                 throw new Error(`C~ debug target does not exist: ${targetPath}`);
             this.target = JSON.parse(readFileSync(targetPath, 'utf8')) as DebugTarget;
             this.debugMap = JSON.parse(readFileSync(this.target.debugMap, 'utf8')) as DebugMap;
-            if (this.target.version !== 1 || this.debugMap.version !== 1)
-                throw new Error('Unsupported C~ debug metadata version. Rebuild the project with the current compiler.');
+            if (this.target.version !== 2 || this.debugMap.version !== 2 || !this.target.instrumented || !this.debugMap.instrumented)
+                throw new Error('C~ debug metadata v2 with instrumentation is required. Rebuild with --prepare-debug launch using the current compiler and extension.');
             if (this.target.backend !== 'gdb')
                 throw new Error('This configuration was built with MSVC. Use C~: Debug Project for the cppvsdbg fallback.');
             if (!existsSync(this.target.program))
@@ -221,20 +289,25 @@ export class CTildeDebugSession extends LoggingDebugSession {
         this.sendResponse(response);
         try {
             if (this.target?.target === 'esp-idf') {
-                this.suppressNextTargetStop = this.request === 'launch' && !this.launchArguments?.stopAtEntry;
+                this.suppressNextTargetStop = true;
                 await this.gdb.command(`-interpreter-exec console ${miQuote(`target remote ${this.espRemoteTarget()}`)}`);
-                if (this.request === 'launch' && !this.launchArguments?.stopAtEntry)
+                this.targetRunning = false;
+                this.installStopAtEntry();
+                await this.synchronizeDebugControl();
+                if (this.request === 'launch') {
+                    await this.setControl('StartupReleased', 1);
                     await this.gdb.command('-exec-continue');
+                } else
+                    this.sendEvent(new StoppedEvent('pause', 1, 'Attached to the ESP runtime GDB stub.'));
             } else if (this.request === 'launch') {
                 await this.configurationPromise;
-                if (this.launchArguments?.stopAtEntry) {
-                    const entry = this.debugMap?.functions.find(candidate => candidate.name === this.debugMap?.entryPoint);
-                    if (entry !== undefined)
-                        await this.gdb.command(`-break-insert -t ${entry.name}`);
-                }
+                this.installStopAtEntry();
+                this.bootstrapBreakpoint = await this.insertBreakpoint('-t main');
                 await this.gdb.command('-exec-run');
             } else if (this.launchArguments?.processId !== undefined) {
                 await this.gdb.command(`-target-attach ${String(this.launchArguments.processId)}`);
+                this.targetRunning = false;
+                await this.synchronizeDebugControl();
             } else {
                 this.sendEvent(new OutputEvent('Hosted attach requires processId.\n', 'stderr'));
             }
@@ -248,42 +321,42 @@ export class CTildeDebugSession extends LoggingDebugSession {
         try {
             const sourcePath = args.source.path === undefined ? '' : path.resolve(args.source.path);
             const relative = this.relativeSource(sourcePath);
-            for (const id of this.sourceBreakpoints.get(relative) ?? []) {
-                try { await this.gdb.command(`-break-delete ${id}`); } catch { }
-                this.logpoints.delete(id);
-            }
-            const installed: number[] = [];
-            const executable = this.debugMap?.functions.flatMap(fn => fn.executable)
-                .filter(location => normalizePath(location.file) === relative) ?? [];
+            const installed: LogicalBreakpoint[] = [];
             const result: DebugProtocol.Breakpoint[] = [];
             for (const requested of args.breakpoints ?? []) {
-                const actualLine = executable.filter(location => location.line >= requested.line)
-                    .sort((left, right) => left.line - right.line)[0]?.line ?? requested.line;
-                const fn = this.debugMap?.functions.find(candidate => candidate.executable.some(location =>
-                    normalizePath(location.file) === relative && location.line === actualLine));
-                const options: string[] = [];
-                if (requested.condition)
-                    options.push('-c', miQuote(this.translateExpression(requested.condition, fn)));
-                if (requested.hitCondition && /^\d+$/.test(requested.hitCondition))
-                    options.push('-i', requested.hitCondition);
-                if (!this.hasEspBreakpointSlot()) {
-                    const breakpoint = new Breakpoint(false, actualLine, 1,
+                if (requested.hitCondition !== undefined && parseHitCondition(requested.hitCondition) === undefined) {
+                    const breakpoint = new Breakpoint(false, requested.line, requested.column ?? 1,
                         new Source(path.basename(sourcePath), sourcePath)) as DebugProtocol.Breakpoint;
-                    breakpoint.message = this.espBreakpointLimitMessage();
+                    breakpoint.message = 'C~ hit counts must be a positive integer.';
                     result.push(breakpoint);
                     continue;
                 }
-                const record = await this.gdb.command(`-break-insert -f ${options.join(' ')} ${miQuote(`${relative}:${actualLine}`)}`);
-                const bkpt = miTuple(record.results.bkpt);
-                const breakpoint = new Breakpoint(true, Number.parseInt(miString(bkpt.line) || String(actualLine), 10), 1,
+                const match = this.findSourceSite(relative, requested.line, requested.column);
+                if (match === undefined) {
+                    const breakpoint = new Breakpoint(false, requested.line, requested.column ?? 1,
+                        new Source(path.basename(sourcePath), sourcePath)) as DebugProtocol.Breakpoint;
+                    breakpoint.message = 'No executable C~ probe exists in the containing method.';
+                    result.push(breakpoint);
+                    continue;
+                }
+                const logical: LogicalBreakpoint = {
+                    siteId: match.site.id,
+                    fn: match.fn,
+                    condition: requested.condition,
+                    hitCondition: parseHitCondition(requested.hitCondition),
+                    logMessage: requested.logMessage,
+                    hits: 0,
+                };
+                installed.push(logical);
+                const breakpoint = new Breakpoint(true, match.site.source.line, match.site.source.column,
                     new Source(path.basename(sourcePath), sourcePath)) as DebugProtocol.Breakpoint;
-                breakpoint.id = Number.parseInt(miString(bkpt.number), 10);
-                installed.push(breakpoint.id);
-                if (requested.logMessage !== undefined)
-                    this.logpoints.set(breakpoint.id, { message: requested.logMessage, fn });
+                breakpoint.id = match.site.id + 1;
+                if (match.site.source.line !== requested.line)
+                    breakpoint.message = `Relocated to executable C~ line ${match.site.source.line}.`;
                 result.push(breakpoint);
             }
             this.sourceBreakpoints.set(relative, installed);
+            await this.requestControlSync();
             response.body = { breakpoints: result };
             this.sendResponse(response);
         } catch (error) {
@@ -292,67 +365,55 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     protected async setFunctionBreakPointsRequest(response: DebugProtocol.SetFunctionBreakpointsResponse, args: DebugProtocol.SetFunctionBreakpointsArguments): Promise<void> {
-        for (const id of this.functionBreakpoints) {
-            try { await this.gdb.command(`-break-delete ${id}`); } catch { }
-        }
         this.functionBreakpoints = [];
+        this.runtimeFunctionBreakpoints.clear();
         const breakpoints: DebugProtocol.Breakpoint[] = [];
         for (const requested of args.breakpoints) {
-            const candidates = this.debugMap?.functions.filter(fn => fn.displayName === requested.name || fn.displayName.endsWith(`.${requested.name}`)) ?? [];
+            if (requested.hitCondition !== undefined && parseHitCondition(requested.hitCondition) === undefined) {
+                const breakpoint = new Breakpoint(false) as DebugProtocol.Breakpoint;
+                breakpoint.message = 'C~ hit counts must be a positive integer.';
+                breakpoints.push(breakpoint);
+                continue;
+            }
+            if (requested.name === '$allocation' || requested.name === '$final-release' || requested.name === '$leak') {
+                const breakpoint = new Breakpoint(this.debugMap?.memoryDiagnostics !== 'off') as DebugProtocol.Breakpoint;
+                if (!breakpoint.verified)
+                    breakpoint.message = 'ARC runtime breakpoints require memory diagnostics in the instrumented image.';
+                else
+                    breakpoint.id = -(['$allocation', '$final-release', '$leak'].indexOf(requested.name) + 1);
+                if (breakpoint.verified)
+                    this.runtimeFunctionBreakpoints.add(requested.name);
+                breakpoints.push(breakpoint);
+                continue;
+            }
+            const candidates = this.debugMap?.functions.filter(fn => matchesFunctionBreakpoint(fn, requested.name)) ?? [];
             if (candidates.length !== 1) {
                 const breakpoint = new Breakpoint(false) as DebugProtocol.Breakpoint;
                 breakpoint.message = candidates.length === 0 ? 'C~ function was not found.' : 'C~ function name is ambiguous.';
                 breakpoints.push(breakpoint);
                 continue;
             }
-            try {
-                if (!this.hasEspBreakpointSlot()) {
-                    const breakpoint = new Breakpoint(false) as DebugProtocol.Breakpoint;
-                    breakpoint.message = this.espBreakpointLimitMessage();
-                    breakpoints.push(breakpoint);
-                    continue;
-                }
-                const options: string[] = [];
-                if (requested.condition)
-                    options.push('-c', miQuote(this.translateExpression(requested.condition, candidates[0])));
-                if (requested.hitCondition && /^\d+$/.test(requested.hitCondition))
-                    options.push('-i', requested.hitCondition);
-                const record = await this.gdb.command(`-break-insert ${options.join(' ')} ${miQuote(candidates[0].name)}`);
-                const breakpoint = new Breakpoint(true) as DebugProtocol.Breakpoint;
-                breakpoint.id = Number.parseInt(miString(miTuple(record.results.bkpt).number), 10);
-                this.functionBreakpoints.push(breakpoint.id);
-                breakpoints.push(breakpoint);
-            } catch (error) {
+            const site = candidates[0].sites.find(candidate => candidate.kind === 'entry');
+            if (site === undefined) {
                 const breakpoint = new Breakpoint(false) as DebugProtocol.Breakpoint;
-                breakpoint.message = String(error);
+                breakpoint.message = 'The function has no reachable instrumented entry site.';
                 breakpoints.push(breakpoint);
+                continue;
             }
+            this.functionBreakpoints.push({ siteId: site.id, fn: candidates[0], condition: requested.condition,
+                hitCondition: parseHitCondition(requested.hitCondition), hits: 0 });
+            const breakpoint = new Breakpoint(true) as DebugProtocol.Breakpoint;
+            breakpoint.id = site.id + 1;
+            breakpoints.push(breakpoint);
         }
+        await this.requestControlSync();
         response.body = { breakpoints };
         this.sendResponse(response);
     }
 
     protected async setExceptionBreakPointsRequest(response: DebugProtocol.SetExceptionBreakpointsResponse, args: DebugProtocol.SetExceptionBreakpointsArguments): Promise<void> {
-        for (const id of this.exceptionBreakpoints) {
-            try { await this.gdb.command(`-break-delete ${id}`); } catch { }
-        }
-        this.exceptionBreakpoints = [];
-        const filters = new Set(args.filters);
-        this.exceptionFilters = filters;
-        const hooks = this.debugMap?.runtimeHooks;
-        if (hooks !== undefined) {
-            const requestedHooks = [
-                filters.has('ctilde-thrown') || filters.has('ctilde-unhandled') ? hooks.throw : undefined,
-                filters.has('ctilde-fatal') ? hooks.fatal : undefined,
-            ].filter((hook): hook is string => hook !== undefined);
-            for (const hook of requestedHooks) {
-                if (!this.hasEspBreakpointSlot()) {
-                    this.sendEvent(new OutputEvent(`${this.espBreakpointLimitMessage()} Exception breakpoint '${hook}' was not installed.\n`, 'stderr'));
-                    continue;
-                }
-                this.exceptionBreakpoints.push(await this.insertBreakpoint(hook));
-            }
-        }
+        this.exceptionFilters = new Set(args.filters);
+        await this.requestControlSync();
         this.sendResponse(response);
     }
 
@@ -368,36 +429,51 @@ export class CTildeDebugSession extends LoggingDebugSession {
     protected async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): Promise<void> {
         const record = await this.gdb.command(`-stack-list-frames --thread ${args.threadId}`);
         const frames: StackFrame[] = [];
+        const currentMatch = this.currentSite === undefined ? undefined : this.allSites().find(candidate => candidate.site.id === this.currentSite?.id);
+        let mappedCurrentSite = false;
         this.frameLevels.clear();
         this.frameFunctions.clear();
+        this.frameSites.clear();
         for (const value of miArray(record.results.stack)) {
             const wrapper = miTuple(value);
             const frame = miTuple(wrapper.frame ?? value);
             const rawName = miString(frame.func);
             const mapped = this.debugMap?.functions.find(fn => fn.name === rawName);
             const file = miString(frame.fullname) || miString(frame.file);
-            const generated = file === '<ctilde-generated>' || (mapped === undefined && rawName.startsWith('ct_'));
+            const generated = mapped === undefined || file === '<ctilde-generated>';
             if (generated && !this.launchArguments?.showRuntimeFrames)
                 continue;
             const level = Number.parseInt(miString(frame.level), 10);
             const id = frames.length + 1;
             this.frameLevels.set(id, level);
             this.frameFunctions.set(id, mapped);
-            const sourcePath = mapped?.source === undefined ? file : this.absoluteSource(mapped.source.file);
+            const nativeLine = Number.parseInt(miString(frame.line) || String(mapped?.source?.line ?? 1), 10);
+            const exactCurrentSite = !mappedCurrentSite && args.threadId === this.currentStoppedThreadId &&
+                currentMatch?.fn.name === rawName ? currentMatch.site : undefined;
+            if (exactCurrentSite !== undefined)
+                mappedCurrentSite = true;
+            const frameSite = resolveLogicalFrameSite(mapped?.sites ?? [], nativeLine, exactCurrentSite);
+            this.frameSites.set(id, frameSite);
+            const sourcePath = exactCurrentSite !== undefined ? this.absoluteSource(exactCurrentSite.source.file)
+                : mapped?.source == null ? file : this.absoluteSource(mapped.source.file);
             frames.push(new StackFrame(id, mapped?.displayName ?? rawName,
                 sourcePath.length === 0 ? undefined : new Source(path.basename(sourcePath), sourcePath),
-                Number.parseInt(miString(frame.line) || String(mapped?.source?.line ?? 1), 10), 1));
+                exactCurrentSite?.source.line ?? nativeLine, exactCurrentSite?.source.column ?? 1));
         }
         response.body = { stackFrames: frames, totalFrames: frames.length };
         this.sendResponse(response);
     }
 
     protected scopesRequest(response: DebugProtocol.ScopesResponse, args: DebugProtocol.ScopesArguments): void {
+        const scopes = [
+            new Scope('Locals', this.variableHandles.create({ expression: '$locals', type: '$scope', frameId: args.frameId }), false),
+            new Scope('Arguments', this.variableHandles.create({ expression: '$arguments', type: '$scope', frameId: args.frameId }), false),
+            new Scope('Statics', this.variableHandles.create({ expression: '$statics', type: '$statics', frameId: args.frameId }), true),
+        ];
+        if (this.debugMap?.memoryDiagnostics !== 'off')
+            scopes.push(new Scope('C~ Runtime', this.variableHandles.create({ expression: '$runtime', type: '$runtime', frameId: args.frameId }), true));
         response.body = {
-            scopes: [
-                new Scope('Locals', this.variableHandles.create({ expression: '$locals', type: '$scope', frameId: args.frameId }), false),
-                new Scope('Arguments', this.variableHandles.create({ expression: '$arguments', type: '$scope', frameId: args.frameId }), false),
-            ],
+            scopes,
         };
         this.sendResponse(response);
     }
@@ -414,7 +490,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
             await this.gdb.command(`-stack-select-frame ${level}`);
             if (container.type === '$scope') {
                 const fn = this.frameFunctions.get(container.frameId);
-                const definitions = container.expression === '$arguments' ? fn?.parameters ?? [] : fn?.locals ?? [];
+                const definitions = container.expression === '$arguments' ? fn?.parameters ?? [] : this.liveLocals(fn, container.frameId);
                 const variables: DebugProtocol.Variable[] = [];
                 for (const definition of definitions) {
                     try {
@@ -427,7 +503,15 @@ export class CTildeDebugSession extends LoggingDebugSession {
                     try { variables.push(await this.makeVariable('this', fn.receiver, fn.receiverType, container.frameId)); } catch { }
                 }
                 response.body = { variables };
-            } else
+            } else if (container.type === '$runtime')
+                response.body = { variables: await this.runtimeVariables(container.frameId) };
+            else if (container.type === '$statics')
+                response.body = { variables: await this.staticVariables(container.frameId) };
+            else if (container.type === '$liveobjects')
+                response.body = { variables: await this.liveObjectVariables(container.frameId, args.start ?? 0, args.count ?? 100) };
+            else if (container.type === '$objectruntime')
+                response.body = { variables: await this.objectRuntimeVariables(container.expression, container.frameId) };
+            else
                 response.body = { variables: await this.expandVariable(container, args.start, args.count) };
             this.sendResponse(response);
         } catch (error) {
@@ -447,7 +531,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
             }
             const frameId = args.frameId ?? 1;
             const fn = this.frameFunctions.get(frameId);
-            const watch = this.translateWatch(args.expression.trim(), fn);
+            const watch = this.translateWatch(args.expression.trim(), fn, frameId);
             if (watch === undefined)
                 throw new Error('C~ watches support identifiers, field access, and array indices.');
             const variable = await this.makeVariable(args.expression, watch.expression, watch.type, frameId);
@@ -458,26 +542,28 @@ export class CTildeDebugSession extends LoggingDebugSession {
         }
     }
 
-    protected continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): void {
-        void this.gdb.command(`-exec-continue --thread ${args.threadId}`);
-        response.body = { allThreadsContinued: true };
-        this.sendResponse(response);
-        this.sendEvent(new ContinuedEvent(args.threadId, true));
+    protected async continueRequest(response: DebugProtocol.ContinueResponse, args: DebugProtocol.ContinueArguments): Promise<void> {
+        try {
+            this.pendingLogicalStep = undefined;
+            await this.setControl('StepMode', 0);
+            await this.resume(args.threadId);
+            response.body = { allThreadsContinued: true };
+            this.sendResponse(response);
+        } catch (error) {
+            this.sendErrorResponse(response, 1008, `Could not continue the C~ target: ${String(error)}`);
+        }
     }
 
-    protected nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): void {
-        void this.gdb.command(`-exec-next --thread ${args.threadId}`);
-        this.sendResponse(response);
+    protected async nextRequest(response: DebugProtocol.NextResponse, args: DebugProtocol.NextArguments): Promise<void> {
+        await this.logicalStepRequest(response, args.threadId, 2);
     }
 
-    protected stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): void {
-        void this.gdb.command(`-exec-step --thread ${args.threadId}`);
-        this.sendResponse(response);
+    protected async stepInRequest(response: DebugProtocol.StepInResponse, args: DebugProtocol.StepInArguments): Promise<void> {
+        await this.logicalStepRequest(response, args.threadId, 1);
     }
 
-    protected stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): void {
-        void this.gdb.command(`-exec-finish --thread ${args.threadId}`);
-        this.sendResponse(response);
+    protected async stepOutRequest(response: DebugProtocol.StepOutResponse, args: DebugProtocol.StepOutArguments): Promise<void> {
+        await this.logicalStepRequest(response, args.threadId, 3);
     }
 
     protected pauseRequest(response: DebugProtocol.PauseResponse, args: DebugProtocol.PauseArguments): void {
@@ -485,8 +571,104 @@ export class CTildeDebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
+    protected gotoTargetsRequest(response: DebugProtocol.GotoTargetsResponse, args: DebugProtocol.GotoTargetsArguments): void {
+        const relative = args.source.path === undefined ? '' : this.relativeSource(path.resolve(args.source.path));
+        const match = this.findSourceSite(relative, args.line, args.column);
+        response.body = { targets: match === undefined ? [] : [{ id: match.site.id + 1, label: `${match.fn.displayName}:${match.site.source.line}`, line: match.site.source.line, column: match.site.source.column }] };
+        this.sendResponse(response);
+    }
+
+    protected async gotoRequest(response: DebugProtocol.GotoResponse, args: DebugProtocol.GotoArguments): Promise<void> {
+        const siteId = args.targetId - 1;
+        const match = this.allSites().find(candidate => candidate.site.id === siteId);
+        if (match === undefined) {
+            this.sendErrorResponse(response, 1006, 'The selected C~ run-to-cursor site is no longer available.');
+            return;
+        }
+        this.temporaryBreakpoints.clear();
+        this.temporaryBreakpoints.set(siteId, { siteId, fn: match.fn, temporary: true, hits: 0 });
+        await this.synchronizeDebugControl();
+        await this.resume(args.threadId);
+        this.sendResponse(response);
+    }
+
+    protected dataBreakpointInfoRequest(response: DebugProtocol.DataBreakpointInfoResponse, args: DebugProtocol.DataBreakpointInfoArguments): void {
+        const frameId = args.frameId ?? 1;
+        const fn = this.frameFunctions.get(frameId);
+        const translated = this.dataBreakpointExpression(args.variablesReference, args.name, frameId, fn);
+        if (translated === undefined) {
+            response.body = { dataId: null, description: args.name, accessTypes: [], canPersist: false };
+        } else {
+            response.body = {
+                dataId: JSON.stringify({ expression: translated.expression, type: translated.type, frameId }),
+                description: args.name,
+                accessTypes: ['write', 'readWrite'],
+                canPersist: false,
+            };
+        }
+        this.sendResponse(response);
+    }
+
+    protected async setDataBreakpointsRequest(response: DebugProtocol.SetDataBreakpointsResponse, args: DebugProtocol.SetDataBreakpointsArguments): Promise<void> {
+        for (const watchpoint of this.dataBreakpoints.values()) {
+            try { await this.gdb.command(`-break-delete ${watchpoint.id}`); } catch { }
+        }
+        this.dataBreakpoints.clear();
+        const breakpoints: DebugProtocol.Breakpoint[] = [];
+        for (const requested of args.breakpoints) {
+            try {
+                const data = JSON.parse(requested.dataId) as { expression: string; type: string; frameId: number };
+                if (!isAddressableWatchType(data.type))
+                    throw new Error(`C~ cannot watch values of type '${data.type}' with a native data breakpoint.`);
+                const level = this.frameLevels.get(data.frameId);
+                if (level === undefined)
+                    throw new Error('The local variable stack activation is no longer active.');
+                await this.gdb.command(`-stack-select-frame ${level}`);
+                if (this.target?.target === 'esp-idf') {
+                    const size = nativeWatchSize(data.type);
+                    if (size === undefined || size > 4)
+                        throw new Error(`ESP runtime-stub watchpoints require an addressable 1, 2, or 4-byte value; '${data.type}' is not supported.`);
+                    const address = BigInt(await this.addressOf(data.expression));
+                    if (address % BigInt(size) !== 0n)
+                        throw new Error(`ESP watchpoint address 0x${address.toString(16)} is not aligned to ${size} bytes.`);
+                }
+                const option = requested.accessType === 'readWrite' ? '-a' : '';
+                const record = await this.gdb.command(`-break-watch ${option} ${miQuote(data.expression)}`);
+                const id = Number.parseInt(miString(miTuple(record.results.wpt ?? record.results.hw_awpt ?? record.results.hw_rwpt).number), 10);
+                this.dataBreakpoints.set(requested.dataId, { id, thread: this.currentThreadState, activation: this.currentActivation });
+                const breakpoint = new Breakpoint(true) as DebugProtocol.Breakpoint;
+                breakpoint.id = id;
+                breakpoints.push(breakpoint);
+            } catch (error) {
+                const breakpoint = new Breakpoint(false) as DebugProtocol.Breakpoint;
+                breakpoint.message = `Could not install hardware watchpoint: ${String(error instanceof Error ? error.message : error)}`;
+                breakpoints.push(breakpoint);
+            }
+        }
+        response.body = { breakpoints };
+        this.sendResponse(response);
+    }
+
+    protected async readMemoryRequest(response: DebugProtocol.ReadMemoryResponse, args: DebugProtocol.ReadMemoryArguments): Promise<void> {
+        try {
+            const count = Math.min(args.count, 4096);
+            const address = offsetAddress(args.memoryReference, args.offset ?? 0);
+            const record = await this.gdb.command(`-data-read-memory-bytes ${address} ${count}`);
+            const memory = miArray(record.results.memory).map(miTuple)[0];
+            response.body = { address, data: Buffer.from(miString(memory?.contents), 'hex').toString('base64') };
+            this.sendResponse(response);
+        } catch (error) {
+            this.sendErrorResponse(response, 1007, String(error));
+        }
+    }
+
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse): Promise<void> {
         try {
+            this.disconnecting = true;
+            if (this.targetRunning)
+                await this.interruptAndWait();
+            this.clearTargetConsoleOutput();
+            await this.clearDebugControl();
             if (this.target?.target === 'esp-idf')
                 await this.gdb.command(`-interpreter-exec console ${miQuote('set confirm off')}`).then(() =>
                     this.gdb.command(`-interpreter-exec console ${miQuote('kill')}`));
@@ -500,6 +682,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
 
     protected async terminateRequest(response: DebugProtocol.TerminateResponse): Promise<void> {
         try {
+            this.clearTargetConsoleOutput();
             if (this.target?.target === 'esp-idf')
                 await this.gdb.command(`-interpreter-exec console ${miQuote('set confirm off')}`).then(() =>
                     this.gdb.command(`-interpreter-exec console ${miQuote('kill')}`));
@@ -514,6 +697,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
     protected async restartRequest(response: DebugProtocol.RestartResponse): Promise<void> {
         try {
             try { await this.gdb.command('-exec-abort'); } catch { }
+            this.clearTargetConsoleOutput();
+            this.controlReady = false;
+            this.currentSite = undefined;
+            this.pendingLogicalStep = undefined;
+            this.installStopAtEntry();
+            this.bootstrapBreakpoint = await this.insertBreakpoint('-t main');
             await this.gdb.command('-exec-run');
             this.sendResponse(response);
         } catch (error) {
@@ -536,21 +725,21 @@ export class CTildeDebugSession extends LoggingDebugSession {
         if (type === 'string') {
             const nullResult = await this.evaluateNative(`${expression} == 0`);
             if (nullResult !== '0')
-                return { name, value: 'null', type, variablesReference: 0 };
+                return { name, value: 'null', type, variablesReference: 0, evaluateName: expression, memoryReference: '0x0' };
             const length = Number.parseInt(await this.evaluateNative(`${expression}->Length`), 10);
             const address = await this.evaluateNative(`(void*)${expression}->Data`);
             const contents = length <= 0 ? '' : await this.readUtf8(address, Math.min(length, 4096));
             const suffix = length > 4096 ? '…' : '';
-            return { name, value: JSON.stringify(contents + suffix), type, variablesReference: this.variableHandles.create({ expression, type, frameId }) };
+            return { name, value: JSON.stringify(contents + suffix), type, variablesReference: this.variableHandles.create({ expression, type, frameId }), evaluateName: expression, memoryReference: address };
         }
         const mappedType = this.debugMap?.types.find(candidate => candidate.name === type);
         const reference = type.endsWith('[]') || mappedType?.kind === 'class' || mappedType?.kind === 'delegate';
         if (reference && await this.evaluateNative(`${expression} == 0`) !== '0')
-            return { name, value: 'null', type, variablesReference: 0 };
+            return { name, value: 'null', type, variablesReference: 0, evaluateName: expression, memoryReference: '0x0' };
         const value = await this.evaluateNative(expression);
         if (mappedType?.kind === 'enum') {
             const enumValue = mappedType.values?.find(candidate => candidate.value === value);
-            return { name, value: enumValue === undefined ? value : `${enumValue.name} (${value})`, type, variablesReference: 0 };
+            return { name, value: enumValue === undefined ? value : `${enumValue.name} (${value})`, type, variablesReference: 0, evaluateName: expression };
         }
         let displayType = type;
         let expansionType = type;
@@ -566,7 +755,8 @@ export class CTildeDebugSession extends LoggingDebugSession {
             }
         }
         const expandable = reference || (!isPrimitive(type) && value !== 'null' && value !== '0x0');
-        return { name, value, type: displayType || undefined, variablesReference: expandable ? this.variableHandles.create({ expression, type: expansionType, frameId }) : 0 };
+        const memoryReference = reference ? value : await this.addressOf(expression).catch(() => undefined);
+        return { name, value, type: displayType || undefined, variablesReference: expandable ? this.variableHandles.create({ expression, type: expansionType, frameId }) : 0, evaluateName: expression, memoryReference };
     }
 
     private async expandVariable(container: VariableContainer, start = 0, count = 100): Promise<DebugProtocol.Variable[]> {
@@ -604,7 +794,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
             for (const field of this.instanceFields(type))
                 result.push(await this.makeVariable(field.name, `${expression}${member}${field.storage}`, field.type, container.frameId));
             if (pointer)
-                result.push({ name: '$runtime', value: await this.evaluateNative(`*(ct_object*)(void*)${container.expression}`), variablesReference: 0 });
+                result.push({ name: '$runtime', value: 'ARC metadata', variablesReference: this.variableHandles.create({ expression: container.expression, type: '$objectruntime', frameId: container.frameId }) });
             return result;
         }
         return [{ name: '$native', value: await this.evaluateNative(container.expression), variablesReference: 0 }];
@@ -626,66 +816,159 @@ export class CTildeDebugSession extends LoggingDebugSession {
         if (record.kind !== '*')
             return;
         if (record.name === 'running') {
-            if (this.suppressNextRunningEvent) {
-                this.suppressNextRunningEvent = false;
-                return;
-            }
+            this.targetRunning = true;
             this.sendEvent(new ContinuedEvent(0, true));
             return;
         }
         if (record.name !== 'stopped')
             return;
+        this.targetRunning = false;
+        this.translatingStop = true;
+        for (const resolve of this.stopWaiters.splice(0))
+            resolve();
+        if (this.disconnecting) {
+            this.clearTargetConsoleOutput();
+            return;
+        }
         if (this.suppressNextTargetStop) {
             this.suppressNextTargetStop = false;
+            this.finishTargetConsoleOutput(false);
             return;
         }
         this.variableHandles.reset();
         this.frameLevels.clear();
         this.frameFunctions.clear();
+        this.frameSites.clear();
+        this.currentStoppedThreadId = 0;
         const reason = miString(record.results.reason);
         const threadId = Number.parseInt(miString(record.results['thread-id']) || '1', 10);
         const breakpointNumber = Number.parseInt(miString(record.results.bkptno), 10);
-        const logpoint = this.logpoints.get(breakpointNumber);
-        if (logpoint !== undefined) {
-            this.sendEvent(new OutputEvent(await this.renderLogMessage(logpoint.message, logpoint.fn) + '\n', 'console'));
-            void this.gdb.command(`-exec-continue --thread ${threadId}`);
+        if (this.bootstrapBreakpoint !== undefined && breakpointNumber === this.bootstrapBreakpoint) {
+            this.bootstrapBreakpoint = undefined;
+            await this.synchronizeDebugControl();
+            this.finishTargetConsoleOutput(false);
+            await this.resume(threadId);
             return;
         }
-        const frame = miTuple(record.results.frame);
-        const functionName = miString(frame.func);
-        const runtimeHook = functionName === this.debugMap?.runtimeHooks.throw
-            ? 'throw'
-            : functionName === this.debugMap?.runtimeHooks.fatal ? 'fatal' : undefined;
-        if (runtimeHook !== undefined && this.pendingRuntimeHook === undefined) {
-            this.pendingRuntimeHook = runtimeHook;
-            this.suppressNextRunningEvent = true;
-            void this.gdb.command(`-exec-step-instruction --thread ${threadId}`).catch(error => {
-                this.pendingRuntimeHook = undefined;
-                this.sendEvent(new OutputEvent(`Could not inspect the C~ runtime hook: ${String(error)}\n`, 'stderr'));
-                this.sendEvent(new StoppedEvent('exception', threadId));
-            });
+        if (this.pendingControlSync) {
+            const resume = this.resumeAfterControlSync;
+            this.pendingControlSync = false;
+            this.resumeAfterControlSync = false;
+            await this.synchronizeDebugControl();
+            this.finishTargetConsoleOutput(false);
+            if (resume)
+                await this.resume(threadId);
             return;
         }
-        const inspectedHook = this.pendingRuntimeHook;
-        this.pendingRuntimeHook = undefined;
-        if (inspectedHook === 'throw') {
-            const code = await this.evaluateCString('code');
-            const file = await this.evaluateCString('file');
-            const line = await this.evaluateNative('line');
-            const unhandled = await this.evaluateNative('unhandled');
-            if (!this.exceptionFilters.has('ctilde-thrown') && unhandled === '0') {
-                this.suppressNextRunningEvent = true;
-                void this.gdb.command(`-exec-continue --thread ${threadId}`);
+        if (reason === 'watchpoint-trigger' || reason === 'read-watchpoint-trigger' || reason === 'access-watchpoint-trigger') {
+            this.currentSite = undefined;
+            this.finishTargetConsoleOutput(false);
+            this.sendEvent(new StoppedEvent('data breakpoint', threadId, 'C~ data breakpoint'));
+            return;
+        }
+        let debugReason = 0;
+        try { debugReason = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10); } catch { }
+        if (debugReason !== 0 && this.target?.target === 'esp-idf')
+            await this.evaluateNative(espTrapResumeExpression(this.target.espTarget));
+        if (debugReason === 1) {
+            const siteId = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentSite'), 10);
+            this.currentThreadState = normalizeAddress(await this.evaluateNative('(void*)ct_debug_control.CurrentThread'));
+            this.currentActivation = await this.evaluateNative('ct_debug_control.CurrentActivation');
+            this.currentDepth = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentValue'), 10);
+            await this.removeExpiredLocalWatchpoints();
+            const match = this.allSites().find(candidate => candidate.site.id === siteId);
+            this.currentSite = match?.site;
+            this.currentStoppedThreadId = threadId;
+            if (match !== undefined)
+                await this.selectFunctionFrame(match.fn);
+            const candidates = this.logicalBreakpoints().filter(candidate => candidate.siteId === siteId);
+            let shouldStop = candidates.length === 0;
+            for (const candidate of candidates) {
+                candidate.hits++;
+                if (candidate.hitCondition !== undefined && candidate.hits < candidate.hitCondition)
+                    continue;
+                if (candidate.condition !== undefined) {
+                    try {
+                        if (!isTruthyGdbValue(await this.evaluateNative(this.translateExpression(candidate.condition, candidate.fn))))
+                            continue;
+                    } catch (error) {
+                        this.sendEvent(new OutputEvent(`C~ breakpoint condition failed: ${String(error)}\n`, 'stderr'));
+                        continue;
+                    }
+                }
+                if (candidate.logMessage !== undefined) {
+                    this.sendEvent(new OutputEvent(await this.renderLogMessage(candidate.logMessage, candidate.fn) + '\n', 'console'));
+                    continue;
+                }
+                shouldStop = true;
+                if (candidate.temporary)
+                    this.temporaryBreakpoints.delete(candidate.siteId);
+            }
+            if (candidates.length === 0 && this.pendingLogicalStep !== undefined && match !== undefined &&
+                this.pendingLogicalStep.origin !== undefined && this.pendingLogicalStep.originFunction === match.fn.name &&
+                sameSourceLine(this.pendingLogicalStep.origin.source, match.site.source)) {
+                await this.setControl('SelectedThread', `(uintptr_t)${this.currentThreadState}`);
+                await this.setControl('StepDepth', this.currentDepth);
+                await this.setControl('StepMode', this.pendingLogicalStep.mode);
+                this.finishTargetConsoleOutput(true);
+                await this.resume(threadId);
                 return;
             }
-            this.stoppedException = { id: code, description: `${code} at ${file}:${line}`, breakMode: unhandled === '0' ? 'always' : 'unhandled' };
-            this.sendEvent(new StoppedEvent('exception', threadId, this.stoppedException.description));
-        } else if (inspectedHook === 'fatal') {
-            const code = await this.evaluateCString('code');
-            this.stoppedException = { id: code, description: `Fatal C~ runtime failure ${code}`, breakMode: 'unhandled' };
-            this.sendEvent(new StoppedEvent('exception', threadId, this.stoppedException.description));
-        } else
-            this.sendEvent(new StoppedEvent(reason === 'breakpoint-hit' ? 'breakpoint' : 'step', threadId));
+            if (shouldStop) {
+                this.pendingLogicalStep = undefined;
+                const source = match?.site.source;
+                const location = source === undefined ? 'an instrumented site' : `${source.file}:${source.line}`;
+                const stopKind = candidates.length === 0 ? 'step' : 'breakpoint';
+                this.finishTargetConsoleOutput(true);
+                this.sendEvent(new StoppedEvent(stopKind, threadId, `C~ ${stopKind} at ${location}`));
+                return;
+            }
+            await this.synchronizeDebugControl();
+            this.finishTargetConsoleOutput(true);
+            await this.resume(threadId);
+            return;
+        }
+        if (debugReason >= 2 && debugReason <= 6) {
+            const object = await this.evaluateNative('(void*)ct_debug_control.CurrentObject');
+            const value = await this.evaluateNative('ct_debug_control.CurrentValue');
+            if (debugReason === 2 || debugReason === 3) {
+                const code = await this.evaluateCStringPointer('ct_debug_control.CurrentCode');
+                const file = await this.evaluateCStringPointer('ct_debug_control.CurrentFile');
+                const line = await this.evaluateNative('ct_debug_control.CurrentLine');
+                const unhandled = value !== '0';
+                this.stoppedException = debugReason === 2
+                    ? { id: code || 'C~ exception', description: `${code || 'C~ exception'} at ${file}:${line}`, breakMode: unhandled ? 'unhandled' : 'always' }
+                    : { id: code || 'C~ fatal runtime failure', description: `Fatal C~ runtime failure ${code}`, breakMode: 'unhandled' };
+                this.finishTargetConsoleOutput(true);
+                this.sendEvent(new StoppedEvent('exception', threadId, this.stoppedException.description));
+            } else {
+                const labels = ['', '', '', '', '$allocation', '$final-release', '$leak'];
+                this.finishTargetConsoleOutput(true);
+                this.sendEvent(new StoppedEvent('function breakpoint', threadId, `C~ ${labels[debugReason]} object=${object} value=${value}`));
+            }
+            return;
+        }
+        if (debugReason === 7) {
+            this.currentSite = undefined;
+            this.finishTargetConsoleOutput(true);
+            this.sendEvent(new StoppedEvent('entry', threadId, 'Stopped before C~ runtime and module initialization.'));
+            return;
+        }
+        this.currentSite = undefined;
+        this.finishTargetConsoleOutput(false);
+        this.sendEvent(new StoppedEvent(reason === 'breakpoint-hit' ? 'breakpoint' : reason === 'signal-received' ? 'pause' : 'step', threadId));
+    }
+
+    private finishTargetConsoleOutput(internalProbe: boolean): void {
+        const output = this.targetConsoleOutput.finish(internalProbe, this.launchArguments?.showRuntimeFrames === true);
+        this.translatingStop = false;
+        if (output.length !== 0)
+            this.sendEvent(new OutputEvent(output, 'console'));
+    }
+
+    private clearTargetConsoleOutput(): void {
+        this.targetConsoleOutput.clear();
+        this.translatingStop = false;
     }
 
     private relativeSource(sourcePath: string): string {
@@ -741,29 +1024,293 @@ export class CTildeDebugSession extends LoggingDebugSession {
         return Number.parseInt(miString(miTuple(record.results.bkpt).number), 10);
     }
 
-    private hasEspBreakpointSlot(): boolean {
-        const limit = this.espBreakpointLimit();
-        return limit === undefined || this.usedBreakpointCount() < limit;
+    private allSites(): { fn: DebugFunction; site: DebugSite }[] {
+        return this.debugMap?.functions.flatMap(fn => fn.sites.map(site => ({ fn, site }))) ?? [];
     }
 
-    private espBreakpointLimit(): number | undefined {
-        if (this.target?.target !== 'esp-idf')
+    private logicalBreakpoints(): LogicalBreakpoint[] {
+        return [...this.sourceBreakpoints.values()].flat().concat(this.functionBreakpoints, [...this.temporaryBreakpoints.values()]);
+    }
+
+    private findSourceSite(file: string, line: number, column = 1): { fn: DebugFunction; site: DebugSite } | undefined {
+        return findExecutableSite(this.debugMap?.functions ?? [], file, line, column);
+    }
+
+    private installStopAtEntry(): void {
+        if (!this.launchArguments?.stopAtEntry || this.target?.target === 'esp-idf')
+            return;
+        const fn = this.debugMap?.functions.find(candidate => candidate.name === this.debugMap?.entryPoint);
+        const site = fn?.sites.find(candidate => candidate.kind === 'entry');
+        if (fn !== undefined && site !== undefined)
+            this.temporaryBreakpoints.set(site.id, { siteId: site.id, fn, temporary: true, hits: 0 });
+    }
+
+    private eventMask(): number {
+        let mask = 0;
+        if (this.exceptionFilters.has('ctilde-thrown'))
+            mask |= debugEventThrow | debugEventUnhandled;
+        else if (this.exceptionFilters.has('ctilde-unhandled'))
+            mask |= debugEventUnhandled;
+        if (this.exceptionFilters.has('ctilde-fatal'))
+            mask |= debugEventFatal;
+        if (this.runtimeFunctionBreakpoints.has('$allocation'))
+            mask |= debugEventAllocation;
+        if (this.runtimeFunctionBreakpoints.has('$final-release'))
+            mask |= debugEventRelease;
+        if (this.runtimeFunctionBreakpoints.has('$leak'))
+            mask |= debugEventLeak;
+        if (this.target?.target === 'esp-idf' && this.request === 'launch' && this.launchArguments?.stopAtEntry)
+            mask |= debugEventStartup;
+        return mask;
+    }
+
+    private async synchronizeDebugControl(): Promise<void> {
+        if (this.debugMap?.runtimeHooks.control === undefined)
+            throw new Error('Instrumented C~ metadata does not name its debug control block.');
+        const values = buildEnabledSiteWords(this.allSites().length, this.logicalBreakpoints().map(breakpoint => breakpoint.siteId));
+        for (const field of ['CurrentReason', 'StepMode', 'StepDepth', 'SelectedThread', 'StartupReleased'])
+            await this.controlAddress(field);
+        for (let index = 0; index < values.length; index++)
+            await this.setControl(`Enabled[${index}]`, values[index] >>> 0);
+        await this.setControl('EventMask', this.eventMask());
+        await this.setControl('SessionActive', 1);
+        this.controlReady = true;
+    }
+
+    private async requestControlSync(): Promise<void> {
+        if (!this.controlReady)
+            return;
+        if (!this.targetRunning) {
+            await this.synchronizeDebugControl();
+            return;
+        }
+        this.pendingControlSync = true;
+        this.resumeAfterControlSync = true;
+        await this.gdb.command('-exec-interrupt');
+    }
+
+    private async setControl(field: string, value: string | number): Promise<void> {
+        const address = await this.controlAddress(field);
+        const width = field === 'SelectedThread' && this.target?.target !== 'esp-idf' ? 8 : 4;
+        await this.gdb.command(`-data-write-memory-bytes ${address} ${encodeDebugControlValue(value, width)}`);
+    }
+
+    private async controlAddress(field: string): Promise<string> {
+        const existing = this.controlAddresses.get(field);
+        if (existing !== undefined)
+            return existing;
+        const address = normalizeAddress(await this.evaluateNative(`(void*)&(ct_debug_control.${field})`));
+        this.controlAddresses.set(field, address);
+        return address;
+    }
+
+    private async clearDebugControl(): Promise<void> {
+        if (!this.controlReady || this.targetRunning)
+            return;
+        const words = Math.max(1, Math.ceil(this.allSites().length / 32));
+        for (let index = 0; index < words; index++)
+            await this.setControl(`Enabled[${index}]`, 0);
+        await this.setControl('EventMask', 0);
+        await this.setControl('StepMode', 0);
+        await this.setControl('SelectedThread', 0);
+        await this.setControl('StartupReleased', 1);
+        await this.setControl('SessionActive', 0);
+        this.controlReady = false;
+    }
+
+    private async interruptAndWait(): Promise<void> {
+        const stopped = new Promise<void>((resolve, reject) => {
+            const timeout = setTimeout(() => reject(new Error('Timed out while stopping the target for debugger cleanup.')), 3000);
+            this.stopWaiters.push(() => { clearTimeout(timeout); resolve(); });
+        });
+        await this.gdb.command('-exec-interrupt');
+        await stopped;
+    }
+
+    private async startLogicalStep(threadId: number, mode: 1 | 2 | 3): Promise<void> {
+        if (!this.controlReady || this.currentThreadState === '0' || this.currentThreadState === '0x0' || this.currentSite === undefined)
+            throw new Error('C~ logical stepping is available only after stopping at an instrumented C~ source location. Continue to a C~ breakpoint first.');
+        await this.setControl('SelectedThread', `(uintptr_t)${this.currentThreadState}`);
+        await this.setControl('StepDepth', this.currentDepth);
+        await this.setControl('StepMode', mode);
+        const match = this.currentSite === undefined ? undefined : this.allSites().find(candidate => candidate.site.id === this.currentSite?.id);
+        this.pendingLogicalStep = { mode, origin: this.currentSite, originFunction: match?.fn.name, threadId };
+        await this.resume(threadId);
+    }
+
+    private async logicalStepRequest(response: DebugProtocol.Response, threadId: number, mode: 1 | 2 | 3): Promise<void> {
+        try {
+            await this.startLogicalStep(threadId, mode);
+            this.sendResponse(response);
+        } catch (error) {
+            this.sendErrorResponse(response, 1009, `Could not step the C~ target: ${String(error)}`);
+        }
+    }
+
+    private async resume(threadId: number): Promise<void> {
+        if (this.controlReady) {
+            try {
+                await this.setControl('CurrentReason', 0);
+            } catch (error) {
+                throw new Error(`could not clear the logical stop reason: ${String(error)}`);
+            }
+        }
+        const command = gdbResumeCommand(this.target?.target === 'esp-idf', threadId);
+        try {
+            await this.gdb.command(command);
+        } catch (error) {
+            throw new Error(`native resume command ${command} failed: ${String(error)}`);
+        }
+    }
+
+    private variableIsLive(variable: DebugVariable, frameId?: number): boolean {
+        const position = (frameId === undefined ? this.currentSite : this.frameSites.get(frameId))?.source.spanStart;
+        return position === undefined || (variable.liveStart === undefined || position >= variable.liveStart) &&
+            (variable.liveEnd === undefined || position < variable.liveEnd);
+    }
+
+    private liveLocals(fn: DebugFunction | undefined, frameId?: number): DebugVariable[] {
+        if (fn === undefined)
+            return [];
+        const result = new Map<string, DebugVariable>();
+        const scopeLength = (variable: DebugVariable): number => fn.scopes?.find(scope => scope.id === variable.scopeId)?.source.spanLength ?? Number.MAX_SAFE_INTEGER;
+        for (const variable of fn.locals.filter(candidate => this.variableIsLive(candidate, frameId)).sort((left, right) => scopeLength(right) - scopeLength(left)))
+            result.set(variable.name, variable);
+        return [...result.values()].sort((left, right) => (left.liveStart ?? 0) - (right.liveStart ?? 0));
+    }
+
+    private async addressOf(expression: string): Promise<string> {
+        return normalizeAddress(await this.evaluateNative(`(void*)&(${expression})`));
+    }
+
+    private async runtimeVariables(frameId: number): Promise<DebugProtocol.Variable[]> {
+        const count = await this.evaluateNative('(uint32_t)ct_debug_live_count');
+        const mode = this.debugMap?.memoryDiagnostics ?? 'off';
+        const result: DebugProtocol.Variable[] = [
+            { name: 'Memory diagnostics', value: mode, type: 'string', variablesReference: 0 },
+            { name: 'Live object count', value: count, type: 'uint', variablesReference: 0 },
+            { name: 'Total allocations', value: await this.evaluateNative('(uint32_t)ct_debug_allocation_count'), type: 'uint', variablesReference: 0 },
+            { name: 'Total final releases', value: await this.evaluateNative('(uint32_t)ct_debug_final_release_count'), type: 'uint', variablesReference: 0 },
+            { name: 'Live objects', value: `${count} object(s)`, indexedVariables: Number.parseInt(count, 10), variablesReference: this.variableHandles.create({ expression: '$liveobjects', type: '$liveobjects', frameId }) },
+            { name: 'Current probe site', value: await this.evaluateNative('ct_debug_control.CurrentSite'), type: 'uint', variablesReference: 0 },
+        ];
+        if (mode === 'guarded') {
+            result.push({ name: 'Quarantine blocks', value: await this.evaluateNative('ct_debug_quarantine_count'), type: 'uint', variablesReference: 0 });
+            result.push({ name: 'Quarantine bytes', value: await this.evaluateNative('ct_debug_quarantine_bytes'), type: 'nuint', variablesReference: 0 });
+        }
+        return result;
+    }
+
+    private async staticVariables(frameId: number): Promise<DebugProtocol.Variable[]> {
+        const result: DebugProtocol.Variable[] = [];
+        for (const type of this.debugMap?.types ?? [])
+        for (const field of type.fields.filter(candidate => candidate.static))
+            result.push(await this.makeVariable(`${type.name}.${field.name}`, field.storage, field.type, frameId));
+        return result;
+    }
+
+    private async liveObjectVariables(frameId: number, start: number, count: number): Promise<DebugProtocol.Variable[]> {
+        let allocation = 'ct_debug_live_head';
+        for (let index = 0; index < start; index++)
+            allocation = `(${allocation})->Next`;
+        const result: DebugProtocol.Variable[] = [];
+        for (let index = start; index < start + Math.max(0, count); index++) {
+            if (!isTruthyGdbValue(await this.evaluateNative(`${allocation} != 0`)))
+                break;
+            const object = `(ct_object*)(void*)((${allocation}) + 1)`;
+            const identity = await this.evaluateNative(`${object}->IdentityHash`);
+            const type = await this.evaluateCString(`${object}->Type->Name`);
+            const presentationType = this.debugMap?.boxes?.some(box => box.valueType === type) ? 'System.Object' : type || 'System.Object';
+            result.push(await this.makeVariable(`#${identity}`, object, presentationType, frameId));
+            allocation = `(${allocation})->Next`;
+        }
+        return result;
+    }
+
+    private async objectRuntimeVariables(expression: string, frameId: number): Promise<DebugProtocol.Variable[]> {
+        const allocation = `((ct_debug_allocation*)(void*)${expression}) - 1`;
+        const result: DebugProtocol.Variable[] = [
+            { name: 'IdentityHash', value: await this.evaluateNative(`((ct_object*)(void*)${expression})->IdentityHash`), type: 'uint', variablesReference: 0 },
+            { name: 'RefCount', value: await this.evaluateNative(`((ct_object*)(void*)${expression})->RefCount`), type: 'uint', variablesReference: 0, evaluateName: `((ct_object*)(void*)${expression})->RefCount`, memoryReference: await this.addressOf(`((ct_object*)(void*)${expression})->RefCount`) },
+        ];
+        if (this.debugMap?.memoryDiagnostics !== 'off') {
+            result.push({ name: 'AllocationSize', value: await this.evaluateNative(`${allocation}->Size`), type: 'nuint', variablesReference: 0 });
+            result.push({ name: 'AllocationSite', value: await this.evaluateNative(`${allocation}->LastSite`), type: 'uint', variablesReference: 0 });
+            result.push({ name: 'AllocatedAt', value: `${await this.evaluateCString(`${allocation}->File`)}:${await this.evaluateNative(`${allocation}->Line`)}`, type: 'string', variablesReference: 0 });
+            if (this.debugMap?.memoryDiagnostics === 'guarded') {
+                const canary = await this.evaluateNative(`*(uint32_t*)((uint8_t*)(void*)${expression} + ${allocation}->Size)`);
+                result.push({ name: 'Canary', value: canary.toLocaleLowerCase().includes('c71de14d') || canary === '3340624205' ? 'intact' : `corrupt (${canary})`, type: 'string', variablesReference: 0 });
+            }
+        }
+        return result;
+    }
+
+    private async evaluateCStringPointer(expression: string): Promise<string> {
+        if (!isTruthyGdbValue(await this.evaluateNative(`${expression} != 0`)))
+            return '';
+        return this.evaluateCString(`(const char*)(uintptr_t)${expression}`);
+    }
+
+    private dataBreakpointExpression(variablesReference: number | undefined, name: string, frameId: number,
+        fn: DebugFunction | undefined): { expression: string; type: string } | undefined {
+        const container = variablesReference === undefined ? undefined : this.variableHandles.get(variablesReference);
+        if (container === undefined || container.type === '$scope')
+            return this.translateWatch(name, fn, frameId);
+        if (container.type === '$statics') {
+            for (const type of this.debugMap?.types ?? []) {
+                const field = type.fields.find(candidate => candidate.static && (candidate.name === name || `${type.name}.${candidate.name}` === name));
+                if (field !== undefined)
+                    return { expression: field.storage, type: field.type };
+            }
             return undefined;
-        return this.target.espTarget === 'esp32c3' ? 8 : 2;
+        }
+        if (container.type === '$objectruntime' && name === 'RefCount')
+            return { expression: `((ct_object*)(void*)${container.expression})->RefCount`, type: 'uint' };
+        if (container.type.endsWith('[]')) {
+            const index = /^\[(\d+)\]$/.exec(name);
+            return index === null ? undefined : { expression: `${container.expression}->Data[${index[1]}]`, type: container.type.slice(0, -2) };
+        }
+        const type = this.debugMap?.types.find(candidate => candidate.name === container.type);
+        const field = type === undefined ? undefined : this.instanceFields(type).find(candidate => candidate.name === name);
+        if (type === undefined || field === undefined)
+            return undefined;
+        const pointer = type.kind === 'class' || type.kind === 'delegate';
+        return { expression: `${pointer ? `((${type.storage}*)(void*)${container.expression})->` : `${container.expression}.`}${field.storage}`, type: field.type };
     }
 
-    private usedBreakpointCount(): number {
-        return [...this.sourceBreakpoints.values()].reduce((count, ids) => count + ids.length, 0)
-            + this.functionBreakpoints.length + this.exceptionBreakpoints.length;
+    private async removeExpiredLocalWatchpoints(): Promise<void> {
+        if (this.dataBreakpoints.size === 0 || this.currentThreadState === '0' || this.currentThreadState === '0x0')
+            return;
+        const active = new Set<string>();
+        let frame = `((ct_thread_state*)(void*)${this.currentThreadState})->DebugFrameTop`;
+        for (let count = 0; count < 256 && isTruthyGdbValue(await this.evaluateNative(`${frame} != 0`)); count++) {
+            active.add(await this.evaluateNative(`${frame}->Activation`));
+            frame = `(${frame})->Previous`;
+        }
+        for (const [dataId, watchpoint] of this.dataBreakpoints) {
+            if (watchpoint.thread !== this.currentThreadState || active.has(watchpoint.activation))
+                continue;
+            try { await this.gdb.command(`-break-delete ${watchpoint.id}`); } catch { }
+            this.dataBreakpoints.delete(dataId);
+            this.sendEvent(new OutputEvent('A C~ local data breakpoint was removed because its owning method activation exited.\n', 'console'));
+        }
     }
 
-    private espBreakpointLimitMessage(): string {
-        return `The ${this.target?.espTarget ?? 'ESP'} runtime GDB stub provides ${this.espBreakpointLimit()} hardware breakpoint slots shared by source, function, and exception breakpoints.`;
+    private async selectFunctionFrame(fn: DebugFunction): Promise<void> {
+        const record = await this.gdb.command('-stack-list-frames');
+        for (const value of miArray(record.results.stack)) {
+            const wrapper = miTuple(value);
+            const frame = miTuple(wrapper.frame ?? value);
+            if (miString(frame.func) !== fn.name)
+                continue;
+            await this.gdb.command(`-stack-select-frame ${Number.parseInt(miString(frame.level), 10)}`);
+            return;
+        }
     }
 
     private translateExpression(expression: string, fn: DebugFunction | undefined): string {
         const storage = new Map<string, string>();
-        for (const variable of [...fn?.parameters ?? [], ...fn?.locals ?? []])
+        for (const variable of [...fn?.parameters ?? [], ...this.liveLocals(fn)])
             storage.set(variable.name, variable.storage);
         if (fn?.receiver !== undefined)
             storage.set('this', fn.receiver);
@@ -791,13 +1338,13 @@ export class CTildeDebugSession extends LoggingDebugSession {
         catch { return match[1]; }
     }
 
-    private translateWatch(expression: string, fn: DebugFunction | undefined): { expression: string; type: string } | undefined {
+    private translateWatch(expression: string, fn: DebugFunction | undefined, frameId?: number): { expression: string; type: string } | undefined {
         const root = /^([A-Za-z_][A-Za-z0-9_]*|this)/.exec(expression);
         if (root === null)
             return undefined;
         const definition = root[1] === 'this' && fn?.receiver !== undefined && fn.receiverType !== undefined
             ? { name: 'this', storage: fn.receiver, type: fn.receiverType }
-            : [...fn?.locals ?? [], ...fn?.parameters ?? []].find(variable => variable.name === root[1]);
+            : [...this.liveLocals(fn, frameId), ...fn?.parameters ?? []].find(variable => variable.name === root[1]);
         if (definition === undefined)
             return undefined;
         let native = definition.storage;
@@ -845,6 +1392,45 @@ function normalizePath(value: string): string {
 
 function isPrimitive(type: string): boolean {
     return ['bool', 'byte', 'sbyte', 'short', 'ushort', 'char', 'int', 'uint', 'long', 'ulong', 'nint', 'nuint', 'float'].includes(type) || type.length === 0;
+}
+
+function isAddressableWatchType(type: string): boolean {
+    return type.length !== 0 && !type.startsWith('$');
+}
+
+function nativeWatchSize(type: string): number | undefined {
+    if (['bool', 'byte', 'sbyte', 'char'].includes(type))
+        return 1;
+    if (['short', 'ushort'].includes(type))
+        return 2;
+    if (['int', 'uint', 'float'].includes(type) || type.endsWith('[]') || type === 'string' || type.includes('.'))
+        return 4;
+    return undefined;
+}
+
+function offsetAddress(reference: string, offset: number): string {
+    const parsed = BigInt(reference);
+    return `0x${(parsed + BigInt(offset)).toString(16)}`;
+}
+
+function normalizeAddress(value: string): string {
+    const hexadecimal = /0x[0-9a-f]+/i.exec(value);
+    if (hexadecimal !== null)
+        return hexadecimal[0];
+    const decimal = /\b\d+\b/.exec(value);
+    return decimal?.[0] ?? value.trim();
+}
+
+function matchesFunctionBreakpoint(fn: DebugFunction, requested: string): boolean {
+    const normalized = requested.replaceAll(' ', '');
+    const signature = `${fn.displayName}(${fn.parameters.map(parameter => parameter.type).join(',')})`.replaceAll(' ', '');
+    if (signature === normalized || signature.endsWith(`.${normalized}`))
+        return true;
+    return !normalized.includes('(') && (fn.displayName === normalized || fn.displayName.endsWith(`.${normalized}`));
+}
+
+function sameSourceLine(left: DebugSource, right: DebugSource): boolean {
+    return normalizePath(left.file) === normalizePath(right.file) && left.line === right.line;
 }
 
 LoggingDebugSession.run(CTildeDebugSession);

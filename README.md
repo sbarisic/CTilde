@@ -132,7 +132,7 @@ ctilde <input.ct>... --check
 ctilde <input.ct>... -o <program.c> [--header <exports.h>]
 ctilde <input.ct>... --build [--compiler auto|msvc|gcc|clang]
 ctilde --project <ctilde.json> [--check|--build]
-ctilde --project <ctilde.json> --prepare-debug launch --debug-target <target.json>
+ctilde --project <ctilde.json> --prepare-debug launch --debug-target <target.json> --debug-memory objects
 ctilde --project <ctilde.json> --prepare-debug attach --debug-target <target.json>
 ```
 
@@ -176,11 +176,11 @@ using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
 ```
 
-`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, `EmitSymbolMap()`, and `EmitDebugMap()` expose modular artifacts, exported declarations, compact-name mappings, and C~-aware debug metadata. `CompilationOptions.DebugInformation` enables source `#line` mappings and stable exception hooks. Ordinary and Release emission remains unchanged. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
+`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, `EmitSymbolMap()`, and `EmitDebugMap()` expose modular artifacts, exported declarations, compact-name mappings, and C~-aware debug metadata. `CompilationOptions.DebugInformation` selects no debugging, source mappings, or full version-2 instrumentation. Instrumented images add logical probes and optional ARC diagnostics privately; ordinary and Release emission remains unchanged. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
 
 ## Editor support
 
-The extension in [editors/vscode](editors/vscode/README.md) provides compiler-aware semantic highlighting, completion, diagnostics, XML-documentation hover and signature help, definitions, document and workspace symbols, project checks and native builds, C~-aware GDB debugging, and navigation into the embedded standard library. It bundles the framework-dependent compiler, language server, and Node debug adapter and therefore requires an installed .NET 10 runtime.
+The extension in [editors/vscode](editors/vscode/README.md) provides compiler-aware semantic highlighting, completion, diagnostics, XML-documentation hover and signature help, definitions, document and workspace symbols, project checks and native builds, C~-aware GDB debugging, and navigation into the embedded standard library. Its GDB adapter uses compiler-emitted logical probes for source, function, log, and exception breakpoints; it also provides C~-level stepping, Run to Cursor, lexical locals, hardware data watchpoints, and optional ARC object/guard inspection. It bundles the framework-dependent compiler, language server, and Node debug adapter and therefore requires an installed .NET 10 runtime.
 
 Rename, references, formatting, code actions, auto-import edits, and semantic-token deltas are not yet implemented. MSVC uses the Microsoft C/C++ debugger as a native-variable fallback; GCC, Clang, WSL, and ESP-IDF use the C~-aware GDB adapter. Type-body completion includes arithmetic-operator declarations, while operator hover, definition, symbols, usage classification, and ordinary member filtering share the same language-service regression coverage.
 

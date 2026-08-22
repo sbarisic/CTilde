@@ -79,12 +79,17 @@ Use **C~: Debug Project** to save, build, and launch the nearest project. Use **
   "args": [],
   "stopAtEntry": false,
   "showRuntimeFrames": false,
+  "memoryDiagnostics": "objects",
   "serialPort": "",
   "baudRate": 115200
 }
 ```
 
-Hosted GCC and Clang builds use the bundled C~-aware GDB/MI adapter. WSL builds start GDB in the same WSL environment. Breakpoints, conditional and hit-count breakpoints, logpoints, C~ function breakpoints, stepping, threads, stacks, locals, watches, and C~ exception filters use the compiler's deterministic debug map. Runtime and ARC frames are hidden unless `showRuntimeFrames` is enabled. Safe watch expressions are limited to identifiers, field chains, and array indices. Managed assignment, method or property calls, and general C~ expression evaluation are not supported.
+Hosted GCC and Clang builds use the bundled C~-aware GDB/MI adapter. WSL builds start GDB in the same WSL environment. Debug Launch creates version-2 instrumented metadata; Attach validates and reuses that exact image. Source and qualified function breakpoints, conditions, positive-integer hit counts, logpoints, exception filters, and Run to Cursor use compiler-emitted logical probes instead of native instruction breakpoints. Step Into, Over, and Out follow C~ sites and method depth, so ARC and cleanup helpers do not become intermediate stops. Locals are filtered by initialization point, lexical lifetime, and shadowing. Runtime and ARC frames and the native trap reports behind logical probes are hidden unless `showRuntimeFrames` is enabled. Genuine native signals and hardware-watchpoint reports remain visible.
+
+The `C~ Runtime` scope lists live managed objects, allocation and final-release counters, identities, reference counts, allocation sites, and last ARC sites. Set `memoryDiagnostics` or `ctilde.debugger.memoryDiagnostics` to `off`, `objects`, or `guarded`; `objects` is the default. Guarded mode also displays canary and quarantine state. The reserved function breakpoints `$allocation`, `$final-release`, and `$leak` stop on ARC events without consuming instruction-breakpoint slots. Data breakpoints use GDB hardware watchpoints for addressable locals, fields, array elements, managed-reference slots, and reference counts. ESP values must meet the target's size and alignment rules, and GDB reports the actual watchpoint-slot limit. A local watchpoint is removed when its owning method activation exits.
+
+Safe watch expressions are limited to identifiers, field chains, and array indices. Managed assignment, method or property calls, and general C~ expression evaluation are not supported. Use `$gdb <native-expression>` in the Debug Console for an explicitly raw GDB expression.
 
 An automatically discovered MSVC build uses `cppvsdbg` and requires the Microsoft C/C++ extension. Source breakpoints and stepping map to `.ct` files, while variables and exceptions retain their generated native presentation. Manual `type: "ctilde"` configurations require GCC or Clang.
 
@@ -96,7 +101,11 @@ CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y
 CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
 ```
 
-Launch builds and flashes before interrupting the running application over UART. Attach reuses existing ELF and debug-map artifacts and rejects changed sources. Because ESP-IDF's runtime-stub UART listener starts after the scheduler, v1 cannot stop at one-time startup code that has already executed; set breakpoints in code that will execute after attachment. The adapter selects the architecture-specific GDB from ESP-IDF project metadata; it never substitutes a host GDB. It forces GDB's `Z0` remote packet because the runtime stub implements instruction breakpoints through that packet even for flash code. ESP32 has two such breakpoint slots and ESP32-C3 has eight; source, function, and enabled exception breakpoints share them, so exception filters are disabled by default. An ESP-IDF-Python serial bridge keeps the port open for the complete GDB session, avoiding a lossy Windows close/reopen handoff. Runtime-stub mode therefore owns UART input during the session, so the same port cannot be used as an interactive application console. OpenOCD, JTAG, panic-only postmortem sessions, and ISR entry are outside this debugger profile.
+Launch builds and flashes an instrumented image. Before runtime initialization, that image waits up to 15 seconds for the UART debugger; it starts normally after the timeout. With `stopAtEntry`, the adapter stops before runtime and module initialization. Source breakpoints can then stop at the first C~ statement. Attach reuses existing ELF and version-2 debug-map artifacts, rejects changed sources, and does not rebuild or flash. The adapter selects the architecture-specific GDB from ESP-IDF project metadata; it never substitutes a host GDB. Source, function, log, and exception breakpoints use logical probes and therefore do not consume the ESP32's two instruction-breakpoint slots. Only requested data breakpoints consume target hardware watchpoint resources.
+
+The ESP runtime stub is an all-stop debugger and does not identify the stopping FreeRTOS task in every stop packet. The adapter resumes the actual interrupted frame directly, so inspecting other task stacks before continuing does not change or corrupt the frame that triggered a C~ probe.
+
+An ESP-IDF-Python serial bridge keeps the port open for the complete GDB session, avoiding a lossy Windows close/reopen handoff. Runtime-stub mode therefore owns UART input during the session, so the same port cannot be used as an interactive application console. Clean disconnect clears probe, step, event, and startup-gate state. If the debugger process dies while the target is stopped in a trap, reset the board. OpenOCD, JTAG, panic-only postmortem sessions, reverse execution, and ISR entry are outside this debugger profile.
 
 ## Development
 

@@ -24,10 +24,10 @@ Prepare a hosted executable and machine-local debugger descriptor:
 ctilde --project path/to/ctilde.json --prepare-debug launch --debug-target build/ctilde-debug-target.json
 ```
 
-This forces Debug compilation, emits C~ source mappings and `ctilde_debug.json`, disables LTO, and records the selected GDB or MSVC backend. Reuse the artifacts only when sources still match:
+This forces an instrumented Debug compilation, emits C~ source mappings and version-2 `ctilde_debug.json`, disables LTO, and records the selected GDB or MSVC backend. ARC object tracking is enabled by default. Select another launch-only mode with `--debug-memory off|objects|guarded`; guarded mode adds canaries, released-memory poisoning, and a bounded quarantine. Reuse the artifacts only when sources still match:
 
 ```text
 ctilde --project path/to/ctilde.json --prepare-debug attach --debug-target build/ctilde-debug-target.json
 ```
 
-ESP-IDF Launch also requires `--serial-port`; it validates runtime GDB-stub configuration, builds, and flashes before writing the descriptor. Attach does not rebuild or flash. The native debugger and ESP-IDF Python/serial environment remain external dependencies.
+ESP-IDF Launch also requires `--serial-port`; it validates runtime GDB-stub configuration, builds, and flashes before writing the descriptor. The instrumented application waits for the debugger for up to 15 seconds before runtime and module initialization, then starts normally if no debugger connects. Attach does not rebuild or flash and rejects non-instrumented or version-1 metadata. Ordinary Debug builds and `--debug-info` use source mappings without logical-probe or memory-diagnostic overhead. The native debugger and ESP-IDF Python/serial environment remain external dependencies.

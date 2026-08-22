@@ -621,6 +621,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    (void)setvbuf(stdout, NULL, _IONBF, 0);");
             writer.WriteLine("    (void)setvbuf(stderr, NULL, _IONBF, 0);");
+            if (EmitDebugInstrumentation)
+                writer.WriteLine("    ct_debug_wait_for_client();\n    ct_debug_startup_probe();");
             writer.WriteLine("    ct_runtime_initialize(NULL);");
             if (Model.EntryPoint is not null)
                 writer.WriteLine($"    {Model.EntryPoint.CName}();");

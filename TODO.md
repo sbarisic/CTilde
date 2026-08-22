@@ -5,6 +5,7 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 ## Release blockers
 
 - [ ] Flash and monitor the ABI 14 T-CAN485 runtime regression workload. Confirm lifecycle behavior, attached tasks, exports, callbacks, ARC recovery, exceptions, runtime faults, heap/stack measurements, and sustained GPIO4 WS2812 operation.
+- [ ] Validate instrumented debugger v2 on the connected ESP32 at 460800 baud: pre-initialization and first-statement stops, more than two logical breakpoints, C~ Step Into/Over/Out, one field or reference-count watchpoint, ARC object/leak inspection, clean detach, and the 15-second no-debugger startup path.
 - [ ] Keep `IMPLEMENTATION_STATUS.md` synchronized with the SDK, toolchain, test, firmware, and physical-hardware evidence used for the release decision.
 
 ## Compiler and runtime architecture

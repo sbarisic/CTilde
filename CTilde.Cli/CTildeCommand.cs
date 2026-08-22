@@ -89,11 +89,11 @@ internal static class CTildeCommand
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
             }
             var trees = request.Inputs.Select(path => SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
-            var sourceRoot = request.DebugInformation
+            var sourceRoot = request.DebugInformation != DebugInformationMode.None
                 ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
                 : request.SourceRoot;
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
-                request.DebugInformation ? DebugInformationMode.Source : DebugInformationMode.None));
+                request.DebugInformation, request.DebugMemory));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -166,7 +166,7 @@ internal static class CTildeCommand
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
             options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
-            options.DebugInfo || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null)
+            options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null)
             return UsageError("--compile-directory cannot be combined with inputs, project, output, check, build, or native-build options.");
         try
         {
@@ -311,6 +311,6 @@ internal static class CTildeCommand
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
-        Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--serial-port <port>] [--baud-rate <rate>]");
+        Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--debug-memory off|objects|guarded] [--serial-port <port>] [--baud-rate <rate>]");
     }
 }

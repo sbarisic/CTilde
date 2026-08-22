@@ -24,6 +24,7 @@ internal sealed record CommandLineOptions(
     string? SymbolMap,
     bool Lto,
     bool DebugInfo,
+    DebugMemoryMode? DebugMemory,
     string? DebugMap,
     string? PrepareDebug,
     string? DebugTarget,
@@ -63,6 +64,7 @@ internal sealed record CommandLineOptions(
         var targetSpecified = false;
         var lto = false;
         var debugInfo = false;
+        DebugMemoryMode? debugMemory = null;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
 
@@ -94,6 +96,19 @@ internal sealed record CommandLineOptions(
                 case "--debug-target": debugTarget = RequireValue(); break;
                 case "--serial-port": serialPort = RequireValue(); break;
                 case "--debug-info": debugInfo = true; break;
+                case "--debug-memory":
+                    var memoryValue = RequireValue();
+                    debugMemory = memoryValue switch
+                    {
+                        "off" => DebugMemoryMode.Off,
+                        "objects" => DebugMemoryMode.Objects,
+                        "guarded" => DebugMemoryMode.Guarded,
+                        null => null,
+                        _ => (DebugMemoryMode)(-1),
+                    };
+                    if (debugMemory is not null && !Enum.IsDefined(debugMemory.Value))
+                        parseError = $"Unknown debug memory mode '{memoryValue}'; expected off, objects, or guarded.";
+                    break;
                 case "--prepare-debug":
                     prepareDebug = RequireValue();
                     if (prepareDebug is not null && prepareDebug is not ("launch" or "attach"))
@@ -161,7 +176,7 @@ internal sealed record CommandLineOptions(
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
-            debugInfo, debugMap, prepareDebug, debugTarget, serialPort, baudRate);
+            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate);
         return true;
     }
 }

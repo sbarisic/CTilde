@@ -31,6 +31,8 @@ internal sealed partial class TypedIrBodyLowerer
                 }
                 if (!_analysisOnly)
                 {
+                    if (_emitter.EmitDebugInstrumentation)
+                        writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, defer, "defer-capture")}));");
                     var deferId = _deferId;
                     _capturingDirectDefer = true;
                     var directLowered = LowerCall(call, captureForDefer: true);
@@ -40,6 +42,8 @@ internal sealed partial class TypedIrBodyLowerer
                     var action = directLowered.Type.ContainsManagedReferences
                         ? $"{_emitter.CDeclaration(directLowered.Type, "ignored")} = {directLowered.Code}; {CEmitter.ValueDropName(directLowered.Type)}((void*)&ignored);"
                         : $"(void)({directLowered.Code});";
+                    if (_emitter.EmitDebugInstrumentation)
+                        action = $"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, defer, "defer")})); {action}";
                     _directDefers.Add(new DirectDeferThunk(thunkName, action));
                     RegisterDurableSlot("ct_defer_marker", CType.Byte);
                     var record = $"ct_cleanup_defer_{deferId}";
@@ -83,14 +87,33 @@ internal sealed partial class TypedIrBodyLowerer
 
     private FlowResult EmitStatement(ILoweringWriter writer, StatementSyntax statement)
     {
-        if (!_emitter.EmitDebugInformation)
+        // A braced block is a structural container, not an executable source site.
+        // Emitting a probe before it would place statements between an if/while and
+        // its body, changing the generated C control flow (and orphaning else).
+        if (!_emitter.EmitDebugInformation || statement is BlockStatementSyntax)
             return EmitStatementCore(writer, statement);
         _emitter.RegisterDebugExecutable(_method, statement);
         writer.WriteLine(_emitter.DebugSourceDirective(statement));
+        if (_emitter.EmitDebugInstrumentation)
+        {
+            foreach (var local in ActiveLocals().Where(local => local.IsAssigned).OrderBy(local => local.Id))
+                writer.WriteLine($"ct_debug_keep((void*)&{local.CName});");
+            writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, statement, DebugStatementKind(statement))}));");
+        }
         var result = EmitStatementCore(writer, statement);
         writer.WriteLine(_emitter.DebugGeneratedDirective());
         return result;
     }
+
+    private static string DebugStatementKind(StatementSyntax statement) => statement switch
+    {
+        ReturnStatementSyntax => "return",
+        ThrowStatementSyntax => "throw",
+        TryStatementSyntax => "try",
+        DeferStatementSyntax => "defer",
+        IfStatementSyntax or WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax or ForeachStatementSyntax or SwitchStatementSyntax => "condition",
+        _ => "statement",
+    };
 
     private FlowResult EmitStatementCore(ILoweringWriter writer, StatementSyntax statement)
     {
@@ -99,7 +122,7 @@ internal sealed partial class TypedIrBodyLowerer
             case BlockStatementSyntax block:
                 using (writer.Block())
                 {
-                    BeginScope(writer);
+                    BeginScope(writer, block.Span.End);
                     var flow = EmitStatements(writer, block.Statements);
                     EndScope(writer, flow.FallsThrough);
                     return flow;
@@ -399,7 +422,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (type.Kind is CTypeKind.Opaque or CTypeKind.Pointer && initializer?.Ownership == OwnershipKind.Owned)
             ConsumeOwnedExpression(initializer, syntax.Initializer!);
         _scopes.Peek()[syntax.Name] = symbol;
-        _emitter.RegisterDebugLocal(_method, symbol);
+        _emitter.RegisterDebugLocal(_method, symbol, syntax.Span.End, _debugScopeEnds.Peek());
         if (symbol.IsDurable)
         {
             RegisterDurableSlot(symbol.StorageName, type);
@@ -417,6 +440,8 @@ internal sealed partial class TypedIrBodyLowerer
                 writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
         writer.WriteLine($"(void){symbol.CName};");
+        if (_emitter.EmitDebugInstrumentation)
+            writer.WriteLine($"ct_debug_keep((void*)&{symbol.CName});");
     }
 
     private FlowResult EmitIf(ILoweringWriter writer, IfStatementSyntax syntax)
@@ -453,7 +478,7 @@ internal sealed partial class TypedIrBodyLowerer
             return EmitStatement(writer, statement);
         using (writer.Block())
         {
-            BeginScope(writer);
+            BeginScope(writer, statement.Span.End);
             var flow = EmitStatement(writer, statement);
             EndScope(writer, flow.FallsThrough);
             return flow;
@@ -542,7 +567,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitFor(ILoweringWriter writer, ForStatementSyntax syntax)
     {
-        BeginScope(writer);
+        BeginScope(writer, syntax.Span.End);
         if (syntax.Initializer is not null)
             EmitStatement(writer, syntax.Initializer);
         var start = NewLabel("for_test");
@@ -583,7 +608,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitForeach(ILoweringWriter writer, ForeachStatementSyntax syntax)
     {
-        BeginScope(writer);
+        BeginScope(writer, syntax.Span.End);
         var collection = Materialize(LowerExpression(syntax.Collection), syntax.Collection);
         if (collection.Type.Kind != CTypeKind.Array)
             Report("CT2105", "foreach requires a one-dimensional array.", syntax.Collection);
@@ -605,7 +630,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsDurable = _tryCount != 0,
         };
         _scopes.Peek()[syntax.Name] = local;
-        _emitter.RegisterDebugLocal(_method, local);
+        _emitter.RegisterDebugLocal(_method, local, syntax.Body.Span.Start, syntax.Body.Span.End);
         var index = NewTemp();
         writer.WriteLine($"int32_t {index} = 0;");
         var start = NewLabel("foreach_test");
@@ -693,7 +718,7 @@ internal sealed partial class TypedIrBodyLowerer
                         writer.WriteLine($"case {code}:;");
                     }
                 }
-                BeginScope(writer);
+                BeginScope(writer, section.Span.End);
                 var flow = EmitStatements(writer, section.Statements, allowDefer: false);
                 var sectionState = SnapshotAssignments();
                 EndScope(writer, flow.FallsThrough);

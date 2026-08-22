@@ -51,7 +51,10 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.debugger.gdbPath"].scope, "machine");
   assert.equal(configuration["ctilde.debugger.serialPort"].default, "");
   assert.equal(configuration["ctilde.debugger.baudRate"].default, 115200);
+  assert.equal(configuration["ctilde.debugger.memoryDiagnostics"].default, "objects");
+  assert.deepEqual(configuration["ctilde.debugger.memoryDiagnostics"].enum, ["off", "objects", "guarded"]);
   assert.equal(configuration["ctilde.debugger.showRuntimeFrames"].default, false);
+  assert.match(configuration["ctilde.debugger.showRuntimeFrames"].description, /trap reports/);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].required, ["project", "mode"]);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build"]);
   assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
@@ -65,6 +68,7 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.deepEqual(debuggerContribution.languages, ["ctilde"]);
   assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ["project"]);
   assert.equal(debuggerContribution.configurationAttributes.launch.properties.baudRate.default, 115200);
+  assert.equal(debuggerContribution.configurationAttributes.launch.properties.memoryDiagnostics.default, "objects");
   assert.equal(debuggerContribution.initialConfigurations.length, 2);
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   const semanticScopes = manifest.contributes.semanticTokenScopes[0];

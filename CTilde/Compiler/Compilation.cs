@@ -148,7 +148,7 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
-        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot(), Options.DebugInformation);
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);

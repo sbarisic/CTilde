@@ -22,6 +22,18 @@ internal sealed record DebugLocalEntry(
     int Line,
     int Column,
     int SpanStart,
+    int SpanLength,
+    int LiveStart,
+    int? LiveEnd);
+
+internal sealed record DebugSiteEntry(
+    int Id,
+    MethodSymbol Method,
+    string Kind,
+    string File,
+    int Line,
+    int Column,
+    int SpanStart,
     int SpanLength);
 
 internal sealed partial class CEmitter : ILoweringServices
@@ -42,8 +54,11 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly CompilationTarget _target;
     private readonly string? _sourceRoot;
     private readonly DebugInformationMode _debugInformation;
+    private readonly DebugMemoryMode _debugMemory;
     private readonly List<DebugLocalEntry> _debugLocals = [];
     private readonly Dictionary<MethodSymbol, HashSet<(string File, int Line, int Column, int Start, int Length)>> _debugExecutable = [];
+    private readonly List<DebugSiteEntry> _debugSites = [];
+    private readonly Dictionary<(MethodSymbol Method, int Start, int Length, string Kind), int> _debugSiteIds = [];
     private bool _usesExceptions = true;
     private bool _usesHostedIo;
     private bool _usesNativeIntegers;
@@ -52,13 +67,15 @@ internal sealed partial class CEmitter : ILoweringServices
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
     public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null,
-        DebugInformationMode debugInformation = DebugInformationMode.None)
+        DebugInformationMode debugInformation = DebugInformationMode.None,
+        DebugMemoryMode debugMemory = DebugMemoryMode.Off)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
         _sourceRoot = sourceRoot;
         _debugInformation = debugInformation;
+        _debugMemory = debugMemory;
         foreach (var type in model.Types.Values)
         {
             foreach (var field in type.Fields)
@@ -87,7 +104,10 @@ internal sealed partial class CEmitter : ILoweringServices
     public DiagnosticBag Diagnostics { get; }
     public AllocationEffectRegistry AllocationEffects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
-    public bool EmitDebugInformation => _debugInformation == DebugInformationMode.Source;
+    public bool EmitDebugInformation => _debugInformation != DebugInformationMode.None;
+    public bool EmitDebugInstrumentation => _debugInformation == DebugInformationMode.Instrumented;
+    private bool EmitDebugObjects => EmitDebugInstrumentation && _debugMemory != DebugMemoryMode.Off;
+    private bool EmitDebugGuards => EmitDebugInstrumentation && _debugMemory == DebugMemoryMode.Guarded;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
     private bool HasExports => _reachableMethods.Any(method => method.ExportName is not null);
 
@@ -252,6 +272,18 @@ internal sealed partial class CEmitter : ILoweringServices
         {
             externalRuntimeNames.Add("ct_debug_throw_hook");
             externalRuntimeNames.Add("ct_debug_fatal_hook");
+            if (EmitDebugInstrumentation)
+            {
+                externalRuntimeNames.Add("ct_debug_site");
+                externalRuntimeNames.Add("ct_debug_keep");
+                externalRuntimeNames.Add("ct_debug_method_enter");
+                externalRuntimeNames.Add("ct_debug_method_leave");
+                if (IsEspIdf)
+                {
+                    externalRuntimeNames.Add("ct_debug_wait_for_client");
+                    externalRuntimeNames.Add("ct_debug_startup_probe");
+                }
+            }
         }
         var markedPrefix = MarkUnusedDefinitions(prefix);
         var internalHeader = BuildInternalHeader(markedPrefix, definitionNames, externalRuntimeNames);
@@ -309,6 +341,12 @@ internal sealed partial class CEmitter : ILoweringServices
             {
                 if (line.TrimEnd().EndsWith("};", StringComparison.Ordinal))
                     skipInitializer = false;
+                continue;
+            }
+
+            if (line.StartsWith("ct_debug_control_block ct_debug_control =", StringComparison.Ordinal))
+            {
+                writer.Append("extern ct_debug_control_block ct_debug_control;\n");
                 continue;
             }
 
@@ -401,7 +439,9 @@ internal sealed partial class CEmitter : ILoweringServices
             }
             line = line.Replace("CT_NORETURN static CT_UNUSED ", "CT_NORETURN ", StringComparison.Ordinal)
                 .Replace("CT_NORETURN static ", "CT_NORETURN ", StringComparison.Ordinal);
-            if (line.StartsWith("static CT_UNUSED ", StringComparison.Ordinal))
+            if (line.StartsWith("CT_DEBUG_USER_NOINLINE static ", StringComparison.Ordinal))
+                line = "CT_DEBUG_USER_NOINLINE " + line["CT_DEBUG_USER_NOINLINE static ".Length..];
+            else if (line.StartsWith("static CT_UNUSED ", StringComparison.Ordinal))
                 line = line["static CT_UNUSED ".Length..];
             else if (line.StartsWith("static ", StringComparison.Ordinal))
                 line = line["static ".Length..];
@@ -453,16 +493,44 @@ internal sealed partial class CEmitter : ILoweringServices
                 var cName = function.Property is null
                     ? method.CName
                     : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+                var scopeSource = method.Body ?? method.Syntax;
+                SyntaxNode[] scopeNodes = scopeSource is null
+                    ? []
+                    : DebugDescendantNodes(scopeSource).OfType<BlockStatementSyntax>()
+                        .OrderBy(scope => scope.Span.Start).ThenByDescending(scope => scope.Span.Length).Cast<SyntaxNode>().ToArray();
+                if (scopeNodes.Length == 0 && scopeSource is not null)
+                    scopeNodes = [scopeSource];
+                var scopes = scopeNodes.Select((scope, id) =>
+                {
+                    var parent = scopeNodes.Select((candidate, candidateId) => (candidate, candidateId))
+                        .Where(candidate => candidate.candidateId != id && candidate.candidate.Span.Start <= scope.Span.Start && candidate.candidate.Span.End >= scope.Span.End)
+                        .OrderBy(candidate => candidate.candidate.Span.Length).FirstOrDefault();
+                    return new Dictionary<string, object?>
+                    {
+                        ["id"] = id,
+                        ["parent"] = parent.candidate is null ? null : parent.candidateId,
+                        ["source"] = DebugSourceEntry(scope),
+                    };
+                }).ToArray();
                 var locals = _debugLocals.Where(local => ReferenceEquals(local.Method, method))
                     .OrderBy(local => local.SpanStart)
                     .ThenBy(local => local.Storage, StringComparer.Ordinal)
-                    .Select(local => new Dictionary<string, object?>
+                    .Select(local =>
                     {
-                        ["name"] = local.Name,
-                        ["storage"] = local.Storage,
-                        ["type"] = local.Type,
-                        ["durable"] = local.Durable,
-                        ["source"] = DebugSourceEntry(local.File, local.Line, local.Column, local.SpanStart, local.SpanLength),
+                        var containing = scopeNodes.Select((scope, id) => (scope, id))
+                            .Where(candidate => candidate.scope.Span.Start <= local.SpanStart && candidate.scope.Span.End >= local.SpanStart)
+                            .OrderBy(candidate => candidate.scope.Span.Length).FirstOrDefault();
+                        return new Dictionary<string, object?>
+                        {
+                            ["name"] = local.Name,
+                            ["storage"] = local.Storage,
+                            ["type"] = local.Type,
+                            ["durable"] = local.Durable,
+                            ["scopeId"] = containing.scope is null ? 0 : containing.id,
+                            ["liveStart"] = local.LiveStart,
+                            ["liveEnd"] = local.LiveEnd ?? containing.scope?.Span.End ?? method.Body?.Span.End ?? method.Syntax?.Span.End ?? local.SpanStart + local.SpanLength,
+                            ["source"] = DebugSourceEntry(local.File, local.Line, local.Column, local.SpanStart, local.SpanLength),
+                        };
                     }).ToArray();
                 var executable = _debugExecutable.GetValueOrDefault(method, [])
                     .OrderBy(location => location.File, StringComparer.Ordinal)
@@ -470,6 +538,14 @@ internal sealed partial class CEmitter : ILoweringServices
                     .ThenBy(location => location.Column)
                     .Select(location => DebugSourceEntry(location.File, location.Line, location.Column, location.Start, location.Length))
                     .ToArray();
+                var sites = _debugSites.Where(site => ReferenceEquals(site.Method, method))
+                    .OrderBy(site => site.Id)
+                    .Select(site => new Dictionary<string, object?>
+                    {
+                        ["id"] = site.Id,
+                        ["kind"] = site.Kind,
+                        ["source"] = DebugSourceEntry(site.File, site.Line, site.Column, site.SpanStart, site.SpanLength),
+                    }).ToArray();
                 return new Dictionary<string, object?>
                 {
                     ["name"] = cName,
@@ -487,6 +563,8 @@ internal sealed partial class CEmitter : ILoweringServices
                     }).ToArray(),
                     ["locals"] = locals,
                     ["executable"] = executable,
+                    ["sites"] = sites,
+                    ["scopes"] = scopes,
                 };
             })
             .OrderBy(function => (string)function["name"]!, StringComparer.Ordinal)
@@ -546,8 +624,10 @@ internal sealed partial class CEmitter : ILoweringServices
         return JsonSerializer.Serialize(new Dictionary<string, object?>
         {
             ["generator"] = "C~ draft 0.14",
-            ["version"] = 1,
+            ["version"] = 2,
             ["runtimeAbi"] = 14,
+            ["instrumented"] = EmitDebugInstrumentation,
+            ["memoryDiagnostics"] = _debugMemory.ToString().ToLowerInvariant(),
             ["files"] = files,
             ["functions"] = functions,
             ["types"] = types,
@@ -558,7 +638,21 @@ internal sealed partial class CEmitter : ILoweringServices
             {
                 ["throw"] = "ct_debug_throw_hook",
                 ["fatal"] = "ct_debug_fatal_hook",
+                ["control"] = EmitDebugInstrumentation ? "ct_debug_control" : null,
+                ["trap"] = EmitDebugInstrumentation ? "ct_debug_trap" : null,
+                ["startup"] = EmitDebugInstrumentation && IsEspIdf ? "ct_debug_startup_probe" : null,
             },
+            ["runtimeControl"] = EmitDebugInstrumentation ? new Dictionary<string, object?>
+            {
+                ["symbol"] = "ct_debug_control",
+                ["magic"] = "0x43544432",
+                ["enabledSites"] = "Enabled",
+                ["eventMask"] = "EventMask",
+                ["stepMode"] = "StepMode",
+                ["selectedThread"] = "SelectedThread",
+                ["currentSite"] = "CurrentSite",
+                ["currentReason"] = "CurrentReason",
+            } : null,
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
     }
 
@@ -919,16 +1013,39 @@ internal sealed partial class CEmitter : ILoweringServices
             syntax.Span.Start, syntax.Span.Length));
     }
 
-    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local)
+    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local, int liveStart, int? liveEnd)
     {
         if (!EmitDebugInformation)
             return;
         var location = local.Syntax.Source.GetLocation(local.Syntax.Span);
         var entry = new DebugLocalEntry(method, local.Name, local.CName, local.Type.DisplayName, local.IsDurable,
             NormalizeDebugPath(local.Syntax.Source.FilePath), location.Line, location.Column,
-            local.Syntax.Span.Start, local.Syntax.Span.Length);
+            local.Syntax.Span.Start, local.Syntax.Span.Length, liveStart, liveEnd);
         if (!_debugLocals.Contains(entry))
             _debugLocals.Add(entry);
+    }
+
+    public int RegisterDebugSite(MethodSymbol method, SyntaxNode syntax, string kind)
+    {
+        if (!EmitDebugInstrumentation)
+            return -1;
+        var key = (method, syntax.Span.Start, syntax.Span.Length, kind);
+        if (_debugSiteIds.TryGetValue(key, out var existing))
+            return existing;
+        var location = syntax.Source.GetLocation(syntax.Span);
+        var id = _debugSites.Count;
+        _debugSiteIds.Add(key, id);
+        _debugSites.Add(new DebugSiteEntry(id, method, kind, NormalizeDebugPath(syntax.Source.FilePath),
+            location.Line, location.Column, syntax.Span.Start, syntax.Span.Length));
+        return id;
+    }
+
+    private static IEnumerable<SyntaxNode> DebugDescendantNodes(SyntaxNode root)
+    {
+        yield return root;
+        foreach (var child in root.ChildNodesAndTokens().Where(item => item.IsNode).Select(item => item.Node!))
+            foreach (var descendant in DebugDescendantNodes(child))
+                yield return descendant;
     }
 
     private string NormalizeDebugPath(string path)

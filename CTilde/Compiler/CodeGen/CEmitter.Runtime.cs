@@ -33,8 +33,12 @@ internal sealed partial class CEmitter
             writer.WriteLine("#if defined(_MSC_VER)\n#include <malloc.h>\n#endif");
         if (_usesExceptions)
             writer.WriteLine("#include <setjmp.h>");
+        if (EmitDebugInstrumentation && !IsEspIdf)
+            writer.WriteLine("#include <signal.h>");
         if (IsEspIdf)
             writer.WriteLine("#include \"ctilde_esp_shim.h\"");
+        if (EmitDebugInstrumentation && IsEspIdf)
+            writer.WriteLine("#include <esp_cpu.h>");
         writer.WriteLine();
         writer.WriteLine("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(14)");
         writer.WriteLine();
@@ -98,11 +102,38 @@ internal sealed partial class CEmitter
             writer.WriteLine("#else");
             writer.WriteLine("#define CT_DEBUG_NOINLINE __attribute__((noinline, used))");
             writer.WriteLine("#endif");
-            writer.WriteLine("static volatile uintptr_t ct_debug_probe;");
+            writer.WriteLine(EmitDebugInstrumentation ? "#define CT_DEBUG_USER_NOINLINE CT_DEBUG_NOINLINE" : "#define CT_DEBUG_USER_NOINLINE");
+            writer.WriteLine("static volatile uintptr_t ct_debug_probe_sink;");
             writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled);");
             writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line);");
-            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; (void)code; (void)file; }");
-            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe = (uintptr_t)(unsigned int)line; (void)code; (void)file; }");
+            if (!EmitDebugInstrumentation)
+            {
+                writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe_sink = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; (void)code; (void)file; }");
+                writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe_sink = (uintptr_t)(unsigned int)line; (void)code; (void)file; }");
+            }
+        }
+        if (EmitDebugInstrumentation)
+        {
+            var enabledWords = Math.Max(1, (_debugSites.Count + 31) / 32);
+            writer.WriteLine("enum { CT_DEBUG_REASON_SITE = 1u, CT_DEBUG_REASON_THROW = 2u, CT_DEBUG_REASON_FATAL = 3u, CT_DEBUG_REASON_ALLOC = 4u, CT_DEBUG_REASON_RELEASE = 5u, CT_DEBUG_REASON_LEAK = 6u, CT_DEBUG_REASON_STARTUP = 7u };");
+            writer.WriteLine("enum { CT_DEBUG_EVENT_THROW = 1u, CT_DEBUG_EVENT_UNHANDLED = 2u, CT_DEBUG_EVENT_FATAL = 4u, CT_DEBUG_EVENT_ALLOC = 8u, CT_DEBUG_EVENT_RELEASE = 16u, CT_DEBUG_EVENT_LEAK = 32u, CT_DEBUG_EVENT_STARTUP = 64u };");
+            writer.WriteLine($"typedef struct ct_debug_control_block {{ uint32_t Magic; uint32_t SiteCount; volatile uint32_t SessionActive; volatile uint32_t StartupReleased; volatile uint32_t EventMask; volatile uint32_t StepMode; volatile uint32_t StepDepth; volatile uintptr_t SelectedThread; volatile uintptr_t CurrentThread; volatile uintptr_t CurrentActivation; volatile uint32_t CurrentSite; volatile uint32_t CurrentReason; volatile uintptr_t CurrentObject; volatile uint32_t CurrentValue; volatile uintptr_t CurrentCode; volatile uintptr_t CurrentFile; volatile int32_t CurrentLine; volatile uint32_t Enabled[{enabledWords}]; }} ct_debug_control_block;");
+            writer.WriteLine($"ct_debug_control_block ct_debug_control = {{ UINT32_C(0x43544432), UINT32_C({_debugSites.Count}), 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, UINT32_MAX, 0u, 0u, 0u, 0u, 0u, 0, {{0}} }};");
+            writer.WriteLine("static ct_atomic_u32 ct_debug_stop_lock = CT_ATOMIC_U32_INIT(0u);");
+            writer.WriteLine("typedef struct ct_debug_method_frame { void* State; struct ct_debug_method_frame* Previous; uintptr_t Activation; bool Active; } ct_debug_method_frame;");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_site(uint32_t site);");
+            writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_keep(void* storage);");
+            writer.WriteLine("void ct_debug_method_enter(ct_debug_method_frame* frame);");
+            writer.WriteLine("void ct_debug_method_leave(void* value);");
+            writer.WriteLine("static void ct_debug_runtime_event(uint32_t reason, uint32_t mask, ct_object* object, uint32_t value, const char* code, const char* file, int32_t line);");
+            if (IsEspIdf)
+                writer.WriteLine("void ct_debug_wait_for_client(void);\nvoid ct_debug_startup_probe(void);");
+            if (EmitDebugObjects)
+            {
+                writer.WriteLine("static void ct_debug_object_initialized(ct_object* object);");
+                writer.WriteLine("static void ct_debug_arc_touch(ct_object* object);");
+                writer.WriteLine("static void ct_debug_report_leaks(void);");
+            }
         }
         writer.WriteLine("static_assert(sizeof(ct_atomic_u32) == sizeof(uint32_t), \"C~ atomic reference counts must remain 32-bit\");");
         writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic reference counts must preserve managed-header alignment\");");
@@ -130,6 +161,13 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_object* ReleaseHead;");
         writer.WriteLine("    bool ReleaseDraining;");
         writer.WriteLine("    bool HeapAllocated;");
+        if (EmitDebugInstrumentation)
+        {
+            writer.WriteLine("    uint32_t DebugDepth;");
+            writer.WriteLine("    uint32_t DebugCurrentSite;");
+            writer.WriteLine("    uintptr_t DebugNextActivation;");
+            writer.WriteLine("    ct_debug_method_frame* DebugFrameTop;");
+        }
         writer.WriteLine("} ct_thread_state;");
         EmitThreadStorage(writer);
         writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); };");
@@ -154,6 +192,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void* ct_require_nonnull(void* value, const char* file, int line) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", file, line); return value; }");
         EmitPlatformAllocation(writer);
         EmitThreadRuntime(writer);
+        if (EmitDebugInstrumentation)
+            EmitInstrumentedDebugRuntime(writer);
         writer.WriteLine("#define ct_cleanup_top (ct_thread_require_attached()->CleanupTop)");
         if (_usesExceptions)
         {
@@ -164,6 +204,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         writer.WriteLine("    (void)ct_thread_require_attached();");
         writer.WriteLine("    if (object == NULL) return;");
+        if (EmitDebugObjects)
+            writer.WriteLine("    ct_debug_arc_touch(object);");
         writer.WriteLine("    uint32_t count = ct_atomic_load_relaxed(&object->RefCount);");
         writer.WriteLine("    for (;;)");
         writer.WriteLine("    {");
@@ -176,6 +218,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
         writer.WriteLine("    if (object == NULL) return;");
+        if (EmitDebugObjects)
+            writer.WriteLine("    ct_debug_arc_touch(object);");
         writer.WriteLine("    uint32_t count = ct_atomic_load_relaxed(&object->RefCount);");
         writer.WriteLine("    for (;;)");
         writer.WriteLine("    {");
@@ -185,6 +229,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    if (count != 1u) return;");
         writer.WriteLine("    ct_atomic_acquire_fence();");
+        if (EmitDebugObjects)
+            writer.WriteLine("    ct_debug_runtime_event(CT_DEBUG_REASON_RELEASE, CT_DEBUG_EVENT_RELEASE, object, 0u, NULL, NULL, 0);");
         writer.WriteLine("    object->ReleaseNext = state->ReleaseHead;");
         writer.WriteLine("    state->ReleaseHead = object;");
         writer.WriteLine("    if (state->ReleaseDraining) return;");
@@ -240,6 +286,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    uint32_t identity;");
         writer.WriteLine("    do { identity = ct_atomic_fetch_add_relaxed(&ct_next_identity, 1u); } while (identity == 0u);");
         writer.WriteLine("    object->Type = type; object->IdentityHash = identity; ct_atomic_store_relaxed(&object->RefCount, 1u); object->ReleaseNext = NULL;");
+        if (EmitDebugObjects)
+            writer.WriteLine("    ct_debug_object_initialized(object);");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_live_objects, 1u);");
         writer.WriteLine("#endif");
@@ -491,7 +539,7 @@ internal sealed partial class CEmitter
             writer.WriteLine();
     }
 
-    private static void EmitPlatformAllocation(CWriter writer)
+    private void EmitPlatformAllocation(CWriter writer)
     {
         writer.WriteLine("#if defined(CTILDE_CONFORMANCE)");
         writer.WriteLine("static int32_t ct_test_allocation_failure_countdown = -1;");
@@ -505,12 +553,44 @@ internal sealed partial class CEmitter
         writer.WriteLine("uint32_t ct_memory_diagnostic_live_objects(void) { return ct_atomic_load_relaxed(&ct_memory_live_objects); }");
         writer.WriteLine("uint32_t ct_memory_diagnostic_total_allocations(void) { return ct_atomic_load_relaxed(&ct_memory_total_allocations); }");
         writer.WriteLine("#endif");
+        if (EmitDebugObjects)
+        {
+            writer.WriteLine("#if defined(_MSC_VER)");
+            writer.WriteLine("typedef __declspec(align(16)) struct ct_debug_allocation { struct ct_debug_allocation* Previous; struct ct_debug_allocation* Next; size_t Size; const char* File; int32_t Line; ct_atomic_u32 LastSite; uint64_t AlignmentPadding; } ct_debug_allocation;");
+            writer.WriteLine("#else");
+            writer.WriteLine("typedef struct __attribute__((aligned(__alignof__(max_align_t)))) ct_debug_allocation { struct ct_debug_allocation* Previous; struct ct_debug_allocation* Next; size_t Size; const char* File; int32_t Line; ct_atomic_u32 LastSite; } ct_debug_allocation;");
+            writer.WriteLine("#endif");
+            writer.WriteLine("static ct_debug_allocation* ct_debug_live_head = NULL;");
+            writer.WriteLine("static ct_debug_allocation* ct_debug_quarantine_head = NULL;");
+            writer.WriteLine("static ct_debug_allocation* ct_debug_quarantine_tail = NULL;");
+            writer.WriteLine("static size_t ct_debug_quarantine_bytes = 0u;");
+            writer.WriteLine("static uint32_t ct_debug_quarantine_count = 0u;");
+            writer.WriteLine("static ct_atomic_u32 ct_debug_registry_lock = CT_ATOMIC_U32_INIT(0u);");
+            writer.WriteLine("static ct_atomic_u32 ct_debug_live_count = CT_ATOMIC_U32_INIT(0u);");
+            writer.WriteLine("static ct_atomic_u32 ct_debug_allocation_count = CT_ATOMIC_U32_INIT(0u);");
+            writer.WriteLine("static ct_atomic_u32 ct_debug_final_release_count = CT_ATOMIC_U32_INIT(0u);");
+            writer.WriteLine("static ct_debug_allocation* ct_debug_allocation_for(void* value) { return value == NULL ? NULL : ((ct_debug_allocation*)value) - 1; }");
+            writer.WriteLine("static void ct_debug_registry_acquire(void) { uint32_t expected; do { expected = 0u; } while (!ct_atomic_compare_exchange_relaxed(&ct_debug_registry_lock, &expected, 1u)); ct_atomic_acquire_fence(); }");
+            writer.WriteLine("static void ct_debug_registry_release(void) { ct_atomic_store_release(&ct_debug_registry_lock, 0u); }");
+            writer.WriteLine("static void ct_debug_native_free(ct_debug_allocation* allocation) { free(allocation); }");
+        }
         writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) {");
         writer.WriteLine("#if defined(CTILDE_CONFORMANCE)");
         writer.WriteLine("    if (ct_test_allocation_failure_countdown == 0) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line);");
         writer.WriteLine("    if (ct_test_allocation_failure_countdown > 0) --ct_test_allocation_failure_countdown;");
         writer.WriteLine("#endif");
-        writer.WriteLine("    void* value = calloc(1u, size == 0u ? 1u : size); if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); }");
+        if (EmitDebugObjects)
+        {
+            writer.WriteLine("    size_t payload = size == 0u ? 1u : size;");
+            writer.WriteLine($"    size_t guard = {(EmitDebugGuards ? "sizeof(uint32_t)" : "0u")}; if (payload > SIZE_MAX - sizeof(ct_debug_allocation) - guard) ct_fail(\"CTM0001\", file, line);");
+            writer.WriteLine("    ct_debug_allocation* allocation = (ct_debug_allocation*)calloc(1u, sizeof(ct_debug_allocation) + payload + guard); void* value = allocation == NULL ? NULL : (void*)(allocation + 1);");
+            writer.WriteLine("    if (value != NULL) { allocation->Size = payload; allocation->File = file; allocation->Line = (int32_t)line; ct_atomic_store_relaxed(&allocation->LastSite, UINT32_MAX); ct_debug_registry_acquire(); allocation->Next = ct_debug_live_head; if (ct_debug_live_head != NULL) ct_debug_live_head->Previous = allocation; ct_debug_live_head = allocation; ct_debug_registry_release(); (void)ct_atomic_fetch_add_relaxed(&ct_debug_live_count, 1u); (void)ct_atomic_fetch_add_relaxed(&ct_debug_allocation_count, 1u); }");
+            if (EmitDebugGuards)
+                writer.WriteLine("    if (value != NULL) { uint32_t canary = UINT32_C(0xC71DE14D); (void)memcpy((uint8_t*)value + payload, &canary, sizeof(canary)); }");
+            writer.WriteLine("    if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); }");
+        }
+        else
+            writer.WriteLine("    void* value = calloc(1u, size == 0u ? 1u : size); if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); }");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_live_allocations, 1u);");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_total_allocations, 1u);");
@@ -520,7 +600,24 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    if (ct_atomic_fetch_sub_release(&ct_memory_live_allocations, 1u) == 0u) ct_fail(\"CTM0003\", \"<runtime>\", 0);");
         writer.WriteLine("#endif");
-        writer.WriteLine("    free(value); }");
+        if (EmitDebugObjects)
+        {
+            writer.WriteLine("    ct_debug_allocation* allocation = ct_debug_allocation_for(value);");
+            if (EmitDebugGuards)
+                writer.WriteLine("    uint32_t canary = 0u; (void)memcpy(&canary, (uint8_t*)value + allocation->Size, sizeof(canary)); if (canary != UINT32_C(0xC71DE14D)) ct_fail(\"CTM0004\", allocation->File, allocation->Line);");
+            writer.WriteLine("    ct_debug_registry_acquire(); if (allocation->Previous != NULL) allocation->Previous->Next = allocation->Next; else ct_debug_live_head = allocation->Next; if (allocation->Next != NULL) allocation->Next->Previous = allocation->Previous; allocation->Previous = NULL; allocation->Next = NULL; ct_debug_registry_release();");
+            writer.WriteLine("    if (ct_atomic_fetch_sub_release(&ct_debug_live_count, 1u) == 0u) ct_fail(\"CTM0003\", \"<debug-registry>\", 0);");
+            writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_debug_final_release_count, 1u);");
+            if (EmitDebugGuards)
+            {
+                writer.WriteLine("    (void)memset(value, 0xDD, allocation->Size); ct_debug_registry_acquire(); allocation->Previous = ct_debug_quarantine_tail; if (ct_debug_quarantine_tail != NULL) ct_debug_quarantine_tail->Next = allocation; else ct_debug_quarantine_head = allocation; ct_debug_quarantine_tail = allocation; ++ct_debug_quarantine_count; ct_debug_quarantine_bytes += allocation->Size; while (ct_debug_quarantine_count > 16u || ct_debug_quarantine_bytes > 32768u) { ct_debug_allocation* oldest = ct_debug_quarantine_head; ct_debug_quarantine_head = oldest->Next; if (ct_debug_quarantine_head != NULL) ct_debug_quarantine_head->Previous = NULL; else ct_debug_quarantine_tail = NULL; --ct_debug_quarantine_count; ct_debug_quarantine_bytes -= oldest->Size; ct_debug_native_free(oldest); } ct_debug_registry_release();");
+            }
+            else
+                writer.WriteLine("    ct_debug_native_free(allocation);");
+            writer.WriteLine("}");
+        }
+        else
+            writer.WriteLine("    free(value); }");
     }
 
     private static void EmitAtomicRuntime(CWriter writer)
@@ -649,11 +746,72 @@ internal sealed partial class CEmitter
         writer.WriteLine("    if (ct_thread_current() != &ct_primary_thread_state) ct_fail(\"CTT0002\", \"<runtime-shutdown>\", 0);");
         writer.WriteLine("    ct_thread_begin_shutdown();");
         writer.WriteLine("    ct_program_module.Finalize();");
+        if (EmitDebugObjects)
+            writer.WriteLine("    ct_debug_report_leaks();");
         writer.WriteLine("    ct_thread_detach();");
         writer.WriteLine("}");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("uint32_t ct_memory_diagnostic_attached_threads(void) { return ct_atomic_load_relaxed(&ct_attached_thread_count); }");
         writer.WriteLine("#endif");
+    }
+
+    private void EmitInstrumentedDebugRuntime(CWriter writer)
+    {
+        writer.WriteLine("static CT_DEBUG_NOINLINE void ct_debug_trap(void)");
+        writer.WriteLine("{");
+        if (IsEspIdf)
+            writer.WriteLine("    esp_cpu_dbgr_break();");
+        else
+        {
+            writer.WriteLine("#if defined(_MSC_VER)");
+            writer.WriteLine("    __debugbreak();");
+            writer.WriteLine("#else");
+            writer.WriteLine("    (void)raise(SIGTRAP);");
+            writer.WriteLine("#endif");
+        }
+        writer.WriteLine("}");
+        writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_keep(void* storage) { ct_debug_probe_sink ^= (uintptr_t)storage; }");
+        writer.WriteLine("static void ct_debug_stop_acquire(void) { uint32_t expected; do { expected = 0u; } while (!ct_atomic_compare_exchange_relaxed(&ct_debug_stop_lock, &expected, 1u)); ct_atomic_acquire_fence(); }");
+        writer.WriteLine("static void ct_debug_stop_release(void) { ct_atomic_store_release(&ct_debug_stop_lock, 0u); }");
+        writer.WriteLine("void ct_debug_method_enter(ct_debug_method_frame* frame) { ct_thread_state* state = ct_thread_require_attached(); frame->State = state; frame->Previous = state->DebugFrameTop; frame->Activation = ++state->DebugNextActivation; frame->Active = true; state->DebugFrameTop = frame; ++state->DebugDepth; }");
+        writer.WriteLine("void ct_debug_method_leave(void* value) { ct_debug_method_frame* frame = (ct_debug_method_frame*)value; if (!frame->Active) return; ct_thread_state* state = (ct_thread_state*)frame->State; frame->Active = false; if (state == NULL || state->DebugDepth == 0u || state->DebugFrameTop != frame) ct_fail(\"CTM0003\", \"<debug-depth>\", 0); state->DebugFrameTop = frame->Previous; --state->DebugDepth; }");
+        writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_site(uint32_t site)");
+        writer.WriteLine("{");
+        writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
+        writer.WriteLine("    state->DebugCurrentSite = site;");
+        writer.WriteLine("    if (ct_debug_control.SessionActive == 0u || site >= ct_debug_control.SiteCount) return;");
+        writer.WriteLine("    bool stop = (ct_debug_control.Enabled[site / 32u] & (UINT32_C(1) << (site % 32u))) != 0u;");
+        writer.WriteLine("    if (!stop && ct_debug_control.SelectedThread == (uintptr_t)(void*)state) {");
+        writer.WriteLine("        if (ct_debug_control.StepMode == 1u) stop = true;");
+        writer.WriteLine("        else if (ct_debug_control.StepMode == 2u && state->DebugDepth <= ct_debug_control.StepDepth) stop = true;");
+        writer.WriteLine("        else if (ct_debug_control.StepMode == 3u && state->DebugDepth < ct_debug_control.StepDepth) stop = true;");
+        writer.WriteLine("    }");
+        writer.WriteLine("    if (!stop) return;");
+        writer.WriteLine("    ct_debug_stop_acquire(); ct_debug_control.StepMode = 0u; ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = site; ct_debug_control.CurrentReason = CT_DEBUG_REASON_SITE; ct_debug_control.CurrentObject = 0u; ct_debug_control.CurrentValue = state->DebugDepth; ct_debug_control.CurrentCode = 0u; ct_debug_control.CurrentFile = 0u; ct_debug_control.CurrentLine = 0;");
+        writer.WriteLine("    ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine("}");
+        writer.WriteLine("static void ct_debug_runtime_event(uint32_t reason, uint32_t mask, ct_object* object, uint32_t value, const char* code, const char* file, int32_t line)");
+        writer.WriteLine("{");
+        writer.WriteLine("    if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & mask) == 0u) return;");
+        writer.WriteLine("    ct_thread_state* state = ct_thread_current(); ct_debug_stop_acquire(); ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state == NULL || state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = state == NULL ? UINT32_MAX : state->DebugCurrentSite; ct_debug_control.CurrentReason = reason; ct_debug_control.CurrentObject = (uintptr_t)(void*)object; ct_debug_control.CurrentValue = value; ct_debug_control.CurrentCode = (uintptr_t)(const void*)code; ct_debug_control.CurrentFile = (uintptr_t)(const void*)file; ct_debug_control.CurrentLine = line; ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine("}");
+        writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe_sink = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; ct_debug_runtime_event(CT_DEBUG_REASON_THROW, unhandled != 0u ? CT_DEBUG_EVENT_UNHANDLED : CT_DEBUG_EVENT_THROW, exception, unhandled, code, file, line); }");
+        writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe_sink = (uintptr_t)(unsigned int)line; ct_debug_runtime_event(CT_DEBUG_REASON_FATAL, CT_DEBUG_EVENT_FATAL, NULL, 0u, code, file, line); }");
+        if (EmitDebugObjects)
+        {
+            writer.WriteLine("static void ct_debug_object_initialized(ct_object* object) { ct_debug_allocation* allocation = ct_debug_allocation_for(object); ct_thread_state* state = ct_thread_current(); ct_atomic_store_relaxed(&allocation->LastSite, state == NULL ? UINT32_MAX : state->DebugCurrentSite); ct_debug_runtime_event(CT_DEBUG_REASON_ALLOC, CT_DEBUG_EVENT_ALLOC, object, ct_atomic_load_relaxed(&object->RefCount), NULL, NULL, 0); }");
+            writer.WriteLine("static void ct_debug_arc_touch(ct_object* object) { if (object == NULL || ct_atomic_load_relaxed(&object->RefCount) == UINT32_MAX) return; ct_debug_allocation* allocation = ct_debug_allocation_for(object); ct_thread_state* state = ct_thread_current(); ct_atomic_store_relaxed(&allocation->LastSite, state == NULL ? UINT32_MAX : state->DebugCurrentSite); }");
+            writer.WriteLine("static void ct_debug_report_leaks(void) { uint32_t count = ct_atomic_load_relaxed(&ct_debug_live_count); if (count == 0u) return; (void)fprintf(stderr, \"C~ debug: %\" PRIu32 \" managed object(s) remain live at shutdown\\n\", count); ct_debug_runtime_event(CT_DEBUG_REASON_LEAK, CT_DEBUG_EVENT_LEAK, ct_debug_live_head == NULL ? NULL : (ct_object*)(void*)(ct_debug_live_head + 1), count, NULL, NULL, 0); }");
+        }
+        if (IsEspIdf)
+        {
+            writer.WriteLine("void ct_debug_startup_probe(void) { if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & CT_DEBUG_EVENT_STARTUP) == 0u) return; ct_debug_stop_acquire(); ct_debug_control.CurrentThread = 0u; ct_debug_control.CurrentActivation = 0u; ct_debug_control.CurrentSite = UINT32_MAX; ct_debug_control.CurrentReason = CT_DEBUG_REASON_STARTUP; ct_debug_trap(); ct_debug_stop_release(); }");
+            writer.WriteLine("void ct_debug_wait_for_client(void)");
+            writer.WriteLine("{");
+            writer.WriteLine("    int64_t start = ct_esp_timer_get_time_us();");
+            writer.WriteLine("    while (ct_debug_control.StartupReleased == 0u && ct_esp_timer_get_time_us() - start < INT64_C(15000000)) ct_esp_delay_ms(UINT32_C(10));");
+            writer.WriteLine("}");
+        }
     }
 
     private void EmitBoxLayouts(CWriter writer)

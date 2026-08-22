@@ -42,6 +42,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     public bool UsesExceptions { get; private set; }
     public bool EmitDebugInformation => false;
+    public bool EmitDebugInstrumentation => false;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -250,7 +251,8 @@ internal sealed class AnalysisServices : ILoweringServices
     public string DebugSourceDirective(SyntaxNode syntax) => string.Empty;
     public string DebugGeneratedDirective() => string.Empty;
     public void RegisterDebugExecutable(MethodSymbol method, SyntaxNode syntax) { }
-    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local) { }
+    public void RegisterDebugLocal(MethodSymbol method, LocalSymbol local, int liveStart, int? liveEnd) { }
+    public int RegisterDebugSite(MethodSymbol method, SyntaxNode syntax, string kind) => -1;
 
     public string RegisterDelegateThunk(TypeSymbol delegateType, MethodSymbol method, bool virtualDispatch)
     {

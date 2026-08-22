@@ -10,6 +10,7 @@
       "cwd": "${workspaceFolder}",
       "stopAtEntry": false,
       "showRuntimeFrames": false,
+      "memoryDiagnostics": "guarded",
       "serialPort": "COM4",
       "baudRate": 460800
     },

@@ -22,7 +22,8 @@ internal sealed record BuildRequest(
     string? GeneratedDirectory,
     string? SymbolMapPath,
     bool Lto,
-    bool DebugInformation = false,
+    DebugInformationMode DebugInformation = DebugInformationMode.None,
+    DebugMemoryMode DebugMemory = DebugMemoryMode.Off,
     string? DebugMapPath = null,
     string? PrepareDebug = null,
     string? DebugTargetPath = null,
@@ -71,13 +72,15 @@ internal static class BuildRequestResolver
         var configuration = preparingLaunch && project.Configuration.Target == CompilationTarget.Hosted
             ? CTildeNativeBuildConfiguration.Debug
             : options.Configuration ?? build.Configuration;
-        var debugInformation = options.DebugInfo || options.PrepareDebug is not null ||
-            (buildNative && project.Configuration.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug);
+        var debugInformation = preparingLaunch ? DebugInformationMode.Instrumented : options.DebugInfo || preparingAttach ||
+            (buildNative && project.Configuration.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug)
+                ? DebugInformationMode.Source : DebugInformationMode.None;
+        var debugMemory = preparingLaunch ? options.DebugMemory ?? DebugMemoryMode.Objects : DebugMemoryMode.Off;
         var generatedC = checkOnly || layout == GeneratedCLayout.Modules ? null : Path.GetFullPath(options.Output ?? build.GeneratedCPath);
         var generatedDirectory = checkOnly || layout == GeneratedCLayout.Unity ? null : Path.GetFullPath(options.OutputDirectory ?? build.GeneratedDirectory);
         var generatedHeader = options.CheckOnly ? null : Path.GetFullPath(options.HeaderOutput ?? build.GeneratedHeaderPath);
         var symbolMap = options.CheckOnly ? null : options.SymbolMap is not null ? Path.GetFullPath(options.SymbolMap) : build.SymbolMapPath;
-        var debugMap = debugInformation
+        var debugMap = debugInformation != DebugInformationMode.None
             ? Path.GetFullPath(options.DebugMap ?? (layout == GeneratedCLayout.Modules
                 ? Path.Combine(generatedDirectory!, "ctilde_debug.json")
                 : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_debug.json")))
@@ -101,7 +104,7 @@ internal static class BuildRequestResolver
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? build.Compiler, executable,
-            idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMap,
+            idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate);
     }
 
@@ -142,9 +145,11 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--lto requires --configuration release.");
         if (idfProject is not null)
             ValidateEspOutputs(idfProject, generatedC, generatedHeader, generatedDirectory);
-        var debugInformation = options.DebugInfo || options.PrepareDebug is not null ||
-            (buildNative && options.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug);
-        var debugMap = debugInformation
+        var debugInformation = preparingLaunch ? DebugInformationMode.Instrumented : options.DebugInfo || preparingAttach ||
+            (buildNative && options.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug)
+                ? DebugInformationMode.Source : DebugInformationMode.None;
+        var debugMemory = preparingLaunch ? options.DebugMemory ?? DebugMemoryMode.Objects : DebugMemoryMode.Off;
+        var debugMap = debugInformation != DebugInformationMode.None
             ? Path.GetFullPath(options.DebugMap ?? (layout == GeneratedCLayout.Modules
                 ? Path.Combine(generatedDirectory!, "ctilde_debug.json")
                 : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_debug.json")))
@@ -159,7 +164,7 @@ internal static class BuildRequestResolver
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
-            debugInformation, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate);
+            debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
@@ -167,12 +172,14 @@ internal static class BuildRequestResolver
         var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.Lto ||
             options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null;
         if (options.CheckOnly && (options.Build || hasNativeOptions || options.HeaderOutput is not null || options.SymbolMap is not null ||
-            options.OutputDirectory is not null || options.DebugInfo || options.DebugMap is not null || options.PrepareDebug is not null))
+            options.OutputDirectory is not null || options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null))
             throw new CommandLineException("--check cannot be combined with build outputs or native-build options.");
         if (!options.Build && options.PrepareDebug is null && hasNativeOptions)
             throw new CommandLineException("Native-build options require --build.");
         if (options.DebugMap is not null && !options.DebugInfo && options.PrepareDebug is null)
             throw new CommandLineException("--debug-map requires --debug-info or --prepare-debug.");
+        if (options.DebugMemory is not null && options.PrepareDebug != "launch")
+            throw new CommandLineException("--debug-memory requires --prepare-debug launch.");
         if (options.DebugTarget is not null && options.PrepareDebug is null)
             throw new CommandLineException("--debug-target requires --prepare-debug.");
         if (options.PrepareDebug is not null && options.Build)

@@ -147,7 +147,7 @@ internal static class HostedBuildDriver
     private static async Task<int> CompileMsvcAsync(HostedCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
     {
         var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new[] { "/Od", "/Zi" }
+            ? new[] { "/Od", "/Zi", "/Oy-" }
             : ["/O2"];
         var common = new List<string> { "/nologo", "/std:clatest", "/W4", "/WX", "/wd4702" };
         common.AddRange(configuration);
@@ -199,8 +199,11 @@ internal static class HostedBuildDriver
             prefix = ["--exec", compiler.WslCompiler!];
         }
         var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new[] { "-Og", "-g", "-fno-omit-frame-pointer" }
+            ? new List<string> { "-Og", "-g3", "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls" }
             : ["-O2"];
+        var compilerName = (compiler.WslCompiler ?? compiler.Command).ToLowerInvariant();
+        if (request.Configuration == CTildeNativeBuildConfiguration.Debug && compilerName.Contains("gcc", StringComparison.Ordinal))
+            configuration.Add("-fvar-tracking-assignments");
         var common = new List<string> { "-std=gnu23" };
         common.AddRange(configuration);
         if (request.Lto)

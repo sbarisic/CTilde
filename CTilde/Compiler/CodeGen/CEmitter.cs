@@ -228,20 +228,24 @@ internal sealed partial class CEmitter : ILoweringServices
             suffix.WriteLine();
         EmitMain(suffix);
 
+        var externalRoots = new StringBuilder(suffix.ToString());
+        foreach (var definition in definitions)
+            externalRoots.Append('\n').Append(definition.Text);
+        var prunedPrefix = MarkUnusedGeneratedFields(PruneRuntimeHelpers(prefix.ToString(), externalRoots.ToString()));
+
         var writer = new CWriter();
-        writer.WriteBlock(prefix.ToString().TrimEnd().Split('\n'));
+        writer.WriteBlock(prunedPrefix.TrimEnd().Split('\n'));
         writer.WriteLine();
         foreach (var definition in definitions)
         {
-            writer.WriteBlock(definition.Text.TrimEnd().Split('\n'));
+            writer.WriteBlock(MarkUnusedDefinitions(definition.Text).TrimEnd().Split('\n'));
             writer.WriteLine();
         }
-        writer.WriteBlock(suffix.ToString().TrimEnd().Split('\n'));
-        var output = writer.ToString();
-        var unity = MarkUnusedDefinitions(output);
+        writer.WriteBlock(MarkUnusedDefinitions(suffix.ToString()).TrimEnd().Split('\n'));
+        var unity = writer.ToString();
         var symbolMap = EmitSymbolMapJson(program);
         var debugMap = EmitDebugInformation ? EmitDebugMapJson(program) : string.Empty;
-        var artifacts = BuildModularArtifacts(prefix.ToString(), suffix.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
+        var artifacts = BuildModularArtifacts(prunedPrefix, suffix.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
         return new CEmitterOutput(unity, artifacts, symbolMap, debugMap);
     }
 
@@ -254,42 +258,10 @@ internal sealed partial class CEmitter : ILoweringServices
         string debugMap)
     {
         var artifacts = ImmutableArray.CreateBuilder<GeneratedCArtifact>();
-        var definitionNames = definitions.Select(definition => definition.Function.Property is null
-                ? definition.Function.Method.CName
-                : definition.Function.IsGetter
-                    ? NameMangler.Getter(definition.Function.Property)
-                    : NameMangler.Setter(definition.Function.Property))
-            .ToHashSet(StringComparer.Ordinal);
-        foreach (var constructor in definitions.Select(definition => definition.Function.Method)
-                     .Where(method => method.IsConstructor && method.ContainingType.Kind == DeclaredTypeKind.Class))
-            definitionNames.Add(ConstructorInitializerName(constructor));
-        var externalRuntimeNames = Model.Types.Values.SelectMany(type => type.Methods.Concat(type.Constructors))
-            .Select(method => method.ExternName)
-            .Where(name => name is not null)
-            .Cast<string>()
-            .ToHashSet(StringComparer.Ordinal);
-        if (EmitDebugInformation)
-        {
-            externalRuntimeNames.Add("ct_debug_throw_hook");
-            externalRuntimeNames.Add("ct_debug_fatal_hook");
-            if (EmitDebugInstrumentation)
-            {
-                externalRuntimeNames.Add("ct_debug_site");
-                externalRuntimeNames.Add("ct_debug_keep");
-                externalRuntimeNames.Add("ct_debug_method_enter");
-                externalRuntimeNames.Add("ct_debug_method_leave");
-                if (IsEspIdf)
-                {
-                    externalRuntimeNames.Add("ct_debug_wait_for_client");
-                    externalRuntimeNames.Add("ct_debug_startup_probe");
-                }
-            }
-        }
-        var markedPrefix = MarkUnusedDefinitions(prefix);
-        var internalHeader = BuildInternalHeader(markedPrefix, definitionNames, externalRuntimeNames);
+        var internalHeader = BuildInternalHeader(prefix);
         artifacts.Add(new GeneratedCArtifact("ctilde_runtime.h", runtimeHeader, GeneratedCArtifactKind.RuntimeHeader));
         artifacts.Add(new GeneratedCArtifact("ctilde_internal.h", internalHeader, GeneratedCArtifactKind.InternalHeader));
-        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", ExternalizeDefinitions(markedPrefix, runtimeUnit: true), GeneratedCArtifactKind.RuntimeSource));
+        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", ExternalizeDefinitions(prefix, runtimeUnit: true), GeneratedCArtifactKind.RuntimeSource));
 
         foreach (var group in definitions.GroupBy(definition => definition.Function.Method.ContainingType.Namespace, StringComparer.Ordinal)
                      .OrderBy(group => group.Key, StringComparer.Ordinal))
@@ -321,7 +293,7 @@ internal sealed partial class CEmitter : ILoweringServices
         return artifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal).ToImmutableArray();
     }
 
-    private static string BuildInternalHeader(string prefix, HashSet<string> definitionNames, HashSet<string> externalRuntimeNames)
+    private static string BuildInternalHeader(string prefix)
     {
         var writer = new StringBuilder("#ifndef CTILDE_INTERNAL_DRAFT_014_H\n#define CTILDE_INTERNAL_DRAFT_014_H\n\n");
         var skipInitializer = false;
@@ -355,16 +327,18 @@ internal sealed partial class CEmitter : ILoweringServices
                 continue;
             }
 
-            const string staticPrefix = "static CT_UNUSED ";
-            if (line.StartsWith(staticPrefix, StringComparison.Ordinal))
+            var declaration = RemoveInternalLinkage(line);
+            if (declaration is not null)
             {
-                var declaration = line[staticPrefix.Length..];
-                var externalDefinition = externalRuntimeNames.FirstOrDefault(name => declaration.Contains(name + "(", StringComparison.Ordinal));
-                if (externalDefinition is not null && !declaration.EndsWith(';'))
+                if (LooksLikeFunctionDeclaration(declaration))
                 {
+                    var openBrace = declaration.IndexOf('{');
+                    var signature = openBrace >= 0 ? declaration[..openBrace].TrimEnd() : declaration.TrimEnd();
+                    writer.Append("extern ").Append(signature.TrimEnd(';')).Append(";\n");
                     var opens = declaration.Count(character => character == '{');
                     var closes = declaration.Count(character => character == '}');
-                    if (opens == 0 || opens > closes)
+                    var isDefinition = openBrace >= 0 || !declaration.EndsWith(';');
+                    if (isDefinition && (opens == 0 || opens > closes))
                     {
                         skipFunction = true;
                         skipFunctionDepth = opens - closes;
@@ -373,8 +347,8 @@ internal sealed partial class CEmitter : ILoweringServices
                 }
                 var equals = declaration.IndexOf('=');
                 var openParenthesis = declaration.IndexOf('(');
-                var openBrace = declaration.IndexOf('{');
-                var isVariableInitializer = equals >= 0 && (openBrace < 0 || equals < openBrace || declaration.StartsWith("struct ", StringComparison.Ordinal));
+                var initializerBrace = declaration.IndexOf('{');
+                var isVariableInitializer = equals >= 0 && (initializerBrace < 0 || equals < initializerBrace || declaration.StartsWith("struct ", StringComparison.Ordinal));
                 if (isVariableInitializer)
                 {
                     writer.Append("extern ").Append(declaration.AsSpan(0, equals).TrimEnd()).Append(";\n");
@@ -388,37 +362,59 @@ internal sealed partial class CEmitter : ILoweringServices
                     writer.Append("extern ").Append(declaration).Append('\n');
                     continue;
                 }
-                var isExternalPrototype = declaration.EndsWith(';') &&
-                    (definitionNames.Any(name => declaration.Contains(name + "(", StringComparison.Ordinal)) ||
-                     declaration.Contains("ct_module_init(", StringComparison.Ordinal) ||
-                     declaration.Contains("ct_module_fini(", StringComparison.Ordinal));
-                if (isExternalPrototype)
-                {
-                    writer.Append("extern ").Append(declaration).Append('\n');
-                    continue;
-                }
             }
             else if (LooksLikePublicFunction(line))
             {
-                var externalDefinition = externalRuntimeNames.FirstOrDefault(name => line.Contains(name + "(", StringComparison.Ordinal));
-                if (externalDefinition is not null)
+                var openBrace = line.IndexOf('{');
+                var signature = openBrace >= 0 ? line[..openBrace].TrimEnd() : line.TrimEnd();
+                writer.Append("extern ").Append(signature.TrimEnd(';')).Append(";\n");
+                var opens = line.Count(character => character == '{');
+                var closes = line.Count(character => character == '}');
+                if (opens == 0 || opens > closes)
                 {
-                    var opens = line.Count(character => character == '{');
-                    var closes = line.Count(character => character == '}');
-                    if (opens == 0 || opens > closes)
-                    {
-                        skipFunction = true;
-                        skipFunctionDepth = opens - closes;
-                    }
-                    continue;
+                    skipFunction = true;
+                    skipFunctionDepth = opens - closes;
                 }
-                line = "static CT_UNUSED " + line;
+                continue;
             }
 
             writer.Append(line).Append('\n');
         }
         writer.Append("\n#endif\n");
         return writer.ToString();
+    }
+
+    private static string? RemoveInternalLinkage(string line)
+    {
+        const string noReturnMarked = "CT_NORETURN static CT_UNUSED ";
+        const string noReturn = "CT_NORETURN static ";
+        const string marked = "static CT_UNUSED ";
+        const string plain = "static ";
+        if (line.StartsWith(noReturnMarked, StringComparison.Ordinal))
+            return "CT_NORETURN " + line[noReturnMarked.Length..];
+        if (line.StartsWith(noReturn, StringComparison.Ordinal))
+            return "CT_NORETURN " + line[noReturn.Length..];
+        if (line.StartsWith(marked, StringComparison.Ordinal))
+            return line[marked.Length..];
+        return line.StartsWith(plain, StringComparison.Ordinal) ? line[plain.Length..] : null;
+    }
+
+    private static bool LooksLikeFunctionDeclaration(string declaration)
+    {
+        var match = RuntimeIdentifierPattern.Match(SanitizeGeneratedC(declaration));
+        while (match.Success)
+        {
+            var next = match.Index + match.Length;
+            while (next < declaration.Length && char.IsWhiteSpace(declaration[next]))
+                next++;
+            if (next < declaration.Length && declaration[next] == '(')
+            {
+                var equals = declaration.IndexOf('=');
+                return equals < 0 || match.Index < equals;
+            }
+            match = match.NextMatch();
+        }
+        return false;
     }
 
     private static bool LooksLikePublicFunction(string line)

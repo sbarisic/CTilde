@@ -105,6 +105,47 @@ internal static partial class ConformanceTests
             Assert(durableCatchResult.ExitCode == 0 && Normalize(durableCatchResult.StandardOutput) == "42\n", "Catch-handler durable parameter storage changed runtime behavior.");
         });
 
+        suite.Run("draft 0.14 runtime helper pruning", () =>
+        {
+            const string arithmetic = "public static class Program { private static int Add(int value) { return value + 1; } [EntryPoint] public static void Main() { int result = Add(41); } }";
+            var first = Emit(arithmetic);
+            var second = Emit(arithmetic);
+            Assert(first == second, "Runtime-helper pruning changed deterministic unity emission.");
+            Assert(first.Contains("static int32_t ct_i32_add(", StringComparison.Ordinal) && first.Contains("static int32_t ct_i32_bits(", StringComparison.Ordinal), "Arithmetic helper dependencies were pruned while reachable.");
+            Assert(!first.Contains("ct_i64_add(", StringComparison.Ordinal) && !first.Contains("ct_string_concat(", StringComparison.Ordinal) && !first.Contains("ct_bounds(", StringComparison.Ordinal), "A minimal arithmetic program retained unrelated runtime helpers.");
+            Assert(!first.Contains("#pragma warning(disable: 4505)", StringComparison.Ordinal) &&
+                !first.Contains("static CT_UNUSED int32_t ct_i32_add(", StringComparison.Ordinal), "Runtime helpers still relied on blanket unused suppression.");
+            Assert(first.Contains("void ct_thread_attach(void)", StringComparison.Ordinal) && first.Contains("void ct_thread_detach(void)", StringComparison.Ordinal) &&
+                first.Contains("void ct_retain(ct_object*", StringComparison.Ordinal) && first.Contains("void ct_release(ct_object*", StringComparison.Ordinal), "A required ABI 14 runtime entry point was pruned.");
+
+            var bundle = Compile(arithmetic).EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
+            var header = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            Assert(runtime.Contains("int32_t ct_i32_add(", StringComparison.Ordinal) && !runtime.Contains("ct_i64_add(", StringComparison.Ordinal), "Modular runtime pruning diverged from unity output.");
+            Assert(System.Text.RegularExpressions.Regex.Matches(runtime, @"(?m)^int32_t ct_i32_add\(").Count == 1, "A retained modular helper was not emitted exactly once.");
+            Assert(header.Contains("extern int32_t ct_i32_add(", StringComparison.Ordinal) && !header.Contains("ct_i32_add(int32_t a, int32_t b) {", StringComparison.Ordinal), "The modular internal header still embedded runtime helper bodies.");
+            Assert(!header.Contains("free(value);", StringComparison.Ordinal), "A multiline runtime helper body leaked into the modular internal header.");
+
+            const string strings = "using System; public static class Program { [EntryPoint] public static void Main() { int value = 42; string scalar = value.ToString(); string text = \"value=\" + value.ToString() + \".\"; Console.WriteLine(scalar); Console.WriteLine(text); } }";
+            var stringOutput = Emit(strings);
+            Assert(stringOutput.Contains("ct_string_build(", StringComparison.Ordinal), "A reachable fused-string helper was pruned.");
+            Assert(stringOutput.Contains("ct_to_string_int(", StringComparison.Ordinal), "A reachable scalar-formatting helper was pruned.");
+
+            const string arrays = "public static class Program { private static int Read(int[] values) { return values[0]; } [EntryPoint] public static void Main() { int[] values = new int[1]; int result = Read(values); } }";
+            var arrayOutput = Emit(arrays);
+            Assert(arrayOutput.Contains("ct_bounds(", StringComparison.Ordinal) && arrayOutput.Contains("ct_flexible_allocation_size(", StringComparison.Ordinal), "Array allocation or bounds dependencies were pruned while reachable.");
+
+            const string exceptions = "using System; public static class Program { private static void Fail() { throw new Exception(\"failure\"); } [EntryPoint] public static void Main() { try { Fail(); } catch (Exception error) { Console.WriteLine(error.Message); } } }";
+            var exceptionOutput = Emit(exceptions);
+            Assert(exceptionOutput.Contains("ct_throw(", StringComparison.Ordinal) && exceptionOutput.Contains("ct_cleanup_unwind_to(", StringComparison.Ordinal), "Exception or cleanup dependencies were pruned while reachable.");
+
+            const string math = "using System; public static class Program { [EntryPoint] public static void Main() { float result = Math.Sqrt(9.0f); Console.WriteLine(result); } }";
+            var mathOutput = Emit(math);
+            Assert(mathOutput.Contains("ct_math_sqrt(", StringComparison.Ordinal), "A reachable math wrapper was pruned.");
+            Assert(!mathOutput.Contains("return tanf(value);", StringComparison.Ordinal), "An unused math wrapper was emitted.");
+        });
+
         suite.Run("draft 0.12 reproducible source paths", () =>
         {
             var root = Path.Combine(Path.GetTempPath(), "ctilde-source-root", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));

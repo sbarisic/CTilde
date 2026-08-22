@@ -39,13 +39,13 @@ internal sealed partial class CEmitter
         foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences))
         {
             var valueType = type.Type;
-            writer.WriteLine($"static CT_UNUSED void {ValueRetainName(valueType)}(void* storage)");
+            writer.WriteLine($"static void {ValueRetainName(valueType)}(void* storage)");
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)storage;");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences))
                 writer.WriteLine($"    {ValueRetainName(field.Type)}((void*)&value->{field.CName});");
             writer.WriteLine("}");
-            writer.WriteLine($"static CT_UNUSED void {ValueDropName(valueType)}(void* storage)");
+            writer.WriteLine($"static void {ValueDropName(valueType)}(void* storage)");
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)storage;");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences).Reverse())
@@ -648,6 +648,20 @@ internal sealed partial class CEmitter
         {
             if (lines[index].StartsWith("static ", StringComparison.Ordinal))
                 lines[index] = "static CT_UNUSED " + lines[index][7..];
+        }
+        return string.Join('\n', lines);
+    }
+
+    private static string MarkUnusedGeneratedFields(string output)
+    {
+        var lines = output.Split('\n');
+        for (var index = 0; index < lines.Length; index++)
+        {
+            if (lines[index].StartsWith("static ", StringComparison.Ordinal) &&
+                lines[index].Contains("ct_f_", StringComparison.Ordinal))
+            {
+                lines[index] = "static CT_UNUSED " + lines[index][7..];
+            }
         }
         return string.Join('\n', lines);
     }

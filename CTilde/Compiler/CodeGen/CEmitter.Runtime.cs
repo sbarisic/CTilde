@@ -58,7 +58,6 @@ internal sealed partial class CEmitter
         writer.WriteLine();
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("#define CT_NORETURN __declspec(noreturn)");
-        writer.WriteLine("#pragma warning(disable: 4505) /* reachability may conservatively retain translation-local helpers */");
         writer.WriteLine("#elif defined(__GNUC__) || defined(__clang__)");
         writer.WriteLine("#define CT_NORETURN __attribute__((noreturn))");
         writer.WriteLine("#else");
@@ -281,8 +280,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("    ct_cleanup_unwind_to(target->CleanupBoundary);");
             writer.WriteLine("    longjmp(*target->Target, 1);");
             writer.WriteLine("}");
-            writer.WriteLine("CT_NORETURN static CT_UNUSED void ct_throw(ct_object* exception, const char* file, int line) { if (exception == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTE0002\", file, line); ct_throw_core(exception, \"CTE0001\", file, line); }");
-            writer.WriteLine("CT_NORETURN static CT_UNUSED void ct_rethrow(ct_object* exception) { ct_thread_state* state = ct_thread_require_attached(); ct_throw_core(exception, state->ExceptionCode, state->ExceptionFile, state->ExceptionLine); }");
+            writer.WriteLine("CT_NORETURN static void ct_throw(ct_object* exception, const char* file, int line) { if (exception == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTE0002\", file, line); ct_throw_core(exception, \"CTE0001\", file, line); }");
+            writer.WriteLine("CT_NORETURN static void ct_rethrow(ct_object* exception) { ct_thread_state* state = ct_thread_require_attached(); ct_throw_core(exception, state->ExceptionCode, state->ExceptionFile, state->ExceptionLine); }");
         }
         writer.WriteLine("static ct_atomic_u32 ct_next_identity = CT_ATOMIC_U32_INIT(1u);");
         writer.WriteLine("static void ct_init_object(void* value, const ct_type_descriptor* type)");
@@ -334,17 +333,17 @@ internal sealed partial class CEmitter
         writer.WriteLine("static int64_t ct_i64_shr(int64_t a, int32_t b) { uint32_t n = (uint32_t)b & 63u; if (n == 0u) return a; return a >= 0 ? (int64_t)((uint64_t)a >> n) : ct_i64_bits(((uint64_t)a >> n) | (~UINT64_C(0) << (64u - n))); }");
         if (_usesNativeIntegers)
         {
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_bits(uintptr_t value) { intptr_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_add(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a + (uintptr_t)b); }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_sub(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a - (uintptr_t)b); }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_mul(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a * (uintptr_t)b); }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_neg(intptr_t value) { return ct_ni_bits((uintptr_t)0 - (uintptr_t)value); }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_div(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return INTPTR_MIN; return a / b; }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_mod(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return 0; return a % b; }");
-            writer.WriteLine("static CT_UNUSED uintptr_t ct_nu_div(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a / b; }");
-            writer.WriteLine("static CT_UNUSED uintptr_t ct_nu_mod(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a % b; }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_shl(intptr_t a, int32_t b) { const uint32_t mask = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u); return ct_ni_bits((uintptr_t)a << ((uint32_t)b & mask)); }");
-            writer.WriteLine("static CT_UNUSED intptr_t ct_ni_shr(intptr_t a, int32_t b) { const uint32_t width = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT); uint32_t n = (uint32_t)b & (width - 1u); if (n == 0u) return a; return a >= 0 ? (intptr_t)((uintptr_t)a >> n) : ct_ni_bits(((uintptr_t)a >> n) | (~(uintptr_t)0 << (width - n))); }");
+            writer.WriteLine("static intptr_t ct_ni_bits(uintptr_t value) { intptr_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
+            writer.WriteLine("static intptr_t ct_ni_add(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a + (uintptr_t)b); }");
+            writer.WriteLine("static intptr_t ct_ni_sub(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a - (uintptr_t)b); }");
+            writer.WriteLine("static intptr_t ct_ni_mul(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a * (uintptr_t)b); }");
+            writer.WriteLine("static intptr_t ct_ni_neg(intptr_t value) { return ct_ni_bits((uintptr_t)0 - (uintptr_t)value); }");
+            writer.WriteLine("static intptr_t ct_ni_div(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return INTPTR_MIN; return a / b; }");
+            writer.WriteLine("static intptr_t ct_ni_mod(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return 0; return a % b; }");
+            writer.WriteLine("static uintptr_t ct_nu_div(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a / b; }");
+            writer.WriteLine("static uintptr_t ct_nu_mod(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a % b; }");
+            writer.WriteLine("static intptr_t ct_ni_shl(intptr_t a, int32_t b) { const uint32_t mask = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u); return ct_ni_bits((uintptr_t)a << ((uint32_t)b & mask)); }");
+            writer.WriteLine("static intptr_t ct_ni_shr(intptr_t a, int32_t b) { const uint32_t width = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT); uint32_t n = (uint32_t)b & (width - 1u); if (n == 0u) return a; return a >= 0 ? (intptr_t)((uintptr_t)a >> n) : ct_ni_bits(((uintptr_t)a >> n) | (~(uintptr_t)0 << (width - n))); }");
         }
         writer.WriteLine("static bool ct_string_equal(const ct_string* a, const ct_string* b) { if (a == b) return true; if (a == NULL || b == NULL || a->Length != b->Length) return false; return a->Length == 0 || memcmp(a->Data, b->Data, (size_t)a->Length) == 0; }");
         writer.WriteLine("static ct_string* ct_string_concat(const ct_string* a, const ct_string* b, const char* file, int line)");
@@ -394,8 +393,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("static ct_string* ct_to_string_ulong(uint64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         if (_usesNativeIntegers)
         {
-            writer.WriteLine("static CT_UNUSED ct_string* ct_to_string_nint(intptr_t value, const char* file, int line) { char buffer[3 * sizeof(intptr_t) + 2]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIdPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-            writer.WriteLine("static CT_UNUSED ct_string* ct_to_string_nuint(uintptr_t value, const char* file, int line) { char buffer[3 * sizeof(uintptr_t) + 1]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIuPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_nint(intptr_t value, const char* file, int line) { char buffer[3 * sizeof(intptr_t) + 2]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIdPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_nuint(uintptr_t value, const char* file, int line) { char buffer[3 * sizeof(uintptr_t) + 1]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIuPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         }
         writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_bool(bool value, const char* file, int line) { const char* text = value ? \"True\" : \"False\"; return ct_string_from_bytes((const uint8_t*)text, value ? 4 : 5, file, line); }");

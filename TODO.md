@@ -8,7 +8,6 @@ None. Draft 0.14 automated acceptance passed on 2026-08-22, and the restored Rel
 
 ## Compiler and runtime architecture
 
-- [ ] Prune common runtime helpers individually instead of retaining the conservative annotated runtime core.
 - [ ] Place immutable vtables, type descriptors, and string-literal data in read-only or flash storage where supported.
 - [ ] Measure object, box, array, string, vtable, and descriptor overhead on a 32-bit target, then set firmware-size and static-DRAM regression budgets.
 

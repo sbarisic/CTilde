@@ -243,6 +243,12 @@ internal static partial class ConformanceTests
                 Assert(instrumentedMap.Contains("\"kind\": \"entry\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"call\"", StringComparison.Ordinal), "Instrumented debug metadata omitted method-entry or call probe sites.");
                 Assert(instrumentedMap.Contains("\"kind\": \"defer\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"catch\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"kind\": \"finally\"", StringComparison.Ordinal), "Instrumented debug metadata omitted cleanup or exception probe sites.");
                 Assert(instrumentedMap.Contains("\"scopes\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"liveStart\"", StringComparison.Ordinal), "Instrumented debug metadata omitted lexical lifetime information.");
+                Assert(instrumentedMap.Contains("\"runtimeControl\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"enabledOffset\"", StringComparison.Ordinal) && instrumentedMap.Contains("\"pointerSize\": 4", StringComparison.Ordinal) && instrumentedMap.Contains("\"pointerSize\": 8", StringComparison.Ordinal), "Instrumented debug metadata omitted its optional bulk control layouts.");
+                Assert(instrumentedMap.Contains("\"runtimeSummary\"", StringComparison.Ordinal) && instrumented.Contains("ct_debug_runtime_summary_block", StringComparison.Ordinal) && instrumented.Contains("ct_debug_refresh_runtime_summary", StringComparison.Ordinal), "Instrumented debugging omitted its bulk runtime-inspection summary.");
+                Assert(instrumented.Contains("(void)fflush(stdout);", StringComparison.Ordinal), "Instrumented Console.WriteLine did not flush debugger-visible output.");
+                var espInstrumented = Emit(source, new CompilationOptions(CompilationTarget.EspIdf, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Objects), sourcePath);
+                Assert(espInstrumented.Contains("ct_debug_console_packet", StringComparison.Ordinal) && espInstrumented.Contains("esp_gdbstub_putchar", StringComparison.Ordinal), "Instrumented ESP output did not emit GDB remote console packets.");
+                Assert(espInstrumented.Contains("ct_debug_control.SessionActive == 0u", StringComparison.Ordinal) && espInstrumented.Contains("esp_rom_uart_putc", StringComparison.Ordinal), "Instrumented ESP output did not restore the normal UART path outside a debug session.");
                 using (var instrumentedDocument = System.Text.Json.JsonDocument.Parse(instrumentedMap))
                 {
                     var locals = instrumentedDocument.RootElement.GetProperty("functions").EnumerateArray()
@@ -266,7 +272,9 @@ internal static partial class ConformanceTests
                 var instrumentedRuntime = instrumentedBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
                 var instrumentedNamespaces = instrumentedBundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content).ToArray();
                 Assert(instrumentedHeader.Contains("extern ct_debug_control_block ct_debug_control;", StringComparison.Ordinal), "The modular debug header defined the shared control block instead of declaring it.");
+                Assert(instrumentedHeader.Contains("extern ct_debug_runtime_summary_block ct_debug_runtime_summary;", StringComparison.Ordinal), "The modular debug header defined the runtime summary instead of declaring it.");
                 Assert(instrumentedRuntime.Contains("ct_debug_control_block ct_debug_control =", StringComparison.Ordinal), "The modular runtime omitted the debug control-block definition.");
+                Assert(instrumentedRuntime.Contains("ct_debug_runtime_summary_block ct_debug_runtime_summary;", StringComparison.Ordinal), "The modular runtime omitted the debug runtime-summary definition.");
                 Assert(instrumentedNamespaces.All(content => !content.Contains("CT_DEBUG_USER_NOINLINE static ", StringComparison.Ordinal)), "An instrumented modular method retained internal linkage despite its shared declaration.");
                 var instrumentationOnly = Emit(source, new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Off), sourcePath);
                 Assert(instrumentationOnly.Contains("ct_debug_control_block", StringComparison.Ordinal) && !instrumentationOnly.Contains("ct_debug_live_head", StringComparison.Ordinal), "Instrumentation-only mode did not isolate optional ARC diagnostics.");
@@ -277,6 +285,8 @@ internal static partial class ConformanceTests
 
                 var ordinary = Emit(source, path: sourcePath);
                 Assert(!ordinary.Contains("ct_debug_throw_hook", StringComparison.Ordinal) && !ordinary.Contains("<ctilde-generated>", StringComparison.Ordinal), "Ordinary emission unexpectedly enabled debug-only output.");
+                var ordinaryEsp = Emit(source, new CompilationOptions(CompilationTarget.EspIdf), sourcePath);
+                Assert(!ordinaryEsp.Contains("ct_debug_console_packet", StringComparison.Ordinal) && !ordinaryEsp.Contains("esp_gdbstub_putchar", StringComparison.Ordinal), "Ordinary ESP emission unexpectedly enabled debugger console packet output.");
 
                 var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
                 var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));

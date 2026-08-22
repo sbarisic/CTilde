@@ -349,6 +349,11 @@ internal sealed partial class CEmitter : ILoweringServices
                 writer.Append("extern ct_debug_control_block ct_debug_control;\n");
                 continue;
             }
+            if (line.Equals("ct_debug_runtime_summary_block ct_debug_runtime_summary;", StringComparison.Ordinal))
+            {
+                writer.Append("extern ct_debug_runtime_summary_block ct_debug_runtime_summary;\n");
+                continue;
+            }
 
             const string staticPrefix = "static CT_UNUSED ";
             if (line.StartsWith(staticPrefix, StringComparison.Ordinal))
@@ -652,9 +657,96 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["selectedThread"] = "SelectedThread",
                 ["currentSite"] = "CurrentSite",
                 ["currentReason"] = "CurrentReason",
+                ["layouts"] = DebugControlLayouts(),
+            } : null,
+            ["runtimeSummary"] = EmitDebugInstrumentation ? new Dictionary<string, object?>
+            {
+                ["symbol"] = "ct_debug_runtime_summary",
+                ["layouts"] = DebugRuntimeSummaryLayouts(),
             } : null,
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
     }
+
+    private object[] DebugControlLayouts()
+    {
+        var enabledWords = Math.Max(1, (_debugSites.Count + 31) / 32);
+        return
+        [
+            DebugControlLayout(4, 28, 68, 68 + enabledWords * 4),
+            DebugControlLayout(8, 32, 100, AlignTo(100 + enabledWords * 4, 8)),
+        ];
+    }
+
+    private static Dictionary<string, object?> DebugControlLayout(int pointerSize, int selectedThreadOffset, int enabledOffset, int size)
+    {
+        var fields = new Dictionary<string, object?>
+        {
+            ["Magic"] = DebugField(0, 4),
+            ["SiteCount"] = DebugField(4, 4),
+            ["SessionActive"] = DebugField(8, 4),
+            ["StartupReleased"] = DebugField(12, 4),
+            ["EventMask"] = DebugField(16, 4),
+            ["StepMode"] = DebugField(20, 4),
+            ["StepDepth"] = DebugField(24, 4),
+            ["SelectedThread"] = DebugField(selectedThreadOffset, pointerSize),
+            ["CurrentThread"] = DebugField(selectedThreadOffset + pointerSize, pointerSize),
+            ["CurrentActivation"] = DebugField(selectedThreadOffset + pointerSize * 2, pointerSize),
+            ["CurrentSite"] = DebugField(selectedThreadOffset + pointerSize * 3, 4),
+            ["CurrentReason"] = DebugField(selectedThreadOffset + pointerSize * 3 + 4, 4),
+            ["CurrentObject"] = DebugField(selectedThreadOffset + pointerSize * 3 + 8, pointerSize),
+            ["CurrentValue"] = DebugField(selectedThreadOffset + pointerSize * 4 + 8, 4),
+            ["CurrentCode"] = DebugField(pointerSize == 4 ? 56 : 80, pointerSize),
+            ["CurrentFile"] = DebugField(pointerSize == 4 ? 60 : 88, pointerSize),
+            ["CurrentLine"] = DebugField(pointerSize == 4 ? 64 : 96, 4),
+        };
+        return new Dictionary<string, object?>
+        {
+            ["pointerSize"] = pointerSize,
+            ["size"] = size,
+            ["enabledOffset"] = enabledOffset,
+            ["fields"] = fields,
+        };
+    }
+
+    private static object[] DebugRuntimeSummaryLayouts() =>
+    [
+        new Dictionary<string, object?>
+        {
+            ["pointerSize"] = 4,
+            ["size"] = 24,
+            ["fields"] = new Dictionary<string, object?>
+            {
+                ["LiveObjectCount"] = DebugField(0, 4),
+                ["TotalAllocations"] = DebugField(4, 4),
+                ["TotalFinalReleases"] = DebugField(8, 4),
+                ["QuarantineBlocks"] = DebugField(12, 4),
+                ["QuarantineBytes"] = DebugField(16, 4),
+                ["CurrentSite"] = DebugField(20, 4),
+            },
+        },
+        new Dictionary<string, object?>
+        {
+            ["pointerSize"] = 8,
+            ["size"] = 32,
+            ["fields"] = new Dictionary<string, object?>
+            {
+                ["LiveObjectCount"] = DebugField(0, 4),
+                ["TotalAllocations"] = DebugField(4, 4),
+                ["TotalFinalReleases"] = DebugField(8, 4),
+                ["QuarantineBlocks"] = DebugField(12, 4),
+                ["QuarantineBytes"] = DebugField(16, 8),
+                ["CurrentSite"] = DebugField(24, 4),
+            },
+        },
+    ];
+
+    private static Dictionary<string, object?> DebugField(int offset, int width) => new()
+    {
+        ["offset"] = offset,
+        ["width"] = width,
+    };
+
+    private static int AlignTo(int value, int alignment) => (value + alignment - 1) / alignment * alignment;
 
     private static string DebugMethodDisplayName(MethodSymbol method, PropertySymbol? property, bool getter)
     {

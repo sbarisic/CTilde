@@ -119,6 +119,11 @@ internal sealed partial class CEmitter
             writer.WriteLine("enum { CT_DEBUG_EVENT_THROW = 1u, CT_DEBUG_EVENT_UNHANDLED = 2u, CT_DEBUG_EVENT_FATAL = 4u, CT_DEBUG_EVENT_ALLOC = 8u, CT_DEBUG_EVENT_RELEASE = 16u, CT_DEBUG_EVENT_LEAK = 32u, CT_DEBUG_EVENT_STARTUP = 64u };");
             writer.WriteLine($"typedef struct ct_debug_control_block {{ uint32_t Magic; uint32_t SiteCount; volatile uint32_t SessionActive; volatile uint32_t StartupReleased; volatile uint32_t EventMask; volatile uint32_t StepMode; volatile uint32_t StepDepth; volatile uintptr_t SelectedThread; volatile uintptr_t CurrentThread; volatile uintptr_t CurrentActivation; volatile uint32_t CurrentSite; volatile uint32_t CurrentReason; volatile uintptr_t CurrentObject; volatile uint32_t CurrentValue; volatile uintptr_t CurrentCode; volatile uintptr_t CurrentFile; volatile int32_t CurrentLine; volatile uint32_t Enabled[{enabledWords}]; }} ct_debug_control_block;");
             writer.WriteLine($"ct_debug_control_block ct_debug_control = {{ UINT32_C(0x43544432), UINT32_C({_debugSites.Count}), 0u, 0u, 0u, 0u, 0u, 0u, 0u, 0u, UINT32_MAX, 0u, 0u, 0u, 0u, 0u, 0, {{0}} }};");
+            writer.WriteLine("typedef struct ct_debug_runtime_summary_block { uint32_t LiveObjectCount; uint32_t TotalAllocations; uint32_t TotalFinalReleases; uint32_t QuarantineBlocks; uintptr_t QuarantineBytes; uint32_t CurrentSite; } ct_debug_runtime_summary_block;");
+            writer.WriteLine("ct_debug_runtime_summary_block ct_debug_runtime_summary;");
+            writer.WriteLine("static_assert(offsetof(ct_debug_control_block, SelectedThread) == (sizeof(uintptr_t) == 4u ? 28u : 32u), \"C~ debug control layout mismatch\");");
+            writer.WriteLine("static_assert(offsetof(ct_debug_control_block, Enabled) == (sizeof(uintptr_t) == 4u ? 68u : 100u), \"C~ debug bitmap layout mismatch\");");
+            writer.WriteLine("static_assert(offsetof(ct_debug_runtime_summary_block, QuarantineBytes) == 16u, \"C~ debug summary layout mismatch\");");
             writer.WriteLine("static ct_atomic_u32 ct_debug_stop_lock = CT_ATOMIC_U32_INIT(0u);");
             writer.WriteLine("typedef struct ct_debug_method_frame { void* State; struct ct_debug_method_frame* Previous; uintptr_t Activation; bool Active; } ct_debug_method_frame;");
             writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_site(uint32_t site);");
@@ -395,20 +400,45 @@ internal sealed partial class CEmitter
         writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_bool(bool value, const char* file, int line) { const char* text = value ? \"True\" : \"False\"; return ct_string_from_bytes((const uint8_t*)text, value ? 4 : 5, file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_char(uint8_t value, const char* file, int line) { return ct_string_from_bytes(&value, 1, file, line); }");
-        writer.WriteLine("void ct_write_string(ct_string* value) { if (value != NULL && value->Length > 0) (void)fwrite(value->Data, 1u, (size_t)value->Length, stdout); }");
-        writer.WriteLine("void ct_write_char(uint8_t value) { (void)fputc((int)value, stdout); }");
-        writer.WriteLine("void ct_write_int(int32_t value) { (void)fprintf(stdout, \"%\" PRId32, value); }");
-        writer.WriteLine("void ct_write_uint(uint32_t value) { (void)fprintf(stdout, \"%\" PRIu32, value); }");
-        writer.WriteLine("void ct_write_long(int64_t value) { (void)fprintf(stdout, \"%\" PRId64, value); }");
-        writer.WriteLine("void ct_write_ulong(uint64_t value) { (void)fprintf(stdout, \"%\" PRIu64, value); }");
-        if (_usesNativeIntegers)
+        if (IsEspIdf && EmitDebugInstrumentation)
         {
-            writer.WriteLine("void ct_write_nint(intptr_t value) { (void)fprintf(stdout, \"%\" PRIdPTR, value); }");
-            writer.WriteLine("void ct_write_nuint(uintptr_t value) { (void)fprintf(stdout, \"%\" PRIuPTR, value); }");
+            writer.WriteLine("extern void esp_gdbstub_putchar(int value);");
+            writer.WriteLine("extern void esp_gdbstub_flush(void);");
+            writer.WriteLine("extern void esp_rom_uart_putc(char value);");
+            writer.WriteLine("static void ct_debug_console_write(const char* data, size_t length);");
+            writer.WriteLine("static void ct_debug_console_flush(void);");
+            writer.WriteLine("void ct_write_string(ct_string* value) { if (value != NULL && value->Length > 0) ct_debug_console_write((const char*)value->Data, (size_t)value->Length); }");
+            writer.WriteLine("void ct_write_char(uint8_t value) { char buffer[1] = { (char)value }; ct_debug_console_write(buffer, 1u); }");
+            writer.WriteLine("void ct_write_int(int32_t value) { char buffer[12]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId32, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_uint(uint32_t value) { char buffer[11]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu32, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_long(int64_t value) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId64, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_ulong(uint64_t value) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu64, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            if (_usesNativeIntegers)
+            {
+                writer.WriteLine("void ct_write_nint(intptr_t value) { char buffer[3 * sizeof(intptr_t) + 2]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIdPTR, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+                writer.WriteLine("void ct_write_nuint(uintptr_t value) { char buffer[3 * sizeof(uintptr_t) + 1]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIuPTR, value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            }
+            writer.WriteLine("void ct_write_float(float value) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); if (length > 0) ct_debug_console_write(buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_bool(bool value) { const char* text = value ? \"True\" : \"False\"; ct_debug_console_write(text, value ? 4u : 5u); }");
+            writer.WriteLine("void ct_write_line(void) { ct_debug_console_write(\"\\n\", 1u); ct_debug_console_flush(); }");
         }
-        writer.WriteLine("void ct_write_float(float value) { (void)fprintf(stdout, \"%.9g\", (double)value); }");
-        writer.WriteLine("void ct_write_bool(bool value) { (void)fputs(value ? \"True\" : \"False\", stdout); }");
-        writer.WriteLine("void ct_write_line(void) { (void)fputc('\\n', stdout); }");
+        else
+        {
+            writer.WriteLine("void ct_write_string(ct_string* value) { if (value != NULL && value->Length > 0) (void)fwrite(value->Data, 1u, (size_t)value->Length, stdout); }");
+            writer.WriteLine("void ct_write_char(uint8_t value) { (void)fputc((int)value, stdout); }");
+            writer.WriteLine("void ct_write_int(int32_t value) { (void)fprintf(stdout, \"%\" PRId32, value); }");
+            writer.WriteLine("void ct_write_uint(uint32_t value) { (void)fprintf(stdout, \"%\" PRIu32, value); }");
+            writer.WriteLine("void ct_write_long(int64_t value) { (void)fprintf(stdout, \"%\" PRId64, value); }");
+            writer.WriteLine("void ct_write_ulong(uint64_t value) { (void)fprintf(stdout, \"%\" PRIu64, value); }");
+            if (_usesNativeIntegers)
+            {
+                writer.WriteLine("void ct_write_nint(intptr_t value) { (void)fprintf(stdout, \"%\" PRIdPTR, value); }");
+                writer.WriteLine("void ct_write_nuint(uintptr_t value) { (void)fprintf(stdout, \"%\" PRIuPTR, value); }");
+            }
+            writer.WriteLine("void ct_write_float(float value) { (void)fprintf(stdout, \"%.9g\", (double)value); }");
+            writer.WriteLine("void ct_write_bool(bool value) { (void)fputs(value ? \"True\" : \"False\", stdout); }");
+            writer.WriteLine($"void ct_write_line(void) {{ (void)fputc('\\n', stdout);{(EmitDebugInstrumentation ? " (void)fflush(stdout);" : string.Empty)} }}");
+        }
         if (!IsEspIdf)
             writer.WriteLine("void ct_environment_exit(int32_t code) { exit((int)code); }");
         writer.WriteLine();
@@ -757,6 +787,22 @@ internal sealed partial class CEmitter
 
     private void EmitInstrumentedDebugRuntime(CWriter writer)
     {
+        writer.WriteLine("static void ct_debug_refresh_runtime_summary(void)");
+        writer.WriteLine("{");
+        if (EmitDebugObjects)
+        {
+            writer.WriteLine("    ct_debug_runtime_summary.LiveObjectCount = ct_atomic_load_relaxed(&ct_debug_live_count);");
+            writer.WriteLine("    ct_debug_runtime_summary.TotalAllocations = ct_atomic_load_relaxed(&ct_debug_allocation_count);");
+            writer.WriteLine("    ct_debug_runtime_summary.TotalFinalReleases = ct_atomic_load_relaxed(&ct_debug_final_release_count);");
+            writer.WriteLine("    ct_debug_registry_acquire();");
+            writer.WriteLine("    ct_debug_runtime_summary.QuarantineBlocks = ct_debug_quarantine_count;");
+            writer.WriteLine("    ct_debug_runtime_summary.QuarantineBytes = (uintptr_t)ct_debug_quarantine_bytes;");
+            writer.WriteLine("    ct_debug_registry_release();");
+        }
+        else
+            writer.WriteLine("    ct_debug_runtime_summary.LiveObjectCount = 0u; ct_debug_runtime_summary.TotalAllocations = 0u; ct_debug_runtime_summary.TotalFinalReleases = 0u; ct_debug_runtime_summary.QuarantineBlocks = 0u; ct_debug_runtime_summary.QuarantineBytes = 0u;");
+        writer.WriteLine("    ct_debug_runtime_summary.CurrentSite = ct_debug_control.CurrentSite;");
+        writer.WriteLine("}");
         writer.WriteLine("static CT_DEBUG_NOINLINE void ct_debug_trap(void)");
         writer.WriteLine("{");
         if (IsEspIdf)
@@ -773,6 +819,16 @@ internal sealed partial class CEmitter
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_keep(void* storage) { ct_debug_probe_sink ^= (uintptr_t)storage; }");
         writer.WriteLine("static void ct_debug_stop_acquire(void) { uint32_t expected; do { expected = 0u; } while (!ct_atomic_compare_exchange_relaxed(&ct_debug_stop_lock, &expected, 1u)); ct_atomic_acquire_fence(); }");
         writer.WriteLine("static void ct_debug_stop_release(void) { ct_atomic_store_release(&ct_debug_stop_lock, 0u); }");
+        if (IsEspIdf)
+        {
+            writer.WriteLine("extern void esp_gdbstub_putchar(int value);");
+            writer.WriteLine("extern void esp_gdbstub_flush(void);");
+            writer.WriteLine("extern void esp_rom_uart_putc(char value);");
+            writer.WriteLine("static char ct_debug_hex_digit(uint8_t value) { return (char)(value < 10u ? (uint8_t)'0' + value : (uint8_t)'a' + value - 10u); }");
+            writer.WriteLine("static void ct_debug_console_packet(const uint8_t* data, size_t length) { uint8_t checksum = (uint8_t)'O'; esp_gdbstub_putchar('$'); esp_gdbstub_putchar('O'); for (size_t index = 0u; index < length; ++index) { char high = ct_debug_hex_digit((uint8_t)(data[index] >> 4u)); char low = ct_debug_hex_digit((uint8_t)(data[index] & UINT8_C(0x0f))); checksum = (uint8_t)(checksum + (uint8_t)high + (uint8_t)low); esp_gdbstub_putchar((int)high); esp_gdbstub_putchar((int)low); } esp_gdbstub_putchar('#'); esp_gdbstub_putchar((int)ct_debug_hex_digit((uint8_t)(checksum >> 4u))); esp_gdbstub_putchar((int)ct_debug_hex_digit((uint8_t)(checksum & UINT8_C(0x0f)))); }");
+            writer.WriteLine("static void ct_debug_console_write(const char* data, size_t length) { if (data == NULL || length == 0u) return; if (ct_debug_control.SessionActive == 0u) { for (size_t index = 0u; index < length; ++index) esp_rom_uart_putc(data[index]); return; } ct_debug_stop_acquire(); size_t offset = 0u; while (offset < length) { size_t chunk = length - offset > 16u ? 16u : length - offset; ct_debug_console_packet((const uint8_t*)data + offset, chunk); offset += chunk; } ct_debug_stop_release(); }");
+            writer.WriteLine("static void ct_debug_console_flush(void) { if (ct_debug_control.SessionActive == 0u) return; ct_debug_stop_acquire(); esp_gdbstub_flush(); ct_debug_stop_release(); }");
+        }
         writer.WriteLine("void ct_debug_method_enter(ct_debug_method_frame* frame) { ct_thread_state* state = ct_thread_require_attached(); frame->State = state; frame->Previous = state->DebugFrameTop; frame->Activation = ++state->DebugNextActivation; frame->Active = true; state->DebugFrameTop = frame; ++state->DebugDepth; }");
         writer.WriteLine("void ct_debug_method_leave(void* value) { ct_debug_method_frame* frame = (ct_debug_method_frame*)value; if (!frame->Active) return; ct_thread_state* state = (ct_thread_state*)frame->State; frame->Active = false; if (state == NULL || state->DebugDepth == 0u || state->DebugFrameTop != frame) ct_fail(\"CTM0003\", \"<debug-depth>\", 0); state->DebugFrameTop = frame->Previous; --state->DebugDepth; }");
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_site(uint32_t site)");
@@ -788,12 +844,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    if (!stop) return;");
         writer.WriteLine("    ct_debug_stop_acquire(); ct_debug_control.StepMode = 0u; ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = site; ct_debug_control.CurrentReason = CT_DEBUG_REASON_SITE; ct_debug_control.CurrentObject = 0u; ct_debug_control.CurrentValue = state->DebugDepth; ct_debug_control.CurrentCode = 0u; ct_debug_control.CurrentFile = 0u; ct_debug_control.CurrentLine = 0;");
-        writer.WriteLine("    ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine("    ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release();");
         writer.WriteLine("}");
         writer.WriteLine("static void ct_debug_runtime_event(uint32_t reason, uint32_t mask, ct_object* object, uint32_t value, const char* code, const char* file, int32_t line)");
         writer.WriteLine("{");
         writer.WriteLine("    if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & mask) == 0u) return;");
-        writer.WriteLine("    ct_thread_state* state = ct_thread_current(); ct_debug_stop_acquire(); ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state == NULL || state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = state == NULL ? UINT32_MAX : state->DebugCurrentSite; ct_debug_control.CurrentReason = reason; ct_debug_control.CurrentObject = (uintptr_t)(void*)object; ct_debug_control.CurrentValue = value; ct_debug_control.CurrentCode = (uintptr_t)(const void*)code; ct_debug_control.CurrentFile = (uintptr_t)(const void*)file; ct_debug_control.CurrentLine = line; ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine("    ct_thread_state* state = ct_thread_current(); ct_debug_stop_acquire(); ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state == NULL || state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = state == NULL ? UINT32_MAX : state->DebugCurrentSite; ct_debug_control.CurrentReason = reason; ct_debug_control.CurrentObject = (uintptr_t)(void*)object; ct_debug_control.CurrentValue = value; ct_debug_control.CurrentCode = (uintptr_t)(const void*)code; ct_debug_control.CurrentFile = (uintptr_t)(const void*)file; ct_debug_control.CurrentLine = line; ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release();");
         writer.WriteLine("}");
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe_sink = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; ct_debug_runtime_event(CT_DEBUG_REASON_THROW, unhandled != 0u ? CT_DEBUG_EVENT_UNHANDLED : CT_DEBUG_EVENT_THROW, exception, unhandled, code, file, line); }");
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe_sink = (uintptr_t)(unsigned int)line; ct_debug_runtime_event(CT_DEBUG_REASON_FATAL, CT_DEBUG_EVENT_FATAL, NULL, 0u, code, file, line); }");
@@ -805,7 +861,7 @@ internal sealed partial class CEmitter
         }
         if (IsEspIdf)
         {
-            writer.WriteLine("void ct_debug_startup_probe(void) { if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & CT_DEBUG_EVENT_STARTUP) == 0u) return; ct_debug_stop_acquire(); ct_debug_control.CurrentThread = 0u; ct_debug_control.CurrentActivation = 0u; ct_debug_control.CurrentSite = UINT32_MAX; ct_debug_control.CurrentReason = CT_DEBUG_REASON_STARTUP; ct_debug_trap(); ct_debug_stop_release(); }");
+            writer.WriteLine("void ct_debug_startup_probe(void) { if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & CT_DEBUG_EVENT_STARTUP) == 0u) return; ct_debug_stop_acquire(); ct_debug_control.CurrentThread = 0u; ct_debug_control.CurrentActivation = 0u; ct_debug_control.CurrentSite = UINT32_MAX; ct_debug_control.CurrentReason = CT_DEBUG_REASON_STARTUP; ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release(); }");
             writer.WriteLine("void ct_debug_wait_for_client(void)");
             writer.WriteLine("{");
             writer.WriteLine("    int64_t start = ct_esp_timer_get_time_us();");

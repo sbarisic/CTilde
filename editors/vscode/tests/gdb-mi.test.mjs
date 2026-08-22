@@ -23,6 +23,9 @@ test("GDB MI parser handles tokened results, tuples, lists, and repeated fields"
 
 test("GDB MI parser decodes streams, escapes, async stops, and incomplete lines", () => {
   assert.equal(parseMiRecord('~"hello\\nworld\\t\\042"').text, 'hello\nworld\t"');
+  const target = parseMiRecord('@"C~ ESP ✓\\n"');
+  assert.equal(target.kind, "@");
+  assert.equal(target.text, 'C~ ESP ✓\n');
   const stopped = parseMiRecord('*stopped,reason="breakpoint-hit",thread-id="3",frame={func="ct_m_test",line="9"}');
   assert.equal(stopped.kind, "*");
   assert.equal(miString(stopped.results.reason), "breakpoint-hit");

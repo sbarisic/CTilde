@@ -18,7 +18,7 @@ import {
 } from '@vscode/debugadapter';
 import { DebugProtocol } from '@vscode/debugprotocol';
 import { GdbMi, MiRecord, MiTuple, miArray, miString, miTuple } from './gdbMi';
-import { buildEnabledSiteWords, encodeDebugControlValue, espTrapResumeExpression, findExecutableSite, gdbResumeCommand, isTruthyGdbValue, parseHitCondition, resolveLogicalFrameSite, TargetConsoleBuffer } from './debugModel';
+import { buildEnabledSiteWords, DebugMemoryLayout, debugMemoryChanges, decodeDebugMemoryField, encodeDebugControlValue, espTrapResumeExpression, findExecutableSite, gdbResumeCommand, isTruthyGdbValue, parseHitCondition, patchDebugBitmap, patchDebugMemory, resolveLogicalFrameSite, runEspDetachSequence, TargetConsoleBuffer } from './debugModel';
 
 const espSerialBridgeSource = [
     'import os,serial,sys,threading,time',
@@ -95,6 +95,8 @@ interface DebugMap {
     readonly instrumented: boolean;
     readonly memoryDiagnostics: 'off' | 'objects' | 'guarded';
     readonly runtimeHooks: { readonly throw: string; readonly fatal: string; readonly control?: string; readonly trap?: string };
+    readonly runtimeControl?: { readonly symbol: string; readonly layouts?: readonly DebugMemoryLayout[] };
+    readonly runtimeSummary?: { readonly symbol: string; readonly layouts?: readonly DebugMemoryLayout[] };
 }
 interface DebugTarget {
     readonly version: number;
@@ -155,6 +157,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
     private readonly frameLevels = new Map<number, number>();
     private readonly frameFunctions = new Map<number, DebugFunction | undefined>();
     private readonly frameSites = new Map<number, DebugSite | undefined>();
+    private readonly frameThreads = new Map<number, number>();
     private readonly sourceBreakpoints = new Map<string, LogicalBreakpoint[]>();
     private functionBreakpoints: LogicalBreakpoint[] = [];
     private readonly runtimeFunctionBreakpoints = new Set<string>();
@@ -186,17 +189,38 @@ export class CTildeDebugSession extends LoggingDebugSession {
     private translatingStop = false;
     private readonly targetConsoleOutput = new TargetConsoleBuffer();
     private readonly controlAddresses = new Map<string, string>();
+    private controlLayout: DebugMemoryLayout | undefined;
+    private controlBase: string | undefined;
+    private controlImage: string | undefined;
+    private pointerSize = 4;
+    private runtimeSummaryLayout: DebugMemoryLayout | undefined;
+    private runtimeSummaryBase: string | undefined;
+    private threadCache: Thread[] | undefined;
+    private readonly stackCache = new Map<number, StackFrame[]>();
+    private selectedThreadId: number | undefined;
+    private selectedFrameLevel: number | undefined;
+    private readonly frameVariableCache = new Map<number, Map<string, string>>();
+    private endingEspSession: Promise<void> | undefined;
+    private stoppedAtLogicalTrap = false;
+    private espTrapAdvanced = false;
 
     public constructor() {
         super('ctilde-debug.txt');
         this.setDebuggerLinesStartAt1(true);
         this.setDebuggerColumnsStartAt1(true);
         this.gdb.onOutput = (category, output) => {
-            if (category === 'console' && (this.targetRunning || this.translatingStop)) {
-                this.targetConsoleOutput.append(output);
+            if (category === 'stdout' || category === 'stderr') {
+                this.sendEvent(new OutputEvent(output, category));
                 return;
             }
-            this.sendEvent(new OutputEvent(output, category === 'stdout' ? 'stdout' : category === 'stderr' ? 'stderr' : 'console'));
+            if (this.targetRunning || this.translatingStop) {
+                this.targetConsoleOutput.append(output);
+                const safe = this.targetConsoleOutput.drain(this.launchArguments?.showRuntimeFrames === true);
+                if (safe.length !== 0)
+                    this.sendEvent(new OutputEvent(safe, 'console'));
+                return;
+            }
+            this.sendEvent(new OutputEvent(output, 'console'));
         };
         this.gdb.onAsync = record => {
             void this.handleAsync(record).catch(error => {
@@ -251,6 +275,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
             this.request = request;
             this.launchArguments = args;
             this.controlAddresses.clear();
+            this.controlLayout = undefined;
+            this.controlBase = undefined;
+            this.controlImage = undefined;
+            this.runtimeSummaryLayout = undefined;
+            this.runtimeSummaryBase = undefined;
+            this.invalidateStopCaches();
             const targetPath = path.resolve(args.debugTarget);
             if (!existsSync(targetPath))
                 throw new Error(`C~ debug target does not exist: ${targetPath}`);
@@ -418,22 +448,26 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     protected async threadsRequest(response: DebugProtocol.ThreadsResponse): Promise<void> {
-        const record = await this.gdb.command('-thread-info');
-        response.body = {
-            threads: miArray(record.results.threads).map(value => miTuple(value)).map(thread =>
-                new Thread(Number.parseInt(miString(thread.id), 10), miString(thread.name) || `Thread ${miString(thread.id)}`)),
-        };
+        if (this.threadCache === undefined) {
+            const record = await this.gdb.command('-thread-info');
+            this.threadCache = miArray(record.results.threads).map(value => miTuple(value)).map(thread =>
+                new Thread(Number.parseInt(miString(thread.id), 10), miString(thread.name) || `Thread ${miString(thread.id)}`));
+        }
+        response.body = { threads: this.threadCache };
         this.sendResponse(response);
     }
 
     protected async stackTraceRequest(response: DebugProtocol.StackTraceResponse, args: DebugProtocol.StackTraceArguments): Promise<void> {
+        const cached = this.stackCache.get(args.threadId);
+        if (cached !== undefined) {
+            response.body = { stackFrames: cached, totalFrames: cached.length };
+            this.sendResponse(response);
+            return;
+        }
         const record = await this.gdb.command(`-stack-list-frames --thread ${args.threadId}`);
         const frames: StackFrame[] = [];
         const currentMatch = this.currentSite === undefined ? undefined : this.allSites().find(candidate => candidate.site.id === this.currentSite?.id);
         let mappedCurrentSite = false;
-        this.frameLevels.clear();
-        this.frameFunctions.clear();
-        this.frameSites.clear();
         for (const value of miArray(record.results.stack)) {
             const wrapper = miTuple(value);
             const frame = miTuple(wrapper.frame ?? value);
@@ -444,9 +478,10 @@ export class CTildeDebugSession extends LoggingDebugSession {
             if (generated && !this.launchArguments?.showRuntimeFrames)
                 continue;
             const level = Number.parseInt(miString(frame.level), 10);
-            const id = frames.length + 1;
+            const id = args.threadId * 10000 + level + 1;
             this.frameLevels.set(id, level);
             this.frameFunctions.set(id, mapped);
+            this.frameThreads.set(id, args.threadId);
             const nativeLine = Number.parseInt(miString(frame.line) || String(mapped?.source?.line ?? 1), 10);
             const exactCurrentSite = !mappedCurrentSite && args.threadId === this.currentStoppedThreadId &&
                 currentMatch?.fn.name === rawName ? currentMatch.site : undefined;
@@ -460,6 +495,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 sourcePath.length === 0 ? undefined : new Source(path.basename(sourcePath), sourcePath),
                 exactCurrentSite?.source.line ?? nativeLine, exactCurrentSite?.source.column ?? 1));
         }
+        this.stackCache.set(args.threadId, frames);
         response.body = { stackFrames: frames, totalFrames: frames.length };
         this.sendResponse(response);
     }
@@ -487,20 +523,22 @@ export class CTildeDebugSession extends LoggingDebugSession {
         }
         try {
             const level = this.frameLevels.get(container.frameId) ?? 0;
-            await this.gdb.command(`-stack-select-frame ${level}`);
+            await this.selectFrame(this.frameThreads.get(container.frameId), level);
             if (container.type === '$scope') {
                 const fn = this.frameFunctions.get(container.frameId);
                 const definitions = container.expression === '$arguments' ? fn?.parameters ?? [] : this.liveLocals(fn, container.frameId);
+                const knownValues = await this.frameVariables(container.frameId);
                 const variables: DebugProtocol.Variable[] = [];
                 for (const definition of definitions) {
                     try {
-                        variables.push(await this.makeVariable(definition.name, definition.storage, definition.type, container.frameId));
+                        variables.push(await this.makeVariable(definition.name, definition.storage, definition.type, container.frameId,
+                            knownValues.get(definition.storage)));
                     } catch {
                         // GDB rejects locals that are outside their lexical scope or optimized away.
                     }
                 }
                 if (container.expression === '$arguments' && fn?.receiver !== undefined && fn.receiverType !== undefined) {
-                    try { variables.push(await this.makeVariable('this', fn.receiver, fn.receiverType, container.frameId)); } catch { }
+                    try { variables.push(await this.makeVariable('this', fn.receiver, fn.receiverType, container.frameId, knownValues.get(fn.receiver))); } catch { }
                 }
                 response.body = { variables };
             } else if (container.type === '$runtime')
@@ -663,35 +701,107 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse): Promise<void> {
+        if (this.target?.target === 'esp-idf') {
+            await this.endEspSessionAndContinue();
+            this.sendResponse(response);
+            return;
+        }
         try {
             this.disconnecting = true;
             if (this.targetRunning)
                 await this.interruptAndWait();
             this.clearTargetConsoleOutput();
             await this.clearDebugControl();
-            if (this.target?.target === 'esp-idf')
-                await this.gdb.command(`-interpreter-exec console ${miQuote('set confirm off')}`).then(() =>
-                    this.gdb.command(`-interpreter-exec console ${miQuote('kill')}`));
-            else
-                await this.gdb.command('-target-detach');
-        } catch { }
+            await this.gdb.command('-target-detach');
+        } catch (error) {
+            this.sendEvent(new OutputEvent(`C~ debugger disconnect cleanup failed: ${errorMessage(error)}\n`, 'stderr'));
+        }
         await this.gdb.close();
         this.removeEspBridge();
         this.sendResponse(response);
     }
 
     protected async terminateRequest(response: DebugProtocol.TerminateResponse): Promise<void> {
+        if (this.target?.target === 'esp-idf') {
+            await this.endEspSessionAndContinue();
+            this.sendResponse(response);
+            return;
+        }
         try {
             this.clearTargetConsoleOutput();
-            if (this.target?.target === 'esp-idf')
-                await this.gdb.command(`-interpreter-exec console ${miQuote('set confirm off')}`).then(() =>
-                    this.gdb.command(`-interpreter-exec console ${miQuote('kill')}`));
-            else
-                await this.gdb.command('-exec-abort');
-        } catch { }
+            await this.gdb.command('-exec-abort');
+        } catch (error) {
+            this.sendEvent(new OutputEvent(`C~ debugger termination failed: ${errorMessage(error)}\n`, 'stderr'));
+        }
         await this.gdb.close();
         this.removeEspBridge();
         this.sendResponse(response);
+    }
+
+    private async endEspSessionAndContinue(): Promise<void> {
+        if (this.endingEspSession !== undefined)
+            return this.endingEspSession;
+        this.endingEspSession = this.performEspDetachAndContinue();
+        return this.endingEspSession;
+    }
+
+    private async performEspDetachAndContinue(): Promise<void> {
+        this.disconnecting = true;
+        let safeToContinue = true;
+        try {
+            await runEspDetachSequence({
+                running: this.targetRunning,
+                trapAlreadyAdvanced: this.espTrapAdvanced,
+                interrupt: () => this.interruptAndWait(),
+                readLogicalReason: async () => {
+                    const fast = await this.refreshFastControl().catch(() => false);
+                    const reason = fast
+                        ? Number(this.fastControlValue('CurrentReason'))
+                        : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10);
+                    this.stoppedAtLogicalTrap = reason !== 0;
+                    return reason;
+                },
+                advanceLogicalTrap: async () => {
+                    await this.evaluateNative(espTrapResumeExpression(this.target?.espTarget));
+                    this.espTrapAdvanced = true;
+                },
+                removeNativeBreakpoints: async () => {
+                    for (const watchpoint of this.dataBreakpoints.values())
+                        await this.gdb.command(`-break-delete ${watchpoint.id}`);
+                    this.dataBreakpoints.clear();
+                    if (this.bootstrapBreakpoint !== undefined) {
+                        try { await this.gdb.command(`-break-delete ${this.bootstrapBreakpoint}`); } catch { }
+                        this.bootstrapBreakpoint = undefined;
+                    }
+                },
+                clearLogicalControl: () => this.clearDebugControl(),
+                continueWithoutDebugger: async () => {
+                    await withTimeout(this.gdb.command(`-interpreter-exec console ${miQuote('set confirm off')}`), 2000,
+                        'Timed out while configuring ESP GDB detach.');
+                    await withTimeout(this.gdb.command(`-interpreter-exec console ${miQuote('kill')}`), 3000,
+                        'Timed out while asking the ESP GDB stub to continue.');
+                },
+            });
+            this.sourceBreakpoints.clear();
+            this.functionBreakpoints = [];
+            this.runtimeFunctionBreakpoints.clear();
+            this.temporaryBreakpoints.clear();
+            this.exceptionFilters.clear();
+            this.pendingLogicalStep = undefined;
+            this.clearTargetConsoleOutput();
+        } catch (error) {
+            safeToContinue = false;
+            this.sendEvent(new OutputEvent(
+                `C~ could not safely detach and continue the ESP target: ${errorMessage(error)} Reset the board before using it.\n`, 'stderr'));
+        } finally {
+            this.invalidateStopCaches();
+            this.controlReady = false;
+            this.controlImage = undefined;
+            try { await this.gdb.close(); } catch { }
+            this.removeEspBridge();
+        }
+        if (safeToContinue)
+            this.sendEvent(new OutputEvent('C~ debugger detached; the ESP firmware is continuing with debugger breakpoints disabled.\n', 'console'));
     }
 
     protected async restartRequest(response: DebugProtocol.RestartResponse): Promise<void> {
@@ -721,10 +831,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
         this.sendResponse(response);
     }
 
-    private async makeVariable(name: string, expression: string, type: string, frameId: number): Promise<DebugProtocol.Variable> {
+    private async makeVariable(name: string, expression: string, type: string, frameId: number, knownValue?: string): Promise<DebugProtocol.Variable> {
         if (type === 'string') {
-            const nullResult = await this.evaluateNative(`${expression} == 0`);
-            if (nullResult !== '0')
+            const isNull = knownValue === undefined
+                ? await this.evaluateNative(`${expression} == 0`) !== '0'
+                : !isTruthyGdbValue(knownValue);
+            if (isNull)
                 return { name, value: 'null', type, variablesReference: 0, evaluateName: expression, memoryReference: '0x0' };
             const length = Number.parseInt(await this.evaluateNative(`${expression}->Length`), 10);
             const address = await this.evaluateNative(`(void*)${expression}->Data`);
@@ -734,9 +846,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
         }
         const mappedType = this.debugMap?.types.find(candidate => candidate.name === type);
         const reference = type.endsWith('[]') || mappedType?.kind === 'class' || mappedType?.kind === 'delegate';
-        if (reference && await this.evaluateNative(`${expression} == 0`) !== '0')
+        const referenceIsNull = reference && (knownValue === undefined
+            ? await this.evaluateNative(`${expression} == 0`) !== '0'
+            : !isTruthyGdbValue(knownValue));
+        if (referenceIsNull)
             return { name, value: 'null', type, variablesReference: 0, evaluateName: expression, memoryReference: '0x0' };
-        const value = await this.evaluateNative(expression);
+        const value = knownValue ?? await this.evaluateNative(expression);
         if (mappedType?.kind === 'enum') {
             const enumValue = mappedType.values?.find(candidate => candidate.value === value);
             return { name, value: enumValue === undefined ? value : `${enumValue.name} (${value})`, type, variablesReference: 0, evaluateName: expression };
@@ -805,6 +920,47 @@ export class CTildeDebugSession extends LoggingDebugSession {
         return miString(record.results.value);
     }
 
+    private async selectFrame(threadId: number | undefined, level: number): Promise<void> {
+        if (threadId !== undefined && this.selectedThreadId !== threadId) {
+            await this.gdb.command(`-thread-select ${threadId}`);
+            this.selectedThreadId = threadId;
+            this.selectedFrameLevel = undefined;
+        }
+        if (this.selectedFrameLevel === level)
+            return;
+        await this.gdb.command(`-stack-select-frame ${level}`);
+        this.selectedFrameLevel = level;
+    }
+
+    private async frameVariables(frameId: number): Promise<Map<string, string>> {
+        const cached = this.frameVariableCache.get(frameId);
+        if (cached !== undefined)
+            return cached;
+        const record = await this.gdb.command('-stack-list-variables --all-values');
+        const result = new Map<string, string>();
+        for (const value of miArray(record.results.variables)) {
+            const variable = miTuple(value);
+            const name = miString(variable.name);
+            if (name.length !== 0)
+                result.set(name, miString(variable.value));
+        }
+        this.frameVariableCache.set(frameId, result);
+        return result;
+    }
+
+    private invalidateStopCaches(): void {
+        this.threadCache = undefined;
+        this.stackCache.clear();
+        this.frameLevels.clear();
+        this.frameFunctions.clear();
+        this.frameSites.clear();
+        this.frameThreads.clear();
+        this.frameVariableCache.clear();
+        this.variableHandles.reset();
+        this.selectedThreadId = undefined;
+        this.selectedFrameLevel = undefined;
+    }
+
     private async readUtf8(address: string, length: number): Promise<string> {
         const record = await this.gdb.command(`-data-read-memory-bytes ${address} ${length}`);
         const memory = miArray(record.results.memory).map(miTuple)[0];
@@ -817,6 +973,9 @@ export class CTildeDebugSession extends LoggingDebugSession {
             return;
         if (record.name === 'running') {
             this.targetRunning = true;
+            this.stoppedAtLogicalTrap = false;
+            this.espTrapAdvanced = false;
+            this.invalidateStopCaches();
             this.sendEvent(new ContinuedEvent(0, true));
             return;
         }
@@ -835,11 +994,10 @@ export class CTildeDebugSession extends LoggingDebugSession {
             this.finishTargetConsoleOutput(false);
             return;
         }
-        this.variableHandles.reset();
-        this.frameLevels.clear();
-        this.frameFunctions.clear();
-        this.frameSites.clear();
+        this.invalidateStopCaches();
         this.currentStoppedThreadId = 0;
+        this.stoppedAtLogicalTrap = false;
+        this.espTrapAdvanced = false;
         const reason = miString(record.results.reason);
         const threadId = Number.parseInt(miString(record.results['thread-id']) || '1', 10);
         const breakpointNumber = Number.parseInt(miString(record.results.bkptno), 10);
@@ -854,6 +1012,17 @@ export class CTildeDebugSession extends LoggingDebugSession {
             const resume = this.resumeAfterControlSync;
             this.pendingControlSync = false;
             this.resumeAfterControlSync = false;
+            if (this.target?.target === 'esp-idf') {
+                const fast = await this.refreshFastControl().catch(() => false);
+                const pendingReason = fast
+                    ? Number(this.fastControlValue('CurrentReason'))
+                    : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10);
+                if (pendingReason !== 0) {
+                    this.stoppedAtLogicalTrap = true;
+                    await this.evaluateNative(espTrapResumeExpression(this.target.espTarget));
+                    this.espTrapAdvanced = true;
+                }
+            }
             await this.synchronizeDebugControl();
             this.finishTargetConsoleOutput(false);
             if (resume)
@@ -867,20 +1036,29 @@ export class CTildeDebugSession extends LoggingDebugSession {
             return;
         }
         let debugReason = 0;
-        try { debugReason = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10); } catch { }
-        if (debugReason !== 0 && this.target?.target === 'esp-idf')
+        let usedFastControl = false;
+        try {
+            usedFastControl = await this.refreshFastControl();
+            debugReason = usedFastControl
+                ? Number(this.fastControlValue('CurrentReason'))
+                : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10);
+        } catch { }
+        this.stoppedAtLogicalTrap = debugReason !== 0;
+        if (this.stoppedAtLogicalTrap && this.target?.target === 'esp-idf') {
             await this.evaluateNative(espTrapResumeExpression(this.target.espTarget));
+            this.espTrapAdvanced = true;
+        }
         if (debugReason === 1) {
-            const siteId = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentSite'), 10);
-            this.currentThreadState = normalizeAddress(await this.evaluateNative('(void*)ct_debug_control.CurrentThread'));
-            this.currentActivation = await this.evaluateNative('ct_debug_control.CurrentActivation');
-            this.currentDepth = Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentValue'), 10);
+            const siteId = usedFastControl ? Number(this.fastControlValue('CurrentSite')) : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentSite'), 10);
+            this.currentThreadState = usedFastControl ? formatAddress(this.fastControlValue('CurrentThread')) : normalizeAddress(await this.evaluateNative('(void*)ct_debug_control.CurrentThread'));
+            this.currentActivation = usedFastControl ? this.fastControlValue('CurrentActivation').toString() : await this.evaluateNative('ct_debug_control.CurrentActivation');
+            this.currentDepth = usedFastControl ? Number(this.fastControlValue('CurrentValue')) : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentValue'), 10);
             await this.removeExpiredLocalWatchpoints();
             const match = this.allSites().find(candidate => candidate.site.id === siteId);
             this.currentSite = match?.site;
             this.currentStoppedThreadId = threadId;
             if (match !== undefined)
-                await this.selectFunctionFrame(match.fn);
+                await this.selectFunctionFrame(match.fn, threadId);
             const candidates = this.logicalBreakpoints().filter(candidate => candidate.siteId === siteId);
             let shouldStop = candidates.length === 0;
             for (const candidate of candidates) {
@@ -929,12 +1107,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
             return;
         }
         if (debugReason >= 2 && debugReason <= 6) {
-            const object = await this.evaluateNative('(void*)ct_debug_control.CurrentObject');
-            const value = await this.evaluateNative('ct_debug_control.CurrentValue');
+            const object = usedFastControl ? formatAddress(this.fastControlValue('CurrentObject')) : await this.evaluateNative('(void*)ct_debug_control.CurrentObject');
+            const value = usedFastControl ? this.fastControlValue('CurrentValue').toString() : await this.evaluateNative('ct_debug_control.CurrentValue');
             if (debugReason === 2 || debugReason === 3) {
-                const code = await this.evaluateCStringPointer('ct_debug_control.CurrentCode');
-                const file = await this.evaluateCStringPointer('ct_debug_control.CurrentFile');
-                const line = await this.evaluateNative('ct_debug_control.CurrentLine');
+                const code = usedFastControl ? await this.evaluateCStringAddress(this.fastControlValue('CurrentCode')) : await this.evaluateCStringPointer('ct_debug_control.CurrentCode');
+                const file = usedFastControl ? await this.evaluateCStringAddress(this.fastControlValue('CurrentFile')) : await this.evaluateCStringPointer('ct_debug_control.CurrentFile');
+                const line = usedFastControl ? this.fastControlValue('CurrentLine').toString() : await this.evaluateNative('ct_debug_control.CurrentLine');
                 const unhandled = value !== '0';
                 this.stoppedException = debugReason === 2
                     ? { id: code || 'C~ exception', description: `${code || 'C~ exception'} at ${file}:${line}`, breakMode: unhandled ? 'unhandled' : 'always' }
@@ -1068,6 +1246,18 @@ export class CTildeDebugSession extends LoggingDebugSession {
         if (this.debugMap?.runtimeHooks.control === undefined)
             throw new Error('Instrumented C~ metadata does not name its debug control block.');
         const values = buildEnabledSiteWords(this.allSites().length, this.logicalBreakpoints().map(breakpoint => breakpoint.siteId));
+        if (await this.ensureFastDebugMemory()) {
+            await this.writeFastControl({
+                CurrentReason: 0,
+                StepMode: 0,
+                StepDepth: 0,
+                SelectedThread: 0,
+                EventMask: this.eventMask(),
+                SessionActive: 1,
+            }, values);
+            this.controlReady = true;
+            return;
+        }
         for (const field of ['CurrentReason', 'StepMode', 'StepDepth', 'SelectedThread', 'StartupReleased'])
             await this.controlAddress(field);
         for (let index = 0; index < values.length; index++)
@@ -1090,6 +1280,10 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     private async setControl(field: string, value: string | number): Promise<void> {
+        if (this.controlLayout !== undefined && this.controlImage !== undefined) {
+            await this.writeFastControl({ [field]: value });
+            return;
+        }
         const address = await this.controlAddress(field);
         const width = field === 'SelectedThread' && this.target?.target !== 'esp-idf' ? 8 : 4;
         await this.gdb.command(`-data-write-memory-bytes ${address} ${encodeDebugControlValue(value, width)}`);
@@ -1108,14 +1302,84 @@ export class CTildeDebugSession extends LoggingDebugSession {
         if (!this.controlReady || this.targetRunning)
             return;
         const words = Math.max(1, Math.ceil(this.allSites().length / 32));
+        if (this.controlLayout !== undefined && this.controlImage !== undefined) {
+            await this.writeFastControl({
+                SessionActive: 0,
+                StartupReleased: 1,
+                EventMask: 0,
+                StepMode: 0,
+                StepDepth: 0,
+                SelectedThread: 0,
+                CurrentReason: 0,
+            }, new Array<number>(words).fill(0));
+            this.controlReady = false;
+            return;
+        }
         for (let index = 0; index < words; index++)
             await this.setControl(`Enabled[${index}]`, 0);
         await this.setControl('EventMask', 0);
         await this.setControl('StepMode', 0);
         await this.setControl('SelectedThread', 0);
         await this.setControl('StartupReleased', 1);
+        await this.setControl('CurrentReason', 0);
         await this.setControl('SessionActive', 0);
         this.controlReady = false;
+    }
+
+    private async ensureFastDebugMemory(): Promise<boolean> {
+        if (this.controlLayout !== undefined && this.controlBase !== undefined && this.controlImage !== undefined)
+            return true;
+        const layouts = this.debugMap?.runtimeControl?.layouts;
+        if (layouts === undefined || layouts.length === 0)
+            return false;
+        this.pointerSize = this.target?.target === 'esp-idf'
+            ? 4
+            : Number.parseInt(await this.evaluateNative('sizeof(void*)'), 10);
+        this.controlLayout = layouts.find(layout => layout.pointerSize === this.pointerSize);
+        if (this.controlLayout === undefined)
+            return false;
+        this.controlBase = normalizeAddress(await this.evaluateNative(`(void*)&${this.debugMap!.runtimeControl!.symbol}`));
+        this.controlImage = await this.readMemoryHex(this.controlBase, this.controlLayout.size);
+        const magic = decodeDebugMemoryField(this.controlImage, this.controlLayout, 'Magic');
+        if (magic !== 0x43544432n)
+            throw new Error(`Instrumented C~ debug control has invalid magic 0x${magic.toString(16)}.`);
+        this.runtimeSummaryLayout = this.debugMap?.runtimeSummary?.layouts?.find(layout => layout.pointerSize === this.pointerSize);
+        if (this.runtimeSummaryLayout !== undefined && this.debugMap?.runtimeSummary !== undefined)
+            this.runtimeSummaryBase = normalizeAddress(await this.evaluateNative(`(void*)&${this.debugMap.runtimeSummary.symbol}`));
+        return true;
+    }
+
+    private async refreshFastControl(): Promise<boolean> {
+        if (!await this.ensureFastDebugMemory() || this.controlBase === undefined || this.controlLayout === undefined)
+            return false;
+        this.controlImage = await this.readMemoryHex(this.controlBase, this.controlLayout.size);
+        return true;
+    }
+
+    private fastControlValue(field: string): bigint {
+        if (this.controlImage === undefined || this.controlLayout === undefined)
+            throw new Error('C~ fast debug control is not available.');
+        return decodeDebugMemoryField(this.controlImage, this.controlLayout, field);
+    }
+
+    private async writeFastControl(updates: Readonly<Record<string, string | number | bigint>>, bitmap?: readonly number[]): Promise<void> {
+        if (this.controlLayout === undefined || this.controlBase === undefined || this.controlImage === undefined)
+            throw new Error('C~ fast debug control is not available.');
+        let next = patchDebugMemory(this.controlImage, this.controlLayout, updates);
+        if (bitmap !== undefined)
+            next = patchDebugBitmap(next, this.controlLayout, bitmap);
+        for (const change of debugMemoryChanges(this.controlImage, next))
+            await this.gdb.command(`-data-write-memory-bytes ${offsetAddress(this.controlBase, change.offset)} ${change.contents}`);
+        this.controlImage = next;
+    }
+
+    private async readMemoryHex(address: string, length: number): Promise<string> {
+        const record = await this.gdb.command(`-data-read-memory-bytes ${address} ${length}`);
+        const memory = miArray(record.results.memory).map(miTuple)[0];
+        const contents = miString(memory?.contents);
+        if (contents.length < length * 2)
+            throw new Error(`GDB returned ${contents.length / 2} of ${length} requested debug-memory bytes.`);
+        return contents.slice(0, length * 2);
     }
 
     private async interruptAndWait(): Promise<void> {
@@ -1184,19 +1448,39 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     private async runtimeVariables(frameId: number): Promise<DebugProtocol.Variable[]> {
-        const count = await this.evaluateNative('(uint32_t)ct_debug_live_count');
+        let count: string;
+        let allocations: string;
+        let releases: string;
+        let currentSite: string;
+        let quarantineBlocks: string | undefined;
+        let quarantineBytes: string | undefined;
+        if (this.runtimeSummaryLayout !== undefined && this.runtimeSummaryBase !== undefined) {
+            const image = await this.readMemoryHex(this.runtimeSummaryBase, this.runtimeSummaryLayout.size);
+            const value = (field: string): string => decodeDebugMemoryField(image, this.runtimeSummaryLayout!, field).toString();
+            count = value('LiveObjectCount');
+            allocations = value('TotalAllocations');
+            releases = value('TotalFinalReleases');
+            currentSite = value('CurrentSite');
+            quarantineBlocks = value('QuarantineBlocks');
+            quarantineBytes = value('QuarantineBytes');
+        } else {
+            count = await this.evaluateNative('(uint32_t)ct_debug_live_count');
+            allocations = await this.evaluateNative('(uint32_t)ct_debug_allocation_count');
+            releases = await this.evaluateNative('(uint32_t)ct_debug_final_release_count');
+            currentSite = await this.evaluateNative('ct_debug_control.CurrentSite');
+        }
         const mode = this.debugMap?.memoryDiagnostics ?? 'off';
         const result: DebugProtocol.Variable[] = [
             { name: 'Memory diagnostics', value: mode, type: 'string', variablesReference: 0 },
             { name: 'Live object count', value: count, type: 'uint', variablesReference: 0 },
-            { name: 'Total allocations', value: await this.evaluateNative('(uint32_t)ct_debug_allocation_count'), type: 'uint', variablesReference: 0 },
-            { name: 'Total final releases', value: await this.evaluateNative('(uint32_t)ct_debug_final_release_count'), type: 'uint', variablesReference: 0 },
+            { name: 'Total allocations', value: allocations, type: 'uint', variablesReference: 0 },
+            { name: 'Total final releases', value: releases, type: 'uint', variablesReference: 0 },
             { name: 'Live objects', value: `${count} object(s)`, indexedVariables: Number.parseInt(count, 10), variablesReference: this.variableHandles.create({ expression: '$liveobjects', type: '$liveobjects', frameId }) },
-            { name: 'Current probe site', value: await this.evaluateNative('ct_debug_control.CurrentSite'), type: 'uint', variablesReference: 0 },
+            { name: 'Current probe site', value: currentSite, type: 'uint', variablesReference: 0 },
         ];
         if (mode === 'guarded') {
-            result.push({ name: 'Quarantine blocks', value: await this.evaluateNative('ct_debug_quarantine_count'), type: 'uint', variablesReference: 0 });
-            result.push({ name: 'Quarantine bytes', value: await this.evaluateNative('ct_debug_quarantine_bytes'), type: 'nuint', variablesReference: 0 });
+            result.push({ name: 'Quarantine blocks', value: quarantineBlocks ?? await this.evaluateNative('ct_debug_quarantine_count'), type: 'uint', variablesReference: 0 });
+            result.push({ name: 'Quarantine bytes', value: quarantineBytes ?? await this.evaluateNative('ct_debug_quarantine_bytes'), type: 'nuint', variablesReference: 0 });
         }
         return result;
     }
@@ -1251,6 +1535,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
         return this.evaluateCString(`(const char*)(uintptr_t)${expression}`);
     }
 
+    private async evaluateCStringAddress(address: bigint): Promise<string> {
+        if (address === 0n)
+            return '';
+        return this.evaluateCString(`(const char*)(uintptr_t)0x${address.toString(16)}`);
+    }
+
     private dataBreakpointExpression(variablesReference: number | undefined, name: string, frameId: number,
         fn: DebugFunction | undefined): { expression: string; type: string } | undefined {
         const container = variablesReference === undefined ? undefined : this.variableHandles.get(variablesReference);
@@ -1296,14 +1586,14 @@ export class CTildeDebugSession extends LoggingDebugSession {
         }
     }
 
-    private async selectFunctionFrame(fn: DebugFunction): Promise<void> {
-        const record = await this.gdb.command('-stack-list-frames');
+    private async selectFunctionFrame(fn: DebugFunction, threadId: number): Promise<void> {
+        const record = await this.gdb.command(`-stack-list-frames --thread ${threadId}`);
         for (const value of miArray(record.results.stack)) {
             const wrapper = miTuple(value);
             const frame = miTuple(wrapper.frame ?? value);
             if (miString(frame.func) !== fn.name)
                 continue;
-            await this.gdb.command(`-stack-select-frame ${Number.parseInt(miString(frame.level), 10)}`);
+            await this.selectFrame(threadId, Number.parseInt(miString(frame.level), 10));
             return;
         }
     }
@@ -1419,6 +1709,27 @@ function normalizeAddress(value: string): string {
         return hexadecimal[0];
     const decimal = /\b\d+\b/.exec(value);
     return decimal?.[0] ?? value.trim();
+}
+
+function formatAddress(value: bigint): string {
+    return `0x${value.toString(16)}`;
+}
+
+function errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+async function withTimeout<T>(operation: Promise<T>, timeoutMilliseconds: number, message: string): Promise<T> {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+        return await Promise.race([
+            operation,
+            new Promise<T>((_, reject) => timer = setTimeout(() => reject(new Error(message)), timeoutMilliseconds)),
+        ]);
+    } finally {
+        if (timer !== undefined)
+            clearTimeout(timer);
+    }
 }
 
 function matchesFunctionBreakpoint(fn: DebugFunction, requested: string): boolean {

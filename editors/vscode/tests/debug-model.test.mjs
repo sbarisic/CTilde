@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildEnabledSiteWords, encodeDebugControlValue, espTrapInstructionSize, espTrapResumeExpression, findExecutableSite, gdbResumeCommand, isTruthyGdbValue, parseHitCondition, resolveLogicalFrameSite, stripInternalProbeConsole, TargetConsoleBuffer } from '../out/debugModel.js';
+import { buildEnabledSiteWords, debugMemoryChanges, decodeDebugMemoryField, encodeDebugControlValue, espTrapInstructionSize, espTrapResumeExpression, findExecutableSite, gdbResumeCommand, isTruthyGdbValue, parseHitCondition, patchDebugBitmap, patchDebugMemory, resolveLogicalFrameSite, runEspDetachSequence, stripInternalProbeConsole, TargetConsoleBuffer } from '../out/debugModel.js';
 
 test('logical breakpoint bitmaps support more than ESP instruction breakpoint limits', () => {
   assert.deepEqual(buildEnabledSiteWords(70, [0, 1, 31, 32, 69]), [0x80000003, 1, 32]);
@@ -94,4 +94,60 @@ test('target console buffering handles fragmented probe output, diagnostic mode,
   cleared.append('stale stop output');
   cleared.clear();
   assert.equal(cleared.finish(false, false), '');
+});
+
+test('debug control images decode, patch, and coalesce target memory writes', () => {
+  const layout = {
+    pointerSize: 4,
+    size: 24,
+    enabledOffset: 16,
+    fields: {
+      SessionActive: { offset: 0, width: 4 },
+      SelectedThread: { offset: 4, width: 4 },
+      CurrentReason: { offset: 8, width: 4 },
+    },
+  };
+  const empty = Buffer.alloc(layout.size).toString('hex');
+  let changed = patchDebugMemory(empty, layout, { SessionActive: 1, SelectedThread: '0x3ffb1234', CurrentReason: 7 });
+  changed = patchDebugBitmap(changed, layout, [0x80000001, 2]);
+  assert.equal(decodeDebugMemoryField(changed, layout, 'SelectedThread'), 0x3ffb1234n);
+  assert.equal(decodeDebugMemoryField(changed, layout, 'CurrentReason'), 7n);
+  assert.deepEqual(debugMemoryChanges(empty, changed), [{ offset: 0, contents: changed.slice(0, 42) }]);
+});
+
+test('console filtering streams ordinary lines while retaining possible trap fragments', () => {
+  const output = new TargetConsoleBuffer();
+  output.append('application one\napplication two\napplication three\n');
+  assert.equal(output.drain(false), 'application one\n');
+  output.append('Thread 1 received signal SIGTRAP, Trace/breakpoint trap.\n');
+  output.append('ct_debug_trap () at C:/generated/ctilde_runtime.c:299\n299 esp_cpu_dbgr_break();\n');
+  assert.equal(output.finish(true, false), 'application two\napplication three\n');
+});
+
+test('ESP detach interrupts, advances an unhandled logical trap once, clears state, then continues', async () => {
+  const calls = [];
+  await runEspDetachSequence({
+    running: true,
+    trapAlreadyAdvanced: false,
+    interrupt: async () => calls.push('interrupt'),
+    readLogicalReason: async () => { calls.push('reason'); return 1; },
+    advanceLogicalTrap: async () => calls.push('advance'),
+    removeNativeBreakpoints: async () => calls.push('remove-native'),
+    clearLogicalControl: async () => calls.push('clear-logical'),
+    continueWithoutDebugger: async () => calls.push('continue'),
+  });
+  assert.deepEqual(calls, ['interrupt', 'reason', 'advance', 'remove-native', 'clear-logical', 'continue']);
+
+  calls.length = 0;
+  await runEspDetachSequence({
+    running: false,
+    trapAlreadyAdvanced: true,
+    interrupt: async () => calls.push('interrupt'),
+    readLogicalReason: async () => { calls.push('reason'); return 1; },
+    advanceLogicalTrap: async () => calls.push('advance'),
+    removeNativeBreakpoints: async () => calls.push('remove-native'),
+    clearLogicalControl: async () => calls.push('clear-logical'),
+    continueWithoutDebugger: async () => calls.push('continue'),
+  });
+  assert.deepEqual(calls, ['reason', 'remove-native', 'clear-logical', 'continue']);
 });

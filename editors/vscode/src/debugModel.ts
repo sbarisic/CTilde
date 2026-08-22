@@ -67,6 +67,28 @@ export function gdbResumeCommand(espIdf: boolean, threadId: number): string {
     return espIdf ? '-exec-continue' : `-exec-continue --thread ${threadId}`;
 }
 
+export interface EspDetachOperations {
+    readonly running: boolean;
+    readonly trapAlreadyAdvanced: boolean;
+    interrupt(): Promise<void>;
+    readLogicalReason(): Promise<number>;
+    advanceLogicalTrap(): Promise<void>;
+    removeNativeBreakpoints(): Promise<void>;
+    clearLogicalControl(): Promise<void>;
+    continueWithoutDebugger(): Promise<void>;
+}
+
+export async function runEspDetachSequence(operations: EspDetachOperations): Promise<void> {
+    if (operations.running)
+        await operations.interrupt();
+    const logicalReason = await operations.readLogicalReason();
+    if (logicalReason !== 0 && !operations.trapAlreadyAdvanced)
+        await operations.advanceLogicalTrap();
+    await operations.removeNativeBreakpoints();
+    await operations.clearLogicalControl();
+    await operations.continueWithoutDebugger();
+}
+
 export function encodeDebugControlValue(value: string | number, width: number): string {
     let integer: bigint;
     if (typeof value === 'number')
@@ -82,6 +104,94 @@ export function encodeDebugControlValue(value: string | number, width: number): 
     for (let index = 0; index < width; index++)
         bytes.push(Number(integer >> BigInt(index * 8) & 0xffn).toString(16).padStart(2, '0'));
     return bytes.join('');
+}
+
+export interface DebugMemoryFieldLayout { readonly offset: number; readonly width: number; }
+export interface DebugMemoryLayout {
+    readonly pointerSize: number;
+    readonly size: number;
+    readonly enabledOffset?: number;
+    readonly fields: Readonly<Record<string, DebugMemoryFieldLayout>>;
+}
+
+export function decodeDebugMemoryField(contents: string, layout: DebugMemoryLayout, field: string): bigint {
+    const definition = layout.fields[field];
+    if (definition === undefined)
+        throw new Error(`C~ debug memory layout does not define '${field}'.`);
+    const bytes = Buffer.from(contents, 'hex');
+    if (definition.offset < 0 || definition.width <= 0 || definition.offset + definition.width > bytes.length)
+        throw new Error(`C~ debug memory field '${field}' is outside the returned target memory.`);
+    let result = 0n;
+    for (let index = definition.width - 1; index >= 0; index--)
+        result = result << 8n | BigInt(bytes[definition.offset + index]);
+    return result;
+}
+
+export function patchDebugMemory(contents: string, layout: DebugMemoryLayout,
+    updates: Readonly<Record<string, string | number | bigint>>): string {
+    const bytes = Buffer.from(contents, 'hex');
+    if (bytes.length < layout.size)
+        throw new Error('C~ debug memory image is shorter than its advertised layout.');
+    for (const [field, value] of Object.entries(updates)) {
+        const definition = layout.fields[field];
+        if (definition === undefined)
+            throw new Error(`C~ debug memory layout does not define '${field}'.`);
+        let integer = typeof value === 'bigint' ? value : typeof value === 'number' ? BigInt(value >>> 0) : parseDebugInteger(value);
+        for (let index = 0; index < definition.width; index++) {
+            bytes[definition.offset + index] = Number(integer & 0xffn);
+            integer >>= 8n;
+        }
+        if (integer !== 0n)
+            throw new Error(`C~ debug control value for '${field}' does not fit in ${definition.width} bytes.`);
+    }
+    return bytes.toString('hex');
+}
+
+export function patchDebugBitmap(contents: string, layout: DebugMemoryLayout, values: readonly number[]): string {
+    if (layout.enabledOffset === undefined)
+        throw new Error('C~ debug memory layout does not define an enabled-site bitmap.');
+    const bytes = Buffer.from(contents, 'hex');
+    if (layout.enabledOffset + values.length * 4 > bytes.length)
+        throw new Error('C~ enabled-site bitmap is outside the returned target memory.');
+    for (let index = 0; index < values.length; index++)
+        bytes.writeUInt32LE(values[index] >>> 0, layout.enabledOffset + index * 4);
+    return bytes.toString('hex');
+}
+
+export interface DebugMemoryChange { readonly offset: number; readonly contents: string; }
+
+export function debugMemoryChanges(before: string, after: string, coalesceGap = 8): DebugMemoryChange[] {
+    const oldBytes = Buffer.from(before, 'hex');
+    const newBytes = Buffer.from(after, 'hex');
+    if (oldBytes.length !== newBytes.length)
+        throw new Error('C~ debug memory images must have equal lengths.');
+    const changes: DebugMemoryChange[] = [];
+    let start = -1;
+    let last = -1;
+    for (let index = 0; index < newBytes.length; index++) {
+        if (oldBytes[index] === newBytes[index])
+            continue;
+        if (start < 0) {
+            start = index;
+            last = index;
+        } else if (index - last <= coalesceGap + 1)
+            last = index;
+        else {
+            changes.push({ offset: start, contents: newBytes.subarray(start, last + 1).toString('hex') });
+            start = last = index;
+        }
+    }
+    if (start >= 0)
+        changes.push({ offset: start, contents: newBytes.subarray(start, last + 1).toString('hex') });
+    return changes;
+}
+
+function parseDebugInteger(value: string): bigint {
+    const hexadecimal = /0x[0-9a-f]+/i.exec(value);
+    const decimal = /-?\d+/.exec(value);
+    if (hexadecimal === null && decimal === null)
+        throw new Error(`C~ debug value is not an integer: ${value}`);
+    return BigInt(hexadecimal?.[0] ?? decimal![0]);
 }
 
 export function stripInternalProbeConsole(text: string): string {
@@ -114,6 +224,25 @@ export class TargetConsoleBuffer {
 
     public append(text: string): void {
         this.parts.push(text);
+    }
+
+    public drain(showRuntimeFrames: boolean): string {
+        if (this.parts.length === 0)
+            return '';
+        const buffered = this.parts.join('');
+        if (showRuntimeFrames) {
+            this.parts.length = 0;
+            return buffered;
+        }
+        const lines = buffered.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+        const completeCount = lines.length - (lines.at(-1)?.endsWith('\n') ? 0 : 1);
+        const emitCount = Math.max(0, completeCount - 2);
+        if (emitCount === 0)
+            return '';
+        const emitted = lines.slice(0, emitCount).join('');
+        this.parts.length = 0;
+        this.parts.push(lines.slice(emitCount).join(''));
+        return stripInternalProbeConsole(emitted);
     }
 
     public finish(internalProbe: boolean, showRuntimeFrames: boolean): string {

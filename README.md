@@ -186,9 +186,9 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.400-preview.0.26322.102` builds the solution with zero warnings and zero errors, and all 116 registered conformance checks pass. The Draft 0.14 release gate remains open only for the physical ABI 14 T-CAN485 flash-and-monitor workload and evidence synchronization.
+C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.400-preview.0.26322.102` builds the solution with zero warnings and zero errors, and all 116 registered conformance checks pass. The Draft 0.14 software gates, automated T-CAN485 runtime/debugger acceptance, and operator-confirmed visible WS2812 check all pass.
 
-The compiler and ESP-IDF firmware cross-build coverage are substantially broader than the current physical-hardware evidence. ABI 14 firmware links for Xtensa and RISC-V, but the last completed T-CAN485 flash-and-monitor run used Draft 0.12. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for remaining work.
+ABI 14 firmware links for Xtensa and RISC-V. The connected classic ESP32 completed the ABI 14 Release workload, fatal-runtime image, guarded debugger-v2 matrix, detach continuation, no-debugger startup timeout, and visible LED confirmation on 2026-08-22. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for post-release work.
 
 ## Repository guide
 

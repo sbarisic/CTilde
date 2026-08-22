@@ -640,7 +640,9 @@ internal sealed partial class CEmitter
             writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_debug_final_release_count, 1u);");
             if (EmitDebugGuards)
             {
-                writer.WriteLine("    (void)memset(value, 0xDD, allocation->Size); ct_debug_registry_acquire(); allocation->Previous = ct_debug_quarantine_tail; if (ct_debug_quarantine_tail != NULL) ct_debug_quarantine_tail->Next = allocation; else ct_debug_quarantine_head = allocation; ct_debug_quarantine_tail = allocation; ++ct_debug_quarantine_count; ct_debug_quarantine_bytes += allocation->Size; while (ct_debug_quarantine_count > 16u || ct_debug_quarantine_bytes > 32768u) { ct_debug_allocation* oldest = ct_debug_quarantine_head; ct_debug_quarantine_head = oldest->Next; if (ct_debug_quarantine_head != NULL) ct_debug_quarantine_head->Previous = NULL; else ct_debug_quarantine_tail = NULL; --ct_debug_quarantine_count; ct_debug_quarantine_bytes -= oldest->Size; ct_debug_native_free(oldest); } ct_debug_registry_release();");
+                var quarantineBlockLimit = IsEspIdf ? "2u" : "16u";
+                var quarantineByteLimit = IsEspIdf ? "256u" : "32768u";
+                writer.WriteLine($"    (void)memset(value, 0xDD, allocation->Size); ct_debug_registry_acquire(); allocation->Previous = ct_debug_quarantine_tail; if (ct_debug_quarantine_tail != NULL) ct_debug_quarantine_tail->Next = allocation; else ct_debug_quarantine_head = allocation; ct_debug_quarantine_tail = allocation; ++ct_debug_quarantine_count; ct_debug_quarantine_bytes += allocation->Size; while (ct_debug_quarantine_count > {quarantineBlockLimit} || ct_debug_quarantine_bytes > {quarantineByteLimit}) {{ ct_debug_allocation* oldest = ct_debug_quarantine_head; ct_debug_quarantine_head = oldest->Next; if (ct_debug_quarantine_head != NULL) ct_debug_quarantine_head->Previous = NULL; else ct_debug_quarantine_tail = NULL; --ct_debug_quarantine_count; ct_debug_quarantine_bytes -= oldest->Size; ct_debug_native_free(oldest); }} ct_debug_registry_release();");
             }
             else
                 writer.WriteLine("    ct_debug_native_free(allocation);");

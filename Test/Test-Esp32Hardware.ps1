@@ -1,0 +1,448 @@
+[CmdletBinding()]
+param(
+    [string]$IdfPath = "C:\esp\v6.0.2\esp-idf",
+    [string]$ProjectDirectory = "",
+    [string]$Port = "COM4",
+    [ValidateRange(1, 4000000)]
+    [int]$BaudRate = 460800,
+    [switch]$AutomatedOnly
+)
+
+$ErrorActionPreference = "Stop"
+$repositoryDirectory = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ProjectDirectory)) {
+    $ProjectDirectory = Join-Path $repositoryDirectory "examples\TCan485"
+}
+$ProjectDirectory = (Resolve-Path -LiteralPath $ProjectDirectory).Path
+$projectManifest = Join-Path $ProjectDirectory "ctilde.json"
+$programSource = Join-Path $ProjectDirectory "Program.ct"
+$runtimeFailureSource = Join-Path $ProjectDirectory "RuntimeFailure.ct"
+$buildScript = Join-Path $ProjectDirectory "Build.ps1"
+$artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
+$timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
+$reportPath = Join-Path $artifactDirectory "$timestamp.json"
+$debugReportPath = Join-Path $artifactDirectory "$timestamp-debug.json"
+$debugDescriptorPath = Join-Path $artifactDirectory "$timestamp-debug-target.json"
+$adapterPath = Join-Path $repositoryDirectory "editors\vscode\out\debugAdapter.js"
+$supportTest = Join-Path $PSScriptRoot "Esp32HardwareSupport.test.mjs"
+$debugHarness = Join-Path $PSScriptRoot "Esp32DebugHarness.mjs"
+$workDirectory = Join-Path $artifactDirectory "work-$timestamp"
+$fatalBuildDirectory = Join-Path $workDirectory "fatal-build"
+$fatalSdkconfig = Join-Path $workDirectory "sdkconfig.fatal"
+$fatalDefaults = Join-Path $workDirectory "sdkconfig.fatal.defaults"
+
+$report = [ordered]@{
+    version = 1
+    startedAt = [DateTimeOffset]::Now.ToString("O")
+    completedAt = $null
+    passed = $false
+    automatedPassed = $false
+    automatedOnly = [bool]$AutomatedOnly
+    visualLed = if ($AutomatedOnly) { "pending" } else { "unconfirmed" }
+    repository = $repositoryDirectory
+    commit = (& git -c "safe.directory=E:/Projects/CTilde" rev-parse HEAD).Trim()
+    target = "esp32"
+    port = $Port
+    baudRate = $BaudRate
+    tools = [ordered]@{}
+    firmware = $null
+    runtimeFailure = $null
+    debugger = $null
+    postDetach = $null
+    startupTimeout = $null
+    restore = [ordered]@{ attempted = $false; passed = $false; error = $null }
+    error = $null
+}
+
+function Invoke-Checked([string]$File, [string[]]$Arguments, [string]$WorkingDirectory = $repositoryDirectory) {
+    Push-Location $WorkingDirectory
+    try {
+        & $File @Arguments
+        if ($LASTEXITCODE -ne 0) {
+            throw "$File $($Arguments -join ' ') failed with exit code $LASTEXITCODE."
+        }
+    }
+    finally {
+        Pop-Location
+    }
+}
+
+function Invoke-Captured([string]$File, [string[]]$Arguments, [string]$WorkingDirectory = $repositoryDirectory) {
+    Push-Location $WorkingDirectory
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        # Windows PowerShell 5.1 wraps redirected native stderr as
+        # NativeCommandError records. With the script-wide Stop preference,
+        # informational tools such as `idf.py size` would then terminate even
+        # when the native process returned zero. Capture both streams and use
+        # the native exit code as the authority.
+        $ErrorActionPreference = "Continue"
+        $output = & $File @Arguments 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+        if ($exitCode -ne 0) {
+            throw "$File failed with exit code $exitCode.`n$output"
+        }
+        return $output
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        Pop-Location
+    }
+}
+
+function Remove-Ansi([string]$Text) {
+    return [regex]::Replace($Text, "`e\[[0-9;?]*[ -/]*[@-~]", "")
+}
+
+function Write-Utf8NoBom([string]$Path, [string]$Text) {
+    # Windows PowerShell 5.1 does not recognize Set-Content's utf8NoBOM
+    # encoding name. Use the framework API so reports and parser inputs have
+    # identical UTF-8 bytes under both Windows PowerShell and PowerShell 7.
+    [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
+}
+
+function Select-FirmwareTranscript([string]$Text) {
+    # The ESP32 ROM writes its reset banner at 115200 baud before ESP-IDF
+    # switches UART0 to the project baud rate. Discard that undecodable prefix,
+    # but keep strict UTF-8 validation for the bootloader and application output.
+    $starts = @("I (", "esp error:", "CTILDE_ESP_FAILURE_TEST") |
+        ForEach-Object { $Text.IndexOf($_, [StringComparison]::Ordinal) } |
+        Where-Object { $_ -ge 0 }
+    if ($starts.Count -eq 0) { return $Text }
+    return $Text.Substring(($starts | Measure-Object -Minimum).Minimum)
+}
+
+function Stop-ProjectMonitorProcesses {
+    $escapedProject = [regex]::Escape($ProjectDirectory)
+    $targets = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.CommandLine -match $escapedProject -and
+            $_.Name -match '^(?:python|xtensa.*gdb).*' -and
+            $_.CommandLine -match 'idf_monitor|target remote'
+        } |
+        Sort-Object ProcessId -Descending
+    foreach ($target in $targets) {
+        Stop-Process -Id $target.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+    if ($targets.Count -gt 0) { Start-Sleep -Milliseconds 500 }
+}
+
+function Invoke-IdfMonitor([string[]]$Arguments, [scriptblock]$Completed, [int]$TimeoutSeconds) {
+    $python = Join-Path $env:IDF_PYTHON_ENV_PATH "Scripts\python.exe"
+    $idf = Join-Path $env:IDF_PATH "tools\idf.py"
+    if (-not (Test-Path -LiteralPath $python) -or -not (Test-Path -LiteralPath $idf)) {
+        throw "The activated ESP-IDF Python environment is incomplete."
+    }
+
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $python
+    $start.WorkingDirectory = $ProjectDirectory
+    $start.UseShellExecute = $false
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    # esp-idf-monitor reads the Windows console directly. Let it inherit stdin;
+    # the harness terminates the child once the required UART condition is met.
+    $start.RedirectStandardInput = $false
+    $start.CreateNoWindow = $true
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false, $true)
+    $start.Environment["PYTHONUTF8"] = "1"
+    $start.Environment["PYTHONIOENCODING"] = "utf-8"
+    $start.ArgumentList.Add($idf)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
+
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    $transcript = [Text.StringBuilder]::new()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        if (-not $process.Start()) { throw "Could not start ESP-IDF monitor." }
+        $stdoutTask = $process.StandardOutput.ReadLineAsync()
+        $stderrTask = $process.StandardError.ReadLineAsync()
+        $never = [Threading.Tasks.Task]::Delay([Threading.Timeout]::Infinite)
+        while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            $tasks = [Threading.Tasks.Task[]]@($stdoutTask, $stderrTask)
+            $completedIndex = [Threading.Tasks.Task]::WaitAny($tasks, 100)
+            if ($completedIndex -ge 0) {
+                $task = $tasks[$completedIndex]
+                $line = $task.GetAwaiter().GetResult()
+                if ($null -ne $line) {
+                    [void]$transcript.AppendLine($line)
+                    Write-Host $line
+                }
+                if ($completedIndex -eq 0) {
+                    $stdoutTask = if ($null -eq $line) { $never } else { $process.StandardOutput.ReadLineAsync() }
+                }
+                else {
+                    $stderrTask = if ($null -eq $line) { $never } else { $process.StandardError.ReadLineAsync() }
+                }
+            }
+            $clean = Remove-Ansi $transcript.ToString()
+            if (& $Completed $clean) {
+                $process.Kill($true)
+                $process.WaitForExit()
+                return [pscustomobject]@{ Transcript = Remove-Ansi $transcript.ToString(); ElapsedSeconds = $watch.Elapsed.TotalSeconds }
+            }
+            if ($process.HasExited) {
+                throw "ESP-IDF monitor exited with code $($process.ExitCode) before its acceptance condition was met.`n$clean"
+            }
+            Start-Sleep -Milliseconds 100
+        }
+        throw "Timed out after $TimeoutSeconds seconds waiting for ESP-IDF monitor output.`n$(Remove-Ansi $transcript.ToString())"
+    }
+    finally {
+        if (-not $process.HasExited) {
+            try { $process.Kill($true) } catch { }
+        }
+        $process.Dispose()
+        Stop-ProjectMonitorProcesses
+    }
+}
+
+function Invoke-PassiveSerialCapture([scriptblock]$Completed, [int]$TimeoutSeconds) {
+    $serial = [IO.Ports.SerialPort]::new()
+    $serial.PortName = $Port
+    $serial.BaudRate = $BaudRate
+    $serial.Parity = [IO.Ports.Parity]::None
+    $serial.DataBits = 8
+    $serial.StopBits = [IO.Ports.StopBits]::One
+    $serial.Handshake = [IO.Ports.Handshake]::None
+    $serial.DtrEnable = $false
+    $serial.RtsEnable = $false
+    $serial.ReadTimeout = 100
+    $serial.Encoding = [Text.UTF8Encoding]::new($false, $false)
+    $transcript = [Text.StringBuilder]::new()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $lastOpenError = $null
+        while (-not $serial.IsOpen -and $watch.Elapsed.TotalSeconds -lt [Math]::Min(5, $TimeoutSeconds)) {
+            try {
+                $serial.Open()
+                # Keep both modem-control lines inactive after the Windows CH343
+                # driver has opened the handle. This observes a running target
+                # without reproducing ESP-IDF monitor's reset pulse.
+                $serial.DtrEnable = $false
+                $serial.RtsEnable = $false
+                # The CH343 retains bytes in its USB-side FIFO after the
+                # previous flasher/debugger handle closes. Drain that backlog
+                # before starting a new observation window. New firmware output
+                # can be discarded during this bounded warm-up; acceptance
+                # always waits for later markers.
+                $drainUntil = [DateTime]::UtcNow.AddMilliseconds(750)
+                while ([DateTime]::UtcNow -lt $drainUntil) {
+                    $serial.DiscardInBuffer()
+                    Start-Sleep -Milliseconds 25
+                }
+                $watch.Restart()
+            }
+            catch {
+                $lastOpenError = $_.Exception
+                Start-Sleep -Milliseconds 150
+            }
+        }
+        if (-not $serial.IsOpen) {
+            throw "Could not passively open $Port within five seconds: $($lastOpenError.Message)"
+        }
+
+        while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            $text = $serial.ReadExisting()
+            if (-not [string]::IsNullOrEmpty($text)) {
+                [void]$transcript.Append($text)
+                Write-Host -NoNewline $text
+            }
+            $clean = Remove-Ansi $transcript.ToString()
+            if (& $Completed $clean) {
+                return [pscustomobject]@{ Transcript = $clean; ElapsedSeconds = $watch.Elapsed.TotalSeconds }
+            }
+            Start-Sleep -Milliseconds 50
+        }
+        throw "Timed out after $TimeoutSeconds seconds waiting for passive UART output.`n$(Remove-Ansi $transcript.ToString())"
+    }
+    finally {
+        if ($serial.IsOpen) { $serial.Close() }
+        $serial.Dispose()
+    }
+}
+
+function Invoke-NodeJson([string[]]$Arguments) {
+    $output = Invoke-Captured "node" $Arguments
+    return $output | ConvertFrom-Json
+}
+
+function Save-Report {
+    $report.completedAt = [DateTimeOffset]::Now.ToString("O")
+    Write-Utf8NoBom $reportPath (($report | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
+}
+
+function Restore-ReleaseFirmware {
+    $report.restore.attempted = $true
+    try {
+        & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource -Flash
+        if ($LASTEXITCODE -ne 0) { throw "Release restore failed with exit code $LASTEXITCODE." }
+        $report.restore.passed = $true
+    }
+    catch {
+        $report.restore.error = $_.Exception.Message
+        Write-Warning "Could not restore the ordinary Release firmware: $($_.Exception.Message)"
+    }
+}
+
+New-Item -ItemType Directory -Force -Path $artifactDirectory | Out-Null
+New-Item -ItemType Directory -Force -Path $workDirectory | Out-Null
+try {
+    if (-not (Test-Path -LiteralPath $projectManifest) -or -not (Test-Path -LiteralPath $buildScript)) {
+        throw "TCan485 project files were not found under $ProjectDirectory."
+    }
+    $portInfo = Get-CimInstance Win32_SerialPort | Where-Object DeviceID -eq $Port | Select-Object -First 1
+    if ($null -eq $portInfo) { throw "ESP32 serial port $Port is not present." }
+
+    $resolvedIdfPath = (Resolve-Path -LiteralPath $IdfPath).Path
+    $profile = Get-ChildItem -LiteralPath "C:\Espressif\tools" -Filter "Microsoft.*.PowerShell_profile.ps1" -File -ErrorAction SilentlyContinue |
+        Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -match [regex]::Escape($resolvedIdfPath) } |
+        Select-Object -First 1
+    if ($null -ne $profile) {
+        . $profile.FullName
+    }
+    else {
+        $exportScript = Join-Path $resolvedIdfPath "export.ps1"
+        if (-not (Test-Path -LiteralPath $exportScript)) { throw "ESP-IDF activation script was not found: $exportScript" }
+        . $exportScript
+    }
+    if ((Resolve-Path -LiteralPath $env:IDF_PATH).Path -ne (Resolve-Path -LiteralPath $IdfPath).Path) {
+        throw "Activated ESP-IDF path '$env:IDF_PATH' does not match '$IdfPath'."
+    }
+
+    $report.tools.idf = (Invoke-Captured "idf.py" @("--version") $ProjectDirectory).Trim()
+    $report.tools.dotnet = (Invoke-Captured "dotnet" @("--version")).Trim()
+    $report.tools.node = (Invoke-Captured "node" @("--version")).Trim()
+    $report.tools.compiler = (Invoke-Captured "xtensa-esp32-elf-gcc" @("--version") $ProjectDirectory).Split("`n")[0].Trim()
+    $report.tools.gdb = (Invoke-Captured "xtensa-esp32-elf-gdb" @("--version") $ProjectDirectory).Split("`n")[0].Trim()
+    $report.tools.port = [ordered]@{ name = $portInfo.Name; pnpDeviceId = $portInfo.PNPDeviceID }
+
+    Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "-c", "Release", "--nologo")
+    Invoke-Checked "npm" @("run", "compile") (Join-Path $repositoryDirectory "editors\vscode")
+    Invoke-Checked "node" @("--test", $supportTest)
+
+    Write-Host "`n=== ABI 14 Release workload ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource
+    if ($LASTEXITCODE -ne 0) { throw "Release firmware build failed with exit code $LASTEXITCODE." }
+    $sizeOutput = Invoke-Captured "idf.py" @("size") $ProjectDirectory
+    $sizeInput = Join-Path $artifactDirectory "$timestamp-size.txt"
+    Write-Utf8NoBom $sizeInput $sizeOutput
+    $parseSize = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseIdfSize(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $size = Invoke-NodeJson @("-e", $parseSize, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $sizeInput)
+    Invoke-Checked "idf.py" @("-p", $Port, "flash") $ProjectDirectory
+    $firmwareCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        ([regex]::Matches($text, "(?m)^ws2812:\s*(?:on|off)\s*$")).Count -ge 25
+    } 90
+    $firmwareTranscript = Select-FirmwareTranscript $firmwareCapture.Transcript
+    if ($firmwareTranscript.Contains([char]0xfffd)) { throw "Firmware transcript contains malformed UTF-8 replacement characters." }
+    $firmwareTranscriptPath = Join-Path $artifactDirectory "$timestamp-firmware.txt"
+    Write-Utf8NoBom $firmwareTranscriptPath $firmwareTranscript
+    $parseFirmware = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseFirmwareTranscript(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $firmware = Invoke-NodeJson @("-e", $parseFirmware, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $firmwareTranscriptPath)
+    $report.firmware = [ordered]@{ measurements = $firmware; size = $size; elapsedSeconds = $firmwareCapture.ElapsedSeconds; transcript = $firmwareTranscriptPath }
+
+    if (-not $AutomatedOnly) {
+        $answer = Read-Host "Did the onboard T-CAN485 WS2812 visibly alternate during the 25 checked transitions? [y/N]"
+        if ($answer -notmatch '^(?i:y|yes)$') { throw "Visible WS2812 confirmation was not provided." }
+        $report.visualLed = "confirmed"
+    }
+
+    Write-Host "`n=== Fatal runtime boundary ==="
+    Invoke-Checked "dotnet" @(
+        "run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--",
+        $runtimeFailureSource, "--c-layout", "modules", "--output-directory", (Join-Path $ProjectDirectory "main\generated"),
+        "--header", (Join-Path $ProjectDirectory "main\generated\ctilde_exports.h"), "--target", "esp-idf", "--trace"
+    )
+    $fatalDefaultsText = Get-Content -LiteralPath (Join-Path $ProjectDirectory "sdkconfig.defaults") -Raw
+    $fatalDefaultsText = $fatalDefaultsText.Replace("CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME=y", "# CONFIG_ESP_SYSTEM_GDBSTUB_RUNTIME is not set")
+    $fatalDefaultsText = $fatalDefaultsText.Replace("CONFIG_ESP_GDBSTUB_SUPPORT_TASKS=y", "# CONFIG_ESP_GDBSTUB_SUPPORT_TASKS is not set")
+    $fatalDefaultsText += "`n# CONFIG_ESP_GDBSTUB_ENABLED is not set`nCONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y`n"
+    Write-Utf8NoBom $fatalDefaults $fatalDefaultsText
+    $previousFatalBuild = $env:CTILDE_FATAL_RUNTIME_BUILD
+    try {
+        $env:CTILDE_FATAL_RUNTIME_BUILD = "1"
+        Invoke-Checked "idf.py" @(
+            "-B", $fatalBuildDirectory,
+            "-D", "SDKCONFIG=$fatalSdkconfig",
+            "-D", "SDKCONFIG_DEFAULTS=$fatalDefaults",
+            "set-target", "esp32"
+        ) $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $fatalBuildDirectory, "build") $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $fatalBuildDirectory, "-p", $Port, "flash") $ProjectDirectory
+    }
+    finally {
+        if ($null -eq $previousFatalBuild) { Remove-Item Env:CTILDE_FATAL_RUNTIME_BUILD -ErrorAction SilentlyContinue }
+        else { $env:CTILDE_FATAL_RUNTIME_BUILD = $previousFatalBuild }
+    }
+    $failureCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        ($text.Contains("SW_CPU_RESET") -or $text.Contains("Rebooting...")) -and $text.Contains("CTN0001")
+    } 45
+    $failureTranscriptPath = Join-Path $artifactDirectory "$timestamp-runtime-failure.txt"
+    Write-Utf8NoBom $failureTranscriptPath (Select-FirmwareTranscript $failureCapture.Transcript)
+    $parseFailure = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseRuntimeFailureTranscript(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $failure = Invoke-NodeJson @("-e", $parseFailure, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $failureTranscriptPath)
+    $report.runtimeFailure = [ordered]@{ result = $failure; elapsedSeconds = $failureCapture.ElapsedSeconds; transcript = $failureTranscriptPath }
+
+    Write-Host "`n=== Instrumented debugger v2 ==="
+    Invoke-Checked "dotnet" @(
+        "run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--",
+        "--project", $projectManifest, "--prepare-debug", "launch", "--debug-target", $debugDescriptorPath,
+        "--debug-memory", "guarded", "--idf-path", $IdfPath, "--serial-port", $Port, "--baud-rate", "$BaudRate"
+    )
+    Invoke-Checked "node" @(
+        $debugHarness, "--adapter", $adapterPath, "--descriptor", $debugDescriptorPath, "--source", $programSource,
+        "--report", $debugReportPath, "--port", $Port, "--baud", "$BaudRate"
+    )
+    $debugReport = Get-Content -LiteralPath $debugReportPath -Raw | ConvertFrom-Json
+    if (-not $debugReport.passed) { throw "Debugger-v2 hardware harness failed: $($debugReport.error)" }
+    $report.debugger = $debugReport
+
+    Write-Host "`n=== Post-detach continuation ==="
+    $postDetachCapture = Invoke-PassiveSerialCapture {
+        param($text)
+        ([regex]::Matches($text, "(?m)^ws2812:\s*(?:on|off)\s*$")).Count -ge 4
+    } 15
+    if ($postDetachCapture.Transcript -match 'rst:|Guru Meditation|panic|CTILDE runtime error') {
+        throw "Post-detach monitor observed a reset or runtime failure."
+    }
+    $report.postDetach = [ordered]@{ transitions = 4; elapsedSeconds = $postDetachCapture.ElapsedSeconds; resetObserved = $false }
+
+    Write-Host "`n=== Instrumented startup timeout without debugger ==="
+    Invoke-Checked "idf.py" @("-p", $Port, "flash") $ProjectDirectory
+    $timeoutCapture = Invoke-PassiveSerialCapture {
+        param($text)
+        $text.Contains("esp error: ESP_OK")
+    } 25
+    if ($timeoutCapture.ElapsedSeconds -lt 12 -or $timeoutCapture.ElapsedSeconds -gt 22) {
+        throw "No-debugger startup gate released after $([Math]::Round($timeoutCapture.ElapsedSeconds, 2)) seconds; expected 12-22 seconds."
+    }
+    $report.startupTimeout = [ordered]@{ elapsedSeconds = $timeoutCapture.ElapsedSeconds; expectedSeconds = 15; passed = $true }
+
+    $report.automatedPassed = $true
+    if ($AutomatedOnly) {
+        Write-Warning "All automated checks passed, but visible LED confirmation is pending. This run does not close the release gate."
+    }
+    else {
+        $report.passed = $true
+    }
+}
+catch {
+    $report.error = $_.Exception.ToString()
+    Write-Host $_.Exception.ToString() -ForegroundColor Red
+}
+finally {
+    Stop-ProjectMonitorProcesses
+    Restore-ReleaseFirmware
+    if (Test-Path -LiteralPath $workDirectory) {
+        Remove-Item -LiteralPath $workDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    if (-not $report.restore.passed) { $report.passed = $false }
+    Save-Report
+    Write-Host "Hardware report: $reportPath"
+}
+
+if (-not $report.automatedPassed -or -not $report.restore.passed) { exit 1 }

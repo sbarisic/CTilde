@@ -9,6 +9,15 @@ From PowerShell:
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
+The repeatable physical acceptance runner uses the connected board defaults and restores the ordinary Release image on every exit path:
+
+```powershell
+.\Test\Test-Esp32Hardware.ps1
+.\Test\Test-Esp32Hardware.ps1 -AutomatedOnly
+```
+
+Run it from the repository root. The normal command prompts once to confirm visible WS2812 activity. `-AutomatedOnly` performs all machine-verifiable checks but leaves that release gate pending. Each run writes an ignored JSON report and UART transcripts under `artifacts/esp32-hardware`.
+
 `Program.ct` exercises scoped UTF-8 input, a move-only opaque resource released by `defer`, exact `EspError` naming, generated exports, an instance delegate through a callback/context adapter, two attached FreeRTOS worker tasks, per-task exceptions and cleanup, the earlier timer/function-pointer/native-buffer features, construction, boxing, strings, and ARC heap recovery. The checked component manifest pins Espressif `led_strip` 3.0.3 and uses its non-DMA RMT backend. All allocation-producing managed self-tests return before measurement and the permanent allocation-free loop.
 
 To verify the fatal runtime boundary:
@@ -33,7 +42,11 @@ Set `ctilde.debugger.serialPort` to the board port. This example uses 460800 bau
 
 ## Hardware evidence
 
-The draft 0.14 ABI 14 sources and inline-assembly fixture pass strict syntax checks and complete modular links for both ESP32/Xtensa and ESP32-C3/RISC-V with ESP-IDF 6.0.2. On 2026-08-22, an instrumented v2 image was flashed to the connected dual-core ESP32. The DAP session attached through the architecture-specific GDB at 460800 baud, hit the logical C~ breakpoint at `Program.ct:299`, forwarded `stack high water`, `tick`, `CTILDE_ESP_OK`, and `ws2812: on` immediately as target output, and completed the clean detach-and-continue path. The broader watchpoint and ARC-inspection hardware matrix remains separate from this focused run. The earlier 2026-08-21 source-mapped run reported five FreeRTOS tasks, exposed C~ locals, stepped, classified a handled C~ exception, and confirmed continued WS2812 UART output after detach. These focused runs do not replace the complete ABI 14 runtime regression, shutdown/lifetime, and monitor acceptance gate. The draft 0.12 run below remains the latest complete physical-board acceptance.
+The draft 0.14 ABI 14 sources and inline-assembly fixture pass strict syntax checks and complete modular links for both ESP32/Xtensa and ESP32-C3/RISC-V with ESP-IDF 6.0.2. On 2026-08-22, automated physical acceptance ran on the ESP32-D0WDQ6-V3 revision 3.1 T-CAN485 at `COM4` and 460800 baud using Xtensa GCC 15.2.0 and ESP-GDB 17.1. The ordinary 168,480-byte Release binary passed every runtime marker, ARC heap recovery, and 25 alternating WS2812 UART transitions. It reported 295,204 bytes free, a 284,740-byte minimum, and 6,744 bytes of main-task stack headroom. The isolated fatal image emitted `CTN0001`, called `abort()`, and rebooted. The acceptance runner restored the ordinary Release image afterward.
+
+The same run exercised debugger metadata v2 with guarded memory diagnostics. Six logical breakpoints were active at once; startup and first-statement stops, C~ Step Over/Into/Out, five FreeRTOS tasks, caught-exception translation, lexical locals, live ARC objects, intact canaries, a reference-count hardware watchpoint, console forwarding, and zero live objects after the managed self-tests all passed. Disconnect cleared debugger state and continued the firmware without a reset, and the passive UART observer saw four subsequent alternating WS2812 messages. A separate no-debugger boot passed the 15-second startup gate after 14.16 seconds. The ignored machine-readable report is `artifacts/esp32-hardware/20260822-155832.json`.
+
+After the acceptance runner restored the ordinary Release image, the operator confirmed that the onboard GPIO4 WS2812 visibly alternated. Draft 0.14 ABI 14 is therefore the latest complete physical-board acceptance, including both machine-verifiable results and the human-visible output check.
 
 The Draft 0.12 acceptance image was flashed and monitored on 2026-08-20. Its stable output was:
 

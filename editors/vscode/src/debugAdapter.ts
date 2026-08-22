@@ -25,7 +25,9 @@ const espSerialBridgeSource = [
     'last=None',
     'for attempt in range(25):',
     '  try:',
-    '    connection=serial.Serial(sys.argv[1],int(sys.argv[2]),timeout=.05,dsrdtr=False,rtscts=False)',
+    '    connection=serial.Serial(port=None,baudrate=int(sys.argv[2]),timeout=.05,dsrdtr=False,rtscts=False)',
+    '    connection.dtr=False;connection.rts=False;connection.port=sys.argv[1];connection.open()',
+    '    connection.dtr=False;connection.rts=False',
     '    break',
     '  except Exception as error:',
     '    last=error;time.sleep(.2)',
@@ -662,6 +664,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 if (level === undefined)
                     throw new Error('The local variable stack activation is no longer active.');
                 await this.gdb.command(`-stack-select-frame ${level}`);
+                let watchExpression = data.expression;
                 if (this.target?.target === 'esp-idf') {
                     const size = nativeWatchSize(data.type);
                     if (size === undefined || size > 4)
@@ -669,9 +672,10 @@ export class CTildeDebugSession extends LoggingDebugSession {
                     const address = BigInt(await this.addressOf(data.expression));
                     if (address % BigInt(size) !== 0n)
                         throw new Error(`ESP watchpoint address 0x${address.toString(16)} is not aligned to ${size} bytes.`);
+                    watchExpression = `*(uint${size * 8}_t*)(uintptr_t)0x${address.toString(16)}`;
                 }
                 const option = requested.accessType === 'readWrite' ? '-a' : '';
-                const record = await this.gdb.command(`-break-watch ${option} ${miQuote(data.expression)}`);
+                const record = await this.gdb.command(`-break-watch ${option} ${miQuote(watchExpression)}`);
                 const id = Number.parseInt(miString(miTuple(record.results.wpt ?? record.results.hw_awpt ?? record.results.hw_rwpt).number), 10);
                 this.dataBreakpoints.set(requested.dataId, { id, thread: this.currentThreadState, activation: this.currentActivation });
                 const breakpoint = new Breakpoint(true) as DebugProtocol.Breakpoint;
@@ -859,7 +863,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
         let displayType = type;
         let expansionType = type;
         if (mappedType?.kind === 'class') {
-            const actual = await this.evaluateCString(`((ct_object*)(void*)${expression})->Type->Name`);
+            const actual = await this.evaluateCString(`((ct_object*)(void*)(${expression}))->Type->Name`);
             const box = this.debugMap?.boxes?.find(candidate => candidate.valueType === actual);
             if (box !== undefined) {
                 displayType = `boxed ${actual}`;
@@ -1501,7 +1505,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
         for (let index = start; index < start + Math.max(0, count); index++) {
             if (!isTruthyGdbValue(await this.evaluateNative(`${allocation} != 0`)))
                 break;
-            const object = `(ct_object*)(void*)((${allocation}) + 1)`;
+            const object = `((ct_object*)(void*)((${allocation}) + 1))`;
             const identity = await this.evaluateNative(`${object}->IdentityHash`);
             const type = await this.evaluateCString(`${object}->Type->Name`);
             const presentationType = this.debugMap?.boxes?.some(box => box.valueType === type) ? 'System.Object' : type || 'System.Object';
@@ -1512,10 +1516,11 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     private async objectRuntimeVariables(expression: string, frameId: number): Promise<DebugProtocol.Variable[]> {
-        const allocation = `((ct_debug_allocation*)(void*)${expression}) - 1`;
+        const object = `((ct_object*)(void*)(${expression}))`;
+        const allocation = `(((ct_debug_allocation*)(void*)(${expression})) - 1)`;
         const result: DebugProtocol.Variable[] = [
-            { name: 'IdentityHash', value: await this.evaluateNative(`((ct_object*)(void*)${expression})->IdentityHash`), type: 'uint', variablesReference: 0 },
-            { name: 'RefCount', value: await this.evaluateNative(`((ct_object*)(void*)${expression})->RefCount`), type: 'uint', variablesReference: 0, evaluateName: `((ct_object*)(void*)${expression})->RefCount`, memoryReference: await this.addressOf(`((ct_object*)(void*)${expression})->RefCount`) },
+            { name: 'IdentityHash', value: await this.evaluateNative(`${object}->IdentityHash`), type: 'uint', variablesReference: 0 },
+            { name: 'RefCount', value: await this.evaluateNative(`${object}->RefCount`), type: 'uint', variablesReference: 0, evaluateName: `${object}->RefCount`, memoryReference: await this.addressOf(`${object}->RefCount`) },
         ];
         if (this.debugMap?.memoryDiagnostics !== 'off') {
             result.push({ name: 'AllocationSize', value: await this.evaluateNative(`${allocation}->Size`), type: 'nuint', variablesReference: 0 });
@@ -1555,7 +1560,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
             return undefined;
         }
         if (container.type === '$objectruntime' && name === 'RefCount')
-            return { expression: `((ct_object*)(void*)${container.expression})->RefCount`, type: 'uint' };
+            return { expression: `((ct_object*)(void*)(${container.expression}))->RefCount`, type: 'uint' };
         if (container.type.endsWith('[]')) {
             const index = /^\[(\d+)\]$/.exec(name);
             return index === null ? undefined : { expression: `${container.expression}->Data[${index[1]}]`, type: container.type.slice(0, -2) };

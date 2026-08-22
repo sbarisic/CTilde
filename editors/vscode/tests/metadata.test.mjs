@@ -92,6 +92,12 @@ test("manifest registers the C~ language and grammar", async () => {
   await access(path.resolve(extensionRoot, "schemas/ctilde.schema.json"));
 });
 
+test("ESP serial bridge opens without asserting reset control lines", async () => {
+  const source = await readFile(path.join(extensionRoot, "src/debugAdapter.ts"), "utf8");
+  assert.match(source, /Serial\(port=None,baudrate=/);
+  assert.match(source, /connection\.dtr=False;connection\.rts=False;connection\.port=sys\.argv\[1\];connection\.open\(\)/);
+});
+
 test("project schema includes native build configuration", async () => {
   const schema = await readJson("schemas/ctilde.schema.json");
   const build = schema.properties.build;

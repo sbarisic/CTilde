@@ -88,7 +88,7 @@ public static class Program
 {
     private const int Ws2812Pin = 4;
 
-    private static void ExerciseArc()
+    private static unsafe void ExerciseArc()
     {
         ArcNode head = null;
         ArcHolder[] holders = new ArcHolder[8];
@@ -98,6 +98,8 @@ public static class Program
             ArcNode node = new ArcNode();
             node.Next = head;
             node.Text = index.ToString();
+            Memory.Retain(node);
+            Memory.Release(node);
             head = node;
             if (index < 8)
             {

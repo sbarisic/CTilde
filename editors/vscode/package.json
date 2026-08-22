@@ -52,7 +52,7 @@
     "vscode:prepublish": "npm run build",
     "package": "vsce package --no-dependencies",
     "test": "npm run compile && npm run test:client && npm run test:metadata && npm run test:grammar && npm run test:sources && npm run build:server && npm run build:compiler && npm run test:server",
-    "test:client": "node --test ./tests/server-development.test.mjs ./tests/project-build.test.mjs ./tests/gdb-mi.test.mjs ./tests/debug-model.test.mjs",
+    "test:client": "node --test ./tests/server-development.test.mjs ./tests/project-build.test.mjs ./tests/gdb-mi.test.mjs ./tests/debug-model.test.mjs ../../Test/Esp32HardwareSupport.test.mjs",
     "test:metadata": "node --test ./tests/metadata.test.mjs",
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
     "test:sources": "node --test ./tests/source-tokenization.test.mjs",

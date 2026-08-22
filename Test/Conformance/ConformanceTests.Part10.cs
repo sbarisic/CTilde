@@ -280,6 +280,8 @@ internal static partial class ConformanceTests
                 Assert(instrumentationOnly.Contains("ct_debug_control_block", StringComparison.Ordinal) && !instrumentationOnly.Contains("ct_debug_live_head", StringComparison.Ordinal), "Instrumentation-only mode did not isolate optional ARC diagnostics.");
                 var guarded = Emit(source, new CompilationOptions(SourceRoot: root, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Guarded), sourcePath);
                 Assert(guarded.Contains("UINT32_C(0xC71DE14D)", StringComparison.Ordinal) && guarded.Contains("ct_debug_quarantine_count > 16u", StringComparison.Ordinal) && guarded.Contains("ct_debug_quarantine_bytes > 32768u", StringComparison.Ordinal), "Guarded memory diagnostics omitted canaries or bounded quarantine checks.");
+                var guardedEsp = Emit(source, new CompilationOptions(CompilationTarget.EspIdf, DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Guarded), sourcePath);
+                Assert(guardedEsp.Contains("UINT32_C(0xC71DE14D)", StringComparison.Ordinal) && guardedEsp.Contains("ct_debug_quarantine_count > 2u", StringComparison.Ordinal) && guardedEsp.Contains("ct_debug_quarantine_bytes > 256u", StringComparison.Ordinal), "Guarded ESP memory diagnostics omitted canaries or target-sized quarantine bounds.");
                 const string reservedDebugSymbol = "public static class Native { [Extern(\"ct_debug_control\")] public static int Read(); } public static class P { [EntryPoint] public static void Main() { } }";
                 Assert(Compile(reservedDebugSymbol).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"), "A private debugger runtime symbol conflict was not diagnosed.");
 

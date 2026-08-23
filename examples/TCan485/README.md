@@ -29,6 +29,8 @@ When enabled, `WifiDemo.ct` starts an `IWebsiteFetcher` implementation on a C~ `
 
 A successful fetch prints the HTTP status, declared and received lengths, hash, elapsed microseconds, sanitized preview, and `generated wifi/http bindings: ok`. Connection, TLS, HTTP, response-limit, and C~ failures print `wifi/http error: ...`, briefly set the LED red, and then return to the normal firmware loop. The generated declarations are `[NoAlloc]` only with respect to the C~ heap; ESP-IDF Wi-Fi and TLS use native heap internally. HTTPS and the full certificate bundle intentionally increase flash and peak heap requirements.
 
+The project uses one `0x3f0000`-byte factory application slot, consuming the remainder of the board's 4 MiB flash after the partition table and the required NVS and PHY data partitions. There are no OTA application slots or filesystem partitions. This maximizes firmware space but means updates must be installed over the serial flashing connection rather than OTA.
+
 The opt-in hardware check takes credentials from the environment, temporarily edits the settings, validates a 2xx response and bounds retained first-use native state to 8 KiB, then restores and flashes the original settings when it changed them. If the source already contains the requested settings, the validated firmware remains flashed without a redundant rebuild:
 
 ```powershell

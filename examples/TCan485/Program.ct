@@ -339,9 +339,10 @@ public static class Program
         }
         Console.WriteLine("esp error: ESP_OK");
 
-        RunManagedSelfTests();
+        Ws2812.SetPixel(0u, 16u, 16u, 16u);
+        Ws2812.Refresh();
 
-        WifiDemo.Run();
+        RunManagedSelfTests();
 
         Console.Write("free heap: ");
         Console.WriteLine(EspSystem.GetFreeHeapSize());
@@ -351,40 +352,14 @@ public static class Program
         Console.WriteLine(FreeRtos.GetStackHighWaterMark());
         Console.Write("tick: ");
         Console.WriteLine(FreeRtos.GetTickCount());
-
         Console.WriteLine("CTILDE_ESP_OK");
-        bool high = false;
-        int count = 0;
+        Console.WriteLine("Running WiFi Demo");
+
+        WifiDemo.Run();
+
+        Console.WriteLine("Demo completed! Entering loop");
         while (true)
         {
-            high = !high;
-            bool updated = false;
-
-            if (high) {
-                count = count + 1;
-
-                if (count == 1) {
-                    updated = Ws2812.SetPixel(0u, 16u, 0u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
-                } else if (count == 2) {
-                    updated = Ws2812.SetPixel(0u, 0u, 16u, 0u).IsSuccess && Ws2812.Refresh().IsSuccess;
-                } else if (count == 3) {
-                    updated = Ws2812.SetPixel(0u, 0u, 0u, 16u).IsSuccess && Ws2812.Refresh().IsSuccess;
-                    count = 0;
-                }
-            }
-            else
-                updated = Ws2812.Clear().IsSuccess;
-                
-            if (!updated)
-            {
-                Console.WriteLine("WS2812_UPDATE_FAILED");
-                return;
-            }
-            if (high)
-                Console.WriteLine("ws2812: on");
-            else
-                Console.WriteLine("ws2812: off");
-
             FreeRtos.DelayMilliseconds(500u);
         }
     }

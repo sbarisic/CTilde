@@ -3,8 +3,8 @@ namespace Examples.TCan485;
 public static class WifiSettings
 {
     // Configure these values locally. An empty SSID selects the offline fallback.
-    public const string Ssid = "";
-    public const string Password = "";
+    public const string Ssid = "Barisic";
+    public const string Password = "123456789";
     public const string Url = "https://example.com/";
     public const uint ConnectionTimeoutMilliseconds = 15000u;
     public const int HttpTimeoutMilliseconds = 10000;

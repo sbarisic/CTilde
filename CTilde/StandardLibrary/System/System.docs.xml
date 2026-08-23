@@ -13,6 +13,9 @@
   <member id="M:System.Exception.#ctor(string)"><summary>Creates an exception with a message.</summary><param name="message">The managed exception message.</param></member>
   <member id="P:System.Exception.Message"><summary>Gets the exception message.</summary></member>
   <member id="M:System.Exception.ToString()"><summary>Returns the exception type and message.</summary><returns>An owned managed string.</returns></member>
+  <member id="T:System.ArgumentException"><summary>Represents an invalid runtime argument, including an invalid dynamic atomic memory order.</summary></member>
+  <member id="T:System.ThreadStateException"><summary>Represents an invalid managed-thread lifecycle or native scheduler configuration.</summary></member>
+  <member id="T:System.SynchronizationLockException"><summary>Represents an attempt to release a mutex that the current thread does not own.</summary></member>
 
   <member id="T:System.Console"><summary>Writes formatted values to the target console.</summary><remarks>Hosted output uses the process streams. ESP-IDF output uses the configured UART console.</remarks></member>
   <member id="M:System.Console.WriteLine()"><summary>Writes a line terminator.</summary></member>
@@ -136,6 +139,30 @@
   <member id="T:System.Memory"><summary>Provides unsafe manual ARC operations for native interoperation.</summary></member>
   <member id="M:System.Memory.Retain(object)"><summary>Adds one owned reference.</summary><param name="value">The managed reference to retain.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
   <member id="M:System.Memory.Release(object)"><summary>Releases one owned reference.</summary><param name="value">The managed reference to release.</param><remarks>Use only when implementing a verified native ownership contract.</remarks></member>
+
+  <member id="T:System.Threading.MemoryOrder"><summary>Specifies the ordering guarantees of an atomic operation.</summary></member>
+  <member id="T:System.Threading.Atomic&lt;T&gt;"><summary>Provides non-copyable scalar atomic storage.</summary><remarks>The element type must be Boolean, integral, native-integral, enum, or an unsafe pointer.</remarks></member>
+  <member id="M:System.Threading.Atomic&lt;T&gt;.Load(System.Threading.MemoryOrder)"><summary>Atomically loads the stored value.</summary><param name="order">The load memory order.</param><returns>The observed value.</returns></member>
+  <member id="M:System.Threading.Atomic&lt;T&gt;.Store(T,System.Threading.MemoryOrder)"><summary>Atomically stores a value.</summary><param name="value">The new value.</param><param name="order">The store memory order.</param></member>
+  <member id="M:System.Threading.Atomic&lt;T&gt;.Exchange(T,System.Threading.MemoryOrder)"><summary>Atomically replaces the value.</summary><param name="value">The new value.</param><param name="order">The operation memory order.</param><returns>The previous value.</returns></member>
+  <member id="M:System.Threading.Atomic&lt;T&gt;.CompareExchange(T,T,System.Threading.MemoryOrder,System.Threading.MemoryOrder)"><summary>Atomically replaces the value when it equals the comparand.</summary><param name="value">The replacement value.</param><param name="comparand">The expected value.</param><param name="successOrder">The successful-operation order.</param><param name="failureOrder">The failed-operation order.</param><returns>The observed previous value.</returns></member>
+  <member id="T:System.Threading.Atomic"><summary>Provides process-wide atomic fences.</summary></member>
+  <member id="M:System.Threading.Atomic.Fence(System.Threading.MemoryOrder)"><summary>Issues a memory-ordering fence.</summary><param name="order">The fence order.</param></member>
+  <member id="T:System.Threading.ThreadStart"><summary>Represents a managed thread entry method.</summary></member>
+  <member id="T:System.Threading.ThreadPriority"><summary>Specifies a portable requested thread priority.</summary></member>
+  <member id="T:System.Threading.Thread"><summary>Represents a once-startable managed operating-system thread or FreeRTOS task.</summary></member>
+  <member id="M:System.Threading.Thread.#ctor(System.Threading.ThreadStart)"><summary>Creates a thread with platform-default stack size and normal priority.</summary><param name="start">The managed entry delegate.</param></member>
+  <member id="M:System.Threading.Thread.Start()"><summary>Starts the thread and publishes its captured managed state.</summary></member>
+  <member id="M:System.Threading.Thread.Join()"><summary>Waits for completion and acquires the worker's published writes.</summary></member>
+  <member id="P:System.Threading.Thread.IsAlive"><summary>Gets whether the thread has started and not completed.</summary></member>
+  <member id="P:System.Threading.Thread.Id"><summary>Gets the stable C~ runtime thread identifier.</summary></member>
+  <member id="P:System.Threading.Thread.Priority"><summary>Gets the requested portable priority.</summary></member>
+  <member id="M:System.Threading.Thread.Sleep(uint)"><summary>Suspends the current thread.</summary><param name="milliseconds">The requested duration.</param></member>
+  <member id="M:System.Threading.Thread.Yield()"><summary>Yields execution to the target scheduler.</summary></member>
+  <member id="T:System.Threading.Mutex"><summary>Provides a process-local recursive mutex.</summary></member>
+  <member id="M:System.Threading.Mutex.Enter()"><summary>Acquires the mutex recursively.</summary></member>
+  <member id="M:System.Threading.Mutex.TryEnter()"><summary>Attempts to acquire the mutex without waiting.</summary><returns>True when the mutex was acquired.</returns></member>
+  <member id="M:System.Threading.Mutex.Exit()"><summary>Releases one recursive acquisition.</summary></member>
 
   <member id="T:System.Runtime.NativeBuffer&lt;T&gt;"><summary>Represents a scoped writable pointer-and-length view.</summary><remarks>The element type must be unmanaged. The view cannot be stored on the managed heap or returned.</remarks></member>
   <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Length"><summary>Gets the writable view length as an unsigned native-sized value.</summary></member>

@@ -295,6 +295,22 @@ internal sealed partial class TypedIrBodyLowerer
             prelude.AddRange(loweredReceiver.Prelude);
             code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CName}";
         }
+        if (field.IsVolatile)
+        {
+            var address = $"(void*)&({code})";
+            return new IrExpressionValue
+            {
+                Type = field.Type,
+                Code = AtomicFromBits(field.Type, $"ct_atomic_scalar_load({address}, sizeof({code}), 1)"),
+                Prelude = prelude,
+                Symbol = field,
+                LValue = new IrValueStorage
+                {
+                    Store = value => $"ct_atomic_scalar_store({address}, sizeof({code}), {AtomicToBits(field.Type, value)}, 2)",
+                    Field = field,
+                },
+            };
+        }
         return new IrExpressionValue
         {
             Type = field.Type,
@@ -305,6 +321,14 @@ internal sealed partial class TypedIrBodyLowerer
             Symbol = field,
         };
     }
+
+    private string AtomicToBits(CType type, string value) => type.Kind == CTypeKind.Pointer
+        ? $"(uint64_t)(uintptr_t)(void*)({value})"
+        : $"(uint64_t)({_emitter.CTypeName(type)})({value})";
+
+    private string AtomicFromBits(CType type, string value) => type.Kind == CTypeKind.Pointer
+        ? $"({_emitter.CTypeName(type)})(uintptr_t)({value})"
+        : $"({_emitter.CTypeName(type)})({value})";
 
     private IrExpressionValue LowerProperty(PropertySymbol property, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
@@ -435,7 +459,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerNew(NewExpressionSyntax syntax)
     {
-        var type = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        var type = ResolveType(syntax.Type);
         if (type.ContainsPointer)
             RequireUnsafe(syntax);
         if (syntax.ArrayLength is not null)
@@ -468,6 +492,11 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2119", $"new cannot construct '{type.DisplayName}'.", syntax);
             return ErrorExpression();
         }
+        if (type.Symbol!.IsAbstract)
+        {
+            Report("CT1276", $"Abstract class '{type.DisplayName}' cannot be constructed.", syntax);
+            return ErrorExpression();
+        }
         var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
         var constructor = SelectOverload(type.Symbol!.Constructors, type.Symbol.Name, arguments, syntax.Arguments, syntax);
         if (constructor is null)
@@ -488,7 +517,7 @@ internal sealed partial class TypedIrBodyLowerer
         RequireUnsafe(syntax);
         if (_repeatableLoopDepth > 0)
             Report("CT2182", "stackalloc is not permitted lexically inside a loop.", syntax);
-        var element = _model.ResolveType(syntax.ElementType, TreeFor(syntax));
+        var element = ResolveType(syntax.ElementType);
         var type = new CType(CTypeKind.NativeBuffer, ElementType: element);
         _emitter.RegisterType(type);
         var count = LowerExpression(syntax.Count);
@@ -512,15 +541,25 @@ internal sealed partial class TypedIrBodyLowerer
     {
         var parts = new Stack<string>();
         var current = expression;
+        ImmutableArray<TypeSyntax> typeArguments = [];
         while (current is MemberAccessExpressionSyntax member)
         {
+            if (!member.TypeArguments.IsDefaultOrEmpty)
+                typeArguments = member.TypeArguments;
             parts.Push(member.Name);
             current = member.Receiver;
         }
         if (current is not NameExpressionSyntax name)
             return null;
+        if (!name.TypeArguments.IsDefaultOrEmpty)
+            typeArguments = name.TypeArguments;
         parts.Push(name.Name);
         var qualified = string.Join('.', parts);
+        if (!typeArguments.IsDefaultOrEmpty)
+        {
+            var typeSyntax = new TypeSyntax(expression.Source, expression.Span, qualified, TypeArguments: typeArguments);
+            return ResolveType(typeSyntax).Symbol;
+        }
         return _model.ResolveNamedType(qualified, TreeFor(expression));
     }
 
@@ -585,6 +624,12 @@ internal sealed partial class TypedIrBodyLowerer
         }
 
         var arguments = syntax.Arguments.Select(LowerArgument).ToArray();
+        var explicitTypeArguments = syntax.Target switch
+        {
+            NameExpressionSyntax targetName => targetName.TypeArguments,
+            MemberAccessExpressionSyntax targetMember => targetMember.TypeArguments,
+            _ => ImmutableArray<TypeSyntax>.Empty,
+        };
         var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == methodName && method.IsStatic == requireStatic)
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
         if (!requireStatic && receiver is not null && receiver.Type.IsValueType)
@@ -599,6 +644,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (allCandidates.Length > 0)
                 candidates = allCandidates;
         }
+        candidates = ExpandGenericCandidates(candidates, explicitTypeArguments, arguments, syntax).Distinct().ToArray();
         var selected = SelectOverload(candidates, methodName, arguments, syntax.Arguments, syntax);
         if (selected is null)
             return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
@@ -648,6 +694,11 @@ internal sealed partial class TypedIrBodyLowerer
             ? CaptureDeferredArgumentsWithPostlude(arguments, selected.Parameters, syntax.Arguments)
             : LowerArguments(arguments, selected.Parameters, syntax.Arguments);
         prelude.AddRange(loweredArguments.Prelude);
+
+        if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, prelude, syntax, out var atomicResult))
+            return atomicResult;
+        if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, prelude, captureForDefer, out var threadingResult))
+            return threadingResult;
 
         var callArguments = new List<string>();
         if (receiverCode is not null)
@@ -702,6 +753,81 @@ internal sealed partial class TypedIrBodyLowerer
         return selected.ReturnType.ContainsManagedReferences
             ? OwnResult(selected.ReturnType, call, prelude, selected.ReturnsBorrowed, selected)
             : new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+    }
+
+    private bool TryLowerAtomicCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments, List<string> prelude, SyntaxNode syntax, out IrExpressionValue result)
+    {
+        result = null!;
+        var definition = selected.ContainingType.GenericDefinition;
+        var isAtomicValue = definition is { Namespace: "System.Threading", Name: "Atomic" } && selected.ContainingType.TypeArguments.Length == 1;
+        var isFence = selected.ContainingType is { Namespace: "System.Threading", Name: "Atomic", IsStatic: true } && selected.Name == "Fence";
+        if (isFence)
+        {
+            prelude.Add($"ct_atomic_fence((int32_t){arguments[0]});");
+            result = new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+            return true;
+        }
+        if (!isAtomicValue || receiverCode is null)
+            return false;
+        var valueType = selected.ContainingType.TypeArguments[0];
+        var field = selected.ContainingType.Fields.Single(candidate => candidate.Name == "value");
+        var storage = $"(void*)&(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CName}";
+        var size = $"sizeof((({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CName})";
+        string code;
+        switch (selected.Name)
+        {
+            case "Load":
+                code = AtomicFromBits(valueType, $"ct_atomic_scalar_load({storage}, {size}, (int32_t){arguments[0]})");
+                break;
+            case "Store":
+                prelude.Add($"ct_atomic_scalar_store({storage}, {size}, {AtomicToBits(valueType, arguments[0])}, (int32_t){arguments[1]});");
+                result = new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+                return true;
+            case "Exchange":
+                code = AtomicFromBits(valueType, $"ct_atomic_scalar_exchange({storage}, {size}, {AtomicToBits(valueType, arguments[0])}, (int32_t){arguments[1]})");
+                break;
+            case "CompareExchange":
+                code = AtomicFromBits(valueType, $"ct_atomic_scalar_compare_exchange({storage}, {size}, {AtomicToBits(valueType, arguments[0])}, {AtomicToBits(valueType, arguments[1])}, (int32_t){arguments[2]}, (int32_t){arguments[3]})");
+                break;
+            case "FetchAdd" or "FetchSubtract":
+                if (!valueType.IsIntegral || valueType.Kind is CTypeKind.Bool or CTypeKind.Pointer)
+                    Report("CT1277", $"{selected.Name} requires an integral Atomic<T>.", syntax);
+                code = AtomicFromBits(valueType, $"ct_atomic_scalar_fetch({storage}, {size}, {AtomicToBits(valueType, arguments[0])}, (int32_t){arguments[1]}, {(selected.Name == "FetchAdd" ? 0 : 1)})");
+                break;
+            case "FetchAnd" or "FetchOr" or "FetchXor":
+                if (!(valueType.IsIntegral || valueType.Kind == CTypeKind.Bool) || valueType.Kind == CTypeKind.Pointer)
+                    Report("CT1277", $"{selected.Name} requires a Boolean or integral Atomic<T>.", syntax);
+                var operation = selected.Name == "FetchAnd" ? 2 : selected.Name == "FetchOr" ? 3 : 4;
+                code = AtomicFromBits(valueType, $"ct_atomic_scalar_fetch({storage}, {size}, {AtomicToBits(valueType, arguments[0])}, (int32_t){arguments[1]}, {operation})");
+                break;
+            default:
+                return false;
+        }
+        result = new IrExpressionValue { Type = valueType, Code = code, Prelude = prelude, Symbol = selected };
+        return true;
+    }
+
+    private bool TryLowerManagedThreadingCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments,
+        List<string> prelude, bool captureForDefer, out IrExpressionValue result)
+    {
+        result = null!;
+        string? call = selected.ContainingType.FullName switch
+        {
+            "System.Threading.Thread" when selected.Name == "Start" && receiverCode is not null => $"ct_managed_thread_start(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})",
+            "System.Threading.Thread" when selected.Name == "Join" && receiverCode is not null => $"ct_managed_thread_join(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})",
+            "System.Threading.Thread" when selected.Name == "Sleep" && arguments.Count == 1 => $"ct_managed_thread_sleep((uint32_t){arguments[0]})",
+            "System.Threading.Thread" when selected.Name == "Yield" => "ct_managed_thread_yield()",
+            "System.Threading.Mutex" when selected.Name == "Enter" && receiverCode is not null => $"ct_managed_mutex_enter(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})",
+            "System.Threading.Mutex" when selected.Name == "TryEnter" && receiverCode is not null => $"ct_managed_mutex_try_enter(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})",
+            "System.Threading.Mutex" when selected.Name == "Exit" && receiverCode is not null => $"ct_managed_mutex_exit(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})",
+            _ => null,
+        };
+        if (call is null)
+            return false;
+        if (captureForDefer)
+            _deferId++;
+        result = new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+        return true;
     }
 
     private (List<string> Prelude, List<string> Codes, List<string> Postlude) CaptureDeferredArgumentsWithPostlude(

@@ -16,3 +16,10 @@ idf_component_register(
     PRIV_REQUIRES ${CTILDE_PRIVATE_REQUIRES})
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
+
+if(DEFINED ENV{CTILDE_MEMORY_VALIDATION_BUILD})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE
+        CTILDE_CONFORMANCE=1
+        CT_MEMORY_DIAGNOSTICS=1
+        CT_MEMORY_LAYOUT_DIAGNOSTICS=1)
+endif()

@@ -202,6 +202,8 @@ internal sealed partial class TypedIrBodyLowerer
                 return new FlowResult(FlowExit.Throw);
             case TryStatementSyntax @try:
                 return EmitTry(writer, @try);
+            case LockStatementSyntax @lock:
+                return EmitLock(writer, @lock);
             case UnsafeStatementSyntax unsafeStatement:
                 _unsafeDepth++;
                 var unsafeFlow = EmitStatement(writer, unsafeStatement.Body);
@@ -213,6 +215,23 @@ internal sealed partial class TypedIrBodyLowerer
             default:
                 return FlowResult.None;
         }
+    }
+
+    private FlowResult EmitLock(ILoweringWriter writer, LockStatementSyntax syntax)
+    {
+        var hiddenName = $"__ct_lock_{_lockId++}";
+        var mutexType = new TypeSyntax(syntax.Source, syntax.Expression.Span, "System.Threading.Mutex");
+        var local = new LocalDeclarationStatementSyntax(syntax.Source, syntax.Expression.Span, mutexType, hiddenName, syntax.Expression, false, false);
+        var hidden = new NameExpressionSyntax(syntax.Source, syntax.Expression.Span, hiddenName);
+        var enterTarget = new MemberAccessExpressionSyntax(syntax.Source, syntax.Expression.Span, hidden, "Enter");
+        var enterCall = new CallExpressionSyntax(syntax.Source, syntax.Expression.Span, enterTarget, []);
+        var enter = new ExpressionStatementSyntax(syntax.Source, syntax.Expression.Span, enterCall);
+        var exitTarget = new MemberAccessExpressionSyntax(syntax.Source, syntax.Expression.Span, hidden, "Exit");
+        var exitCall = new CallExpressionSyntax(syntax.Source, syntax.Expression.Span, exitTarget, []);
+        var defer = new DeferStatementSyntax(syntax.Source, syntax.Expression.Span, exitCall);
+        var statements = ImmutableArray.Create<StatementSyntax>(local, enter, defer).AddRange(syntax.Body.Statements);
+        var block = new BlockStatementSyntax(syntax.Source, syntax.Span, statements);
+        return EmitStatementCore(writer, block);
     }
 
     private void EmitInlineAssembly(ILoweringWriter writer, InlineAssemblyStatementSyntax syntax)
@@ -375,7 +394,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (FindLocal(syntax.Name) is not null || _parameters.ContainsKey(syntax.Name))
             Report("CT1106", $"A local named '{syntax.Name}' is already active.", syntax);
         var tree = TreeFor(syntax);
-        var type = syntax.Type.Name == "var" ? CType.Error : _model.ResolveType(syntax.Type, tree);
+        var type = syntax.Type.Name == "var" ? CType.Error : ResolveType(syntax.Type);
         IrExpressionValue? initializer = null;
         if (syntax.Initializer is not null)
         {
@@ -396,6 +415,8 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2103", "var requires an initializer.", syntax);
         if (type.ContainsPointer)
             RequireUnsafe(syntax);
+        if (type.ContainsAtomic && (syntax.Initializer is not NewExpressionSyntax || initializer?.Type.IsAtomic != true))
+            Report("CT1278", "Atomic<T> locals require direct construction and cannot be initialized by copying.", syntax);
         _emitter.RegisterType(type);
         if (syntax.IsConst && initializer is not null && !initializer.IsConstant)
             Report("CT2104", "A const initializer must be a compile-time constant.", syntax.Initializer!);
@@ -615,7 +636,7 @@ internal sealed partial class TypedIrBodyLowerer
         EmitPrelude(writer, collection.Prelude);
         var cleanup = EmitCleanupBoundary(writer, "foreach");
         var elementType = collection.Type.ElementType ?? CType.Error;
-        var declaredType = syntax.Type.Name == "var" ? elementType : _model.ResolveType(syntax.Type, TreeFor(syntax));
+        var declaredType = syntax.Type.Name == "var" ? elementType : ResolveType(syntax.Type);
         if (!TypeFacts.CanImplicitlyConvert(elementType, declaredType))
             Report("CT2106", $"Array element type '{elementType.DisplayName}' cannot convert to '{declaredType.DisplayName}'.", syntax.Type);
         var local = new LocalSymbol

@@ -341,7 +341,7 @@
         },
         {
           "name": "meta.method.declaration.ctilde",
-          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)*)((?!(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\b)@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)*)((?!(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\b)@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
           "captures": {
             "1": {
               "name": "storage.modifier.ctilde"
@@ -356,7 +356,7 @@
         },
         {
           "name": "meta.constructor.declaration.ctilde",
-          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
           "captures": {
             "1": {
               "name": "storage.modifier.ctilde"
@@ -368,7 +368,7 @@
         },
         {
           "name": "meta.property.declaration.ctilde",
-          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)*)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\{)",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)*)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\{)",
           "captures": {
             "1": {
               "name": "storage.modifier.ctilde"
@@ -383,7 +383,7 @@
         },
         {
           "name": "meta.field.declaration.ctilde",
-          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*(?:=|;))",
+          "match": "(?x)^\\s*((?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)+)(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*(?:=|;))",
           "captures": {
             "1": {
               "name": "storage.modifier.ctilde"
@@ -411,7 +411,7 @@
       "patterns": [
         {
           "name": "storage.type.declaration.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|struct|enum|delegate|opaque)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|interface|struct|enum|delegate|opaque)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "keyword.declaration.namespace.ctilde",
@@ -469,11 +469,11 @@
     },
     "modifiers": {
       "name": "storage.modifier.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:public|internal|protected|private|static|sealed|readonly|const|unsafe|virtual|override|ref|out)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override|ref|out)(?![_\\p{L}\\p{Nd}])"
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|lock|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
     },
     "other-keywords": {
       "patterns": [
@@ -492,6 +492,10 @@
         {
           "name": "keyword.other.calling-convention.ctilde",
           "match": "(?<![@_\\p{L}\\p{Nd}])unmanaged(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "name": "keyword.other.constraint.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])where(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },

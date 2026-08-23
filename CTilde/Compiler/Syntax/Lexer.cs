@@ -19,6 +19,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 {
     private static readonly IReadOnlyDictionary<string, SyntaxKind> Keywords = new Dictionary<string, SyntaxKind>(StringComparer.Ordinal)
     {
+        ["abstract"] = SyntaxKind.AbstractKeyword,
         ["bool"] = SyntaxKind.BoolKeyword,
         ["as"] = SyntaxKind.AsKeyword,
         ["asm"] = SyntaxKind.AsmKeyword,
@@ -46,9 +47,11 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["if"] = SyntaxKind.IfKeyword,
         ["in"] = SyntaxKind.InKeyword,
         ["int"] = SyntaxKind.IntKeyword,
+        ["interface"] = SyntaxKind.InterfaceKeyword,
         ["internal"] = SyntaxKind.InternalKeyword,
         ["is"] = SyntaxKind.IsKeyword,
         ["long"] = SyntaxKind.LongKeyword,
+        ["lock"] = SyntaxKind.LockKeyword,
         ["nint"] = SyntaxKind.NintKeyword,
         ["nuint"] = SyntaxKind.NuintKeyword,
         ["namespace"] = SyntaxKind.NamespaceKeyword,
@@ -85,7 +88,9 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["using"] = SyntaxKind.UsingKeyword,
         ["var"] = SyntaxKind.VarKeyword,
         ["virtual"] = SyntaxKind.VirtualKeyword,
+        ["volatile"] = SyntaxKind.VolatileKeyword,
         ["void"] = SyntaxKind.VoidKeyword,
+        ["where"] = SyntaxKind.WhereKeyword,
         ["while"] = SyntaxKind.WhileKeyword,
         ["get"] = SyntaxKind.GetKeyword,
         ["set"] = SyntaxKind.SetKeyword,

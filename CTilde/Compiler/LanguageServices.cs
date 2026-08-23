@@ -58,9 +58,9 @@ public sealed record LanguageWorkspaceSymbol(
 
 public sealed partial class LanguageServiceSnapshot
 {
-    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "struct", "enum", "delegate", "opaque", "static", "sealed"];
-    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "unsafe", "virtual", "override", "sealed", "operator", "void"];
-    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
+    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "enum", "delegate", "opaque", "static", "sealed", "abstract"];
+    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void"];
+    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
@@ -761,7 +761,22 @@ public sealed partial class LanguageServiceSnapshot
         return string.Join('.', parts);
     }
 
-    private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type) => type.BaseTypesAndSelf();
+    private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type)
+    {
+        var pending = new Stack<TypeSymbol>();
+        pending.Push(type);
+        var visited = new HashSet<TypeSymbol>();
+        while (pending.TryPop(out var current))
+        {
+            if (!visited.Add(current))
+                continue;
+            yield return current;
+            foreach (var contract in current.Interfaces.AsEnumerable().Reverse())
+                pending.Push(contract);
+            if (current.BaseType is not null)
+                pending.Push(current.BaseType);
+        }
+    }
 
     private static bool IsAccessible(MemberSymbol member, TypeSymbol? currentType) => member.Accessibility switch
     {

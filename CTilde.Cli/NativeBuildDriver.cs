@@ -206,6 +206,9 @@ internal static class HostedBuildDriver
             configuration.Add("-fvar-tracking-assignments");
         var common = new List<string> { "-std=gnu23" };
         common.AddRange(configuration);
+        var usesPthreads = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
+        if (usesPthreads)
+            common.Add("-pthread");
         if (request.Lto)
             common.Add("-flto");
         common.AddRange(["-Wall", "-Wextra", "-Werror"]);
@@ -258,6 +261,8 @@ internal static class HostedBuildDriver
         link.AddRange(["-o", executable]);
         if (request.Lto)
             link.Add("-flto");
+        if (usesPthreads)
+            link.Add("-pthread");
         if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
             link.Add("-lm");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
@@ -270,7 +275,7 @@ internal static class HostedBuildDriver
         var cache = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
         Directory.CreateDirectory(cache);
         var identity = new StringBuilder()
-            .Append("draft-0.14\n")
+            .Append("draft-0.15\n")
             .Append(compiler.Command).Append('\n')
             .Append(compiler.WslCompiler).Append('\n')
             .Append(File.Exists(compiler.Command) ? File.GetLastWriteTimeUtc(compiler.Command).Ticks : 0L).Append('\n')

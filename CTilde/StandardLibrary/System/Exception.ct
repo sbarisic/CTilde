@@ -64,3 +64,13 @@ public sealed class OutOfMemoryException : Exception
 {
     public OutOfMemoryException() : base("Managed allocation failed.") { }
 }
+
+public sealed class ThreadStateException : Exception
+{
+    public ThreadStateException() : base("The thread is in an invalid state for this operation.") { }
+}
+
+public sealed class SynchronizationLockException : Exception
+{
+    public SynchronizationLockException() : base("The current thread does not own the mutex.") { }
+}

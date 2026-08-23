@@ -72,6 +72,8 @@ internal sealed partial class CEmitter
         {
             var type = pending.Dequeue();
             AddType(type.BaseType);
+            foreach (var contract in type.Interfaces)
+                AddType(contract);
             foreach (var field in type.Fields.Where(field => !field.IsStatic))
                 AddCType(field.Type);
             if (type.Kind == DeclaredTypeKind.Delegate)

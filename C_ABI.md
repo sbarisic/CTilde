@@ -2,11 +2,11 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.14. Draft 0.14 is a breaking runtime and storage ABI: it defines one runtime per process, adds explicit lifecycle and panic configuration, makes built-in runtime faults catchable without allocation, makes strings and arrays contiguous allocations, formalizes constructive `out` writes, adds versioned module descriptors, and replaces readable generated names with compact canonical-identity hashes.
+This document defines the generated C contract for C~ draft 0.15 and runtime ABI 15. Draft 0.15 adds closed-generic identities and layouts, interface dispatch slots, scalar atomic storage, managed thread and recursive-mutex payloads, and concurrency runtime faults to the Draft 0.14 process runtime.
 
-Draft 0.11 arithmetic operators, draft 0.12 reachability and cleanup optimization, and draft 0.13 inline assembly remain part of the language. Draft 0.14 output is not ABI-compatible with older generated modules. `[Export]`, `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts.
+Draft 0.15 output is not ABI-compatible with ABI 14 or older generated modules. `[Export]`, `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross an extern or export boundary.
 
-Debug information is additive and does not change runtime ABI 14. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 2 are tooling metadata, not link-time ABI artifacts.
+Debug information is additive and does not change runtime ABI 15. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation; v2 instrumented images require a rebuild.
 
 The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `.c` file per reachable namespace, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
 
@@ -81,7 +81,7 @@ Generated prefixes identify symbol kinds:
 
 Unity definitions use translation-unit-local linkage where possible. Modular definitions used by another artifact have internal-header declarations and external linkage but remain compiler-private. `public` and `internal` are C~ access rules; they do not export a native symbol.
 
-`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 14.
+`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 15.
 
 ## Managed object header
 
@@ -96,9 +96,29 @@ typedef struct ct_object {
 } ct_object;
 ```
 
-`ct_atomic_u32` is a private four-byte atomic representation with the same alignment as `uint32_t`; the emitter verifies both properties. The descriptor stores a type name, base descriptor, vtable, type ID, size, value-type flag, and generated `Drop` callback. Heap objects start with `RefCount == 1`; `UINT32_MAX` marks immortal static strings. `ReleaseNext` links zero-count objects into the final-releasing thread's allocation-free iterative LIFO worklist.
+`ct_atomic_u32` is a private four-byte atomic representation with the same alignment as `uint32_t`; the emitter verifies both properties. The descriptor stores a type name, base descriptor, primary vtable, immutable interface-table pointer and count, type ID, size, value-type flag, and generated `Drop` callback. Heap objects start with `RefCount == 1`; `UINT32_MAX` marks immortal static strings. `ReleaseNext` links zero-count objects into the final-releasing thread's allocation-free iterative LIFO worklist.
 
 The vtable contains typed function pointers. A generated thunk converts `ct_object*` to the method's declaring type.
+
+Descriptors and vtables are emitted as portable C `const` data. The empty string and every literal string use a distinct compatible `const` wrapper object. On ESP-IDF, retained `ct_d_*`, `ct_v_*`, and `ct_sl_*` symbols must resolve to flash-backed read-only ELF sections. Mutable static fields and the preinitialized runtime-fault objects remain writable. The public header continues to expose only opaque managed objects.
+
+The ABI 15 32-bit layout contract has these exact facts, measured on the connected ESP32 with ESP-IDF 6.0.2. Size and alignment values are bytes:
+
+| Layout | Size | Alignment | Additional fact |
+| --- | ---: | ---: | --- |
+| `ct_object` | 16 | 4 | Four four-byte header fields |
+| `ct_string` header | 20 | 4 | `Data` offset 20 |
+| `ct_type_descriptor` | 40 | 4 | Immutable metadata, including interface table pointer/count |
+| `ct_vtable` | 12 | 4 | Probe fixture base virtual surface |
+| Empty representative class | 16 | 4 | Header only |
+| Representative mixed-field class | 28 | 4 | Header plus scalar/reference fields and padding |
+| Reference-bearing structure | 12 | 4 | Inline value layout |
+| `int[]` header | 20 | 4 | `Data` offset 20; element stride 4 |
+| Reference-structure array header | 20 | 4 | `Data` offset 20; element stride 12 |
+| Boxed `int` | 20 | 4 | Header plus four-byte value |
+| Boxed reference-bearing structure | 28 | 4 | Header plus 12-byte value |
+
+The accepted versioned memory fixture contains 720 bytes of descriptors, 204 bytes of vtables, and 496 bytes of literal-object storage. The descriptor and vtable totals include the ABI 15 interface metadata and concurrency fault types.
 
 ## Classes and structures
 
@@ -124,6 +144,16 @@ A structure lowers to the same C structure form but is passed, returned, assigne
 Instance methods and property accessors receive a first `ct_self` pointer. Static members do not.
 
 A box stores an object header followed by one copied scalar, enum, structure, or pointer value.
+
+### Interfaces and closed generics
+
+An interface reference uses `ct_object*`; it does not add a second pointer or allocate for class receivers. Every emitted interface contract contributes deterministic typed slots to the generated vtable shape. Each concrete class and boxed structure descriptor also owns an immutable `ct_interface_entry` array mapping implemented interface descriptors to the concrete vtable. Class entries use receiver-adjusting thunks; boxed-structure entries use thunks that address the inline boxed value. `ct_type_is_assignable` walks these tables for casts, `is`, and `as`.
+
+Each reachable closed generic type has a canonical identity containing its definition and recursively canonical type arguments. It receives an independent C layout, descriptor, vtable, drop/retain helpers, methods, and static fields. Each reachable closed generic method similarly receives its own substituted signature and function. Open generic identities are compiler-only and never appear in emitted C or the public native header.
+
+`Atomic<T>` is emitted as ordinary aligned scalar storage inside a non-copyable generated structure. Its operations call private width-aware helpers using MSVC Interlocked operations or GCC/Clang atomics. A C~ `volatile` field remains an ordinary scalar declaration; all generated accesses use the same helpers with acquire loads and release stores.
+
+`Thread` and `Mutex` are managed objects with private native payload pointers. Payload memory uses native `calloc`/`free`, not `ct_alloc`, and their generated descriptor drop callbacks release the target-specific handle. These payload layouts are private implementation details and cannot cross `[Extern]` or `[Export]` boundaries. Hosted builds link pthread support only when reachable output references the POSIX shims; ESP-IDF uses FreeRTOS tasks and recursive mutexes.
 
 ## Delegates and unmanaged function pointers
 
@@ -309,7 +339,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler with the diagnostic and context; returning from the handler continues to the platform's default fatal termination. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.14.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.15.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -319,7 +349,7 @@ ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.14.
+This section records constraints that remain after draft 0.15.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
 

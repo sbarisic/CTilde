@@ -17,6 +17,9 @@ internal sealed partial class CompilationModel
     };
     private readonly Dictionary<SyntaxTree, string> _namespaces = [];
     private readonly Dictionary<SyntaxTree, ImmutableArray<string>> _usings = [];
+    private readonly Dictionary<(TypeSymbol Definition, string Arguments), TypeSymbol> _constructedTypes = [];
+    private readonly Dictionary<(MethodSymbol Definition, string Arguments), MethodSymbol> _constructedMethods = [];
+    private IReadOnlyDictionary<string, CType> _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
 
     public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target)
     {
@@ -40,11 +43,13 @@ internal sealed partial class CompilationModel
     public DiagnosticBag Diagnostics { get; }
     public Dictionary<string, TypeSymbol> Types { get; }
     public DocumentationIndex Documentation { get; }
-    public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null).OrderBy(type => type.FullName, StringComparer.Ordinal);
+    public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
     public MethodSymbol? EntryPoint { get; private set; }
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
+        if (syntax.TypeArguments.IsDefaultOrEmpty && _activeTypeParameters.TryGetValue(syntax.Name, out var parameterType))
+            return ApplyTypeShape(parameterType, syntax, report);
         if ((syntax.Name is "NativeUtf8String" or "System.Runtime.NativeUtf8String") && syntax.TypeArguments.IsDefaultOrEmpty)
         {
             if (syntax.PointerDepth != 0 || syntax.IsArray)
@@ -62,10 +67,26 @@ internal sealed partial class CompilationModel
                 : syntax.Name is "ReadOnlyNativeBuffer" or "System.Runtime.ReadOnlyNativeBuffer"
                     ? CTypeKind.ReadOnlyNativeBuffer
                     : CTypeKind.Error;
-            if (bufferKind == CTypeKind.Error || syntax.TypeArguments.Length != 1)
+            if (bufferKind == CTypeKind.Error)
+            {
+                var arguments = syntax.TypeArguments.Select(argument => ResolveType(argument, tree, report)).ToImmutableArray();
+                var definitions = ResolveNamedTypeCandidates(syntax.Name, tree, syntax.TypeArguments.Length).ToArray();
+                if (definitions.Length != 1)
+                {
+                    if (report)
+                        Diagnostics.Add("CT2176", definitions.Length == 0
+                            ? $"Generic type '{syntax.Name}' with {syntax.TypeArguments.Length} type argument(s) could not be found."
+                            : $"Generic type '{syntax.Name}' is ambiguous.", syntax.Source, syntax.Span);
+                    return CType.Error;
+                }
+                if (syntax.PointerDepth != 0 || syntax.IsArray)
+                    return ApplyTypeShape(ConstructGenericType(definitions[0], arguments, tree, syntax).Type, syntax, report);
+                return ConstructGenericType(definitions[0], arguments, tree, syntax).Type;
+            }
+            if (syntax.TypeArguments.Length != 1)
             {
                 if (report)
-                    Diagnostics.Add("CT2176", "Only the intrinsic NativeBuffer<T> and ReadOnlyNativeBuffer<T> generic forms are supported.", syntax.Source, syntax.Span);
+                    Diagnostics.Add("CT2176", $"{syntax.Name} requires one type argument.", syntax.Source, syntax.Span);
                 return CType.Error;
             }
             var element = ResolveType(syntax.TypeArguments[0], tree, report);
@@ -140,9 +161,352 @@ internal sealed partial class CompilationModel
 
         for (var i = 0; i < syntax.PointerDepth; i++)
             baseType = new CType(CTypeKind.Pointer, ElementType: baseType);
+        if (syntax.IsArray && baseType.ContainsAtomic)
+        {
+            if (report)
+                Diagnostics.Add("CT1278", "Atomic<T> cannot be used as an array element.", syntax.Source, syntax.Span);
+            return CType.Error;
+        }
         if (syntax.IsArray)
             baseType = new CType(CTypeKind.Array, ElementType: baseType);
         return baseType;
+    }
+
+    internal CType ResolveType(TypeSyntax syntax, SyntaxTree tree, IReadOnlyDictionary<string, CType> substitutions, bool report = true)
+    {
+        var previous = _activeTypeParameters;
+        var builder = previous.ToImmutableDictionary(StringComparer.Ordinal).ToBuilder();
+        foreach (var substitution in substitutions)
+            builder[substitution.Key] = substitution.Value;
+        _activeTypeParameters = builder.ToImmutable();
+        try
+        {
+            return ResolveType(syntax, tree, report);
+        }
+        finally
+        {
+            _activeTypeParameters = previous;
+        }
+    }
+
+    private CType ApplyTypeShape(CType baseType, TypeSyntax syntax, bool report)
+    {
+        if (baseType == CType.Void && syntax.IsArray)
+        {
+            if (report)
+                Diagnostics.Add("CT2101", "void cannot be used as an element or pointed type.", syntax.Source, syntax.Span);
+            return CType.Error;
+        }
+        for (var index = 0; index < syntax.PointerDepth; index++)
+            baseType = new CType(CTypeKind.Pointer, ElementType: baseType);
+        if (syntax.IsArray && baseType.ContainsAtomic)
+        {
+            if (report)
+                Diagnostics.Add("CT1278", "Atomic<T> cannot be used as an array element.", syntax.Source, syntax.Span);
+            return CType.Error;
+        }
+        if (syntax.IsArray)
+            baseType = new CType(CTypeKind.Array, ElementType: baseType);
+        return baseType;
+    }
+
+    private TypeSymbol ConstructGenericType(TypeSymbol definition, ImmutableArray<CType> arguments, SyntaxTree tree, SyntaxNode syntax)
+    {
+        if (!definition.IsGenericDefinition || definition.TypeParameters.Length != arguments.Length)
+        {
+            Diagnostics.Add("CT1271", $"Type '{definition.FullName}' does not accept {arguments.Length} type argument(s).", syntax.Source, syntax.Span);
+            return definition;
+        }
+        ValidateGenericArguments(definition.TypeParameters, definition.TypeParameterConstraints, arguments, syntax);
+        if (definition is { Namespace: "System.Threading", Name: "Atomic" } &&
+            (arguments.Length != 1 || !IsAtomicElementType(arguments[0])))
+            Diagnostics.Add("CT1277", "Atomic<T> requires Boolean, integral, native-integral, enum, or unsafe-pointer T.", syntax.Source, syntax.Span);
+        var identity = string.Join(";", arguments.Select(NameMangler.CanonicalType));
+        if (_constructedTypes.TryGetValue((definition, identity), out var existing))
+            return existing;
+        if (_constructedTypes.Count >= 1024)
+        {
+            Diagnostics.Add("CT1272", "Generic instantiation exceeded the deterministic limit of 1024 closed types.", syntax.Source, syntax.Span);
+            return definition;
+        }
+        var constructed = new TypeSymbol
+        {
+            Namespace = definition.Namespace,
+            Name = definition.Name,
+            Kind = definition.Kind,
+            Syntax = definition.Syntax,
+            Accessibility = definition.Accessibility,
+            NativeTypeName = definition.NativeTypeName,
+            NativeHeader = definition.NativeHeader,
+            IsSealed = definition.IsSealed,
+            IsAbstract = definition.IsAbstract,
+            TypeArguments = arguments,
+            GenericDefinition = definition,
+        };
+        _constructedTypes.Add((definition, identity), constructed);
+        Types.TryAdd(constructed.FullName, constructed);
+        PopulateConstructedType(constructed);
+        return constructed;
+    }
+
+    private void ValidateGenericArguments(
+        ImmutableArray<TypeSymbol> parameters,
+        IReadOnlyDictionary<string, GenericConstraintSet> constraints,
+        ImmutableArray<CType> arguments,
+        SyntaxNode syntax)
+    {
+        for (var index = 0; index < Math.Min(parameters.Length, arguments.Length); index++)
+        {
+            if (!constraints.TryGetValue(parameters[index].Name, out var constraint))
+                continue;
+            var argument = arguments[index];
+            var valid = (!constraint.RequiresClass || argument.IsReference) &&
+                (!constraint.RequiresStruct || argument.IsValueType) &&
+                (!constraint.RequiresUnmanaged || IsCompleteUnmanagedType(argument)) &&
+                (constraint.BaseType is null || TypeFacts.CanImplicitlyConvert(argument, constraint.BaseType)) &&
+                (constraint.Interfaces.IsDefaultOrEmpty || constraint.Interfaces.All(contract => TypeFacts.CanImplicitlyConvert(argument, contract))) &&
+                (!constraint.RequiresConstructor || HasPublicParameterlessConstructor(argument));
+            if (!valid)
+                Diagnostics.Add("CT1271", $"Type argument '{argument.DisplayName}' does not satisfy constraints for '{parameters[index].Name}'.", syntax.Source, syntax.Span);
+        }
+    }
+
+    private static bool HasPublicParameterlessConstructor(CType type) => type.IsValueType ||
+        type.Symbol is { IsAbstract: false } symbol && symbol.Constructors.Any(constructor => constructor.Accessibility == Accessibility.Public && constructor.Parameters.Length == 0);
+
+    private static bool IsAtomicElementType(CType type) => type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or
+        CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Enum or CTypeKind.Pointer;
+
+    internal MethodSymbol? ConstructGenericMethod(MethodSymbol definition, ImmutableArray<CType> arguments, SyntaxNode syntax)
+    {
+        if (!definition.IsGenericDefinition || definition.TypeParameters.Length != arguments.Length)
+        {
+            Diagnostics.Add("CT1271", $"Method '{definition.Name}' does not accept {arguments.Length} type argument(s).", syntax.Source, syntax.Span);
+            return null;
+        }
+        ValidateGenericArguments(definition.TypeParameters, definition.TypeParameterConstraints, arguments, syntax);
+        var identity = string.Join(";", arguments.Select(NameMangler.CanonicalType));
+        if (_constructedMethods.TryGetValue((definition, identity), out var existing))
+            return existing;
+        if (_constructedMethods.Count >= 4096)
+        {
+            Diagnostics.Add("CT1272", $"Generic method instantiation exceeded the deterministic limit of 4096 while expanding '{definition.Name}<{string.Join(", ", arguments.Select(argument => argument.DisplayName))}>'.", syntax.Source, syntax.Span);
+            return null;
+        }
+        var substitutions = definition.TypeSubstitutions.ToBuilder();
+        for (var index = 0; index < definition.TypeParameters.Length; index++)
+            substitutions[definition.TypeParameters[index].Name] = arguments[index];
+        var constructed = WithGeneric(CloneMethod(definition, definition.ContainingType, substitutions.ToImmutable()), arguments, definition);
+        _constructedMethods.Add((definition, identity), constructed);
+        definition.ContainingType.Methods.Add(constructed);
+        return constructed;
+
+        static MethodSymbol WithGeneric(MethodSymbol method, ImmutableArray<CType> typeArguments, MethodSymbol genericDefinition) => new()
+        {
+            Name = method.Name,
+            ContainingType = method.ContainingType,
+            Accessibility = method.Accessibility,
+            IsStatic = method.IsStatic,
+            Syntax = method.Syntax,
+            ReturnType = method.ReturnType,
+            Parameters = method.Parameters,
+            Body = method.Body,
+            IsConstructor = method.IsConstructor,
+            IsEntryPoint = method.IsEntryPoint,
+            IsNoAlloc = method.IsNoAlloc,
+            IsUnsafe = method.IsUnsafe,
+            ReturnsBorrowed = method.ReturnsBorrowed,
+            ReturnsOwned = method.ReturnsOwned,
+            ReturnsNullable = method.ReturnsNullable,
+            ExternName = method.ExternName,
+            ExportName = method.ExportName,
+            IsTrustedExtern = method.IsTrustedExtern,
+            IsVirtual = method.IsVirtual,
+            IsOverride = method.IsOverride,
+            IsSealedOverride = method.IsSealedOverride,
+            IsAbstract = method.IsAbstract,
+            IsOperator = method.IsOperator,
+            OperatorKind = method.OperatorKind,
+            ConstructorInitializer = method.ConstructorInitializer,
+            TypeParameters = method.TypeParameters,
+            TypeParameterConstraints = method.TypeParameterConstraints,
+            TypeArguments = typeArguments,
+            TypeSubstitutions = method.TypeSubstitutions,
+            GenericDefinition = genericDefinition,
+        };
+    }
+
+    private void FinalizeConstructedTypes()
+    {
+        var completed = new HashSet<TypeSymbol>();
+        var progress = true;
+        while (progress)
+        {
+            progress = false;
+            foreach (var type in _constructedTypes.Values.ToArray())
+            {
+                if (completed.Contains(type) || type.IsOpenConstructed)
+                    continue;
+                PopulateConstructedType(type);
+                completed.Add(type);
+                progress = true;
+            }
+        }
+    }
+
+    private void PopulateConstructedType(TypeSymbol type)
+    {
+        if (type.GenericDefinition is not { } definition || type.Fields.Count != 0 || type.Methods.Count != 0 || type.Properties.Count != 0 || type.Constructors.Count != 0)
+            return;
+        var substitutions = definition.TypeParameters.Select((parameter, index) => (parameter.Name, Type: type.TypeArguments[index]))
+            .ToImmutableDictionary(pair => pair.Name, pair => pair.Type, StringComparer.Ordinal);
+        if (definition.BaseType is not null)
+            type.BaseType = SubstituteType(definition.BaseType.Type, substitutions).Symbol;
+        foreach (var contract in definition.Interfaces)
+        {
+            var substituted = SubstituteType(contract.Type, substitutions).Symbol;
+            if (substituted is not null && !type.Interfaces.Contains(substituted))
+                type.Interfaces.Add(substituted);
+        }
+        foreach (var field in definition.Fields)
+            type.Fields.Add(new FieldSymbol
+            {
+                Name = field.Name,
+                ContainingType = type,
+                Accessibility = field.Accessibility,
+                IsStatic = field.IsStatic,
+                Syntax = field.Syntax,
+                Type = SubstituteType(field.Type, substitutions),
+                IsReadonly = field.IsReadonly,
+                IsConst = field.IsConst,
+                IsVolatile = field.IsVolatile,
+                Initializer = field.Initializer,
+            });
+        foreach (var property in definition.Properties)
+        {
+            var cloned = new PropertySymbol
+            {
+                Name = property.Name,
+                ContainingType = type,
+                Accessibility = property.Accessibility,
+                IsStatic = property.IsStatic,
+                Syntax = property.Syntax,
+                Type = SubstituteType(property.Type, substitutions),
+                Getter = property.Getter,
+                Setter = property.Setter,
+                BackingField = property.BackingField is null ? null : type.Fields.FirstOrDefault(field => field.Name == property.BackingField.Name),
+                GetterAccessibility = property.GetterAccessibility,
+                SetterAccessibility = property.SetterAccessibility,
+                IsVirtual = property.IsVirtual,
+                IsOverride = property.IsOverride,
+                IsSealedOverride = property.IsSealedOverride,
+                IsAbstract = property.IsAbstract,
+                IsNoAlloc = property.IsNoAlloc,
+            };
+            cloned.ImplementedInterfaceProperties.AddRange(property.ImplementedInterfaceProperties);
+            type.Properties.Add(cloned);
+        }
+        foreach (var method in definition.Methods)
+            type.Methods.Add(CloneMethod(method, type, substitutions));
+        foreach (var constructor in definition.Constructors)
+            type.Constructors.Add(CloneMethod(constructor, type, substitutions));
+        foreach (var contract in EnumerateInterfaces(type))
+        {
+            foreach (var required in contract.Methods)
+            {
+                var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                    .FirstOrDefault(candidate => candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract &&
+                        HaveSameSourceSignature(candidate, required) && candidate.ReturnType == required.ReturnType);
+                if (implementation is not null && !implementation.ImplementedInterfaceMethods.Contains(required))
+                    implementation.ImplementedInterfaceMethods.Add(required);
+            }
+            foreach (var required in contract.Properties)
+            {
+                var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Properties)
+                    .FirstOrDefault(candidate => ResolvesPropertyContract(candidate, required));
+                if (implementation is not null && !implementation.ImplementedInterfaceProperties.Contains(required))
+                    implementation.ImplementedInterfaceProperties.Add(required);
+            }
+        }
+        if (definition.Kind == DeclaredTypeKind.Delegate)
+        {
+            type.DelegateReturnType = definition.DelegateReturnType is null ? null : SubstituteType(definition.DelegateReturnType, substitutions);
+            type.DelegateParameters = definition.DelegateParameters.Select(parameter => new ParameterSymbol
+            {
+                Name = parameter.Name,
+                Type = SubstituteType(parameter.Type, substitutions),
+                Syntax = parameter.Syntax,
+                PassingKind = parameter.PassingKind,
+                IsRetained = parameter.IsRetained,
+                NativeOwnership = parameter.NativeOwnership,
+                IsNullable = parameter.IsNullable,
+                IsSynchronousCallback = parameter.IsSynchronousCallback,
+            }).ToImmutableArray();
+        }
+    }
+
+    private MethodSymbol CloneMethod(MethodSymbol method, TypeSymbol containingType, ImmutableDictionary<string, CType> substitutions)
+    {
+        var cloned = new MethodSymbol
+        {
+            Name = method.Name,
+            ContainingType = containingType,
+            Accessibility = method.Accessibility,
+            IsStatic = method.IsStatic,
+            Syntax = method.Syntax,
+            ReturnType = method.IsConstructor ? containingType.Type : SubstituteType(method.ReturnType, substitutions),
+            Parameters = method.Parameters.Select(parameter => new ParameterSymbol
+            {
+                Name = parameter.Name,
+                Type = SubstituteType(parameter.Type, substitutions),
+                Syntax = parameter.Syntax,
+                PassingKind = parameter.PassingKind,
+                IsRetained = parameter.IsRetained,
+                NativeOwnership = parameter.NativeOwnership,
+                IsNullable = parameter.IsNullable,
+                IsSynchronousCallback = parameter.IsSynchronousCallback,
+            }).ToImmutableArray(),
+            Body = method.Body,
+            IsConstructor = method.IsConstructor,
+            IsEntryPoint = method.IsEntryPoint,
+            IsNoAlloc = method.IsNoAlloc,
+            IsUnsafe = method.IsUnsafe,
+            ReturnsBorrowed = method.ReturnsBorrowed,
+            ReturnsOwned = method.ReturnsOwned,
+            ReturnsNullable = method.ReturnsNullable,
+            ExternName = method.ExternName,
+            ExportName = method.ExportName,
+            IsTrustedExtern = method.IsTrustedExtern,
+            IsVirtual = method.IsVirtual,
+            IsOverride = method.IsOverride,
+            IsSealedOverride = method.IsSealedOverride,
+            IsAbstract = method.IsAbstract,
+            IsOperator = method.IsOperator,
+            OperatorKind = method.OperatorKind,
+            ConstructorInitializer = method.ConstructorInitializer,
+            TypeParameters = method.TypeParameters,
+            TypeParameterConstraints = method.TypeParameterConstraints,
+            TypeSubstitutions = substitutions,
+            GenericDefinition = method.GenericDefinition,
+        };
+        cloned.ImplementedInterfaceMethods.AddRange(method.ImplementedInterfaceMethods);
+        return cloned;
+    }
+
+    internal CType SubstituteType(CType type, IReadOnlyDictionary<string, CType> substitutions)
+    {
+        if (type.Kind == CTypeKind.TypeParameter && type.Symbol is not null && substitutions.TryGetValue(type.Symbol.Name, out var replacement))
+            return replacement;
+        if (type.Kind is CTypeKind.Array or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer)
+            return type with { ElementType = SubstituteType(type.ElementType!, substitutions) };
+        if (type.Symbol?.GenericDefinition is { } definition && !type.Symbol.TypeArguments.IsDefaultOrEmpty)
+        {
+            var arguments = type.Symbol.TypeArguments.Select(argument => SubstituteType(argument, substitutions)).ToImmutableArray();
+            var source = definition.Syntax?.Source ?? type.Symbol.Syntax!.Source;
+            var tree = SyntaxTrees.First(candidate => candidate.Text == source || candidate.Text.FilePath == source.FilePath);
+            return ConstructGenericType(definition, arguments, tree, definition.Syntax!).Type;
+        }
+        return type;
     }
 
     private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
@@ -161,20 +525,21 @@ internal sealed partial class CompilationModel
 
     public TypeSymbol? ResolveNamedType(string name, SyntaxTree tree)
     {
-        var candidates = ResolveNamedTypeCandidates(name, tree).Take(2).ToArray();
+        var candidates = ResolveNamedTypeCandidates(name, tree, 0).Take(2).ToArray();
         return candidates.Length == 1 ? candidates[0] : null;
     }
 
-    private IEnumerable<TypeSymbol> ResolveNamedTypeCandidates(string name, SyntaxTree tree)
+    private IEnumerable<TypeSymbol> ResolveNamedTypeCandidates(string name, SyntaxTree tree, int arity = 0)
     {
+        var suffix = arity == 0 ? string.Empty : $"`{arity}";
         if (name.Contains('.', StringComparison.Ordinal))
         {
-            if (Types.TryGetValue(name, out var qualified))
+            if (Types.TryGetValue(name + suffix, out var qualified))
                 yield return qualified;
             yield break;
         }
         var currentNamespace = _namespaces.GetValueOrDefault(tree, string.Empty);
-        if (!string.IsNullOrEmpty(currentNamespace) && Types.TryGetValue($"{currentNamespace}.{name}", out var local))
+        if (!string.IsNullOrEmpty(currentNamespace) && Types.TryGetValue($"{currentNamespace}.{name}{suffix}", out var local))
         {
             yield return local;
             yield break;
@@ -182,10 +547,10 @@ internal sealed partial class CompilationModel
         var emitted = new HashSet<TypeSymbol>();
         foreach (var imported in _usings.GetValueOrDefault(tree, []))
         {
-            if (Types.TryGetValue($"{imported}.{name}", out var importedType) && emitted.Add(importedType))
+            if (Types.TryGetValue($"{imported}.{name}{suffix}", out var importedType) && emitted.Add(importedType))
                 yield return importedType;
         }
-        if (Types.TryGetValue(name, out var global) && emitted.Add(global))
+        if (Types.TryGetValue(name + suffix, out var global) && emitted.Add(global))
             yield return global;
     }
 
@@ -211,7 +576,8 @@ internal sealed partial class CompilationModel
             foreach (var declaration in tree.Root.Types)
             {
                 var fullName = string.IsNullOrEmpty(namespaceName) ? declaration.Name : $"{namespaceName}.{declaration.Name}";
-                if (Types.TryGetValue(fullName, out var existing))
+                var typeKey = fullName + (declaration.TypeParameters.IsDefaultOrEmpty ? string.Empty : $"`{declaration.TypeParameters.Length}");
+                if (Types.TryGetValue(typeKey, out var existing))
                 {
                     Diagnostics.Add("CT1100", $"The type '{fullName}' is already declared.", declaration.Source, declaration.Span, existing.Syntax?.Source.GetLocation(existing.Syntax.Span));
                     continue;
@@ -219,6 +585,7 @@ internal sealed partial class CompilationModel
                 var kind = declaration.Kind switch
                 {
                     TypeDeclarationKind.Struct => DeclaredTypeKind.Struct,
+                    TypeDeclarationKind.Interface => DeclaredTypeKind.Interface,
                     TypeDeclarationKind.Enum => DeclaredTypeKind.Enum,
                     TypeDeclarationKind.Delegate => DeclaredTypeKind.Delegate,
                     TypeDeclarationKind.Opaque => DeclaredTypeKind.Opaque,
@@ -233,7 +600,9 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT1217", "Only a class can be static.", declaration.Source, declaration.Span);
                 if (declaration.Kind != TypeDeclarationKind.Class && declaration.Modifiers.Contains("sealed", StringComparer.Ordinal))
                     Diagnostics.Add("CT1218", "sealed applies only to classes.", declaration.Source, declaration.Span);
-                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" || modifier == "readonly" && declaration.Kind != TypeDeclarationKind.Struct))
+                if (declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) && declaration.Kind != TypeDeclarationKind.Class)
+                    Diagnostics.Add("CT1270", "abstract applies only to classes and their members.", declaration.Source, declaration.Span);
+                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind != TypeDeclarationKind.Struct))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
                 ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : []);
                 string? nativeTypeName = null;
@@ -250,7 +619,16 @@ internal sealed partial class CompilationModel
                     else
                         Diagnostics.Add("CT1240", "An opaque declaration requires NativeType with a portable C typedef and header name.", declaration.Source, nativeType?.Span ?? declaration.Span);
                 }
-                Types.Add(fullName, new TypeSymbol
+                var typeParameters = (declaration.TypeParameters.IsDefault ? [] : declaration.TypeParameters).Select(parameter => new TypeSymbol
+                {
+                    Namespace = fullName,
+                    Name = parameter.Name,
+                    Kind = DeclaredTypeKind.TypeParameter,
+                    Syntax = null,
+                    Accessibility = Accessibility.Private,
+                    IsSealed = false,
+                }).ToImmutableArray();
+                Types.Add(typeKey, new TypeSymbol
                 {
                     Namespace = namespaceName,
                     Name = declaration.Name,
@@ -260,6 +638,8 @@ internal sealed partial class CompilationModel
                     NativeTypeName = nativeTypeName,
                     NativeHeader = nativeHeader,
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
+                    IsAbstract = declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) || kind == DeclaredTypeKind.Interface,
+                    TypeParameters = typeParameters,
                 });
             }
         }
@@ -274,34 +654,48 @@ internal sealed partial class CompilationModel
             foreach (var declaration in tree.Root.Types)
             {
                 var fullName = string.IsNullOrEmpty(_namespaces[tree]) ? declaration.Name : $"{_namespaces[tree]}.{declaration.Name}";
-                if (!Types.TryGetValue(fullName, out var type) || type.Kind != DeclaredTypeKind.Class)
+                if (!Types.TryGetValue(DeclarationKey(fullName, declaration), out var type) || type.Kind is not (DeclaredTypeKind.Class or DeclaredTypeKind.Struct or DeclaredTypeKind.Interface))
                     continue;
+                _activeTypeParameters = type.TypeParameters.ToDictionary(parameter => parameter.Name, parameter => parameter.Type, StringComparer.Ordinal);
+                type.TypeParameterConstraints = BuildConstraintSets(declaration.TypeParameters, declaration.ConstraintClauses, tree, declaration);
                 if (type.IsObject)
                 {
                     if (declaration.BaseType is not null)
                         Diagnostics.Add("CT1225", "System.Object cannot declare a base type.", declaration.BaseType.Source, declaration.BaseType.Span);
                     continue;
                 }
-                if (declaration.BaseType is null)
+                var declaredBases = declaration.BaseTypes.IsDefaultOrEmpty
+                    ? declaration.BaseType is null ? [] : [declaration.BaseType]
+                    : declaration.BaseTypes;
+                var baseClassSeen = false;
+                foreach (var baseSyntax in declaredBases)
                 {
+                    var resolved = ResolveType(baseSyntax, tree);
+                    if (resolved.Kind == CTypeKind.Interface && resolved.Symbol is not null)
+                    {
+                        if (!type.Interfaces.Contains(resolved.Symbol))
+                            type.Interfaces.Add(resolved.Symbol);
+                        continue;
+                    }
+                    if (type.Kind != DeclaredTypeKind.Class || baseClassSeen || resolved.Kind != CTypeKind.Class || resolved.Symbol is null || resolved.Symbol.IsStatic)
+                    {
+                        Diagnostics.Add("CT1225", $"Type '{type.FullName}' requires interface bases and at most one non-static class base.", baseSyntax.Source, baseSyntax.Span);
+                        continue;
+                    }
+                    baseClassSeen = true;
+                    type.BaseType = resolved.Symbol;
+                    if (resolved.Symbol.IsSealed)
+                        Diagnostics.Add("CT1227", $"Class '{type.FullName}' cannot derive from sealed class '{resolved.Symbol.FullName}'.", baseSyntax.Source, baseSyntax.Span);
+                }
+                if (type.Kind == DeclaredTypeKind.Class && type.BaseType is null)
                     type.BaseType = objectType;
-                    continue;
-                }
-                var resolved = ResolveType(declaration.BaseType, tree);
-                if (resolved.Kind != CTypeKind.Class || resolved.Symbol is null || resolved.Symbol.IsStatic)
-                {
-                    Diagnostics.Add("CT1225", $"Class '{type.FullName}' requires a non-static class base type.", declaration.BaseType.Source, declaration.BaseType.Span);
-                    continue;
-                }
-                type.BaseType = resolved.Symbol;
-                if (resolved.Symbol.IsSealed)
-                    Diagnostics.Add("CT1227", $"Class '{type.FullName}' cannot derive from sealed class '{resolved.Symbol.FullName}'.", declaration.BaseType.Source, declaration.BaseType.Span);
             }
         }
+        _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
 
         var complete = new HashSet<TypeSymbol>();
         var active = new HashSet<TypeSymbol>();
-        foreach (var type in Types.Values.Where(type => type.Kind == DeclaredTypeKind.Class))
+        foreach (var type in Types.Values.Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface))
             Visit(type);
 
         void Visit(TypeSymbol type)
@@ -316,6 +710,8 @@ internal sealed partial class CompilationModel
             }
             if (type.BaseType is not null)
                 Visit(type.BaseType);
+            foreach (var contract in type.Interfaces)
+                Visit(contract);
             active.Remove(type);
             complete.Add(type);
         }
@@ -328,8 +724,9 @@ internal sealed partial class CompilationModel
             foreach (var declaration in tree.Root.Types)
             {
                 var fullName = string.IsNullOrEmpty(_namespaces[tree]) ? declaration.Name : $"{_namespaces[tree]}.{declaration.Name}";
-                if (!Types.TryGetValue(fullName, out var type) || type.Syntax != declaration)
+                if (!Types.TryGetValue(DeclarationKey(fullName, declaration), out var type) || type.Syntax != declaration)
                     continue;
+                _activeTypeParameters = type.TypeParameters.ToDictionary(parameter => parameter.Name, parameter => parameter.Type, StringComparer.Ordinal);
                 if (type.Kind == DeclaredTypeKind.Enum)
                 {
                     DeclareEnum(type, declaration, tree);
@@ -345,7 +742,7 @@ internal sealed partial class CompilationModel
                     continue;
                 foreach (var member in declaration.Members)
                     DeclareMember(type, member, tree);
-                if (!type.IsStatic && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
+                if (!type.IsStatic && type.Kind != DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
                 {
                     type.Constructors.Add(new MethodSymbol
                     {
@@ -362,12 +759,66 @@ internal sealed partial class CompilationModel
                 }
             }
         }
+        _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
+        FinalizeConstructedTypes();
+    }
+
+    private static string DeclarationKey(string fullName, TypeDeclarationSyntax declaration) =>
+        fullName + (declaration.TypeParameters.IsDefaultOrEmpty ? string.Empty : $"`{declaration.TypeParameters.Length}");
+
+    private ImmutableDictionary<string, GenericConstraintSet> BuildConstraintSets(
+        ImmutableArray<TypeParameterSyntax> parameters,
+        ImmutableArray<TypeParameterConstraintClauseSyntax> clauses,
+        SyntaxTree tree,
+        SyntaxNode owner)
+    {
+        var names = parameters.Select(parameter => parameter.Name).ToHashSet(StringComparer.Ordinal);
+        var result = parameters.ToDictionary(parameter => parameter.Name, _ => new GenericConstraintSet(Interfaces: []), StringComparer.Ordinal);
+        foreach (var clause in clauses)
+        {
+            if (!names.Contains(clause.TypeParameterName))
+            {
+                Diagnostics.Add("CT1271", $"Constraint clause names unknown type parameter '{clause.TypeParameterName}'.", clause.Source, clause.Span);
+                continue;
+            }
+            var requiresClass = false;
+            var requiresStruct = false;
+            var requiresUnmanaged = false;
+            var requiresConstructor = false;
+            CType? baseType = null;
+            var interfaces = ImmutableArray.CreateBuilder<CType>();
+            foreach (var constraint in clause.Constraints)
+            {
+                switch (constraint.Kind)
+                {
+                    case TypeParameterConstraintKind.Class: requiresClass = true; break;
+                    case TypeParameterConstraintKind.Struct: requiresStruct = true; break;
+                    case TypeParameterConstraintKind.Unmanaged: requiresUnmanaged = true; requiresStruct = true; break;
+                    case TypeParameterConstraintKind.Constructor: requiresConstructor = true; break;
+                    case TypeParameterConstraintKind.Type:
+                        var resolved = ResolveType(constraint.Type!, tree);
+                        if (resolved.Kind == CTypeKind.Interface)
+                            interfaces.Add(resolved);
+                        else if (resolved.Kind == CTypeKind.Class && baseType is null)
+                            baseType = resolved;
+                        else
+                            Diagnostics.Add("CT1271", "A generic constraint must be one base class or an interface.", constraint.Source, constraint.Span);
+                        break;
+                }
+            }
+            if (requiresClass && requiresStruct || requiresClass && requiresUnmanaged || baseType is not null && requiresStruct)
+                Diagnostics.Add("CT1271", "class, struct, unmanaged, and base-class constraints must be mutually compatible.", clause.Source, clause.Span);
+            result[clause.TypeParameterName] = new GenericConstraintSet(requiresClass, requiresStruct, requiresUnmanaged, requiresConstructor, baseType, interfaces.ToImmutable());
+        }
+        foreach (var duplicate in clauses.GroupBy(clause => clause.TypeParameterName, StringComparer.Ordinal).Where(group => group.Count() > 1))
+            Diagnostics.Add("CT1271", $"Type parameter '{duplicate.Key}' has more than one constraint clause.", owner.Source, owner.Span);
+        return result.ToImmutableDictionary(StringComparer.Ordinal);
     }
 
     private void DeclareMember(TypeSymbol type, MemberDeclarationSyntax declaration, SyntaxTree tree)
     {
         ValidateModifiers(declaration.Modifiers, declaration);
-        var accessibility = GetAccessibility(declaration.Modifiers, declaration, Accessibility.Private);
+        var accessibility = GetAccessibility(declaration.Modifiers, declaration, type.Kind == DeclaredTypeKind.Interface ? Accessibility.Public : Accessibility.Private);
         var isStatic = declaration.Modifiers.Contains("static", StringComparer.Ordinal) ||
             declaration is FieldDeclarationSyntax { Modifiers: var fieldModifiers } && fieldModifiers.Contains("const", StringComparer.Ordinal);
         if (type.IsStatic && !isStatic)
@@ -377,8 +828,11 @@ internal sealed partial class CompilationModel
         {
             case FieldDeclarationSyntax field:
                 {
-                    ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe"], field);
+                    ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
                     ValidateAttributes(field.Attributes, field, []);
+                    if (type.Kind == DeclaredTypeKind.Interface)
+                        Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
+                    var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
                     var symbol = new FieldSymbol
                     {
                         Name = field.Name,
@@ -389,6 +843,7 @@ internal sealed partial class CompilationModel
                         Type = ResolveType(field.Type, tree),
                         IsReadonly = field.Modifiers.Contains("readonly", StringComparer.Ordinal),
                         IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
+                        IsVolatile = isVolatile,
                         Initializer = field.Initializer,
                     };
                     if (symbol.Type.IsNativeBuffer)
@@ -397,16 +852,20 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1242", "Opaque handles cannot be stored in fields.", field.Source, field.Span);
                     if (symbol.Type.IsNativeUtf8String)
                         Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in fields or static storage.", field.Source, field.Span);
+                    if (type.Kind == DeclaredTypeKind.Struct && symbol.Type.ContainsAtomic)
+                        Diagnostics.Add("CT1278", "A structure cannot contain Atomic<T> because structure copies would duplicate atomic storage.", field.Source, field.Span);
                     if (symbol.IsConst && field.Initializer is null)
                         Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
                     if (symbol.IsConst && symbol.IsReadonly)
                         Diagnostics.Add("CT1220", "A field cannot be both const and readonly.", field.Source, field.Span);
+                    if (isVolatile && (symbol.IsConst || symbol.IsReadonly || !IsVolatileType(symbol.Type)))
+                        Diagnostics.Add("CT1274", "volatile requires a writable Boolean, integral, native-integral, enum, or unsafe-pointer field.", field.Source, field.Span);
                     AddUnique(type, symbol);
                     break;
                 }
             case PropertyDeclarationSyntax property:
                 {
-                    ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], property);
+                    ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], property);
                     ValidateAttributes(property.Attributes, property, ["NoAlloc"]);
                     var noAlloc = FindAttribute(property.Attributes, "NoAlloc");
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
@@ -420,12 +879,21 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1242", "Opaque handles cannot be stored in properties.", property.Source, property.Span);
                     if (propertyType.IsNativeUtf8String && UserSyntaxTrees.Contains(tree))
                         Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in properties.", property.Source, property.Span);
+                    if (propertyType.ContainsAtomic)
+                        Diagnostics.Add("CT1278", "Atomic<T> cannot be stored in a property.", property.Source, property.Span);
                     if (property.Getter is not null)
                         ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
                     if (property.Setter is not null)
                         ValidateAllowedModifiers(property.Setter.Modifiers, ["public", "internal", "protected", "private"], property.Setter);
+                    var isAbstractProperty = type.Kind == DeclaredTypeKind.Interface || property.Modifiers.Contains("abstract", StringComparer.Ordinal);
+                    if (type.Kind == DeclaredTypeKind.Interface && (isStatic || accessibility != Accessibility.Public))
+                        Diagnostics.Add("CT1273", "Interface properties are public instance contracts.", property.Source, property.Span);
+                    if (isAbstractProperty && type.Kind != DeclaredTypeKind.Interface && !type.IsAbstract)
+                        Diagnostics.Add("CT1270", "An abstract property requires an abstract class.", property.Source, property.Span);
+                    if (isAbstractProperty && (property.Getter?.Body is not null || property.Setter?.Body is not null))
+                        Diagnostics.Add("CT1270", "An abstract or interface property cannot have an accessor body.", property.Source, property.Span);
                     FieldSymbol? backing = null;
-                    if (property.Getter is { Body: null } || property.Setter is { Body: null })
+                    if (!isAbstractProperty && (property.Getter is { Body: null } || property.Setter is { Body: null }))
                     {
                         backing = new FieldSymbol
                         {
@@ -453,7 +921,8 @@ internal sealed partial class CompilationModel
                         BackingField = backing,
                         GetterAccessibility = property.Getter is null ? Accessibility.Private : GetAccessibility(property.Getter.Modifiers, property.Getter, accessibility),
                         SetterAccessibility = property.Setter is null ? Accessibility.Private : GetAccessibility(property.Setter.Modifiers, property.Setter, accessibility),
-                        IsVirtual = property.Modifiers.Contains("virtual", StringComparer.Ordinal) || property.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsVirtual = isAbstractProperty || property.Modifiers.Contains("virtual", StringComparer.Ordinal) || property.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsAbstract = isAbstractProperty,
                         IsOverride = property.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = property.Modifiers.Contains("sealed", StringComparer.Ordinal),
                         IsNoAlloc = noAlloc is not null,
@@ -471,6 +940,8 @@ internal sealed partial class CompilationModel
                     ValidateAttributes(constructor.Attributes, constructor, []);
                     if (isStatic)
                         Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.7.", constructor.Source, constructor.Span);
+                    if (type.Kind == DeclaredTypeKind.Interface)
+                        Diagnostics.Add("CT1273", "An interface cannot declare constructors.", constructor.Source, constructor.Span);
                     var parameters = DeclareParameters(constructor.Parameters, tree, isExtern: false);
                     var symbol = new MethodSymbol
                     {
@@ -490,11 +961,13 @@ internal sealed partial class CompilationModel
                     break;
                 }
             case OperatorDeclarationSyntax @operator:
+                if (type.Kind == DeclaredTypeKind.Interface)
+                    Diagnostics.Add("CT1273", "An interface cannot declare operators.", @operator.Source, @operator.Span);
                 DeclareOperator(type, @operator, tree, accessibility, isStatic);
                 break;
             case MethodDeclarationSyntax method:
                 {
-                    ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed"], method);
+                    ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
                     ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
@@ -503,6 +976,33 @@ internal sealed partial class CompilationModel
                     var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
                     var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
                     var returnsNullable = FindAttribute(method.Attributes, "ReturnsNullable");
+                    var previousTypeParameters = _activeTypeParameters;
+                    var methodTypeParameters = method.TypeParameters.Select(parameter => new TypeSymbol
+                    {
+                        Namespace = $"{type.FullName}.{method.Name}",
+                        Name = parameter.Name,
+                        Kind = DeclaredTypeKind.TypeParameter,
+                        Syntax = null,
+                        Accessibility = Accessibility.Private,
+                    }).ToImmutableArray();
+                    if (methodTypeParameters.Select(parameter => parameter.Name).Distinct(StringComparer.Ordinal).Count() != methodTypeParameters.Length)
+                        Diagnostics.Add("CT1271", "Generic method type-parameter names must be unique.", method.Source, method.Span);
+                    var activeBuilder = previousTypeParameters.ToImmutableDictionary(StringComparer.Ordinal).ToBuilder();
+                    foreach (var parameter in methodTypeParameters)
+                    {
+                        if (activeBuilder.ContainsKey(parameter.Name))
+                            Diagnostics.Add("CT1271", $"Method type parameter '{parameter.Name}' conflicts with a containing type parameter.", method.Source, method.Span);
+                        activeBuilder[parameter.Name] = parameter.Type;
+                    }
+                    _activeTypeParameters = activeBuilder.ToImmutable();
+                    var methodConstraints = BuildConstraintSets(method.TypeParameters, method.ConstraintClauses, tree, method);
+                    var isAbstractMethod = type.Kind == DeclaredTypeKind.Interface || method.Modifiers.Contains("abstract", StringComparer.Ordinal);
+                    if (type.Kind == DeclaredTypeKind.Interface && (isStatic || accessibility != Accessibility.Public))
+                        Diagnostics.Add("CT1273", "Interface methods are public instance contracts.", method.Source, method.Span);
+                    if (isAbstractMethod && type.Kind != DeclaredTypeKind.Interface && !type.IsAbstract)
+                        Diagnostics.Add("CT1270", "An abstract method requires an abstract class.", method.Source, method.Span);
+                    if (isAbstractMethod && method.Body is not null)
+                        Diagnostics.Add("CT1270", "An abstract or interface method cannot have a body.", method.Source, method.Span);
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
@@ -518,8 +1018,8 @@ internal sealed partial class CompilationModel
                         if (!isStatic || method.Body is not null)
                             Diagnostics.Add("CT1205", "An Extern method must be static and bodyless.", method.Source, method.Span);
                     }
-                    else if (method.Body is null)
-                        Diagnostics.Add("CT1206", "A bodyless method requires Extern.", method.Source, method.Span);
+                    else if (method.Body is null && !isAbstractMethod)
+                        Diagnostics.Add("CT1206", "A bodyless method requires Extern or abstract.", method.Source, method.Span);
                     if (export is not null)
                     {
                         if (export.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
@@ -534,7 +1034,18 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT2186", "Native-buffer views cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
                     if (returnType.IsNativeUtf8String && UserSyntaxTrees.Contains(tree))
                         Diagnostics.Add("CT1266", "NativeUtf8String is scoped and cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
+                    if (returnType.ContainsAtomic)
+                        Diagnostics.Add("CT1278", "Atomic<T> cannot be returned by value.", method.ReturnType.Source, method.ReturnType.Span);
                     var methodParameters = DeclareParameters(method.Parameters, tree, external is not null || export is not null);
+                    foreach (var parameter in methodParameters.Where(parameter => parameter.Type.ContainsAtomic && parameter.PassingKind == ParameterPassingKind.Value))
+                        Diagnostics.Add("CT1278", "Atomic<T> cannot be passed by value.", parameter.Syntax!.Source, parameter.Syntax.Span);
+                    if (external is not null || export is not null)
+                    {
+                        if (!method.TypeParameters.IsDefaultOrEmpty || ForbiddenNativeBoundaryType(returnType))
+                            Diagnostics.Add("CT1279", "Open generic, interface, atomic, and runtime-backed threading types cannot cross an extern or export boundary.", method.ReturnType.Source, method.ReturnType.Span);
+                        foreach (var parameter in methodParameters.Where(parameter => ForbiddenNativeBoundaryType(parameter.Type)))
+                            Diagnostics.Add("CT1279", "Open generic, interface, atomic, and runtime-backed threading types cannot cross an extern or export boundary.", parameter.Syntax!.Source, parameter.Syntax.Span);
+                    }
                     if (returnsBorrowed is not null &&
                         (returnsBorrowed.Arguments.Length != 0 || external is null || !(returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)))
                         Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern method with a managed-reference, opaque-handle, or pointer return type.", returnsBorrowed.Source, returnsBorrowed.Span);
@@ -567,7 +1078,10 @@ internal sealed partial class CompilationModel
                         ExternName = externalName,
                         ExportName = exportName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
-                        IsVirtual = method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
+                        IsAbstract = isAbstractMethod,
+                        TypeParameters = methodTypeParameters,
+                        TypeParameterConstraints = methodConstraints,
                         IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = method.Modifiers.Contains("sealed", StringComparer.Ordinal),
                     };
@@ -576,9 +1090,19 @@ internal sealed partial class CompilationModel
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);
+                    _activeTypeParameters = previousTypeParameters;
                     break;
                 }
         }
+    }
+
+    private static bool ForbiddenNativeBoundaryType(CType type)
+    {
+        if (type.Kind is CTypeKind.Interface or CTypeKind.TypeParameter || type.IsAtomic ||
+            type.Symbol is { Namespace: "System.Threading", Name: "Thread" or "Mutex" } ||
+            type.Symbol?.IsOpenConstructed == true)
+            return true;
+        return type.ElementType is not null && ForbiddenNativeBoundaryType(type.ElementType);
     }
 
     private ImmutableArray<ParameterSymbol> DeclareParameters(ImmutableArray<ParameterSyntax> parameters, SyntaxTree tree, bool isExtern)
@@ -689,6 +1213,13 @@ internal sealed partial class CompilationModel
     private void ValidateInheritanceMembers()
     {
         var objectType = Types.GetValueOrDefault("System.Object");
+        foreach (var contract in Types.Values.Where(type => type.Kind == DeclaredTypeKind.Interface && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct())
+        {
+            foreach (var property in contract.Properties)
+                ValidateVirtualModifiers(property.IsStatic, property.IsVirtual, property.IsOverride, property.IsSealedOverride, property.Syntax!);
+            foreach (var method in contract.Methods)
+                ValidateVirtualModifiers(method.IsStatic, method.IsVirtual, method.IsOverride, method.IsSealedOverride, method.Syntax!);
+        }
         foreach (var type in Types.Values.Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct))
         {
             var baseTypes = type.Kind == DeclaredTypeKind.Class
@@ -751,6 +1282,71 @@ internal sealed partial class CompilationModel
                 if (inheritedMembers.Any(member => member.Name == method.Name && member is not MethodSymbol))
                     Diagnostics.Add("CT1230", $"Method '{method.Name}' hides an inherited member; member hiding is not supported.", method.Syntax!.Source, method.Syntax.Span);
             }
+
+            var concrete = type.Kind == DeclaredTypeKind.Struct || !type.IsAbstract;
+            foreach (var baseProperty in baseTypes.SelectMany(baseType => baseType.Properties).Where(property => property.IsAbstract))
+            {
+                var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Properties)
+                    .FirstOrDefault(candidate => candidate != baseProperty && ResolvesPropertyContract(candidate, baseProperty));
+                if (concrete && implementation is null)
+                    Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement abstract property '{baseProperty.Name}'.", type.Syntax!.Source, type.Syntax.Span);
+            }
+            foreach (var baseMethod in baseTypes.SelectMany(baseType => baseType.Methods).Where(method => method.IsAbstract))
+            {
+                var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                    .FirstOrDefault(candidate => candidate != baseMethod && !candidate.IsAbstract && HaveSameSourceSignature(candidate, baseMethod) && candidate.ReturnType == baseMethod.ReturnType);
+                if (concrete && implementation is null)
+                    Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement abstract method '{baseMethod.Name}'.", type.Syntax!.Source, type.Syntax.Span);
+            }
+
+            foreach (var contract in EnumerateInterfaces(type))
+            {
+                foreach (var required in contract.Properties)
+                {
+                    var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Properties)
+                        .FirstOrDefault(candidate => ResolvesPropertyContract(candidate, required));
+                    if (implementation is not null)
+                    {
+                        if (!implementation.ImplementedInterfaceProperties.Contains(required))
+                            implementation.ImplementedInterfaceProperties.Add(required);
+                        implementation.IsNoAlloc |= required.IsNoAlloc;
+                    }
+                    else if (concrete)
+                        Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement interface property '{contract.FullName}.{required.Name}'.", type.Syntax!.Source, type.Syntax.Span);
+                }
+                foreach (var required in contract.Methods)
+                {
+                    var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                        .FirstOrDefault(candidate => candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract &&
+                            HaveSameSourceSignature(candidate, required) && candidate.ReturnType == required.ReturnType);
+                    if (implementation is not null)
+                    {
+                        if (!implementation.ImplementedInterfaceMethods.Contains(required))
+                            implementation.ImplementedInterfaceMethods.Add(required);
+                        implementation.IsNoAlloc |= required.IsNoAlloc;
+                    }
+                    else if (concrete)
+                        Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement interface method '{contract.FullName}.{required.Name}'.", type.Syntax!.Source, type.Syntax.Span);
+                }
+            }
+        }
+    }
+
+    private static bool ResolvesPropertyContract(PropertySymbol candidate, PropertySymbol contract) =>
+        candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract && candidate.Name == contract.Name &&
+        candidate.Type == contract.Type && (contract.Getter is null || candidate.Getter is not null) && (contract.Setter is null || candidate.Setter is not null);
+
+    private static IEnumerable<TypeSymbol> EnumerateInterfaces(TypeSymbol type)
+    {
+        var pending = new Stack<TypeSymbol>(type.BaseTypesAndSelf().SelectMany(candidate => candidate.Interfaces));
+        var visited = new HashSet<TypeSymbol>();
+        while (pending.TryPop(out var contract))
+        {
+            if (!visited.Add(contract))
+                continue;
+            yield return contract;
+            foreach (var inherited in contract.Interfaces)
+                pending.Push(inherited);
         }
     }
 
@@ -779,6 +1375,10 @@ internal sealed partial class CompilationModel
         CTypeKind.Ulong => value >= ulong.MinValue && value <= ulong.MaxValue,
         _ => false,
     };
+
+    private static bool IsVolatileType(CType type) => type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or
+        CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or
+        CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Enum or CTypeKind.Pointer;
 
     private static int AccessRank(Accessibility accessibility) => accessibility switch
     {

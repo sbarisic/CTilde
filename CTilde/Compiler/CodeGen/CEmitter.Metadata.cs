@@ -15,6 +15,8 @@ internal sealed partial class CEmitter
         "System.OverflowException",
         "System.ArgumentException",
         "System.OutOfMemoryException",
+        "System.ThreadStateException",
+        "System.SynchronizationLockException",
     ];
 
     private static readonly (string Kind, string TypeName, string StorageName)[] RuntimeFaultTypes =
@@ -26,11 +28,18 @@ internal sealed partial class CEmitter
         ("CT_FAULT_OVERFLOW", "System.OverflowException", "ct_fault_overflow"),
         ("CT_FAULT_ARGUMENT", "System.ArgumentException", "ct_fault_argument"),
         ("CT_FAULT_OUT_OF_MEMORY", "System.OutOfMemoryException", "ct_fault_out_of_memory"),
+        ("CT_FAULT_THREAD_STATE", "System.ThreadStateException", "ct_fault_thread_state"),
+        ("CT_FAULT_SYNCHRONIZATION_LOCK", "System.SynchronizationLockException", "ct_fault_synchronization_lock"),
     ];
 
     private void EmitOwnershipHelpers(CWriter writer)
     {
         var objectType = Model.Types["System.Object"];
+        if (_usesManagedThreading)
+        {
+            writer.WriteLine("static void ct_managed_thread_drop(ct_object* object);");
+            writer.WriteLine("static void ct_managed_mutex_drop(ct_object* object);");
+        }
         writer.WriteLine($"void ct_memory_retain({NameMangler.Type(objectType)}* value) {{ ct_retain((ct_object*)(void*)value); }}");
         writer.WriteLine($"void ct_memory_release({NameMangler.Type(objectType)}* value) {{ ct_release((ct_object*)(void*)value); }}");
         if (IsEspIdf && Model.Types.ContainsKey("Esp.Idf.EspError"))
@@ -59,6 +68,10 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)(void*)object;");
             writer.WriteLine("    (void)value;");
+            if (type is { Namespace: "System.Threading", Name: "Thread" })
+                writer.WriteLine("    ct_managed_thread_drop(object);");
+            else if (type is { Namespace: "System.Threading", Name: "Mutex" })
+                writer.WriteLine("    ct_managed_mutex_drop(object);");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences).Reverse())
                 writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CName});");
             if (type.BaseType is not null)
@@ -131,12 +144,22 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"    void (*{VirtualSetterSlotName(property)})(ct_object*, {CTypeName(property.Type)});");
         }
         writer.WriteLine("};");
+        writer.WriteLine("struct ct_interface_entry { const ct_type_descriptor* Type; const ct_vtable* VTable; };");
         writer.WriteLine("static ct_string* ct_object_default_to_string(ct_object* value);");
         writer.WriteLine("static bool ct_object_default_equals(ct_object* left, ct_object* right);");
         writer.WriteLine("static int32_t ct_object_default_hash(ct_object* value);");
         writer.WriteLine("static bool ct_object_value_equals(ct_object* left, ct_object* right);");
         writer.WriteLine("static uint32_t ct_object_value_hash(ct_object* value);");
-        writer.WriteLine("static bool ct_type_is_assignable(const ct_type_descriptor* actual, const ct_type_descriptor* target) { for (const ct_type_descriptor* current = actual; current != NULL; current = current->Base) if (current == target) return true; return false; }");
+        writer.WriteLine("static bool ct_type_is_assignable(const ct_type_descriptor* actual, const ct_type_descriptor* target)");
+        writer.WriteLine("{");
+        writer.WriteLine("    for (const ct_type_descriptor* current = actual; current != NULL; current = current->Base)");
+        writer.WriteLine("    {");
+        writer.WriteLine("        if (current == target) return true;");
+        writer.WriteLine("        for (uint32_t index = 0u; index < current->InterfaceCount; ++index)");
+        writer.WriteLine("            if (current->Interfaces[index].Type == target) return true;");
+        writer.WriteLine("    }");
+        writer.WriteLine("    return false;");
+        writer.WriteLine("}");
         writer.WriteLine("static ct_object* ct_checked_cast(ct_object* value, const ct_type_descriptor* target, const char* file, int line) { if (value == NULL) return NULL; if (!ct_type_is_assignable(value->Type, target)) ct_raise_runtime_fault(CT_FAULT_CAST, \"CTO0001\", file, line); return value; }");
         writer.WriteLine("static ct_object* ct_safe_cast(ct_object* value, const ct_type_descriptor* target) { return value != NULL && ct_type_is_assignable(value->Type, target) ? value : NULL; }");
         writer.WriteLine("static uint32_t ct_hash_bytes(const void* value, size_t size) { const uint8_t* bytes = (const uint8_t*)value; uint32_t hash = UINT32_C(2166136261); for (size_t i = 0; i < size; ++i) { hash ^= bytes[i]; hash *= UINT32_C(16777619); } return hash; }");
@@ -146,27 +169,33 @@ internal sealed partial class CEmitter
         writer.WriteLine("static bool ct_string_v_equals(ct_object* left, ct_object* right) { return right != NULL && right->Type == &ct_desc_string && ct_string_equal((ct_string*)(void*)left, (ct_string*)(void*)right); }");
         writer.WriteLine("static int32_t ct_string_v_hash(ct_object* value) { ct_string* text = (ct_string*)(void*)value; return ct_i32_bits(ct_hash_bytes(text->Data, (size_t)text->Length)); }");
         EmitSpecialVTable(writer, "ct_string_vtable", "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", virtualMethods, virtualProperties);
-        writer.WriteLine("static ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string };");
+        writer.WriteLine("const ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, NULL, 0u, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string };");
         uint id = 2;
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Interface).OrderBy(type => type.FullName, StringComparer.Ordinal))
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", NULL, &ct_default_vtable, NULL, 0u, {id++}u, 0u, 1u, false, NULL }};");
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
+            var interfaces = EmitInterfaceTable(writer, DescriptorName(type), VTableName(type), ImplementedInterfaces(type));
             var baseDescriptor = type.BaseType is null ? "NULL" : $"&{DescriptorName(type.BaseType)}";
-            writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &{VTableName(type)}, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)} }};");
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &{VTableName(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)} }};");
         }
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
-            writer.WriteLine($"static ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)} }};");
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)} }};");
         }
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
         {
             var name = NameMangler.Array(array.ElementType!);
-            writer.WriteLine($"static ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, {id++}u, sizeof({name}), _Alignof({name}), false, {ArrayDropName(array.ElementType!)} }};");
+            writer.WriteLine($"const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({name}), _Alignof({name}), false, {ArrayDropName(array.ElementType!)} }};");
         }
         foreach (var type in BoxedTypes)
         {
             EmitBoxMetadata(writer, type, virtualMethods, virtualProperties);
-            writer.WriteLine($"static ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {id++}u, sizeof({BoxName(type)}), _Alignof({BoxName(type)}), true, {BoxDropName(type)} }};");
+            var interfaces = type is { Kind: CTypeKind.Struct, Symbol: not null }
+                ? EmitInterfaceTable(writer, BoxDescriptorName(type), $"ct_vtable_box_{NameMangler.TypeCode(type)}", ImplementedInterfaces(type.Symbol))
+                : (Pointer: "NULL", Count: 0);
+            writer.WriteLine($"const ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({BoxName(type)}), _Alignof({BoxName(type)}), true, {BoxDropName(type)} }};");
         }
         writer.WriteLine("static ct_string* ct_object_default_to_string(ct_object* value) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", \"<runtime>\", 0); return ct_string_from_bytes((const uint8_t*)value->Type->Name, (int32_t)strlen(value->Type->Name), \"<runtime>\", 0); }");
         writer.WriteLine("static bool ct_object_default_equals(ct_object* left, ct_object* right) { return left == right; }");
@@ -195,6 +224,24 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
         }
         writer.WriteLine();
+    }
+
+    private (string Pointer, int Count) EmitInterfaceTable(CWriter writer, string ownerDescriptor, string vtable, IEnumerable<TypeSymbol> candidates)
+    {
+        var interfaces = candidates
+            .Where(_reachableTypes.Contains)
+            .Distinct()
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .ToArray();
+        if (interfaces.Length == 0)
+            return ("NULL", 0);
+
+        var table = NameMangler.Artifact("ct_i_", $"interfaces:{ownerDescriptor}");
+        writer.WriteLine($"static const ct_interface_entry {table}[] = {{");
+        foreach (var contract in interfaces)
+            writer.WriteLine($"    {{ &{DescriptorName(contract)}, &{vtable} }},");
+        writer.WriteLine("};");
+        return (table, interfaces.Length);
     }
 
     private void EmitRuntimeFaultSupport(CWriter writer)
@@ -235,6 +282,45 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    ct_throw_core(exception, code, file, line);");
         writer.WriteLine("}");
+        writer.WriteLine();
+    }
+
+    private void EmitMemoryLayoutProbe(CWriter writer)
+    {
+        if (!_externUses.Any(use => use.Method.ExternName == "ct_test_memory_layout_report"))
+            return;
+
+        var classAndStructTypes = OrderLayoutTypes()
+            .Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct or DeclaredTypeKind.Delegate)
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .ToArray();
+        var arrays = _arrayTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal).ToArray();
+        var boxes = BoxedTypes.ToArray();
+        var descriptorCount = 1 + classAndStructTypes.Count(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Delegate) + arrays.Length + boxes.Length;
+        var vtableCount = 2 + classAndStructTypes.Count(type => type.Kind == DeclaredTypeKind.Class) + boxes.Length;
+        var literalBytes = _stringLiterals.Count == 0
+            ? "0u"
+            : string.Join(" + ", _stringLiterals.OrderBy(pair => pair.Value).Select(pair => $"sizeof(ct_sl_{pair.Value})"));
+
+        writer.WriteLine("#if defined(CT_MEMORY_LAYOUT_DIAGNOSTICS)");
+        writer.WriteLine("void ct_test_memory_layout_report(void)");
+        writer.WriteLine("{");
+        writer.WriteLine("    (void)printf(\"CT_LAYOUT object %zu %zu\\n\", sizeof(ct_object), _Alignof(ct_object));");
+        writer.WriteLine("    (void)printf(\"CT_LAYOUT string %zu %zu %zu\\n\", sizeof(ct_string), _Alignof(ct_string), offsetof(ct_string, Data));");
+        writer.WriteLine("    (void)printf(\"CT_LAYOUT descriptor %zu %zu\\n\", sizeof(ct_type_descriptor), _Alignof(ct_type_descriptor));");
+        writer.WriteLine("    (void)printf(\"CT_LAYOUT vtable %zu %zu\\n\", sizeof(ct_vtable), _Alignof(ct_vtable));");
+        foreach (var type in classAndStructTypes)
+            writer.WriteLine($"    (void)printf(\"CT_LAYOUT type:{EscapeCString(type.FullName)} %zu %zu\\n\", sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}));");
+        foreach (var array in arrays)
+        {
+            var name = NameMangler.Array(array.ElementType!);
+            writer.WriteLine($"    (void)printf(\"CT_LAYOUT array:{EscapeCString(array.ElementType!.DisplayName)} %zu %zu %zu %zu\\n\", sizeof({name}), _Alignof({name}), offsetof({name}, Data), sizeof((({name}*)0)->Data[0]));");
+        }
+        foreach (var type in boxes)
+            writer.WriteLine($"    (void)printf(\"CT_LAYOUT box:{EscapeCString(type.DisplayName)} %zu %zu\\n\", sizeof({BoxName(type)}), _Alignof({BoxName(type)}));");
+        writer.WriteLine($"    (void)printf(\"CT_LAYOUT totals %zu %zu %zu\\n\", (size_t){descriptorCount}u * sizeof(ct_type_descriptor), (size_t){vtableCount}u * sizeof(ct_vtable), (size_t)({literalBytes}));");
+        writer.WriteLine("}");
+        writer.WriteLine("#endif");
         writer.WriteLine();
     }
 
@@ -433,28 +519,34 @@ internal sealed partial class CEmitter
 
     private MethodSymbol? ResolveVirtualMethod(TypeSymbol type, MethodSymbol root)
     {
+        if (root.ContainingType.Kind == DeclaredTypeKind.Interface)
+            return type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                .FirstOrDefault(method => method.ImplementedInterfaceMethods.Contains(root));
         if (!type.BaseTypesAndSelf().Contains(root.ContainingType))
             return null;
         foreach (var current in type.BaseTypesAndSelf())
         {
             var match = current.Methods.FirstOrDefault(method => VirtualRoot(method) == root);
-            if (match is not null)
+            if (match is not null && !match.IsAbstract)
                 return match;
         }
-        return root;
+        return root.IsAbstract ? null : root;
     }
 
     private PropertySymbol? ResolveVirtualProperty(TypeSymbol type, PropertySymbol root)
     {
+        if (root.ContainingType.Kind == DeclaredTypeKind.Interface)
+            return type.BaseTypesAndSelf().SelectMany(candidate => candidate.Properties)
+                .FirstOrDefault(property => property.ImplementedInterfaceProperties.Contains(root));
         if (!type.BaseTypesAndSelf().Contains(root.ContainingType))
             return null;
         foreach (var current in type.BaseTypesAndSelf())
         {
             var match = current.Properties.FirstOrDefault(property => VirtualRoot(property) == root);
-            if (match is not null)
+            if (match is not null && !match.IsAbstract)
                 return match;
         }
-        return root;
+        return root.IsAbstract ? null : root;
     }
 
     private static MethodSymbol VirtualRoot(MethodSymbol method)
@@ -469,6 +561,20 @@ internal sealed partial class CEmitter
         while (property.OverriddenProperty is not null)
             property = property.OverriddenProperty;
         return property;
+    }
+
+    private static IEnumerable<TypeSymbol> ImplementedInterfaces(TypeSymbol type)
+    {
+        var pending = new Stack<TypeSymbol>(type.BaseTypesAndSelf().SelectMany(candidate => candidate.Interfaces));
+        var visited = new HashSet<TypeSymbol>();
+        while (pending.TryPop(out var contract))
+        {
+            if (!visited.Add(contract))
+                continue;
+            yield return contract;
+            foreach (var inherited in contract.Interfaces)
+                pending.Push(inherited);
+        }
     }
 
     private string EmitMethodThunk(CWriter writer, MethodSymbol method)
@@ -506,7 +612,7 @@ internal sealed partial class CEmitter
         var code = NameMangler.TypeCode(type);
         var box = BoxName(type);
         var descriptor = BoxDescriptorName(type);
-        writer.WriteLine($"static ct_type_descriptor {descriptor};");
+        writer.WriteLine($"extern const ct_type_descriptor {descriptor};");
         var toString = $"ct_box_to_string_{code}";
         var equals = $"ct_box_equals_{code}";
         var hash = $"ct_box_hash_{code}";
@@ -572,11 +678,68 @@ internal sealed partial class CEmitter
             writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; return ct_i32_bits(ct_hash_float(box->Value)); }}");
         else
             writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; return ct_i32_bits(ct_hash_bytes(&box->Value, sizeof(box->Value))); }}");
-        EmitSpecialVTable(writer, $"ct_vtable_box_{code}", toString, equals, hash, methods, properties);
+        EmitBoxVTable(writer, type, $"ct_vtable_box_{code}", toString, equals, hash, methods, properties);
         var boxRetain = type.ContainsManagedReferences ? $" {ValueRetainName(type)}((void*)&box->Value);" : string.Empty;
         var unboxRetain = type.ContainsManagedReferences ? $" {ValueRetainName(type)}((void*)&result);" : string.Empty;
         writer.WriteLine($"static {NameMangler.Type(Model.Types["System.Object"])}* {BoxFunctionName(type)}({CTypeName(type)} value, const char* file, int line) {{ {box}* box = ({box}*)ct_alloc(sizeof({box}), file, line); ct_init_object(box, &{descriptor}); box->Value = value;{boxRetain} return ({NameMangler.Type(Model.Types["System.Object"])}*)(void*)box; }}");
         writer.WriteLine($"static {CTypeName(type)} {UnboxFunctionName(type)}({NameMangler.Type(Model.Types["System.Object"])}* value, const char* file, int line) {{ if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTO0002\", file, line); ct_object* object = (ct_object*)(void*)value; if (object->Type != &{descriptor}) ct_raise_runtime_fault(CT_FAULT_CAST, \"CTO0003\", file, line); {CTypeName(type)} result = (({box}*)(void*)value)->Value;{unboxRetain} return result; }}");
+    }
+
+    private void EmitBoxVTable(CWriter writer, CType boxedType, string name, string toString, string equals, string hash, MethodSymbol[] methods, PropertySymbol[] properties)
+    {
+        var methodEntries = methods.Select(root =>
+        {
+            var implementation = boxedType.Kind == CTypeKind.Struct
+                ? boxedType.Symbol!.Methods.FirstOrDefault(method => method.ImplementedInterfaceMethods.Contains(root))
+                : null;
+            return (Root: root, Thunk: implementation is null ? "NULL" : EmitBoxMethodThunk(writer, boxedType, implementation, root));
+        }).ToArray();
+        var propertyEntries = properties.Select(root =>
+        {
+            var implementation = boxedType.Kind == CTypeKind.Struct
+                ? boxedType.Symbol!.Properties.FirstOrDefault(property => property.ImplementedInterfaceProperties.Contains(root))
+                : null;
+            return (Root: root,
+                Getter: implementation?.Getter is null ? "NULL" : EmitBoxPropertyThunk(writer, boxedType, implementation, true),
+                Setter: implementation?.Setter is null ? "NULL" : EmitBoxPropertyThunk(writer, boxedType, implementation, false));
+        }).ToArray();
+        writer.WriteLine($"static const ct_vtable {name} = {{");
+        writer.WriteLine($"    .ToString = {toString}, .Equals = {equals}, .GetHashCode = {hash},");
+        foreach (var entry in methodEntries)
+            writer.WriteLine($"    .{VirtualSlotName(entry.Root)} = {entry.Thunk},");
+        foreach (var entry in propertyEntries)
+        {
+            if (entry.Root.Getter is not null)
+                writer.WriteLine($"    .{VirtualGetterSlotName(entry.Root)} = {entry.Getter},");
+            if (entry.Root.Setter is not null)
+                writer.WriteLine($"    .{VirtualSetterSlotName(entry.Root)} = {entry.Setter},");
+        }
+        writer.WriteLine("};");
+    }
+
+    private string EmitBoxMethodThunk(CWriter writer, CType boxedType, MethodSymbol implementation, MethodSymbol root)
+    {
+        var name = NameMangler.Artifact("ct_h_", $"box-interface-thunk:{NameMangler.CanonicalType(boxedType)}:{NameMangler.MethodIdentity(root)}");
+        if (!_emittedThunks.Add(name))
+            return name;
+        var parameters = root.Parameters.Select((parameter, index) => CParameterDeclaration(parameter, $"a{index}")).ToArray();
+        var signature = string.Join(", ", new[] { "ct_object* self" }.Concat(parameters));
+        var arguments = string.Join(", ", new[] { $"&(({BoxName(boxedType)}*)(void*)self)->Value" }.Concat(root.Parameters.Select((_, index) => $"a{index}")));
+        writer.WriteLine($"static {CTypeName(root.ReturnType)} {name}({signature}) {{ {(root.ReturnType == CType.Void ? string.Empty : "return ")}{implementation.CName}({arguments}); }}");
+        return name;
+    }
+
+    private string EmitBoxPropertyThunk(CWriter writer, CType boxedType, PropertySymbol implementation, bool getter)
+    {
+        var name = NameMangler.Artifact("ct_h_", $"box-interface-thunk:{NameMangler.CanonicalType(boxedType)}:{NameMangler.PropertyIdentity(implementation, getter)}");
+        if (!_emittedThunks.Add(name))
+            return name;
+        var self = $"&(({BoxName(boxedType)}*)(void*)self)->Value";
+        if (getter)
+            writer.WriteLine($"static {CTypeName(implementation.Type)} {name}(ct_object* self) {{ return {NameMangler.Getter(implementation)}({self}); }}");
+        else
+            writer.WriteLine($"static void {name}(ct_object* self, {CTypeName(implementation.Type)} value) {{ {NameMangler.Setter(implementation)}({self}, value); }}");
+        return name;
     }
 
     private static string StructEqualityExpression(TypeSymbol type, string left, string right)

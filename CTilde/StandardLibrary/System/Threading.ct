@@ -1,0 +1,91 @@
+namespace System.Threading;
+
+public enum MemoryOrder
+{
+    Relaxed,
+    Acquire,
+    Release,
+    AcquireRelease,
+    SequentiallyConsistent
+}
+
+public struct Atomic<T>
+{
+    private T value;
+
+    public Atomic(T value)
+    {
+        this.value = value;
+    }
+
+    [NoAlloc] public T Load(MemoryOrder order) { return value; }
+    [NoAlloc] public void Store(T value, MemoryOrder order) { this.value = value; }
+    [NoAlloc] public T Exchange(T value, MemoryOrder order) { T previous = this.value; this.value = value; return previous; }
+    [NoAlloc] public T CompareExchange(T value, T comparand, MemoryOrder successOrder, MemoryOrder failureOrder) { T previous = this.value; if (successOrder == failureOrder) { this.value = comparand; } this.value = value; return previous; }
+    [NoAlloc] public T FetchAdd(T value, MemoryOrder order) { T previous = this.value; if (order == MemoryOrder.Relaxed) { this.value = value; } return previous; }
+    [NoAlloc] public T FetchSubtract(T value, MemoryOrder order) { T previous = this.value; if (order == MemoryOrder.Relaxed) { this.value = value; } return previous; }
+    [NoAlloc] public T FetchAnd(T value, MemoryOrder order) { T previous = this.value; if (order == MemoryOrder.Relaxed) { this.value = value; } return previous; }
+    [NoAlloc] public T FetchOr(T value, MemoryOrder order) { T previous = this.value; if (order == MemoryOrder.Relaxed) { this.value = value; } return previous; }
+    [NoAlloc] public T FetchXor(T value, MemoryOrder order) { T previous = this.value; if (order == MemoryOrder.Relaxed) { this.value = value; } return previous; }
+}
+
+public static class Atomic
+{
+    [NoAlloc] public static void Fence(MemoryOrder order) { if (order == MemoryOrder.Relaxed) { return; } }
+}
+
+public delegate void ThreadStart();
+
+public enum ThreadPriority
+{
+    Lowest,
+    BelowNormal,
+    Normal,
+    AboveNormal,
+    Highest
+}
+
+public sealed class Thread
+{
+    private ThreadStart start;
+    private nuint nativeHandle;
+    private uint runtimeId;
+    private volatile int state;
+    private uint stackSize;
+    private ThreadPriority priority;
+
+    public Thread(ThreadStart start) : this(start, 0u, ThreadPriority.Normal) { }
+    public Thread(ThreadStart start, uint stackSizeBytes) : this(start, stackSizeBytes, ThreadPriority.Normal) { }
+    public Thread(ThreadStart start, uint stackSizeBytes, ThreadPriority priority)
+    {
+        this.start = start;
+        nativeHandle = 0;
+        runtimeId = 0u;
+        state = 0;
+        stackSize = stackSizeBytes;
+        this.priority = priority;
+    }
+
+    [NoAlloc] public bool IsAlive { get { return state == 1; } }
+    [NoAlloc] public uint Id { get { return runtimeId; } }
+    [NoAlloc] public ThreadPriority Priority { get { return priority; } }
+
+    [NoAlloc] public void Start() { }
+    [NoAlloc] public void Join() { }
+    [NoAlloc] public static void Sleep(uint milliseconds) { if (milliseconds == 0u) { return; } }
+    [NoAlloc] public static void Yield() { }
+}
+
+public sealed class Mutex
+{
+    private nuint nativeHandle;
+
+    public Mutex()
+    {
+        nativeHandle = 0;
+    }
+
+    [NoAlloc] public void Enter() { }
+    [NoAlloc] public bool TryEnter() { return false; }
+    [NoAlloc] public void Exit() { }
+}

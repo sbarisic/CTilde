@@ -1,17 +1,20 @@
 typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;
 typedef struct ct_string { ct_object Object; int32_t Length; uint8_t Data[CT_FLEXIBLE_ARRAY]; } ct_string;
-static ct_type_descriptor ct_d_5387ab4162c20a4f61d2862f;
-static ct_type_descriptor ct_d_d282cb203926a764ad6376ae;
-static ct_type_descriptor ct_d_b0f849cefa55ba4450045683;
-static ct_type_descriptor ct_d_44afd0f458a75bae245fb18a;
-static ct_type_descriptor ct_d_cd703f583900b7e4bf13f318;
-static ct_type_descriptor ct_d_5f471a057ab417f1c62fe71e;
-static ct_type_descriptor ct_d_d53eb554304026b357498493;
-static ct_type_descriptor ct_d_1b2237da3e3fad2a39d6ba32;
-static ct_type_descriptor ct_d_53699c012cf2f6bc3be55ba6;
-static ct_type_descriptor ct_d_60001f7e23e593b9b8ab45ce;
-static ct_type_descriptor ct_d_7d638b34e3766612f7f3de36;
-static ct_type_descriptor ct_d_5e1771906f51d8e1b97b4e30;
+typedef struct ct_string_literal_0_type { ct_object Object; int32_t Length; uint8_t Data[3]; } ct_string_literal_0_type;
+extern const ct_type_descriptor ct_d_d282cb203926a764ad6376ae;
+extern const ct_type_descriptor ct_d_b0f849cefa55ba4450045683;
+extern const ct_type_descriptor ct_d_44afd0f458a75bae245fb18a;
+extern const ct_type_descriptor ct_d_5f471a057ab417f1c62fe71e;
+extern const ct_type_descriptor ct_d_d53eb554304026b357498493;
+extern const ct_type_descriptor ct_d_cd703f583900b7e4bf13f318;
+extern const ct_type_descriptor ct_d_1b2237da3e3fad2a39d6ba32;
+extern const ct_type_descriptor ct_d_53699c012cf2f6bc3be55ba6;
+extern const ct_type_descriptor ct_d_60001f7e23e593b9b8ab45ce;
+extern const ct_type_descriptor ct_d_5387ab4162c20a4f61d2862f;
+extern const ct_type_descriptor ct_d_7d638b34e3766612f7f3de36;
+extern const ct_type_descriptor ct_d_5e1771906f51d8e1b97b4e30;
+extern const ct_type_descriptor ct_d_3240a42f24ee5ffcb16d4738;
+extern const ct_type_descriptor ct_d_1ea76b8b99b085e2e43c6853;
 struct ct_t_99b091a0f75882e3ce5f2c48
 {
     ct_t_85f9bec51c25eec663cd1245 ct_base;
@@ -42,7 +45,7 @@ static const ct_vtable ct_v_27301b55ad4ab3b91895f3a7 = {
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = ct_h_7b9707b395b97783dff6be0e,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = ct_h_d45e8153d027417592669de0,
 };
-static ct_type_descriptor ct_d_d282cb203926a764ad6376ae = { "Examples.Base", &ct_d_5387ab4162c20a4f61d2862f, &ct_v_27301b55ad4ab3b91895f3a7, 2u, sizeof(ct_t_99b091a0f75882e3ce5f2c48), _Alignof(ct_t_99b091a0f75882e3ce5f2c48), false, ct_x_863e579dd86004ffc49dffe6 };
+const ct_type_descriptor ct_d_d282cb203926a764ad6376ae = { "Examples.Base", &ct_d_5387ab4162c20a4f61d2862f, &ct_v_27301b55ad4ab3b91895f3a7, NULL, 0u, 2u, sizeof(ct_t_99b091a0f75882e3ce5f2c48), _Alignof(ct_t_99b091a0f75882e3ce5f2c48), false, ct_x_863e579dd86004ffc49dffe6 };
 static int32_t ct_h_fe2dd57ebabac108479d6767(ct_object* self) { return ct_m_8e988b1c681c8e668ad90fdf((ct_t_2f638cfd2bd153fc62b7c90a*)(void*)self); }
 static int32_t ct_h_607c130d16baabccef81f2a2(ct_object* self) { return ct_g_93024e4f0cd9e6b993df6505((ct_t_2f638cfd2bd153fc62b7c90a*)(void*)self); }
 static const ct_vtable ct_v_ae12c65303542366c4d549c9 = {
@@ -50,63 +53,75 @@ static const ct_vtable ct_v_ae12c65303542366c4d549c9 = {
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = ct_h_fe2dd57ebabac108479d6767,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = ct_h_607c130d16baabccef81f2a2,
 };
-static ct_type_descriptor ct_d_b0f849cefa55ba4450045683 = { "Examples.Derived", &ct_d_d282cb203926a764ad6376ae, &ct_v_ae12c65303542366c4d549c9, 3u, sizeof(ct_t_2f638cfd2bd153fc62b7c90a), _Alignof(ct_t_2f638cfd2bd153fc62b7c90a), false, ct_x_81486652d7ba7ef78d2d95c4 };
+const ct_type_descriptor ct_d_b0f849cefa55ba4450045683 = { "Examples.Derived", &ct_d_d282cb203926a764ad6376ae, &ct_v_ae12c65303542366c4d549c9, NULL, 0u, 3u, sizeof(ct_t_2f638cfd2bd153fc62b7c90a), _Alignof(ct_t_2f638cfd2bd153fc62b7c90a), false, ct_x_81486652d7ba7ef78d2d95c4 };
 static ct_string* ct_h_8a2ef55374b6ffcf35b5d89a(ct_object* self) { return ct_m_ee9d37ca73e9ac88c39d7575((ct_t_8e21a5e2fb9f095e7f0daf1a*)(void*)self); }
 static const ct_vtable ct_v_0e712b7adf639ca8a80a5b73 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_5f471a057ab417f1c62fe71e = { "System.ArgumentException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_0e712b7adf639ca8a80a5b73, 4u, sizeof(ct_t_1bb2a862c5cd6454794fe0a4), _Alignof(ct_t_1bb2a862c5cd6454794fe0a4), false, ct_x_58f61014118b18d8905e9b91 };
+const ct_type_descriptor ct_d_5f471a057ab417f1c62fe71e = { "System.ArgumentException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_0e712b7adf639ca8a80a5b73, NULL, 0u, 4u, sizeof(ct_t_1bb2a862c5cd6454794fe0a4), _Alignof(ct_t_1bb2a862c5cd6454794fe0a4), false, ct_x_58f61014118b18d8905e9b91 };
 static const ct_vtable ct_v_a4f8159a688462519ae35d35 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_d53eb554304026b357498493 = { "System.DivideByZeroException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_a4f8159a688462519ae35d35, 5u, sizeof(ct_t_3ca6063c0b91e629603fd3cc), _Alignof(ct_t_3ca6063c0b91e629603fd3cc), false, ct_x_e0455c4cf069bdf46898ca79 };
+const ct_type_descriptor ct_d_d53eb554304026b357498493 = { "System.DivideByZeroException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_a4f8159a688462519ae35d35, NULL, 0u, 5u, sizeof(ct_t_3ca6063c0b91e629603fd3cc), _Alignof(ct_t_3ca6063c0b91e629603fd3cc), false, ct_x_e0455c4cf069bdf46898ca79 };
 static const ct_vtable ct_v_8b734efeab6d58e62a77e7be = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_cd703f583900b7e4bf13f318 = { "System.Exception", &ct_d_5387ab4162c20a4f61d2862f, &ct_v_8b734efeab6d58e62a77e7be, 6u, sizeof(ct_t_8e21a5e2fb9f095e7f0daf1a), _Alignof(ct_t_8e21a5e2fb9f095e7f0daf1a), false, ct_x_2094b1e76ae3b39b26d3f723 };
+const ct_type_descriptor ct_d_cd703f583900b7e4bf13f318 = { "System.Exception", &ct_d_5387ab4162c20a4f61d2862f, &ct_v_8b734efeab6d58e62a77e7be, NULL, 0u, 6u, sizeof(ct_t_8e21a5e2fb9f095e7f0daf1a), _Alignof(ct_t_8e21a5e2fb9f095e7f0daf1a), false, ct_x_2094b1e76ae3b39b26d3f723 };
 static const ct_vtable ct_v_8b95fc7aa558287bc095f045 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_1b2237da3e3fad2a39d6ba32 = { "System.IndexOutOfRangeException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_8b95fc7aa558287bc095f045, 7u, sizeof(ct_t_fb1324f2d929f92a1452d6b0), _Alignof(ct_t_fb1324f2d929f92a1452d6b0), false, ct_x_82c7ec741e7986b69629fcbe };
+const ct_type_descriptor ct_d_1b2237da3e3fad2a39d6ba32 = { "System.IndexOutOfRangeException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_8b95fc7aa558287bc095f045, NULL, 0u, 7u, sizeof(ct_t_fb1324f2d929f92a1452d6b0), _Alignof(ct_t_fb1324f2d929f92a1452d6b0), false, ct_x_82c7ec741e7986b69629fcbe };
 static const ct_vtable ct_v_241d25efb198fd3bb2e7c8e3 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_53699c012cf2f6bc3be55ba6 = { "System.InvalidCastException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_241d25efb198fd3bb2e7c8e3, 8u, sizeof(ct_t_1a7b6d1d671f587b43c0eb87), _Alignof(ct_t_1a7b6d1d671f587b43c0eb87), false, ct_x_e1b27ae78ab782102626ef6d };
+const ct_type_descriptor ct_d_53699c012cf2f6bc3be55ba6 = { "System.InvalidCastException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_241d25efb198fd3bb2e7c8e3, NULL, 0u, 8u, sizeof(ct_t_1a7b6d1d671f587b43c0eb87), _Alignof(ct_t_1a7b6d1d671f587b43c0eb87), false, ct_x_e1b27ae78ab782102626ef6d };
 static const ct_vtable ct_v_bf89dac0ca9a7085081574c8 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_60001f7e23e593b9b8ab45ce = { "System.NullReferenceException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_bf89dac0ca9a7085081574c8, 9u, sizeof(ct_t_bb505331b25fb5c1667198f6), _Alignof(ct_t_bb505331b25fb5c1667198f6), false, ct_x_2a1fa888f8f1b8182c8f029a };
+const ct_type_descriptor ct_d_60001f7e23e593b9b8ab45ce = { "System.NullReferenceException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_bf89dac0ca9a7085081574c8, NULL, 0u, 9u, sizeof(ct_t_bb505331b25fb5c1667198f6), _Alignof(ct_t_bb505331b25fb5c1667198f6), false, ct_x_2a1fa888f8f1b8182c8f029a };
 static const ct_vtable ct_v_daccab3db4384b5a628677d8 = {
     .ToString = ct_object_default_to_string, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_5387ab4162c20a4f61d2862f = { "System.Object", NULL, &ct_v_daccab3db4384b5a628677d8, 10u, sizeof(ct_t_85f9bec51c25eec663cd1245), _Alignof(ct_t_85f9bec51c25eec663cd1245), false, ct_x_384d155cbd42568b676f6836 };
+const ct_type_descriptor ct_d_5387ab4162c20a4f61d2862f = { "System.Object", NULL, &ct_v_daccab3db4384b5a628677d8, NULL, 0u, 10u, sizeof(ct_t_85f9bec51c25eec663cd1245), _Alignof(ct_t_85f9bec51c25eec663cd1245), false, ct_x_384d155cbd42568b676f6836 };
 static const ct_vtable ct_v_8fcbe16df8fd5d9b68fca9d6 = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_7d638b34e3766612f7f3de36 = { "System.OutOfMemoryException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_8fcbe16df8fd5d9b68fca9d6, 11u, sizeof(ct_t_7097958c7fa205ef236ea3cf), _Alignof(ct_t_7097958c7fa205ef236ea3cf), false, ct_x_712303cf5ca81e7abf040c43 };
+const ct_type_descriptor ct_d_7d638b34e3766612f7f3de36 = { "System.OutOfMemoryException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_8fcbe16df8fd5d9b68fca9d6, NULL, 0u, 11u, sizeof(ct_t_7097958c7fa205ef236ea3cf), _Alignof(ct_t_7097958c7fa205ef236ea3cf), false, ct_x_712303cf5ca81e7abf040c43 };
 static const ct_vtable ct_v_a521bca56f1974cbbd24213f = {
     .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
     .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
     .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
 };
-static ct_type_descriptor ct_d_5e1771906f51d8e1b97b4e30 = { "System.OverflowException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_a521bca56f1974cbbd24213f, 12u, sizeof(ct_t_143c556968abb53e4e3c125f), _Alignof(ct_t_143c556968abb53e4e3c125f), false, ct_x_71093c344fc3ea1a53385924 };
-static ct_type_descriptor ct_d_44afd0f458a75bae245fb18a = { "Examples.ValueReader", &ct_d_5387ab4162c20a4f61d2862f, &ct_default_vtable, 13u, sizeof(ct_t_5e604eacc407c4d5a6fe8ce6), _Alignof(ct_t_5e604eacc407c4d5a6fe8ce6), false, ct_x_25fb56881d783b7b3349596c };
+const ct_type_descriptor ct_d_5e1771906f51d8e1b97b4e30 = { "System.OverflowException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_a521bca56f1974cbbd24213f, NULL, 0u, 12u, sizeof(ct_t_143c556968abb53e4e3c125f), _Alignof(ct_t_143c556968abb53e4e3c125f), false, ct_x_71093c344fc3ea1a53385924 };
+static const ct_vtable ct_v_70d880717f5c35e9a9f2ef1b = {
+    .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
+    .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
+    .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
+};
+const ct_type_descriptor ct_d_3240a42f24ee5ffcb16d4738 = { "System.SynchronizationLockException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_70d880717f5c35e9a9f2ef1b, NULL, 0u, 13u, sizeof(ct_t_8adee54d3efbf9ece7651659), _Alignof(ct_t_8adee54d3efbf9ece7651659), false, ct_x_3a10057757f7544a14110a5c };
+static const ct_vtable ct_v_3d60803cd75a761aa08ce6fb = {
+    .ToString = ct_h_8a2ef55374b6ffcf35b5d89a, .Equals = ct_object_default_equals, .GetHashCode = ct_object_default_hash,
+    .m_u_29_ct_5Fm_5F30b65dcc4fc13875b80f24d1 = NULL,
+    .g_u_29_ct_5Fg_5Fef628fd20b3b237fa46556d4 = NULL,
+};
+const ct_type_descriptor ct_d_1ea76b8b99b085e2e43c6853 = { "System.ThreadStateException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_3d60803cd75a761aa08ce6fb, NULL, 0u, 14u, sizeof(ct_t_b5e50b31da161bbdd1109f01), _Alignof(ct_t_b5e50b31da161bbdd1109f01), false, ct_x_e81004d8d95333473e418a54 };
+const ct_type_descriptor ct_d_44afd0f458a75bae245fb18a = { "Examples.ValueReader", &ct_d_5387ab4162c20a4f61d2862f, &ct_default_vtable, NULL, 0u, 15u, sizeof(ct_t_5e604eacc407c4d5a6fe8ce6), _Alignof(ct_t_5e604eacc407c4d5a6fe8ce6), false, ct_x_25fb56881d783b7b3349596c };
 static ct_string* ct_box_to_string_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; (void)box; return ct_string_from_bytes((const uint8_t*)"Examples.Pair", 13, "<runtime>", 0); }
 static bool ct_box_equals_s0237cc9215d75be72c301de3(ct_object* a, ct_object* b) { if (b == NULL || b->Type != &ct_desc_box_s0237cc9215d75be72c301de3) return false; ct_box_s0237cc9215d75be72c301de3* left = (ct_box_s0237cc9215d75be72c301de3*)(void*)a; ct_box_s0237cc9215d75be72c301de3* right = (ct_box_s0237cc9215d75be72c301de3*)(void*)b; return (left->Value.u_1_X == right->Value.u_1_X) && (left->Value.u_1_Y == right->Value.u_1_Y); }
 static int32_t ct_box_hash_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; uint32_t result = UINT32_C(2166136261);

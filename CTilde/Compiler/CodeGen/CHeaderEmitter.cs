@@ -13,7 +13,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .Where(method => method.ExportName is not null)
             .OrderBy(method => method.ExportName, StringComparer.Ordinal)
             .ToArray();
-        var signatureText = "draft-0.14\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
+        var signatureText = "draft-0.15\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -24,7 +24,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         if (ExportTypes(exports).Any(type => type.Kind == CTypeKind.EspError))
             writer.Append("#include <esp_err.h>\n");
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
-        writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(14)\n\n");
+        writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(15)\n\n");
         writer.Append("typedef struct ct_object ct_object;\n");
         writer.Append("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;\n");
         writer.Append("typedef void (*ct_panic_handler)(const ct_panic_info* info, void* context);\n");

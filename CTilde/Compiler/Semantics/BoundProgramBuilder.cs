@@ -8,27 +8,46 @@ internal static class BoundProgramBuilder
     {
         var services = new AnalysisServices(model, target, sourceRoot);
         var bodies = ImmutableArray.CreateBuilder<BoundBody>();
-        foreach (var type in model.UserTypes)
+        var analyzedMethods = new HashSet<MethodSymbol>();
+        var analyzedAccessors = new HashSet<(PropertySymbol Property, bool Getter)>();
+        while (AnalyzeAvailableBodies())
         {
-            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque)
-                continue;
-            foreach (var constructor in type.Constructors)
-                AnalyzeBody(services, constructor, bodies);
-            foreach (var method in type.Methods.Where(method => method.ExternName is null))
-                AnalyzeBody(services, method, bodies);
-            foreach (var property in type.Properties)
+        }
+
+        bool AnalyzeAvailableBodies()
+        {
+            var changed = false;
+            foreach (var type in model.UserTypes.ToArray())
             {
-                if (property.Getter is not null)
+                if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Interface)
+                    continue;
+                foreach (var constructor in type.Constructors.Where(constructor => analyzedMethods.Add(constructor)))
                 {
-                    var method = services.GetAccessorMethod(property, getter: true);
-                    AnalyzeBody(services, method, bodies, NameMangler.Getter(property), property, getter: true);
+                    AnalyzeBody(services, constructor, bodies);
+                    changed = true;
                 }
-                if (property.Setter is not null)
+                foreach (var method in type.Methods.Where(method => method.ExternName is null && !method.IsAbstract && !method.IsGenericDefinition).Where(analyzedMethods.Add).ToArray())
                 {
-                    var method = services.GetAccessorMethod(property, getter: false);
-                    AnalyzeBody(services, method, bodies, NameMangler.Setter(property), property, getter: false);
+                    AnalyzeBody(services, method, bodies);
+                    changed = true;
+                }
+                foreach (var property in type.Properties)
+                {
+                    if (property.Getter is not null && !property.IsAbstract && analyzedAccessors.Add((property, true)))
+                    {
+                        var method = services.GetAccessorMethod(property, getter: true);
+                        AnalyzeBody(services, method, bodies, NameMangler.Getter(property), property, getter: true);
+                        changed = true;
+                    }
+                    if (property.Setter is not null && !property.IsAbstract && analyzedAccessors.Add((property, false)))
+                    {
+                        var method = services.GetAccessorMethod(property, getter: false);
+                        AnalyzeBody(services, method, bodies, NameMangler.Setter(property), property, getter: false);
+                        changed = true;
+                    }
                 }
             }
+            return changed;
         }
 
         AnalyzeModuleInitializers(model, services, bodies);

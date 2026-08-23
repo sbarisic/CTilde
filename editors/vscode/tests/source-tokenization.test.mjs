@@ -48,18 +48,18 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.13 keyword receives its intended scope", () => {
+test("every draft 0.15 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
       scope: "storage.type.builtin.ctilde"
     },
     {
-      words: ["public", "internal", "protected", "private", "static", "sealed", "readonly", "const", "unsafe", "virtual", "override", "ref", "out"],
+      words: ["public", "internal", "protected", "private", "static", "sealed", "abstract", "readonly", "volatile", "const", "unsafe", "virtual", "override", "ref", "out"],
       scope: "storage.modifier.ctilde"
     },
     {
-      words: ["break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "return", "switch", "throw", "try", "while"],
+      words: ["break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "return", "switch", "throw", "try", "while"],
       scope: "keyword.control.ctilde"
     },
     {
@@ -94,9 +94,11 @@ test("every draft 0.13 keyword receives its intended scope", () => {
   expectScope("namespace Examples;", "namespace", "keyword.declaration.namespace.ctilde");
   expectScope("public static V operator +(V left, V right)", "operator", "keyword.declaration.operator.ctilde");
   expectScope("class Example", "class", "storage.type.class.ctilde");
+  expectScope("interface IExample", "interface", "storage.type.declaration.ctilde");
   expectScope("struct Example", "struct", "storage.type.struct.ctilde");
   expectScope("enum Example", "enum", "storage.type.enum.ctilde");
   expectScope("opaque Handle", "opaque", "storage.type.declaration.ctilde");
+  expectScope("where T : class", "where", "keyword.other.constraint.ctilde");
   expectScope("asm { nop }", "asm", "keyword.control.asm.ctilde");
   expectScope('asm (clobber("cc")) { nop }', "clobber", "keyword.other.asm-clobber.ctilde");
 });

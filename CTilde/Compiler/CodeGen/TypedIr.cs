@@ -78,6 +78,8 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
         Add(program.Model.EntryPoint);
         foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null || function.Method.IsVirtual || function.Method.IsOverride))
             Add(function.Method);
+        foreach (var function in ir.Functions.Where(function => function.Method.ImplementedInterfaceMethods.Count != 0 || (function.Property?.ImplementedInterfaceProperties.Count ?? 0) != 0))
+            Add(function.Method);
         foreach (var function in ir.Functions.Where(function => function.Method.IsOperator))
             Add(function.Method);
         if (program.Model.Types.TryGetValue("System.Exception", out var exceptionType))
@@ -147,25 +149,25 @@ internal sealed class TypedIrLowerer(BoundProgram program)
         var definitions = ImmutableArray.CreateBuilder<IrFunction>();
         foreach (var type in Model.UserTypes)
         {
-            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque)
+            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Interface)
                 continue;
             foreach (var constructor in type.Constructors)
                 AddFunction(FindBoundBody(constructor));
-            foreach (var method in type.Methods.Where(method => method.ExternName is null))
+            foreach (var method in type.Methods.Where(method => method.ExternName is null && !method.IsAbstract && !method.IsGenericDefinition))
                 AddFunction(FindBoundBody(method));
             foreach (var property in type.Properties)
             {
-                if (property.Getter is not null)
-                    AddFunction(FindBoundBody(property.Getter, $"get_{property.Name}"), property, isGetter: true);
-                if (property.Setter is not null)
-                    AddFunction(FindBoundBody(property.Setter, $"set_{property.Name}"), property, isGetter: false);
+                if (property.Getter is not null && !property.IsAbstract)
+                    AddFunction(FindBoundBody(property, getter: true), property, isGetter: true);
+                if (property.Setter is not null && !property.IsAbstract)
+                    AddFunction(FindBoundBody(property, getter: false), property, isGetter: false);
             }
         }
         var moduleInitializers = Model.UserTypes.SelectMany(type => type.Fields)
             .Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>")
             .Select(field => new IrStaticInitializer(
                 field,
-                FindBoundBody(field.Syntax!, "<module_init>"),
+                FindInitializerBoundBody(field.Syntax!),
                 field.Type,
                 program.SemanticMap.GetValueOrDefault(field.Initializer!)))
             .ToImmutableArray();
@@ -266,9 +268,17 @@ internal sealed class TypedIrLowerer(BoundProgram program)
             ReferenceEquals(candidate.Method.Syntax, method.Syntax) && candidate.Method.IsStatic == method.IsStatic) ??
         throw new InvalidOperationException($"No bound body exists for '{method.ContainingType.FullName}.{method.Name}'.");
 
-    private BoundBody FindBoundBody(SyntaxNode syntax, string methodName) =>
-        program.Bodies.FirstOrDefault(candidate => candidate.Method.Name == methodName && ReferenceEquals(candidate.Method.Syntax, syntax)) ??
-        throw new InvalidOperationException($"No bound body exists for '{methodName}'.");
+    private BoundBody FindBoundBody(PropertySymbol property, bool getter)
+    {
+        var methodName = getter ? $"get_{property.Name}" : $"set_{property.Name}";
+        return program.Bodies.FirstOrDefault(candidate =>
+            candidate.Method.Name == methodName && candidate.Method.ContainingType == property.ContainingType) ??
+            throw new InvalidOperationException($"No bound body exists for '{property.ContainingType.FullName}.{methodName}'.");
+    }
+
+    private BoundBody FindInitializerBoundBody(SyntaxNode syntax) =>
+        program.Bodies.FirstOrDefault(candidate => candidate.Method.Name == "<module_init>" && ReferenceEquals(candidate.Method.Syntax, syntax)) ??
+        throw new InvalidOperationException("No bound body exists for '<module_init>'.");
 
     private static IEnumerable<BoundExpression> BoundExpressions(BoundStatement statement)
     {

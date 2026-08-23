@@ -9,7 +9,8 @@ internal sealed partial class Parser
         SyntaxKind.PublicKeyword, SyntaxKind.InternalKeyword, SyntaxKind.ProtectedKeyword,
         SyntaxKind.PrivateKeyword, SyntaxKind.StaticKeyword, SyntaxKind.SealedKeyword,
         SyntaxKind.ReadonlyKeyword, SyntaxKind.ConstKeyword, SyntaxKind.UnsafeKeyword,
-        SyntaxKind.VirtualKeyword, SyntaxKind.OverrideKeyword,
+        SyntaxKind.VirtualKeyword, SyntaxKind.OverrideKeyword, SyntaxKind.AbstractKeyword,
+        SyntaxKind.VolatileKeyword,
     ];
 
     private readonly SourceText _source;
@@ -18,6 +19,7 @@ internal sealed partial class Parser
     private readonly List<SyntaxToken> _missingTokens = [];
     private readonly List<SyntaxToken> _skippedTokens = [];
     private int _position;
+    private int _splitGreaterPosition = -1;
 
     public Parser(SourceText source, ImmutableArray<SyntaxToken> tokens, DiagnosticBag diagnostics)
     {
@@ -34,6 +36,27 @@ internal sealed partial class Parser
     private SyntaxToken Peek(int offset) => _tokens[Math.Clamp(_position + offset, 0, _tokens.Length - 1)];
     private SyntaxToken NextToken() { var token = Current; _position = Math.Min(_position + 1, _tokens.Length - 1); return token; }
     private SyntaxToken SkipToken() { var token = NextToken(); if (token.Kind != SyntaxKind.EndOfFileToken) _skippedTokens.Add(token); return token; }
+
+    private bool AtTypeArgumentClose => Current.Kind is SyntaxKind.GreaterToken or SyntaxKind.GreaterGreaterToken;
+
+    private SyntaxToken ConsumeTypeArgumentClose()
+    {
+        if (Current.Kind == SyntaxKind.GreaterToken)
+            return NextToken();
+        if (Current.Kind == SyntaxKind.GreaterGreaterToken)
+        {
+            var original = Current;
+            if (_splitGreaterPosition == _position)
+            {
+                _splitGreaterPosition = -1;
+                _position = Math.Min(_position + 1, _tokens.Length - 1);
+                return new SyntaxToken(SyntaxKind.GreaterToken, _source, new TextSpan(original.Span.Start + 1, 1), ">");
+            }
+            _splitGreaterPosition = _position;
+            return new SyntaxToken(SyntaxKind.GreaterToken, _source, new TextSpan(original.Span.Start, 1), ">");
+        }
+        return Match(SyntaxKind.GreaterToken);
+    }
 
     public CompilationUnitSyntax ParseCompilationUnit()
     {
@@ -88,7 +111,7 @@ internal sealed partial class Parser
             var before = _position;
             var attributes = ParseAttributes();
             var modifiers = ParseModifiers();
-            if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.EnumKeyword)
+            if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.InterfaceKeyword or SyntaxKind.EnumKeyword)
                 types.Add(ParseTypeDeclaration(attributes, modifiers));
             else if (Current.Kind == SyntaxKind.DelegateKeyword)
                 types.Add(ParseDelegateDeclaration(attributes, modifiers));
@@ -96,8 +119,8 @@ internal sealed partial class Parser
                 types.Add(ParseOpaqueDeclaration(attributes, modifiers));
             else
             {
-                Report("CT0102", "Expected a class, structure, enumeration, delegate, or opaque declaration.", Current);
-                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
+                Report("CT0102", "Expected a class, structure, interface, enumeration, delegate, or opaque declaration.", Current);
+                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
             }
             if (_position == before)
                 SkipToken();
@@ -121,7 +144,9 @@ internal sealed partial class Parser
         Match(SyntaxKind.DelegateKeyword);
         var returnType = ParseType();
         var name = Match(SyntaxKind.IdentifierToken);
+        var typeParameters = ParseTypeParameters();
         var parameters = ParseParameters();
+        var constraints = ParseConstraintClauses();
         var end = Match(SyntaxKind.SemicolonToken).Span.End;
         return new TypeDeclarationSyntax(
             _source,
@@ -135,7 +160,10 @@ internal sealed partial class Parser
             null,
             [],
             returnType,
-            parameters);
+            parameters,
+            typeParameters,
+            [],
+            constraints);
     }
 
     private TypeDeclarationSyntax ParseTypeDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)
@@ -145,22 +173,35 @@ internal sealed partial class Parser
         var kind = kindToken.Kind switch
         {
             SyntaxKind.StructKeyword => TypeDeclarationKind.Struct,
+            SyntaxKind.InterfaceKeyword => TypeDeclarationKind.Interface,
             SyntaxKind.EnumKeyword => TypeDeclarationKind.Enum,
             _ => TypeDeclarationKind.Class,
         };
         var name = Match(SyntaxKind.IdentifierToken);
+        var typeParameters = kind == TypeDeclarationKind.Enum ? ImmutableArray<TypeParameterSyntax>.Empty : ParseTypeParameters();
         TypeSyntax? underlying = null;
         TypeSyntax? baseType = null;
+        var baseTypes = ImmutableArray.CreateBuilder<TypeSyntax>();
         if (kind == TypeDeclarationKind.Enum && Current.Kind == SyntaxKind.ColonToken)
         {
             NextToken();
             underlying = ParseType();
         }
-        else if (kind == TypeDeclarationKind.Class && Current.Kind == SyntaxKind.ColonToken)
+        else if (kind is TypeDeclarationKind.Class or TypeDeclarationKind.Struct or TypeDeclarationKind.Interface && Current.Kind == SyntaxKind.ColonToken)
         {
             NextToken();
-            baseType = ParseType();
+            while (Current.Kind is not SyntaxKind.OpenBraceToken and not SyntaxKind.WhereKeyword and not SyntaxKind.EndOfFileToken)
+            {
+                var candidate = ParseType();
+                baseTypes.Add(candidate);
+                if (Current.Kind != SyntaxKind.CommaToken)
+                    break;
+                NextToken();
+            }
+            if (kind == TypeDeclarationKind.Class && baseTypes.Count != 0)
+                baseType = baseTypes[0];
         }
+        var constraints = ParseConstraintClauses();
         Match(SyntaxKind.OpenBraceToken);
 
         var members = ImmutableArray.CreateBuilder<MemberDeclarationSyntax>();
@@ -176,7 +217,7 @@ internal sealed partial class Parser
                 SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
-        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, []);
+        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, [], typeParameters, baseTypes.ToImmutable(), constraints);
     }
 
     private EnumMemberSyntax ParseEnumMember()
@@ -256,9 +297,11 @@ internal sealed partial class Parser
             return new OperatorDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, operatorToken, parameters, body);
         }
         var memberName = Match(SyntaxKind.IdentifierToken);
+        var typeParameters = ParseTypeParameters();
         if (Current.Kind == SyntaxKind.OpenParenToken)
         {
             var parameters = ParseParameters();
+            var constraints = ParseConstraintClauses();
             BlockStatementSyntax? body;
             int end;
             if (Current.Kind == SyntaxKind.SemicolonToken)
@@ -271,8 +314,11 @@ internal sealed partial class Parser
                 body = ParseBlock();
                 end = body.Span.End;
             }
-            return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, memberName.Text, parameters, body);
+            return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, memberName.Text, parameters, body, typeParameters, constraints);
         }
+
+        if (!typeParameters.IsDefaultOrEmpty)
+            Report("CT0111", "Only methods can declare member type parameters.", memberName);
 
         if (Current.Kind == SyntaxKind.OpenBraceToken)
         {
@@ -347,6 +393,75 @@ internal sealed partial class Parser
         return parameters.ToImmutable();
     }
 
+    private ImmutableArray<TypeParameterSyntax> ParseTypeParameters()
+    {
+        if (Current.Kind != SyntaxKind.LessToken)
+            return [];
+        NextToken();
+        var parameters = ImmutableArray.CreateBuilder<TypeParameterSyntax>();
+        while (!AtTypeArgumentClose && Current.Kind != SyntaxKind.EndOfFileToken)
+        {
+            var name = Match(SyntaxKind.IdentifierToken);
+            parameters.Add(new TypeParameterSyntax(_source, name.Span, name.Text));
+            if (Current.Kind != SyntaxKind.CommaToken)
+                break;
+            NextToken();
+        }
+        ConsumeTypeArgumentClose();
+        return parameters.ToImmutable();
+    }
+
+    private ImmutableArray<TypeParameterConstraintClauseSyntax> ParseConstraintClauses()
+    {
+        var clauses = ImmutableArray.CreateBuilder<TypeParameterConstraintClauseSyntax>();
+        while (Current.Kind == SyntaxKind.WhereKeyword)
+        {
+            var start = NextToken().Span.Start;
+            var name = Match(SyntaxKind.IdentifierToken);
+            Match(SyntaxKind.ColonToken);
+            var constraints = ImmutableArray.CreateBuilder<TypeParameterConstraintSyntax>();
+            while (Current.Kind is not SyntaxKind.WhereKeyword and not SyntaxKind.OpenBraceToken and not SyntaxKind.SemicolonToken and not SyntaxKind.EndOfFileToken)
+            {
+                var constraintStart = Current.Span.Start;
+                TypeParameterConstraintSyntax constraint;
+                if (Current.Kind == SyntaxKind.ClassKeyword)
+                {
+                    var token = NextToken();
+                    constraint = new TypeParameterConstraintSyntax(_source, token.Span, TypeParameterConstraintKind.Class);
+                }
+                else if (Current.Kind == SyntaxKind.StructKeyword)
+                {
+                    var token = NextToken();
+                    constraint = new TypeParameterConstraintSyntax(_source, token.Span, TypeParameterConstraintKind.Struct);
+                }
+                else if (Current.Kind == SyntaxKind.UnmanagedKeyword)
+                {
+                    var token = NextToken();
+                    constraint = new TypeParameterConstraintSyntax(_source, token.Span, TypeParameterConstraintKind.Unmanaged);
+                }
+                else if (Current.Kind == SyntaxKind.NewKeyword && Peek(1).Kind == SyntaxKind.OpenParenToken)
+                {
+                    NextToken();
+                    NextToken();
+                    var close = Match(SyntaxKind.CloseParenToken);
+                    constraint = new TypeParameterConstraintSyntax(_source, TextSpan.FromBounds(constraintStart, close.Span.End), TypeParameterConstraintKind.Constructor);
+                }
+                else
+                {
+                    var type = ParseType();
+                    constraint = new TypeParameterConstraintSyntax(_source, type.Span, TypeParameterConstraintKind.Type, type);
+                }
+                constraints.Add(constraint);
+                if (Current.Kind != SyntaxKind.CommaToken)
+                    break;
+                NextToken();
+            }
+            var end = constraints.Count == 0 ? name.Span.End : constraints[^1].Span.End;
+            clauses.Add(new TypeParameterConstraintClauseSyntax(_source, TextSpan.FromBounds(start, end), name.Text, constraints.ToImmutable()));
+        }
+        return clauses.ToImmutable();
+    }
+
     private BlockStatementSyntax ParseBlock()
     {
         var open = Match(SyntaxKind.OpenBraceToken);
@@ -384,6 +499,7 @@ internal sealed partial class Parser
             SyntaxKind.BreakKeyword => ParseSimpleJump(true),
             SyntaxKind.ContinueKeyword => ParseSimpleJump(false),
             SyntaxKind.DeferKeyword => ParseDefer(),
+            SyntaxKind.LockKeyword => ParseLock(),
             SyntaxKind.ReturnKeyword => ParseReturn(),
             SyntaxKind.ThrowKeyword => ParseThrow(),
             SyntaxKind.TryKeyword => ParseTry(),
@@ -547,6 +663,16 @@ internal sealed partial class Parser
         return new DeferStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
     }
 
+    private LockStatementSyntax ParseLock()
+    {
+        var start = NextToken().Span.Start;
+        Match(SyntaxKind.OpenParenToken);
+        var expression = ParseExpression();
+        Match(SyntaxKind.CloseParenToken);
+        var body = ParseBlock();
+        return new LockStatementSyntax(_source, TextSpan.FromBounds(start, body.Span.End), expression, body);
+    }
+
     private ThrowStatementSyntax ParseThrow()
     {
         var start = NextToken().Span.Start;
@@ -665,7 +791,9 @@ internal sealed partial class Parser
             {
                 NextToken();
                 var name = Match(SyntaxKind.IdentifierToken);
-                expression = new MemberAccessExpressionSyntax(_source, TextSpan.FromBounds(expression.Span.Start, name.Span.End), expression, name.Text);
+                var typeArguments = LooksLikeInvocationTypeArguments() ? ParseInvocationTypeArguments() : [];
+                var end = typeArguments.IsDefaultOrEmpty ? name.Span.End : typeArguments[^1].Span.End;
+                expression = new MemberAccessExpressionSyntax(_source, TextSpan.FromBounds(expression.Span.Start, end), expression, name.Text, typeArguments);
             }
             else if (Current.Kind == SyntaxKind.OpenParenToken)
             {
@@ -723,13 +851,53 @@ internal sealed partial class Parser
                 return new LiteralExpressionSyntax(_source, token.Span, token.Value, token.Kind);
             case SyntaxKind.IdentifierToken:
                 NextToken();
-                return new NameExpressionSyntax(_source, token.Span, token.Text);
+                var typeArguments = LooksLikeInvocationTypeArguments() ? ParseInvocationTypeArguments() : [];
+                return new NameExpressionSyntax(_source, TextSpan.FromBounds(token.Span.Start, typeArguments.IsDefaultOrEmpty ? token.Span.End : typeArguments[^1].Span.End), token.Text, typeArguments);
             default:
                 Report("CT0105", "Expected an expression.", token);
                 if (token.Kind != SyntaxKind.EndOfFileToken)
                     SkipToken();
                 return new LiteralExpressionSyntax(_source, token.Span, new NumericLiteralValue(0, IntegerLiteralSuffix.None, null), SyntaxKind.NumberToken);
         }
+    }
+
+    private bool LooksLikeInvocationTypeArguments()
+    {
+        if (Current.Kind != SyntaxKind.LessToken)
+            return false;
+        var index = _position;
+        var depth = 0;
+        while (index < _tokens.Length)
+        {
+            depth += _tokens[index].Kind switch
+            {
+                SyntaxKind.LessToken => 1,
+                SyntaxKind.GreaterToken => -1,
+                SyntaxKind.GreaterGreaterToken => -2,
+                _ => 0,
+            };
+            index++;
+            if (depth == 0)
+                return index < _tokens.Length && _tokens[index].Kind is SyntaxKind.OpenParenToken or SyntaxKind.DotToken;
+            if (depth < 0 || _tokens[index - 1].Kind is SyntaxKind.SemicolonToken or SyntaxKind.EndOfFileToken)
+                return false;
+        }
+        return false;
+    }
+
+    private ImmutableArray<TypeSyntax> ParseInvocationTypeArguments()
+    {
+        Match(SyntaxKind.LessToken);
+        var arguments = ImmutableArray.CreateBuilder<TypeSyntax>();
+        while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
+        {
+            arguments.Add(ParseType());
+            if (Current.Kind != SyntaxKind.CommaToken)
+                break;
+            NextToken();
+        }
+        Match(SyntaxKind.GreaterToken);
+        return arguments.ToImmutable();
     }
 
     private NewExpressionSyntax ParseNew()

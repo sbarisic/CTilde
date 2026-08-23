@@ -1,0 +1,187 @@
+using System;
+using System.Runtime;
+
+namespace Examples.TCan485MemoryValidation;
+
+public struct LayoutReferences
+{
+    public object Object;
+    public string Text;
+    public int Number;
+}
+
+public sealed class LayoutEmpty
+{
+}
+
+public sealed class LayoutFields
+{
+    public int Number;
+    public object Object;
+    public string Text;
+}
+
+public static class NativeMemoryDiagnostics
+{
+    [Extern("ct_test_memory_layout_report")]
+    [NoAlloc]
+    public static void ReportLayout();
+
+    [Extern("ct_memory_diagnostic_live_allocations")]
+    [NoAlloc]
+    public static uint LiveAllocations();
+
+    [Extern("ct_memory_diagnostic_live_objects")]
+    [NoAlloc]
+    public static uint LiveObjects();
+
+    [Extern("ct_memory_diagnostic_total_allocations")]
+    [NoAlloc]
+    public static uint TotalAllocations();
+}
+
+public static class Program
+{
+    [Export("ctilde_add")]
+    public static int Add(int left, int right)
+    {
+        return left + right;
+    }
+
+    private static void ReportResult(string name, bool passed)
+    {
+        Console.Write(name);
+        if (passed)
+            Console.WriteLine(" ok");
+        else
+            Console.WriteLine(" FAILED");
+    }
+
+    private static string BuildDynamicString(string value)
+    {
+        return "dynamic-" + value;
+    }
+
+    private static bool ClassAllocationFails()
+    {
+        Memory.TestFailAllocationAfter(0);
+        try
+        {
+            LayoutEmpty value = new LayoutEmpty();
+            return value == null;
+        }
+        catch (OutOfMemoryException)
+        {
+            return true;
+        }
+        finally
+        {
+            Memory.TestFailAllocationAfter(-1);
+        }
+    }
+
+    private static bool ArrayAllocationFails()
+    {
+        Memory.TestFailAllocationAfter(0);
+        try
+        {
+            int[] values = new int[4];
+            return values.Length == 0;
+        }
+        catch (OutOfMemoryException)
+        {
+            return true;
+        }
+        finally
+        {
+            Memory.TestFailAllocationAfter(-1);
+        }
+    }
+
+    private static bool BoxAllocationFails()
+    {
+        Memory.TestFailAllocationAfter(0);
+        try
+        {
+            object value = 42;
+            return value == null;
+        }
+        catch (OutOfMemoryException)
+        {
+            return true;
+        }
+        finally
+        {
+            Memory.TestFailAllocationAfter(-1);
+        }
+    }
+
+    private static bool StringAllocationFails()
+    {
+        Memory.TestFailAllocationAfter(0);
+        try
+        {
+            string value = BuildDynamicString("value");
+            return value == null;
+        }
+        catch (OutOfMemoryException)
+        {
+            return true;
+        }
+        finally
+        {
+            Memory.TestFailAllocationAfter(-1);
+        }
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        // Keep every representative layout reachable in the generated image.
+        {
+            LayoutEmpty empty = new LayoutEmpty();
+            LayoutFields fields = new LayoutFields();
+            LayoutReferences references = new LayoutReferences();
+            LayoutReferences[] structures = new LayoutReferences[1];
+            object scalarBox = 7;
+            object structureBox = references;
+            fields.Object = empty;
+            fields.Text = "layout";
+            structures[0] = references;
+            Console.WriteLine(scalarBox != null && structureBox != null);
+        }
+
+        uint liveAllocationsBefore = NativeMemoryDiagnostics.LiveAllocations();
+        uint liveObjectsBefore = NativeMemoryDiagnostics.LiveObjects();
+        uint totalAllocationsBefore = NativeMemoryDiagnostics.TotalAllocations();
+
+        NativeMemoryDiagnostics.ReportLayout();
+        ReportResult("OOM class", ClassAllocationFails());
+        ReportResult("OOM array", ArrayAllocationFails());
+        ReportResult("OOM box", BoxAllocationFails());
+        ReportResult("OOM string", StringAllocationFails());
+
+        {
+            LayoutEmpty recoveredClass = new LayoutEmpty();
+            int[] recoveredArray = new int[2];
+            object recoveredBox = 99;
+            string recoveredString = BuildDynamicString("recovered");
+            bool recovered = recoveredClass != null && recoveredArray.Length == 2 && recoveredBox != null && recoveredString.Length > 0;
+            ReportResult("OOM recovery", recovered);
+        }
+
+        Console.Write("MEMORY baseline ");
+        Console.Write(liveAllocationsBefore);
+        Console.Write(" ");
+        Console.Write(liveObjectsBefore);
+        Console.Write(" ");
+        Console.WriteLine(totalAllocationsBefore);
+        Console.Write("MEMORY final ");
+        Console.Write(NativeMemoryDiagnostics.LiveAllocations());
+        Console.Write(" ");
+        Console.Write(NativeMemoryDiagnostics.LiveObjects());
+        Console.Write(" ");
+        Console.WriteLine(NativeMemoryDiagnostics.TotalAllocations());
+        Console.WriteLine("CTILDE_MEMORY_OK");
+    }
+}

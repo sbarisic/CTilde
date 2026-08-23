@@ -75,7 +75,7 @@ internal sealed class DocumentationIndex
     private static Dictionary<object, string> CreateSymbolIds(CompilationModel model)
     {
         var result = new Dictionary<object, string>(ReferenceEqualityComparer.Instance);
-        foreach (var type in model.Types.Values)
+        foreach (var type in model.Types.Values.Where(type => !type.IsOpenConstructed).Distinct())
         {
             result[type] = $"T:{type.FullName}";
             foreach (var field in type.Fields.Where(field => field.Syntax is FieldDeclarationSyntax))
@@ -97,6 +97,10 @@ internal sealed class DocumentationIndex
             : method.IsOperator
                 ? $"op_{OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length)}"
                 : method.Name;
+        if (method.IsGenericDefinition)
+            name += $"``{method.TypeParameters.Length}";
+        else if (!method.TypeArguments.IsDefaultOrEmpty)
+            name += $"<{string.Join(",", method.TypeArguments.Select(argument => argument.DisplayName))}>";
         return $"M:{method.ContainingType.FullName}.{name}({string.Join(",", method.Parameters.Select(ParameterId))})";
     }
 
@@ -113,7 +117,7 @@ internal sealed class DocumentationIndex
 
     private static IEnumerable<(object Symbol, SyntaxNode Syntax)> DocumentableSymbols(CompilationModel model)
     {
-        foreach (var type in model.Types.Values.Where(type => type.Syntax is not null))
+        foreach (var type in model.Types.Values.Where(type => type.Syntax is not null && !type.IsOpenConstructed).Distinct())
         {
             yield return (type, type.Syntax!);
             foreach (var field in type.Fields.Where(field => field.Syntax is FieldDeclarationSyntax))

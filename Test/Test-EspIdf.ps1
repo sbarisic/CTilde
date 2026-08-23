@@ -2,13 +2,16 @@
 param(
     [string]$IdfPath = "C:\esp\v6.0.2\esp-idf",
     [string]$ToolsPath = "C:\Espressif\tools",
-    [switch]$SkipFirmwareBuild
+    [switch]$SkipFirmwareBuild,
+    [switch]$AcceptMemoryBaseline
 )
 
 $ErrorActionPreference = "Stop"
 $repositoryDirectory = Split-Path -Parent $PSScriptRoot
 $exampleDirectory = Join-Path $repositoryDirectory "examples\TCan485"
 $temporaryDirectory = Join-Path ([IO.Path]::GetTempPath()) ("ctilde-esp-tests-" + [guid]::NewGuid().ToString("N"))
+$memoryBaselinePath = Join-Path $PSScriptRoot "Baselines\esp-idf-memory.json"
+$memorySupportPath = Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"
 
 function Find-Compiler([string]$root, [string]$name) {
     $compiler = Get-ChildItem -LiteralPath $root -Recurse -Filter $name -File -ErrorAction SilentlyContinue |
@@ -25,6 +28,72 @@ function Invoke-Checked([string]$file, [string[]]$arguments) {
     if ($LASTEXITCODE -ne 0) {
         throw "$file failed with exit code $LASTEXITCODE."
     }
+}
+
+function Invoke-Captured([string]$file, [string[]]$arguments) {
+    $previousPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $file @arguments 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "$file failed with exit code $LASTEXITCODE.`n$output" }
+        return $output
+    }
+    finally {
+        $ErrorActionPreference = $previousPreference
+    }
+}
+
+function Write-Utf8NoBom([string]$path, [string]$text) {
+    [IO.File]::WriteAllText($path, $text, [Text.UTF8Encoding]::new($false))
+}
+
+function Test-MemoryBudget([string]$target, [string]$compiler) {
+    Push-Location $exampleDirectory
+    try {
+        $sizeOutput = Invoke-Captured "idf.py" @("size")
+    }
+    finally {
+        Pop-Location
+    }
+    $sizePath = Join-Path $temporaryDirectory "size-$target.txt"
+    Write-Utf8NoBom $sizePath $sizeOutput
+    $parseSize = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseIdfSize(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $sizeJson = Invoke-Captured "node" @("-e", $parseSize, $memorySupportPath, $sizePath)
+    $size = $sizeJson | ConvertFrom-Json
+    $actual = [ordered]@{
+        tools = [ordered]@{
+            idf = (Invoke-Captured "idf.py" @("--version")).Trim()
+            compiler = (Invoke-Captured $compiler @("-dumpfullversion")).Trim()
+        }
+        targets = [ordered]@{
+            $target = [ordered]@{
+                binaryBytes = [int64]$size.binaryBytes
+                imageBytes = [int64]$size.imageBytes
+                flashCode = [int64]$size.sections.flashCode
+                flashData = [int64]$size.sections.flashData
+                iram = [int64]$size.sections.iram
+                dram = [int64]$size.sections.dram
+            }
+        }
+    }
+    $actualPath = Join-Path $temporaryDirectory "memory-$target.json"
+    Write-Utf8NoBom $actualPath (($actual | ConvertTo-Json -Depth 20) + [Environment]::NewLine)
+    if ($AcceptMemoryBaseline) {
+        if (-not (Test-Path -LiteralPath $memoryBaselinePath)) {
+            throw "Physical ESP32 measurements must establish $memoryBaselinePath before cross-target rebaselining."
+        }
+        $update = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>{const old=JSON.parse(fs.readFileSync(process.argv[2],'utf8'));const actual=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));process.stdout.write(m.serializeHardwareReport(m.updateMemoryBaseline(old,actual)));}))"
+        $updated = Invoke-Captured "node" @("-e", $update, $memorySupportPath, $memoryBaselinePath, $actualPath)
+        Write-Utf8NoBom $memoryBaselinePath $updated
+    }
+    else {
+        if (-not (Test-Path -LiteralPath $memoryBaselinePath)) {
+            throw "ESP memory baseline is missing; run connected acceptance with -AcceptMemoryBaseline first."
+        }
+        $validate = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>m.validateMemoryBaseline(JSON.parse(fs.readFileSync(process.argv[2],'utf8')),JSON.parse(fs.readFileSync(process.argv[3],'utf8')))))"
+        Invoke-Checked "node" @("-e", $validate, $memorySupportPath, $memoryBaselinePath, $actualPath)
+    }
+    Write-Host "PASS $target memory budget"
 }
 
 New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
@@ -61,7 +130,11 @@ try {
         $xtensa = Find-Compiler (Join-Path $ToolsPath "xtensa-esp-elf") "xtensa-esp32-elf-gcc.exe"
         $riscv = Find-Compiler (Join-Path $ToolsPath "riscv32-esp-elf") "riscv32-esp-elf-gcc.exe"
         foreach ($compiler in @($xtensa, $riscv)) {
-            foreach ($source in @($hello, $exceptions, $arcHeap, $math, $operators, $vectors, $assembly)) {
+            # These standalone checks intentionally use only the portable shim include
+            # directory. Runtime-backed Thread/Mutex code requires ESP-IDF's FreeRTOS
+            # headers and configuration and is therefore validated by the complete
+            # firmware builds below instead of this context-free syntax pass.
+            foreach ($source in @($hello, $exceptions, $math, $operators, $vectors, $assembly)) {
                 Invoke-Checked $compiler @(
                     "-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
                     "-I", (Join-Path $exampleDirectory "main"),
@@ -74,8 +147,10 @@ try {
             $buildScript = Join-Path $exampleDirectory "Build.ps1"
             & $buildScript -IdfPath $IdfPath -Target esp32
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for esp32 with exit code $LASTEXITCODE." }
+            Test-MemoryBudget "esp32" $xtensa
             & $buildScript -IdfPath $IdfPath -Target esp32c3
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for esp32c3 with exit code $LASTEXITCODE." }
+            Test-MemoryBudget "esp32c3" $riscv
             & $buildScript -IdfPath $IdfPath -Target esp32 -Source $assemblySource
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for inline assembly on esp32 with exit code $LASTEXITCODE." }
             & $buildScript -IdfPath $IdfPath -Target esp32c3 -Source $assemblySource

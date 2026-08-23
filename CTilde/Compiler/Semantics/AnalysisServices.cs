@@ -127,6 +127,7 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Float => "float",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class or CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
+        CTypeKind.Interface => "ct_object*",
         CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
         CTypeKind.EspError => "esp_err_t",
         CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
@@ -175,7 +176,7 @@ internal sealed class AnalysisServices : ILoweringServices
     {
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
-        CTypeKind.String or CTypeKind.Class or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
+        CTypeKind.String or CTypeKind.Class or CTypeKind.Interface or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
         CTypeKind.Opaque => $"({CTypeName(type)})0",
         CTypeKind.EspError => "ESP_OK",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
@@ -223,7 +224,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public string DescriptorExpression(CType type) => type.Kind switch
     {
         CTypeKind.String => "&ct_desc_string",
-        CTypeKind.Class or CTypeKind.Delegate => $"&{CEmitter.DescriptorName(type.Symbol!)}",
+        CTypeKind.Class or CTypeKind.Interface or CTypeKind.Delegate => $"&{CEmitter.DescriptorName(type.Symbol!)}",
         CTypeKind.Array => $"&{CEmitter.ArrayDescriptorName(type.ElementType!)}",
         _ => $"&{CEmitter.BoxDescriptorName(type)}",
     };

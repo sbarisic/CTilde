@@ -51,6 +51,7 @@ public enum SyntaxKind
     LessLessToken,
     GreaterGreaterToken,
 
+    AbstractKeyword,
     BoolKeyword,
     AsKeyword,
     AsmKeyword,
@@ -78,9 +79,11 @@ public enum SyntaxKind
     IfKeyword,
     InKeyword,
     IntKeyword,
+    InterfaceKeyword,
     InternalKeyword,
     IsKeyword,
     LongKeyword,
+    LockKeyword,
     NintKeyword,
     NuintKeyword,
     NamespaceKeyword,
@@ -119,6 +122,8 @@ public enum SyntaxKind
     VirtualKeyword,
     VoidKeyword,
     WhileKeyword,
+    VolatileKeyword,
+    WhereKeyword,
     GetKeyword,
     SetKeyword,
 }
@@ -204,6 +209,11 @@ public abstract record SyntaxNode(SourceText Source, TextSpan Span)
                 yield return node;
             else if (value is System.Collections.IEnumerable sequence && value is not string)
             {
+                var valueType = value.GetType();
+                if (valueType.IsGenericType &&
+                    valueType.GetGenericTypeDefinition() == typeof(ImmutableArray<>) &&
+                    valueType.GetProperty(nameof(ImmutableArray<int>.IsDefault))?.GetValue(value) is true)
+                    continue;
                 foreach (var item in sequence)
                     if (item is SyntaxNode child)
                         yield return child;
@@ -287,9 +297,25 @@ public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, stri
 
 public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Name, bool IsFileScoped) : SyntaxNode(Source, Span);
 
-public enum TypeDeclarationKind { Class, Struct, Enum, Delegate, Opaque }
+public enum TypeDeclarationKind { Class, Struct, Interface, Enum, Delegate, Opaque }
 
 public enum ParameterPassingKind { Value, Ref, In, Out }
+
+public enum TypeParameterConstraintKind { Type, Class, Struct, Unmanaged, Constructor }
+
+public sealed record TypeParameterSyntax(SourceText Source, TextSpan Span, string Name) : SyntaxNode(Source, Span);
+
+public sealed record TypeParameterConstraintSyntax(
+    SourceText Source,
+    TextSpan Span,
+    TypeParameterConstraintKind Kind,
+    TypeSyntax? Type = null) : SyntaxNode(Source, Span);
+
+public sealed record TypeParameterConstraintClauseSyntax(
+    SourceText Source,
+    TextSpan Span,
+    string TypeParameterName,
+    ImmutableArray<TypeParameterConstraintSyntax> Constraints) : SyntaxNode(Source, Span);
 
 public sealed record TypeDeclarationSyntax(
     SourceText Source,
@@ -303,7 +329,10 @@ public sealed record TypeDeclarationSyntax(
     TypeSyntax? EnumUnderlyingType,
     ImmutableArray<EnumMemberSyntax> EnumMembers,
     TypeSyntax? DelegateReturnType,
-    ImmutableArray<ParameterSyntax> DelegateParameters) : SyntaxNode(Source, Span);
+    ImmutableArray<ParameterSyntax> DelegateParameters,
+    ImmutableArray<TypeParameterSyntax> TypeParameters = default,
+    ImmutableArray<TypeSyntax> BaseTypes = default,
+    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default) : SyntaxNode(Source, Span);
 
 public sealed record EnumMemberSyntax(SourceText Source, TextSpan Span, string Name, ExpressionSyntax? Value) : SyntaxNode(Source, Span);
 
@@ -350,7 +379,9 @@ public sealed record MethodDeclarationSyntax(
     TypeSyntax ReturnType,
     string Name,
     ImmutableArray<ParameterSyntax> Parameters,
-    BlockStatementSyntax? Body) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+    BlockStatementSyntax? Body,
+    ImmutableArray<TypeParameterSyntax> TypeParameters = default,
+    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 
 public sealed record OperatorDeclarationSyntax(
     SourceText Source,
@@ -411,6 +442,7 @@ public sealed record ForeachStatementSyntax(SourceText Source, TextSpan Span, Ty
 public sealed record BreakStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record ContinueStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record DeferStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : StatementSyntax(Source, Span);
+public sealed record LockStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, BlockStatementSyntax Body) : StatementSyntax(Source, Span);
 public sealed record ReturnStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
 public sealed record ThrowStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
 public sealed record TryStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body, ImmutableArray<CatchClauseSyntax> Catches, FinallyClauseSyntax? Finally) : StatementSyntax(Source, Span);
@@ -442,14 +474,14 @@ public sealed record SwitchLabelSyntax(SourceText Source, TextSpan Span, Express
 public abstract record ExpressionSyntax(SourceText Source, TextSpan Span) : SyntaxNode(Source, Span);
 public sealed record ArgumentSyntax(SourceText Source, TextSpan Span, ParameterPassingKind PassingKind, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
 public sealed record LiteralExpressionSyntax(SourceText Source, TextSpan Span, object? Value, SyntaxKind LiteralKind) : ExpressionSyntax(Source, Span);
-public sealed record NameExpressionSyntax(SourceText Source, TextSpan Span, string Name) : ExpressionSyntax(Source, Span);
+public sealed record NameExpressionSyntax(SourceText Source, TextSpan Span, string Name, ImmutableArray<TypeSyntax> TypeArguments = default) : ExpressionSyntax(Source, Span);
 public sealed record ThisExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
 public sealed record BaseExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
 public sealed record ParenthesizedExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : ExpressionSyntax(Source, Span);
 public sealed record UnaryExpressionSyntax(SourceText Source, TextSpan Span, SyntaxKind OperatorKind, ExpressionSyntax Operand, bool IsPostfix = false) : ExpressionSyntax(Source, Span);
 public sealed record BinaryExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Left, SyntaxKind OperatorKind, ExpressionSyntax Right) : ExpressionSyntax(Source, Span);
 public sealed record AssignmentExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Left, SyntaxKind OperatorKind, ExpressionSyntax Right) : ExpressionSyntax(Source, Span);
-public sealed record MemberAccessExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, string Name) : ExpressionSyntax(Source, Span);
+public sealed record MemberAccessExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, string Name, ImmutableArray<TypeSyntax> TypeArguments = default) : ExpressionSyntax(Source, Span);
 public sealed record CallExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Target, ImmutableArray<ArgumentSyntax> Arguments) : ExpressionSyntax(Source, Span);
 public sealed record IndexExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Receiver, ExpressionSyntax Index) : ExpressionSyntax(Source, Span);
 public sealed record NewExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, ImmutableArray<ArgumentSyntax> Arguments, ExpressionSyntax? ArrayLength) : ExpressionSyntax(Source, Span);

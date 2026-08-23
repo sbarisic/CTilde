@@ -288,8 +288,8 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 throw new Error(`C~ debug target does not exist: ${targetPath}`);
             this.target = JSON.parse(readFileSync(targetPath, 'utf8')) as DebugTarget;
             this.debugMap = JSON.parse(readFileSync(this.target.debugMap, 'utf8')) as DebugMap;
-            if (this.target.version !== 2 || this.debugMap.version !== 2 || !this.target.instrumented || !this.debugMap.instrumented)
-                throw new Error('C~ debug metadata v2 with instrumentation is required. Rebuild with --prepare-debug launch using the current compiler and extension.');
+            if (this.target.version !== 3 || this.debugMap.version !== 3 || !this.target.instrumented || !this.debugMap.instrumented)
+                throw new Error('C~ debug metadata v3 with instrumentation is required. Rebuild with --prepare-debug launch using the current compiler and extension.');
             if (this.target.backend !== 'gdb')
                 throw new Error('This configuration was built with MSVC. Use C~: Debug Project for the cppvsdbg fallback.');
             if (!existsSync(this.target.program))

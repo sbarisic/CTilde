@@ -19,14 +19,14 @@ internal sealed partial class Parser
         {
             NextToken();
             var builder = ImmutableArray.CreateBuilder<TypeSyntax>();
-            while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
+            while (!AtTypeArgumentClose && Current.Kind != SyntaxKind.EndOfFileToken)
             {
                 builder.Add(ParseType());
                 if (Current.Kind != SyntaxKind.CommaToken)
                     break;
                 NextToken();
             }
-            Match(SyntaxKind.GreaterToken);
+            ConsumeTypeArgumentClose();
             typeArguments = builder.ToImmutable();
         }
         var pointerDepth = 0;
@@ -52,7 +52,7 @@ internal sealed partial class Parser
         Match(SyntaxKind.UnmanagedKeyword);
         Match(SyntaxKind.LessToken);
         var elements = ImmutableArray.CreateBuilder<FunctionPointerElementSyntax>();
-        while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
+        while (!AtTypeArgumentClose && Current.Kind != SyntaxKind.EndOfFileToken)
         {
             var elementStart = Current.Span.Start;
             var passingKind = ParsePassingKind();
@@ -62,7 +62,7 @@ internal sealed partial class Parser
                 break;
             NextToken();
         }
-        var close = Match(SyntaxKind.GreaterToken);
+        var close = ConsumeTypeArgumentClose();
         if (elements.Count == 0)
             Report("CT0110", "A function-pointer signature requires a return type.", close);
         var signature = new FunctionPointerSignatureSyntax(_source, TextSpan.FromBounds(start, close.Span.End), elements.ToImmutable());
@@ -120,6 +120,8 @@ internal sealed partial class Parser
                     depth++;
                 else if (_tokens[index].Kind == SyntaxKind.GreaterToken)
                     depth--;
+                else if (_tokens[index].Kind == SyntaxKind.GreaterGreaterToken)
+                    depth -= 2;
                 index++;
             }
             return depth == 0;
@@ -143,6 +145,8 @@ internal sealed partial class Parser
                     depth++;
                 else if (_tokens[index].Kind == SyntaxKind.GreaterToken)
                     depth--;
+                else if (_tokens[index].Kind == SyntaxKind.GreaterGreaterToken)
+                    depth -= 2;
                 index++;
             }
             while (index < _tokens.Length && depth > 0);

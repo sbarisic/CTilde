@@ -7,7 +7,7 @@ internal sealed partial class TypedIrBodyLowerer
 {
     private IrExpressionValue LowerCast(CastExpressionSyntax syntax)
     {
-        var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        var target = ResolveType(syntax.Type);
         var expression = LowerExpression(syntax.Expression);
         if (target.ContainsPointer || expression.Type.ContainsPointer)
             RequireUnsafe(syntax);
@@ -16,7 +16,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerTypeTest(TypeTestExpressionSyntax syntax)
     {
-        var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        var target = ResolveType(syntax.Type);
         if (target.Kind is CTypeKind.Void or CTypeKind.Null or CTypeKind.Error)
         {
             Report("CT2147", $"Type '{target.DisplayName}' is not valid in an is expression.", syntax.Type);
@@ -35,7 +35,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerSafeCast(SafeCastExpressionSyntax syntax)
     {
-        var target = _model.ResolveType(syntax.Type, TreeFor(syntax));
+        var target = ResolveType(syntax.Type);
         if (!target.IsReference)
         {
             Report("CT2147", "The as operator requires a reference target type.", syntax.Type);
@@ -393,6 +393,16 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2132", "The left side of an assignment must be assignable.", syntax.Left);
             return ErrorExpression(target.Prelude);
         }
+        if (target.Type.ContainsAtomic)
+        {
+            Report("CT1278", "Atomic<T> values are non-copyable and cannot be assigned.", syntax);
+            return ErrorExpression(target.Prelude);
+        }
+        if (target.LValue.Field?.IsVolatile == true && syntax.OperatorKind != SyntaxKind.EqualsToken)
+        {
+            Report("CT1274", "Compound assignment is not permitted on a volatile field; use Atomic<T> for read-modify-write operations.", syntax);
+            return ErrorExpression(target.Prelude);
+        }
         ValidateAssignmentTarget(target.LValue, syntax);
         var prelude = new List<string>(target.Prelude);
         if (syntax.OperatorKind == SyntaxKind.EqualsToken)
@@ -653,6 +663,11 @@ internal sealed partial class TypedIrBodyLowerer
         if (expression.IsConstant && TryConvertConstant(expression, target, out var constant))
             return constant;
         var objectType = _model.Types.GetValueOrDefault("System.Object")?.Type;
+        if (sourceType.ContainsAtomic && target != sourceType)
+        {
+            Report("CT1278", "Atomic<T> values cannot be boxed or converted by copying.", syntax);
+            return new IrExpressionValue { Type = target, Code = _emitter.DefaultValue(target), Prelude = expression.Prelude };
+        }
         if (objectType is not null && target == objectType && !sourceType.IsReference && sourceType.Kind is not CTypeKind.Null)
         {
             if (sourceType.ContainsPointer)
@@ -662,7 +677,15 @@ internal sealed partial class TypedIrBodyLowerer
             var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return OwnResult(target, boxCode, expression.Prelude);
         }
-        if (objectType is not null && sourceType == objectType && target != objectType && target.Kind is not CTypeKind.Class and not CTypeKind.String and not CTypeKind.Array)
+        if (target.Kind == CTypeKind.Interface && !sourceType.IsReference && sourceType.Kind is not CTypeKind.Null)
+        {
+            _emitter.RegisterBox(sourceType);
+            _emitter.RegisterType(target);
+            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
+            var boxCode = $"({_emitter.CTypeName(target)})(void*){CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
+            return OwnResult(target, boxCode, expression.Prelude);
+        }
+        if (objectType is not null && sourceType.Kind is CTypeKind.Class or CTypeKind.Interface && target != objectType && target.Kind is not CTypeKind.Class and not CTypeKind.Interface and not CTypeKind.String and not CTypeKind.Array)
         {
             if (target.ContainsPointer)
                 RequireUnsafe(syntax);
@@ -825,6 +848,21 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT1113", $"Member '{member.Name}' is protected.", syntax);
     }
 
-    private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type) => type.BaseTypesAndSelf();
+    private static IEnumerable<TypeSymbol> Hierarchy(TypeSymbol type)
+    {
+        var pending = new Stack<TypeSymbol>();
+        pending.Push(type);
+        var visited = new HashSet<TypeSymbol>();
+        while (pending.TryPop(out var current))
+        {
+            if (!visited.Add(current))
+                continue;
+            yield return current;
+            foreach (var contract in current.Interfaces.AsEnumerable().Reverse())
+                pending.Push(contract);
+            if (current.BaseType is not null)
+                pending.Push(current.BaseType);
+        }
+    }
     private static string MethodSignatureKey(MethodSymbol method) => $"{method.Name}:{string.Join(',', method.Parameters.Select(parameter => $"{parameter.PassingKind}:{NameMangler.TypeCode(parameter.Type)}"))}:{method.IsStatic}";
 }

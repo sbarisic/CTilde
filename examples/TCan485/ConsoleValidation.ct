@@ -1,0 +1,42 @@
+using System;
+using Esp.Idf;
+
+namespace Examples.TCan485ConsoleValidation;
+
+public static class Program
+{
+    [Export("ctilde_add")]
+    public static int Add(int left, int right)
+    {
+        return left + right;
+    }
+
+    private static void WriteFixture()
+    {
+        Console.WriteLine("CTILDE_CONSOLE_BEGIN");
+        Console.WriteLine("ASCII: C~ direct USB-UART");
+        Console.WriteLine("UTF8: čćž €");
+        Console.Write("SIGNED: ");
+        Console.WriteLine(-42);
+        Console.Write("UNSIGNED: ");
+        Console.WriteLine(4294967295u);
+        Console.Write("FLOAT: ");
+        Console.WriteLine(1.5f);
+        Console.Write("BOOLEAN: ");
+        Console.Write(true);
+        Console.Write(" ");
+        Console.WriteLine(false);
+        Console.WriteLine("CTILDE_CONSOLE_OK");
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        FreeRtos.DelayMilliseconds(1500u);
+        while (true)
+        {
+            WriteFixture();
+            FreeRtos.DelayMilliseconds(1000u);
+        }
+    }
+}

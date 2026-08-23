@@ -47,9 +47,9 @@ internal static class DebugPreparation
             }).ToArray();
         var descriptor = new Dictionary<string, object?>
         {
-            ["generator"] = "C~ draft 0.14",
-            ["version"] = 2,
-            ["runtimeAbi"] = 14,
+            ["generator"] = "C~ draft 0.15",
+            ["version"] = 3,
+            ["runtimeAbi"] = 15,
             ["target"] = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf",
             ["backend"] = backend,
             ["program"] = Path.GetFullPath(program),
@@ -83,7 +83,7 @@ internal static class DebugPreparation
         {
             using var document = JsonDocument.Parse(File.ReadAllText(path));
             var root = document.RootElement;
-            if (root.GetProperty("version").GetInt32() != 2 || root.GetProperty("runtimeAbi").GetInt32() != 14 ||
+            if (root.GetProperty("version").GetInt32() != 3 || root.GetProperty("runtimeAbi").GetInt32() != 15 ||
                 !root.GetProperty("instrumented").GetBoolean())
                 throw new NativeBuildException("Existing debug metadata was produced by an incompatible compiler/runtime. Run a debug Launch first.");
             var expectedTarget = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf";

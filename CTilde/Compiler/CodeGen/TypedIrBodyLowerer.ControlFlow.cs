@@ -287,7 +287,7 @@ internal sealed partial class TypedIrBodyLowerer
             }
             else
             {
-                type = _model.ResolveType(catchClause.Type, TreeFor(catchClause));
+                type = ResolveType(catchClause.Type);
                 if (type.Kind != CTypeKind.Class || type.Symbol is null ||
                     type.Symbol != exceptionType.Symbol && !type.Symbol.DerivesFrom(exceptionType.Symbol!))
                     Report("CT2152", "A catch type must derive from System.Exception.", catchClause.Type);

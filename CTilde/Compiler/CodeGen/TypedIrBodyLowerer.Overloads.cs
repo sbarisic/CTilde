@@ -5,6 +5,80 @@ namespace CTilde;
 
 internal sealed partial class TypedIrBodyLowerer
 {
+    private IEnumerable<MethodSymbol> ExpandGenericCandidates(
+        IEnumerable<MethodSymbol> candidates,
+        ImmutableArray<TypeSyntax> explicitArguments,
+        IReadOnlyList<IrExpressionValue> arguments,
+        SyntaxNode syntax)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (!candidate.IsGenericDefinition)
+            {
+                if (explicitArguments.IsDefaultOrEmpty)
+                    yield return candidate;
+                continue;
+            }
+            ImmutableArray<CType> typeArguments;
+            if (!explicitArguments.IsDefaultOrEmpty)
+            {
+                if (explicitArguments.Length != candidate.TypeParameters.Length)
+                    continue;
+                typeArguments = explicitArguments.Select(ResolveType).ToImmutableArray();
+            }
+            else
+            {
+                var inferred = new Dictionary<string, CType>(StringComparer.Ordinal);
+                if (candidate.Parameters.Length != arguments.Count)
+                    continue;
+                var valid = true;
+                for (var index = 0; index < arguments.Count; index++)
+                    valid &= InferTypeArguments(candidate.Parameters[index].Type, arguments[index].Type, inferred);
+                if (!valid || candidate.TypeParameters.Any(parameter => !inferred.ContainsKey(parameter.Name)))
+                    continue;
+                typeArguments = candidate.TypeParameters.Select(parameter => inferred[parameter.Name]).ToImmutableArray();
+            }
+            var constructed = _model.ConstructGenericMethod(candidate, typeArguments, syntax);
+            if (constructed is not null)
+                yield return constructed;
+        }
+    }
+
+    private static bool InferTypeArguments(CType parameter, CType argument, Dictionary<string, CType> inferred)
+    {
+        if (parameter.Kind == CTypeKind.TypeParameter && parameter.Symbol is not null)
+        {
+            if (!inferred.TryGetValue(parameter.Symbol.Name, out var existing))
+            {
+                inferred.Add(parameter.Symbol.Name, argument);
+                return true;
+            }
+            if (existing == argument)
+                return true;
+            if (TypeFacts.CanImplicitlyConvert(argument, existing))
+                return true;
+            if (TypeFacts.CanImplicitlyConvert(existing, argument))
+            {
+                inferred[parameter.Symbol.Name] = argument;
+                return true;
+            }
+            return false;
+        }
+        if (parameter.Kind != argument.Kind)
+            return false;
+        if (parameter.ElementType is not null || argument.ElementType is not null)
+            return parameter.ElementType is not null && argument.ElementType is not null && InferTypeArguments(parameter.ElementType, argument.ElementType, inferred);
+        if (parameter.Symbol?.GenericDefinition is { } parameterDefinition && argument.Symbol?.GenericDefinition == parameterDefinition)
+        {
+            if (parameter.Symbol.TypeArguments.Length != argument.Symbol.TypeArguments.Length)
+                return false;
+            for (var index = 0; index < parameter.Symbol.TypeArguments.Length; index++)
+                if (!InferTypeArguments(parameter.Symbol.TypeArguments[index], argument.Symbol.TypeArguments[index], inferred))
+                    return false;
+        }
+        return true;
+    }
+
     private MethodSymbol? SelectOverload(IEnumerable<MethodSymbol> candidates, string name, IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ArgumentSyntax> argumentSyntax, SyntaxNode syntax)
         => SelectOverload(candidates, arguments, argumentSyntax, syntax, "CT2122", "CT2123", $"No overload of '{name}' accepts the supplied argument types.", $"Call to '{name}' is ambiguous.");
 

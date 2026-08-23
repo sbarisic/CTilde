@@ -28,7 +28,7 @@ internal static class StandardLibrary
         includeHostedIo &= target == CompilationTarget.Hosted;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
         {
-            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct" };
+            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Threading.ct" };
             if ((key.Vectors & StandardVectorTypes.Vec2) != 0)
                 files.Add("Vec2.ct");
             if ((key.Vectors & StandardVectorTypes.Vec3) != 0)

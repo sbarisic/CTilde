@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "tools": {
+    "idf": "ESP-IDF v6.0.2",
+    "compiler": "15.2.0"
+  },
+  "targets": {
+    "esp32": {
+      "observed": {
+        "binaryBytes": 171136,
+        "imageBytes": 171013,
+        "flashCode": 78554,
+        "flashData": 36608,
+        "iram": 45391,
+        "dram": 14652
+      },
+      "maximum": {
+        "binaryBytes": 174559,
+        "imageBytes": 174434,
+        "flashCode": 80126,
+        "flashData": 37632,
+        "iram": 46299,
+        "dram": 15164
+      }
+    },
+    "esp32c3": {
+      "observed": {
+        "binaryBytes": 178096,
+        "imageBytes": 177798,
+        "flashCode": 97260,
+        "flashData": 34116,
+        "iram": 0,
+        "dram": 52078
+      },
+      "maximum": {
+        "binaryBytes": 181658,
+        "imageBytes": 181354,
+        "flashCode": 99206,
+        "flashData": 35140,
+        "iram": 512,
+        "dram": 53120
+      }
+    }
+  },
+  "hardware": {
+    "observed": {
+      "freeHeap": 296908,
+      "minimumFreeHeap": 284168,
+      "stackHighWater": 6736,
+      "tick": 16,
+      "transitions": 25
+    },
+    "minimum": {
+      "freeHeap": 292812,
+      "minimumFreeHeap": 280072,
+      "stackHighWater": 6224
+    }
+  },
+  "layout": {
+    "array:Examples.TCan485MemoryValidation.LayoutReferences": [
+      20,
+      4,
+      20,
+      12
+    ],
+    "array:int": [
+      20,
+      4,
+      20,
+      4
+    ],
+    "box:Examples.TCan485MemoryValidation.LayoutReferences": [
+      28,
+      4
+    ],
+    "box:int": [
+      20,
+      4
+    ],
+    "descriptor": [
+      40,
+      4
+    ],
+    "object": [
+      16,
+      4
+    ],
+    "string": [
+      20,
+      4,
+      20
+    ],
+    "totals": [
+      720,
+      204,
+      496
+    ],
+    "type:Examples.TCan485MemoryValidation.LayoutEmpty": [
+      16,
+      4
+    ],
+    "type:Examples.TCan485MemoryValidation.LayoutFields": [
+      28,
+      4
+    ],
+    "type:Examples.TCan485MemoryValidation.LayoutReferences": [
+      12,
+      4
+    ],
+    "type:System.ArgumentException": [
+      20,
+      4
+    ],
+    "type:System.DivideByZeroException": [
+      20,
+      4
+    ],
+    "type:System.Exception": [
+      20,
+      4
+    ],
+    "type:System.IndexOutOfRangeException": [
+      20,
+      4
+    ],
+    "type:System.InvalidCastException": [
+      20,
+      4
+    ],
+    "type:System.NullReferenceException": [
+      20,
+      4
+    ],
+    "type:System.Object": [
+      16,
+      4
+    ],
+    "type:System.OutOfMemoryException": [
+      20,
+      4
+    ],
+    "type:System.OverflowException": [
+      20,
+      4
+    ],
+    "type:System.SynchronizationLockException": [
+      20,
+      4
+    ],
+    "type:System.ThreadStateException": [
+      20,
+      4
+    ],
+    "vtable": [
+      12,
+      4
+    ]
+  }
+}

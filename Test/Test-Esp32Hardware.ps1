@@ -5,7 +5,9 @@ param(
     [string]$Port = "COM4",
     [ValidateRange(1, 4000000)]
     [int]$BaudRate = 460800,
-    [switch]$AutomatedOnly
+    [switch]$AutomatedOnly,
+    [switch]$AcceptMemoryBaseline,
+    [string]$ExpectedUsbSerialId = "VID_1A86&PID_55D4"
 )
 
 $ErrorActionPreference = "Stop"
@@ -17,6 +19,8 @@ $ProjectDirectory = (Resolve-Path -LiteralPath $ProjectDirectory).Path
 $projectManifest = Join-Path $ProjectDirectory "ctilde.json"
 $programSource = Join-Path $ProjectDirectory "Program.ct"
 $runtimeFailureSource = Join-Path $ProjectDirectory "RuntimeFailure.ct"
+$memoryValidationSource = Join-Path $ProjectDirectory "MemoryValidation.ct"
+$consoleValidationSource = Join-Path $ProjectDirectory "ConsoleValidation.ct"
 $buildScript = Join-Path $ProjectDirectory "Build.ps1"
 $artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
 $timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
@@ -30,6 +34,7 @@ $workDirectory = Join-Path $artifactDirectory "work-$timestamp"
 $fatalBuildDirectory = Join-Path $workDirectory "fatal-build"
 $fatalSdkconfig = Join-Path $workDirectory "sdkconfig.fatal"
 $fatalDefaults = Join-Path $workDirectory "sdkconfig.fatal.defaults"
+$memoryBaselinePath = Join-Path $PSScriptRoot "Baselines\esp-idf-memory.json"
 
 $report = [ordered]@{
     version = 1
@@ -47,6 +52,8 @@ $report = [ordered]@{
     tools = [ordered]@{}
     firmware = $null
     runtimeFailure = $null
+    memoryValidation = $null
+    consoleValidation = $null
     debugger = $null
     postDetach = $null
     startupTimeout = $null
@@ -264,6 +271,49 @@ function Invoke-PassiveSerialCapture([scriptblock]$Completed, [int]$TimeoutSecon
     }
 }
 
+function Invoke-PassiveSerialByteCapture([scriptblock]$Completed, [int]$TimeoutSeconds) {
+    $serial = [IO.Ports.SerialPort]::new($Port, $BaudRate, [IO.Ports.Parity]::None, 8, [IO.Ports.StopBits]::One)
+    $serial.Handshake = [IO.Ports.Handshake]::None
+    $serial.DtrEnable = $false
+    $serial.RtsEnable = $false
+    $serial.ReadTimeout = 100
+    $bytes = [IO.MemoryStream]::new()
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        $serial.Open()
+        $serial.DtrEnable = $false
+        $serial.RtsEnable = $false
+        while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            try {
+                $value = $serial.ReadByte()
+                if ($value -ge 0) { $bytes.WriteByte([byte]$value) }
+            }
+            catch [TimeoutException] { }
+            $current = $bytes.ToArray()
+            if (& $Completed $current) {
+                return [pscustomobject]@{ Bytes = $current; ElapsedSeconds = $watch.Elapsed.TotalSeconds }
+            }
+        }
+        $captured = $bytes.ToArray()
+        if ($captured.Length -eq 0) {
+            $tailHex = "<empty>"
+            $tailText = "<empty>"
+        }
+        else {
+            $tailStart = [Math]::Max(0, $captured.Length - 96)
+            $tail = $captured[$tailStart..($captured.Length - 1)]
+            $tailHex = [BitConverter]::ToString($tail).Replace("-", "")
+            $tailText = [Text.Encoding]::UTF8.GetString($tail).Replace("`r", "\\r").Replace("`n", "\\n")
+        }
+        throw "Timed out after $TimeoutSeconds seconds waiting for raw UART output ($($captured.Length) bytes). Tail text: $tailText; tail hex: $tailHex"
+    }
+    finally {
+        if ($serial.IsOpen) { $serial.Close() }
+        $serial.Dispose()
+        $bytes.Dispose()
+    }
+}
+
 function Invoke-NodeJson([string[]]$Arguments) {
     $output = Invoke-Captured "node" $Arguments
     return $output | ConvertFrom-Json
@@ -294,7 +344,9 @@ try {
         throw "TCan485 project files were not found under $ProjectDirectory."
     }
     $portInfo = Get-CimInstance Win32_SerialPort | Where-Object DeviceID -eq $Port | Select-Object -First 1
-    if ($null -eq $portInfo) { throw "ESP32 serial port $Port is not present." }
+    $portCandidate = if ($null -eq $portInfo) { "null" } else { ([ordered]@{ name = $portInfo.Name; deviceId = $portInfo.DeviceID; pnpDeviceId = $portInfo.PNPDeviceID } | ConvertTo-Json -Compress) }
+    $validatePort = "import('node:url').then(u=>import(u.pathToFileURL(process.argv[1]).href)).then(m=>console.log(JSON.stringify(m.validateUsbSerialDevice(JSON.parse(process.argv[2]),process.argv[3],process.argv[4]))))"
+    $validatedPort = Invoke-NodeJson @("-e", $validatePort, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $portCandidate, $Port, $ExpectedUsbSerialId)
 
     $resolvedIdfPath = (Resolve-Path -LiteralPath $IdfPath).Path
     $profile = Get-ChildItem -LiteralPath "C:\Espressif\tools" -Filter "Microsoft.*.PowerShell_profile.ps1" -File -ErrorAction SilentlyContinue |
@@ -317,13 +369,13 @@ try {
     $report.tools.node = (Invoke-Captured "node" @("--version")).Trim()
     $report.tools.compiler = (Invoke-Captured "xtensa-esp32-elf-gcc" @("--version") $ProjectDirectory).Split("`n")[0].Trim()
     $report.tools.gdb = (Invoke-Captured "xtensa-esp32-elf-gdb" @("--version") $ProjectDirectory).Split("`n")[0].Trim()
-    $report.tools.port = [ordered]@{ name = $portInfo.Name; pnpDeviceId = $portInfo.PNPDeviceID }
+    $report.tools.port = [ordered]@{ name = $validatedPort.name; pnpDeviceId = $validatedPort.pnpDeviceId }
 
     Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "-c", "Release", "--nologo")
     Invoke-Checked "npm" @("run", "compile") (Join-Path $repositoryDirectory "editors\vscode")
     Invoke-Checked "node" @("--test", $supportTest)
 
-    Write-Host "`n=== ABI 14 Release workload ==="
+    Write-Host "`n=== ABI 15 Release workload ==="
     & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource
     if ($LASTEXITCODE -ne 0) { throw "Release firmware build failed with exit code $LASTEXITCODE." }
     $sizeOutput = Invoke-Captured "idf.py" @("size") $ProjectDirectory
@@ -331,6 +383,12 @@ try {
     Write-Utf8NoBom $sizeInput $sizeOutput
     $parseSize = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseIdfSize(fs.readFileSync(process.argv[2],'utf8'))))))"
     $size = Invoke-NodeJson @("-e", $parseSize, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $sizeInput)
+    $elfPath = Join-Path $ProjectDirectory "build\ctilde_tcan485.elf"
+    $objectSymbolsOutput = Invoke-Captured "xtensa-esp32-elf-objdump" @("-t", $elfPath) $ProjectDirectory
+    $objectSymbolsInput = Join-Path $artifactDirectory "$timestamp-symbols.txt"
+    Write-Utf8NoBom $objectSymbolsInput $objectSymbolsOutput
+    $parseSymbols = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseObjectSymbols(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $objectSymbols = Invoke-NodeJson @("-e", $parseSymbols, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $objectSymbolsInput)
     Invoke-Checked "idf.py" @("-p", $Port, "flash") $ProjectDirectory
     $firmwareCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
         param($text)
@@ -342,13 +400,83 @@ try {
     Write-Utf8NoBom $firmwareTranscriptPath $firmwareTranscript
     $parseFirmware = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseFirmwareTranscript(fs.readFileSync(process.argv[2],'utf8'))))))"
     $firmware = Invoke-NodeJson @("-e", $parseFirmware, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $firmwareTranscriptPath)
-    $report.firmware = [ordered]@{ measurements = $firmware; size = $size; elapsedSeconds = $firmwareCapture.ElapsedSeconds; transcript = $firmwareTranscriptPath }
+    $report.firmware = [ordered]@{ measurements = $firmware; size = $size; immutableSymbols = $objectSymbols; elapsedSeconds = $firmwareCapture.ElapsedSeconds; transcript = $firmwareTranscriptPath }
 
     if (-not $AutomatedOnly) {
         $answer = Read-Host "Did the onboard T-CAN485 WS2812 visibly alternate during the 25 checked transitions? [y/N]"
-        if ($answer -notmatch '^(?i:y|yes)$') { throw "Visible WS2812 confirmation was not provided." }
-        $report.visualLed = "confirmed"
+        if ($answer -match '^(?i:y|yes)$') {
+            $report.visualLed = "confirmed"
+        }
+        else {
+            $report.visualLed = "not-confirmed"
+            Write-Warning "Visible WS2812 confirmation was not provided. Automated acceptance will continue, but this run will not close the physical release gate."
+        }
     }
+
+    Write-Host "`n=== Managed layout and allocation failure ==="
+    $previousMemoryBuild = $env:CTILDE_MEMORY_VALIDATION_BUILD
+    try {
+        $env:CTILDE_MEMORY_VALIDATION_BUILD = "1"
+        & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $memoryValidationSource -Flash
+        if ($LASTEXITCODE -ne 0) { throw "Memory-validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    }
+    finally {
+        if ($null -eq $previousMemoryBuild) { Remove-Item Env:CTILDE_MEMORY_VALIDATION_BUILD -ErrorAction SilentlyContinue }
+        else { $env:CTILDE_MEMORY_VALIDATION_BUILD = $previousMemoryBuild }
+    }
+    $memoryCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") { param($text) $text.Contains("CTILDE_MEMORY_OK") } 45
+    $memoryTranscriptPath = Join-Path $artifactDirectory "$timestamp-memory.txt"
+    Write-Utf8NoBom $memoryTranscriptPath (Select-FirmwareTranscript $memoryCapture.Transcript)
+    $parseMemory = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseMemoryValidationTranscript(fs.readFileSync(process.argv[2],'utf8'))))))"
+    $memoryResult = Invoke-NodeJson @("-e", $parseMemory, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $memoryTranscriptPath)
+    $report.memoryValidation = [ordered]@{ result = $memoryResult; elapsedSeconds = $memoryCapture.ElapsedSeconds; transcript = $memoryTranscriptPath }
+
+    $actualBaselineInput = Join-Path $workDirectory "memory-actual.json"
+    $targetMeasurements = [ordered]@{
+        binaryBytes = [int64]$size.binaryBytes
+        imageBytes = [int64]$size.imageBytes
+        flashCode = [int64]$size.sections.flashCode
+        flashData = [int64]$size.sections.flashData
+        iram = [int64]$size.sections.iram
+        dram = [int64]$size.sections.dram
+    }
+    $actualBaseline = [ordered]@{
+        tools = [ordered]@{
+            idf = $report.tools.idf
+            compiler = (Invoke-Captured "xtensa-esp32-elf-gcc" @("-dumpfullversion") $ProjectDirectory).Trim()
+        }
+        targets = [ordered]@{ esp32 = $targetMeasurements }
+        hardware = $firmware
+        layout = $memoryResult.layout
+    }
+    Write-Utf8NoBom $actualBaselineInput (($actualBaseline | ConvertTo-Json -Depth 30) + [Environment]::NewLine)
+    if ($AcceptMemoryBaseline) {
+        New-Item -ItemType Directory -Path (Split-Path -Parent $memoryBaselinePath) -Force | Out-Null
+        $updateBaseline = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>{const old=fs.existsSync(process.argv[2])?JSON.parse(fs.readFileSync(process.argv[2],'utf8')):null;const actual=JSON.parse(fs.readFileSync(process.argv[3],'utf8'));process.stdout.write(m.serializeHardwareReport(m.updateMemoryBaseline(old,actual)));}))"
+        $updatedBaseline = Invoke-Captured "node" @("-e", $updateBaseline, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $memoryBaselinePath, $actualBaselineInput)
+        Write-Utf8NoBom $memoryBaselinePath $updatedBaseline
+    }
+    elseif (-not (Test-Path -LiteralPath $memoryBaselinePath)) {
+        throw "ESP memory baseline is missing. Run this acceptance once with -AcceptMemoryBaseline after reviewing measurements."
+    }
+    else {
+        $validateBaseline = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>m.validateMemoryBaseline(JSON.parse(fs.readFileSync(process.argv[2],'utf8')),JSON.parse(fs.readFileSync(process.argv[3],'utf8')))))"
+        Invoke-Checked "node" @("-e", $validateBaseline, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $memoryBaselinePath, $actualBaselineInput)
+    }
+
+    Write-Host "`n=== Exact COM4 USB-to-UART console bytes ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $consoleValidationSource -Flash
+    if ($LASTEXITCODE -ne 0) { throw "Console-validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    $consoleCapture = Invoke-PassiveSerialByteCapture {
+        param($bytes)
+        $ascii = [Text.Encoding]::ASCII.GetString($bytes)
+        $ascii.Contains("CTILDE_CONSOLE_OK`n") -or $ascii.Contains("CTILDE_CONSOLE_OK`r`n")
+    } 20
+    $consoleBytesPath = Join-Path $artifactDirectory "$timestamp-console.bin"
+    [IO.File]::WriteAllBytes($consoleBytesPath, $consoleCapture.Bytes)
+    $parseConsole = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.extractConsoleFixture(fs.readFileSync(process.argv[2]))))))"
+    $consoleResult = Invoke-NodeJson @("-e", $parseConsole, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $consoleBytesPath)
+    $report.consoleValidation = [ordered]@{ result = $consoleResult; elapsedSeconds = $consoleCapture.ElapsedSeconds; rawBytes = $consoleBytesPath; device = $report.tools.port }
 
     Write-Host "`n=== Fatal runtime boundary ==="
     Invoke-Checked "dotnet" @(
@@ -387,7 +515,7 @@ try {
     $failure = Invoke-NodeJson @("-e", $parseFailure, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $failureTranscriptPath)
     $report.runtimeFailure = [ordered]@{ result = $failure; elapsedSeconds = $failureCapture.ElapsedSeconds; transcript = $failureTranscriptPath }
 
-    Write-Host "`n=== Instrumented debugger v2 ==="
+    Write-Host "`n=== Instrumented debugger v3 ==="
     Invoke-Checked "dotnet" @(
         "run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--",
         "--project", $projectManifest, "--prepare-debug", "launch", "--debug-target", $debugDescriptorPath,
@@ -398,7 +526,7 @@ try {
         "--report", $debugReportPath, "--port", $Port, "--baud", "$BaudRate"
     )
     $debugReport = Get-Content -LiteralPath $debugReportPath -Raw | ConvertFrom-Json
-    if (-not $debugReport.passed) { throw "Debugger-v2 hardware harness failed: $($debugReport.error)" }
+    if (-not $debugReport.passed) { throw "Debugger-v3 hardware harness failed: $($debugReport.error)" }
     $report.debugger = $debugReport
 
     Write-Host "`n=== Post-detach continuation ==="
@@ -423,7 +551,7 @@ try {
     $report.startupTimeout = [ordered]@{ elapsedSeconds = $timeoutCapture.ElapsedSeconds; expectedSeconds = 15; passed = $true }
 
     $report.automatedPassed = $true
-    if ($AutomatedOnly) {
+    if ($AutomatedOnly -or $report.visualLed -ne "confirmed") {
         Write-Warning "All automated checks passed, but visible LED confirmation is pending. This run does not close the release gate."
     }
     else {

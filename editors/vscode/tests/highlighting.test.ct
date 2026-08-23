@@ -1,4 +1,4 @@
-// SYNTAX TEST "source.ctilde" "C~ draft 0.13 highlighting"
+// SYNTAX TEST "source.ctilde" "C~ draft 0.15 highlighting"
 
 /// <summary>Uses <paramref name="value"/>.</summary>
 
@@ -9,6 +9,30 @@ using System;
 namespace Examples;
 // <------- keyword.declaration.namespace.ctilde
 //        ^^^^^^^^ entity.name.namespace.ctilde
+
+public interface IValue<T>
+// <---- storage.modifier.ctilde
+//     ^^^^^^^^^ storage.type.declaration.ctilde
+{
+}
+
+public abstract class GenericDemo<T> where T : class
+//     ^^^^^^^^ storage.modifier.ctilde
+//              ^^^^^ storage.type.class.ctilde
+//                                   ^^^^^ keyword.other.constraint.ctilde
+{
+    private volatile int state;
+//  ^^^^^^^^^^^^^^^^ storage.modifier.ctilde
+
+    public void Guard(System.Threading.Mutex mutex)
+    {
+        lock (mutex)
+//      ^^^^ keyword.control.ctilde
+        {
+            state = 1;
+        }
+    }
+}
 
 public sealed class Demo
 // <---- storage.modifier.ctilde

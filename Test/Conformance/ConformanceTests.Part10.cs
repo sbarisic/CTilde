@@ -146,6 +146,70 @@ internal static partial class ConformanceTests
             Assert(!mathOutput.Contains("return tanf(value);", StringComparison.Ordinal), "An unused math wrapper was emitted.");
         });
 
+        suite.Run("draft 0.14 immutable runtime metadata", () =>
+        {
+            const string source = "using System; public class Value { public virtual int Read() { return 42; } } public static class Program { private static string mutable = \"initial\"; [EntryPoint] public static void Main() { Value value = new Value(); mutable = \"changed\"; Console.WriteLine(value.Read()); Console.WriteLine(mutable); } }";
+            var first = Compile(source);
+            var generated = Emit(source);
+            Assert(generated.Contains("const ct_type_descriptor ct_desc_string =", StringComparison.Ordinal), "The string descriptor is not immutable.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(generated, @"const ct_type_descriptor ct_d_[0-9a-f]{24} ="), "Generated type descriptors are not immutable.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(generated, @"static const ct_vtable ct_v_[0-9a-f]{24} ="), "Generated vtables are not immutable.");
+            Assert(generated.Contains("static const ct_string_literal_", StringComparison.Ordinal), "Static string storage is not immutable.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(generated, @"static CT_UNUSED ct_string\* ct_f_[0-9a-f]{24}"), "A mutable managed static field was made const.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(generated, @"static ct_t_[0-9a-f]{24} ct_fault_null;"), "A writable runtime-fault object was made const.");
+
+            var bundle = first.EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
+            Assert(internalHeader.Contains("extern const ct_type_descriptor ct_desc_string;", StringComparison.Ordinal), "The modular string descriptor declaration lost const.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(internalHeader, @"extern const ct_type_descriptor ct_d_[0-9a-f]{24};"), "A modular descriptor declaration lost const.");
+            Assert(internalHeader.Contains("extern const ct_string_literal_", StringComparison.Ordinal), "A modular string-literal declaration lost const.");
+            Assert(runtime.Contains("const ct_type_descriptor ct_desc_string =", StringComparison.Ordinal), "The modular runtime descriptor definition lost const.");
+            Assert(Emit(source) == generated, "Immutable metadata changed deterministic emission.");
+        });
+
+        suite.Run("draft 0.14 native managed layout probe", () =>
+        {
+            const string source = """
+                using System;
+                public struct References { public object Object; public string Text; public int Number; }
+                public sealed class Fields { public int Number; public object Object; public string Text; }
+                public static class NativeLayout
+                {
+                    [Extern("ct_test_memory_layout_report")]
+                    [NoAlloc]
+                    public static void Report();
+                }
+                public static class Program
+                {
+                    [EntryPoint] public static void Main()
+                    {
+                        References value = new References();
+                        References[] values = new References[1];
+                        Fields fields = new Fields();
+                        object boxedScalar = 1;
+                        object boxedReferences = value;
+                        values[0] = value;
+                        fields.Object = boxedScalar;
+                        NativeLayout.Report();
+                        Console.WriteLine(boxedReferences != null);
+                    }
+                }
+                """;
+            var result = CompileAndRun(source, layoutDiagnostics: true);
+            Assert(result.ExitCode == 0, result.StandardError);
+            var output = Normalize(result.StandardOutput);
+            Assert(output.Contains("CT_LAYOUT object ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT string ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT descriptor ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT vtable ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT type:References ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT array:References ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT box:int ", StringComparison.Ordinal) &&
+                output.Contains("CT_LAYOUT totals ", StringComparison.Ordinal), output);
+        });
+
         suite.Run("draft 0.12 reproducible source paths", () =>
         {
             var root = Path.Combine(Path.GetTempPath(), "ctilde-source-root", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
@@ -264,7 +328,7 @@ internal static partial class ConformanceTests
                 Assert(!internalHeader.Contains("CT_DEBUG_NOINLINE static", StringComparison.Ordinal) && !internalHeader.Contains("static CT_DEBUG_NOINLINE static", StringComparison.Ordinal), "The modular debug header emitted a duplicate or internal hook declaration.");
                 Assert(runtimeSource.Contains("CT_DEBUG_NOINLINE void ct_debug_throw_hook", StringComparison.Ordinal), "The modular runtime omitted the external debug hook definition.");
                 Assert(debugMap == secondMapWriter.ToString(), "Debug-map emission was not deterministic.");
-                Assert(debugMap.Contains("\"version\": 2", StringComparison.Ordinal) && debugMap.Contains("\"instrumented\": false", StringComparison.Ordinal), "Source debug metadata did not use the v2 non-instrumented contract.");
+                Assert(debugMap.Contains("\"version\": 3", StringComparison.Ordinal) && debugMap.Contains("\"runtimeAbi\": 15", StringComparison.Ordinal) && debugMap.Contains("\"instrumented\": false", StringComparison.Ordinal), "Source debug metadata did not use the v3 non-instrumented contract.");
                 Assert(debugMap.Contains("\"displayName\": \"Program.Increment\"", StringComparison.Ordinal), "The debug map omitted the source method name.");
                 Assert(debugMap.Contains("\"name\": \"result\"", StringComparison.Ordinal) && debugMap.Contains("\"storage\": \"ct_l_0\"", StringComparison.Ordinal), "The debug map omitted local storage metadata.");
                 Assert(debugMap.Contains("\"file\": \"src/Program.ct\"", StringComparison.Ordinal), "The debug map did not use a reproducible project-relative source path.");

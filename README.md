@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.14 includes classes and structures, deterministic automatic reference counting, exceptions and `defer`, arrays and UTF-8 strings, user-defined arithmetic operators, native interop, raw GNU inline assembly, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.15 includes interfaces and abstract classes, monomorphized generics, deterministic automatic reference counting, exceptions and `defer`, scalar atomics and volatile fields, managed threads, recursive mutexes and `lock`, native interop, raw GNU inline assembly, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -99,7 +99,7 @@ Managed objects, arrays, strings, boxes, and reference-bearing structures use au
 
 Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, invalid arguments, and managed allocation failure are ordinary catchable exceptions backed by allocation-free runtime objects. ABI, lifecycle, attachment, ARC-corruption, and native-boundary violations are panics. Each attached native thread has independent exception, cleanup, and release state.
 
-The generated native header exposes `[Export]` methods plus the ABI 14 runtime lifecycle, thread attachment, retain, and release operations. [C_ABI.md](C_ABI.md) defines the generated layouts and interop contract.
+The generated native header exposes `[Export]` methods plus the ABI 15 runtime lifecycle, thread attachment, retain, and release operations. [C_ABI.md](C_ABI.md) defines the generated layouts and interop contract.
 
 ## Files, projects, and native builds
 
@@ -158,7 +158,7 @@ cd .\examples\TCan485
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The project covers GPIO and an RMT-driven WS2812, FreeRTOS delays and counters, attached native tasks, exports, synchronous callbacks, opaque resources, runtime failures, and ARC recovery. Its [hardware guide](examples/TCan485/README.md) distinguishes the current ABI 14 cross-build results from the latest physical-board validation.
+The project covers GPIO and an RMT-driven WS2812, FreeRTOS delays and counters, source-created threads, recursive locks, atomics, generic interface dispatch, attached native tasks, exports, synchronous callbacks, opaque resources, runtime failures, and ARC recovery. Its [hardware guide](examples/TCan485/README.md) records the complete ABI 15 physical-board validation.
 
 ## Compiler API
 
@@ -176,7 +176,7 @@ using var output = new StringWriter();
 EmitResult result = compilation.EmitC(output);
 ```
 
-`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, `EmitSymbolMap()`, and `EmitDebugMap()` expose modular artifacts, exported declarations, compact-name mappings, and C~-aware debug metadata. `CompilationOptions.DebugInformation` selects no debugging, source mappings, or full version-2 instrumentation. Instrumented images add logical probes and optional ARC diagnostics privately; ordinary and Release emission remains unchanged. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
+`GetDiagnostics()` performs analysis without initializing C emission. `EmitC()` lazily lowers the validated program and produces deterministic unity output; `EmitCBundle()`, `EmitCHeader()`, `EmitSymbolMap()`, and `EmitDebugMap()` expose modular artifacts, exported declarations, compact-name mappings, and C~-aware debug metadata. `CompilationOptions.DebugInformation` selects no debugging, source mappings, or full version-3 instrumentation. Instrumented images add logical probes and optional ARC diagnostics privately; ordinary and Release emission remains unchanged. `LanguageServiceSnapshot` provides editor-neutral completion, documentation, hover, signature, definition, symbol, diagnostic, and semantic-token queries.
 
 ## Editor support
 
@@ -186,9 +186,9 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.14 implementation, not a stable production language. In the current workspace, .NET SDK `10.0.400-preview.0.26322.102` builds the solution with zero warnings and zero errors, and all 116 registered conformance checks pass. The Draft 0.14 software gates, automated T-CAN485 runtime/debugger acceptance, and operator-confirmed visible WS2812 check all pass.
+C~ is an experimental Draft 0.15 implementation, not a stable production language. Draft 0.15 uses runtime ABI 15 and debug metadata v3. Its interface, generic, atomic, volatile, thread, mutex, and lock coverage passes the hosted, ESP cross-build, and connected-board test pipeline.
 
-ABI 14 firmware links for Xtensa and RISC-V. The connected classic ESP32 completed the ABI 14 Release workload, fatal-runtime image, guarded debugger-v2 matrix, detach continuation, no-debugger startup timeout, and visible LED confirmation on 2026-08-22. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for post-release work.
+On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
 ## Repository guide
 
@@ -203,7 +203,7 @@ ABI 14 firmware links for Xtensa and RISC-V. The connected classic ESP32 complet
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.14 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.15 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

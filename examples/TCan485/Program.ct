@@ -1,11 +1,32 @@
 using System;
 using System.Runtime;
+using System.Threading;
 using Esp.Idf;
 
 namespace Examples.TCan485;
 
 public delegate int ValueReader();
 public delegate int NativeTransformer(int value);
+
+public interface IHardwareValue<T>
+{
+    T Read();
+}
+
+public sealed class HardwareBox<T> : object, IHardwareValue<T>
+{
+    private T value;
+
+    public HardwareBox(T value)
+    {
+        this.value = value;
+    }
+
+    public T Read()
+    {
+        return value;
+    }
+}
 
 [NativeType("ct_esp_test_handle_t", "ctilde_esp_shim.h")]
 public opaque NativeTestHandle;
@@ -87,6 +108,55 @@ public struct ArcHolder
 public static class Program
 {
     private const int Ws2812Pin = 4;
+    private static Atomic<int> ManagedCounter = new Atomic<int>(0);
+    private static Mutex ManagedMutex;
+    private static volatile int ManagedPublished;
+    private static int ManagedProtected;
+
+    private static void ManagedWorker()
+    {
+        int index = 0;
+        while (index < 250)
+        {
+            ManagedCounter.FetchAdd(1, MemoryOrder.Relaxed);
+            index = index + 1;
+        }
+        lock (ManagedMutex)
+        {
+            lock (ManagedMutex)
+            {
+                ManagedProtected = ManagedProtected + 1;
+            }
+        }
+        ManagedPublished = 1;
+    }
+
+    private static bool ExerciseManagedConcurrency()
+    {
+        ManagedCounter.Store(0, MemoryOrder.Relaxed);
+        ManagedProtected = 0;
+        ManagedPublished = 0;
+        ManagedMutex = new Mutex();
+
+        IHardwareValue<int> value = new HardwareBox<int>(42);
+        ArcNode node = new ArcNode();
+        node.Text = "generic ARC";
+        IHardwareValue<ArcNode> owner = new HardwareBox<ArcNode>(node);
+
+        Thread first = new Thread(ManagedWorker, 4096u, ThreadPriority.Normal);
+        Thread second = new Thread(ManagedWorker, 4096u, ThreadPriority.Normal);
+        first.Start();
+        second.Start();
+        first.Join();
+        second.Join();
+
+        bool succeeded = value.Read() == 42 && owner.Read().Text == "generic ARC" &&
+            ManagedCounter.Load(MemoryOrder.Acquire) == 500 &&
+            ManagedProtected == 2 && ManagedPublished == 1 &&
+            first.Id != 0u && second.Id != 0u && !first.IsAlive && !second.IsAlive;
+        ManagedMutex = null;
+        return succeeded;
+    }
 
     private static unsafe void ExerciseArc()
     {
@@ -203,6 +273,11 @@ public static class Program
             Console.WriteLine("ok");
         else
             Console.WriteLine("FAILED");
+
+        if (ExerciseManagedConcurrency())
+            Console.WriteLine("draft15 concurrency: ok");
+        else
+            Console.WriteLine("DRAFT15_CONCURRENCY_FAILED");
 
         object boxed = 7;
         Console.Write("boxed: ");

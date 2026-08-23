@@ -1,22 +1,14 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.14 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
-
-## Release blockers
-
-None. Draft 0.14 automated acceptance passed on 2026-08-22, and the restored Release image's onboard GPIO4 WS2812 was visibly confirmed to alternate.
-
-## Compiler and runtime architecture
-
-- [ ] Place immutable vtables, type descriptors, and string-literal data in read-only or flash storage where supported.
-- [ ] Measure object, box, array, string, vtable, and descriptor overhead on a 32-bit target, then set firmware-size and static-DRAM regression budgets.
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.15 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
 - [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, encoding-aware text files, or asynchronous operations.
 - [ ] Extend vectors only with application-backed requirements such as interpolation, clamping, distance, swizzles, conversions, or SIMD-aware lowering.
-- [ ] Define source-level volatile and atomic operations, ordering, and shared-state rules before adding language-managed concurrency primitives.
+- [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
+- [ ] Design `Task`, futures, continuations, cancellation, and `async`; these remain separate from the implemented `Thread` API.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
 
 ## Editor tooling
@@ -28,8 +20,7 @@ None. Draft 0.14 automated acceptance passed on 2026-08-22, and the restored Rel
 
 ## ESP-IDF and native interop
 
-- [ ] Verify UART and native USB console configurations while preserving exact UTF-8 byte output and current numeric formatting.
-- [ ] Add hardware allocation-failure coverage and define firmware-size, heap, stack, and static-memory regression limits from accepted measurements.
+- [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
 - [ ] Consider configurable panic policies such as abort, restart, and halt after the initial ABI 14 hardware release.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
 - [ ] Define a binding manifest that selects required ESP-IDF components and public headers.

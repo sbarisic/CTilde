@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.14. Object, standard runtime-fault exceptions, console output, single-precision math, mutable single-precision vectors, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.14 changes the runtime and storage ABI.
+This document is the canonical standard-library reference for C~ draft 0.15. Object, standard runtime-fault exceptions, console output, single-precision math, mutable vectors, atomics, threads, mutexes, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.15 uses runtime ABI 15.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -52,7 +52,7 @@ The parameterless constructor uses an empty message. The string constructor also
 
 `ToString()` returns the fully qualified runtime type name. It appends `": "` and `Message` when the message is not empty. Derived exception classes inherit this behavior, so the result uses the derived runtime type name.
 
-The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, and `OutOfMemoryException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
+The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `OutOfMemoryException`, `ThreadStateException`, and `SynchronizationLockException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
 
 ## Console
 
@@ -164,6 +164,58 @@ public struct Vec3
 
 `Vec2` provides `UnitX` and `UnitY`; `Vec4` additionally provides `UnitZ` and `UnitW`. Vector-vector multiplication and division operate component by component. Dot products remain explicit. Normalization divides by the native square-root result without a special zero check, so normalizing a zero vector produces NaN components according to target floating-point behavior. Vector declarations are loaded into compilation only when the corresponding exact type name appears in source; editor services load all three for completion and embedded-source navigation.
 
+## Threading
+
+`System.Threading` is available on hosted and ESP-IDF targets:
+
+```csharp
+public enum MemoryOrder { Relaxed, Acquire, Release, AcquireRelease, SequentiallyConsistent }
+
+public struct Atomic<T>
+{
+    public Atomic(T value);
+    [NoAlloc] public T Load(MemoryOrder order);
+    [NoAlloc] public void Store(T value, MemoryOrder order);
+    [NoAlloc] public T Exchange(T value, MemoryOrder order);
+    [NoAlloc] public T CompareExchange(T value, T comparand, MemoryOrder successOrder, MemoryOrder failureOrder);
+    [NoAlloc] public T FetchAdd(T value, MemoryOrder order);
+    [NoAlloc] public T FetchSubtract(T value, MemoryOrder order);
+    [NoAlloc] public T FetchAnd(T value, MemoryOrder order);
+    [NoAlloc] public T FetchOr(T value, MemoryOrder order);
+    [NoAlloc] public T FetchXor(T value, MemoryOrder order);
+}
+
+public static class Atomic { [NoAlloc] public static void Fence(MemoryOrder order); }
+public delegate void ThreadStart();
+public enum ThreadPriority { Lowest, BelowNormal, Normal, AboveNormal, Highest }
+
+public sealed class Thread
+{
+    public Thread(ThreadStart start);
+    public Thread(ThreadStart start, uint stackSizeBytes);
+    public Thread(ThreadStart start, uint stackSizeBytes, ThreadPriority priority);
+    public bool IsAlive { [NoAlloc] get; }
+    public uint Id { [NoAlloc] get; }
+    public ThreadPriority Priority { [NoAlloc] get; }
+    [NoAlloc] public void Start();
+    [NoAlloc] public void Join();
+    [NoAlloc] public static void Sleep(uint milliseconds);
+    [NoAlloc] public static void Yield();
+}
+
+public sealed class Mutex
+{
+    public Mutex();
+    [NoAlloc] public void Enter();
+    [NoAlloc] public bool TryEnter();
+    [NoAlloc] public void Exit();
+}
+```
+
+Atomics accept Boolean, integral, native-integral, enum, and unsafe-pointer storage. They are non-copyable. Pointer atomics omit fetch operations; arithmetic fetches require integral storage and bitwise fetches require Boolean or integral storage. Invalid dynamic memory orders throw `ArgumentException` without managed allocation.
+
+Threads run on `_beginthreadex`, POSIX threads, or FreeRTOS tasks. `Start` publishes delegate state, `Join` acquires worker completion, and non-default priority failures are explicit. The runtime retains the worker state through completion. Mutexes are recursive and provide acquire/release ordering. Prefer `lock (mutex) { ... }` when lexical cleanup is possible.
+
 ## Hosted file I/O
 
 The hosted target adds synchronous binary-file operations:
@@ -246,7 +298,7 @@ Conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFa
 
 ## Runtime native buffers
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target but do not enable user-defined generic types.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.15 generics.
 
 ```csharp
 NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);

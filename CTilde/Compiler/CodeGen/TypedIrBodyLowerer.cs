@@ -78,12 +78,15 @@ internal sealed partial class TypedIrBodyLowerer
     private int _repeatableLoopDepth;
     private int _tryId;
     private int _deferId;
+    private int _lockId;
     private int _cleanupId;
     private readonly int _tryCount;
     private readonly int _externUseStart;
     private readonly bool _analysisOnly;
     private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
     private bool _capturingDirectDefer;
+
+    private CType ResolveType(TypeSyntax syntax) => _model.ResolveType(syntax, TreeFor(syntax), _method.TypeSubstitutions);
 
     public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null)
     {

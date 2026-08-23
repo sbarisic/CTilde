@@ -273,22 +273,18 @@ The same acceptance run prepared a guarded instrumented image and drove the bund
 
 These features are outside draft 0.15:
 
-- Generic variance, return-context or partial inference, specialization syntax, reflection metadata, and static-abstract generic arithmetic.
+- Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
 - Independent DLL loading, unloading, and dynamic runtime module registration.
 - Parallel renderer row workers; the per-sample RNG contract is ready for them, but the example remains intentionally single-threaded.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
 - General exceptions across native boundaries.
-- Lambdas, closures, multicast delegates, retained callbacks, and callback registration lifetime management.
-- Long-lived owned native-resource fields, `Task`, futures, cancellation, `async`, and exported delegates as ordinary ABI values.
+- Lambdas, closures, retained callbacks, and callback registration lifetime management.
+- Long-lived owned native-resource fields and exported delegates as ordinary ABI values.
 - Header-driven ESP-IDF bindings for configuration structures, constants, macros, and static-inline functions.
 - Managed-reference and floating-point atomics, plus compiler-checked ISR or IRAM execution profiles.
 - Iterators and yield statements.
-- Pattern matching.
-- Nullable reference analysis.
-- Reflection and dynamic binding.
-- Async methods and tasks.
-- Named, optional, implicit by-reference, reference-return, reference-local, and parameter-array arguments.
+- Named, optional, implicit by-reference, and parameter-array arguments.
 - User-defined conversions and equality, comparison, bitwise, logical, remainder, increment, or decrement operator declarations.
 - Multidimensional and jagged arrays.
 - String interpolation and raw or verbatim strings.

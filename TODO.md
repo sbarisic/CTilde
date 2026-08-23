@@ -5,10 +5,9 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 ## Language and standard library
 
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
-- [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, encoding-aware text files, or asynchronous operations.
+- [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.
 - [ ] Extend vectors only with application-backed requirements such as interpolation, clamping, distance, swizzles, conversions, or SIMD-aware lowering.
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
-- [ ] Design `Task`, futures, continuations, cancellation, and `async`; these remain separate from the implemented `Thread` API.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
 
 ## Editor tooling

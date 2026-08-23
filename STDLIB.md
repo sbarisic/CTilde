@@ -441,4 +441,4 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 Future library work can add `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
 
-ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, source-level task APIs, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.
+ESP-IDF interop can next add generated source-compatible bindings, long-lived owned-resource fields, retained callback lifetime rules, and compiler-checked ISR profiles. Generated adapters should consume public ESP-IDF headers and default configuration macros rather than exposing native configuration-structure layouts directly.

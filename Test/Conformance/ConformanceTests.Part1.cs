@@ -357,6 +357,44 @@ internal static partial class ConformanceTests
             }
         });
 
+        suite.Run("CLI preserves unchanged generated timestamps", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-incremental-output-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var source = Path.Combine(directory, "Program.ct");
+                var generated = Path.Combine(directory, "program.c");
+                var header = Path.Combine(directory, "exports.h");
+                var symbols = Path.Combine(directory, "symbols.json");
+                var debug = Path.Combine(directory, "debug.json");
+                File.WriteAllText(source, "public static class Program { [EntryPoint] public static void Main() { int value = 1; } }");
+                var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+                var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+                string[] Arguments() => [cliDll, source, "-o", generated, "--header", header, "--symbol-map", symbols, "--debug-info", "--debug-map", debug, "--source-root", directory];
+
+                var first = RunProcess("dotnet", Arguments());
+                Assert(first.ExitCode == 0, $"Initial incremental-output emission failed: {first.StandardError}");
+                var sentinel = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+                foreach (var path in new[] { generated, header, symbols, debug })
+                    File.SetLastWriteTimeUtc(path, sentinel);
+
+                var unchanged = RunProcess("dotnet", Arguments());
+                Assert(unchanged.ExitCode == 0, $"Repeated incremental-output emission failed: {unchanged.StandardError}");
+                foreach (var path in new[] { generated, header, symbols, debug })
+                    Assert(File.GetLastWriteTimeUtc(path) == sentinel, $"Unchanged generated output '{Path.GetFileName(path)}' was rewritten.");
+
+                File.WriteAllText(source, "public static class Program { [EntryPoint] public static void Main() { int value = 2; } }");
+                var changed = RunProcess("dotnet", Arguments());
+                Assert(changed.ExitCode == 0, $"Changed incremental-output emission failed: {changed.StandardError}");
+                Assert(File.GetLastWriteTimeUtc(generated) != sentinel, "Changed generated C was not atomically replaced.");
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+
         suite.Run("ESP-IDF binding manifest model", () =>
         {
             var directory = Path.Combine(Path.GetTempPath(), "ctilde-binding-manifest-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));

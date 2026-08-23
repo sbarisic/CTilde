@@ -143,7 +143,7 @@ try {
 
         if (-not $SkipFirmwareBuild) {
             $buildScript = Join-Path $exampleDirectory "Build.ps1"
-            & $buildScript -IdfPath $IdfPath -Target esp32
+            & $buildScript -IdfPath $IdfPath -Target esp32 -Clean
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for esp32 with exit code $LASTEXITCODE." }
             Test-MemoryBudget "esp32" $xtensa
             & $buildScript -IdfPath $IdfPath -Target esp32c3

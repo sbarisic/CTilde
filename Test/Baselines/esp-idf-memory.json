@@ -7,38 +7,38 @@
   "targets": {
     "esp32": {
       "observed": {
-        "binaryBytes": 191616,
-        "imageBytes": 191497,
-        "flashCode": 87174,
-        "flashData": 44776,
-        "iram": 48463,
-        "dram": 15444
+        "binaryBytes": 1009888,
+        "imageBytes": 1009764,
+        "flashCode": 696614,
+        "flashData": 204380,
+        "iram": 90779,
+        "dram": 38871
       },
       "maximum": {
-        "binaryBytes": 195449,
-        "imageBytes": 195327,
-        "flashCode": 88918,
-        "flashData": 45800,
-        "iram": 49433,
-        "dram": 15956
+        "binaryBytes": 1030086,
+        "imageBytes": 1029960,
+        "flashCode": 710547,
+        "flashData": 208468,
+        "iram": 92595,
+        "dram": 39649
       }
     },
     "esp32c3": {
       "observed": {
-        "binaryBytes": 208192,
-        "imageBytes": 207820,
-        "flashCode": 113112,
-        "flashData": 43860,
+        "binaryBytes": 1072512,
+        "imageBytes": 1072142,
+        "flashCode": 776986,
+        "flashData": 206596,
         "iram": 0,
-        "dram": 56824
+        "dram": 109488
       },
       "maximum": {
-        "binaryBytes": 212356,
-        "imageBytes": 211977,
-        "flashCode": 115375,
-        "flashData": 44884,
+        "binaryBytes": 1093963,
+        "imageBytes": 1093585,
+        "flashCode": 792526,
+        "flashData": 210728,
         "iram": 512,
-        "dram": 57961
+        "dram": 111678
       }
     }
   },

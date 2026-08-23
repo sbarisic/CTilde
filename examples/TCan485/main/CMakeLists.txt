@@ -1,5 +1,11 @@
-include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_sources.cmake")
-include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_bindings.cmake")
+set(CTILDE_GENERATED_SOURCES)
+set(CTILDE_BINDING_SOURCES)
+set(CTILDE_BINDING_REQUIRES)
+
+# A clean checkout does not contain generated artifacts.  Optional includes let
+# ESP-IDF establish the build directory before the C~ compiler writes them.
+include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_sources.cmake" OPTIONAL)
+include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_bindings.cmake" OPTIONAL)
 
 set(CTILDE_PRIVATE_REQUIRES
     esp_driver_gpio

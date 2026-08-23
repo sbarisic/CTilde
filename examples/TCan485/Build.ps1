@@ -5,7 +5,10 @@ param(
     [string]$Target = "esp32",
     [string]$Port = "COM4",
     [string]$Source = "Program.ct",
+    [switch]$Clean,
     [switch]$Flash,
+    [ValidateRange(115200, 2000000)]
+    [int]$FlashBaud = 921600,
     [switch]$Monitor
 )
 
@@ -56,29 +59,142 @@ if ($activeIdfPath -ne $resolvedIdfPath -or $null -eq (Get-Command idf.py -Error
     }
 }
 
+function Get-ConfiguredTarget {
+    $descriptionTarget = $null
+    $descriptionPath = Join-Path $projectDirectory "build\project_description.json"
+    if (Test-Path -LiteralPath $descriptionPath) {
+        try {
+            $description = Get-Content -LiteralPath $descriptionPath -Raw | ConvertFrom-Json
+            $descriptionTarget = [string]$description.target
+        } catch {
+            Write-Verbose "Could not read ESP-IDF project description: $($_.Exception.Message)"
+        }
+    }
+
+    $sdkTarget = $null
+    $sdkconfigPath = Join-Path $projectDirectory "sdkconfig"
+    if (Test-Path -LiteralPath $sdkconfigPath) {
+        $targetMatch = Select-String -LiteralPath $sdkconfigPath -Pattern '^CONFIG_IDF_TARGET="([^"]+)"$' | Select-Object -First 1
+        if ($null -ne $targetMatch) {
+            $sdkTarget = $targetMatch.Matches[0].Groups[1].Value
+        }
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($descriptionTarget) -and
+        -not [string]::IsNullOrWhiteSpace($sdkTarget) -and
+        $descriptionTarget -ne $sdkTarget) {
+        Write-Warning "ESP-IDF target metadata disagrees ($descriptionTarget versus $sdkTarget); reinitializing the target."
+        return $null
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($descriptionTarget)) { return $descriptionTarget }
+    if (-not [string]::IsNullOrWhiteSpace($sdkTarget)) { return $sdkTarget }
+    return $null
+}
+
+function Find-CurrentCompilerDll {
+    $sourceFiles = @(
+        Get-ChildItem -LiteralPath (Join-Path $repositoryDirectory "CTilde.Cli") -Recurse -File -Include *.cs,*.csproj |
+            Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }
+        Get-ChildItem -LiteralPath (Join-Path $repositoryDirectory "CTilde") -Recurse -File -Include *.cs,*.csproj |
+            Where-Object { $_.FullName -notmatch '[\\/](bin|obj)[\\/]' }
+    )
+    $newestSource = ($sourceFiles | Measure-Object -Property LastWriteTimeUtc -Maximum).Maximum
+    $candidates = @(
+        Join-Path $repositoryDirectory "CTilde.Cli\bin\Release\net10.0\ctilde.dll"
+        Join-Path $repositoryDirectory "CTilde.Cli\bin\Debug\net10.0\ctilde.dll"
+    )
+
+    return $candidates |
+        Where-Object { (Test-Path -LiteralPath $_) -and (Get-Item -LiteralPath $_).LastWriteTimeUtc -ge $newestSource } |
+        Sort-Object { (Get-Item -LiteralPath $_).LastWriteTimeUtc } -Descending |
+        Select-Object -First 1
+}
+
+function Invoke-Ctilde([string[]]$CompilerArguments) {
+    $compilerDll = Find-CurrentCompilerDll
+    if (-not [string]::IsNullOrWhiteSpace($compilerDll)) {
+        Write-Host "Using compiler: $compilerDll"
+        & dotnet $compilerDll @CompilerArguments
+    } else {
+        Write-Host "Compiler output is missing or stale; building through dotnet run."
+        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- @CompilerArguments
+    }
+    $script:ctildeExitCode = $LASTEXITCODE
+}
+
+function Get-BuildEnvironmentSignature {
+    return ([ordered]@{
+        fatalRuntime = [string]$env:CTILDE_FATAL_RUNTIME_BUILD
+        memoryValidation = [string]$env:CTILDE_MEMORY_VALIDATION_BUILD
+    } | ConvertTo-Json -Compress)
+}
+
+function Write-BuildEnvironmentSignature([string]$Path, [string]$Value) {
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    if ((Test-Path -LiteralPath $Path) -and [IO.File]::ReadAllText($Path) -ceq $Value) { return }
+    $temporary = Join-Path $directory ("." + [IO.Path]::GetFileName($Path) + "." + [guid]::NewGuid().ToString("N") + ".tmp")
+    try {
+        [IO.File]::WriteAllText($temporary, $Value, [Text.UTF8Encoding]::new($false))
+        [IO.File]::Move($temporary, $Path, $true)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
+    }
+}
+
 Push-Location $projectDirectory
 try {
-    # ESP-IDF evaluates component CMake files during set-target. Emit the modular
-    # source list first so the generated include already exists for that pass.
-    if ([IO.Path]::GetFullPath($sourcePath) -eq [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))) {
-        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- --project (Join-Path $projectDirectory "ctilde.json") --trace
+    $configuredTarget = Get-ConfiguredTarget
+    $targetReinitialized = $Clean -or $configuredTarget -ne $Target
+    if ($targetReinitialized) {
+        $reason = if ($Clean) { "a clean build was requested" } elseif ([string]::IsNullOrWhiteSpace($configuredTarget)) { "no target is initialized" } else { "the configured target is $configuredTarget" }
+        Write-Host "Initializing ESP-IDF target '$Target' because $reason."
+        & idf.py set-target $Target
+        if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed with exit code $LASTEXITCODE." }
     } else {
-        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath --c-layout modules --output-directory $generatedDirectory --header $generatedHeaderPath --target esp-idf --trace
+        Write-Host "Using initialized ESP-IDF target '$configuredTarget'; preserving the build directory."
     }
-    if ($LASTEXITCODE -ne 0) { throw "C~ modular emission failed with exit code $LASTEXITCODE." }
 
-    & idf.py set-target $Target
-    if ($LASTEXITCODE -ne 0) { throw "idf.py set-target failed with exit code $LASTEXITCODE." }
+    $environmentStatePath = Join-Path $projectDirectory "build\.ctilde\wrapper-environment.json"
+    $environmentSignature = Get-BuildEnvironmentSignature
+    $environmentStateMissing = -not (Test-Path -LiteralPath $environmentStatePath)
+    $environmentStateChanged = -not $environmentStateMissing -and
+        [IO.File]::ReadAllText($environmentStatePath) -cne $environmentSignature
+    if (-not $targetReinitialized -and ($environmentStateMissing -or $environmentStateChanged)) {
+        $environmentReason = if ($environmentStateMissing) { "has not been recorded" } else { "changed" }
+        Write-Host "Relevant build environment $environmentReason; reconfiguring without a full clean."
+        & idf.py reconfigure
+        if ($LASTEXITCODE -ne 0) { throw "idf.py reconfigure failed with exit code $LASTEXITCODE." }
+    }
 
-    if ([IO.Path]::GetFullPath($sourcePath) -eq [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))) {
-        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- --project (Join-Path $projectDirectory "ctilde.json") --build --trace
+    $defaultSourcePath = [IO.Path]::GetFullPath((Join-Path $projectDirectory "Program.ct"))
+    if ([IO.Path]::GetFullPath($sourcePath) -eq $defaultSourcePath) {
+        $compilerArguments = @("--project", (Join-Path $projectDirectory "ctilde.json"), "--build", "--trace")
     } else {
-        & dotnet run --project (Join-Path $repositoryDirectory "CTilde.Cli") -c Release --no-launch-profile -- $sourcePath --c-layout modules --output-directory $generatedDirectory --header $generatedHeaderPath --target esp-idf --build --idf-project $projectDirectory --trace
+        $compilerArguments = @(
+            $sourcePath,
+            "--c-layout", "modules",
+            "--output-directory", $generatedDirectory,
+            "--header", $generatedHeaderPath,
+            "--target", "esp-idf",
+            "--build",
+            "--idf-project", $projectDirectory,
+            "--trace")
     }
-    if ($LASTEXITCODE -ne 0) { throw "C~ native build failed with exit code $LASTEXITCODE." }
+
+    $script:ctildeExitCode = 0
+    Invoke-Ctilde $compilerArguments
+    if ($script:ctildeExitCode -ne 0) { throw "C~ native build failed with exit code $script:ctildeExitCode." }
+    Write-BuildEnvironmentSignature $environmentStatePath $environmentSignature
 
     if ($Flash) {
-        & idf.py -p $Port flash
+        & idf.py -p $Port -b $FlashBaud flash
+        if ($LASTEXITCODE -ne 0 -and $FlashBaud -ne 460800) {
+            Write-Warning "Flashing at $FlashBaud baud failed; retrying once at 460800 baud."
+            & idf.py -p $Port -b 460800 flash
+        }
         if ($LASTEXITCODE -ne 0) { throw "idf.py flash failed with exit code $LASTEXITCODE." }
     }
 

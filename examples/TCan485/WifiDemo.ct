@@ -202,6 +202,9 @@ public static class WifiDemo
         PrintReport(completedReport);
         report = null;
         reportMutex = null;
+
+        Ws2812.SetPixel(0u, 0u, 0u, 16u);
+        Ws2812.Refresh();
     }
 
     public static void SetState(NetworkState value)

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using CTilde;
 
@@ -52,10 +53,16 @@ internal static class CTildeCommand
                     return 0;
                 request = request with { Inputs = CTildeProjectFile.Load(request.ManifestPath!).SourceFiles };
             }
+            var compileElapsed = Stopwatch.StartNew();
             var result = Compile(request);
+            if (request.Trace)
+                Console.Error.WriteLine($"trace: C~ compile phase {compileElapsed.ElapsedMilliseconds} ms");
             if (result.ExitCode != 0 || !request.BuildNative)
                 return result.ExitCode;
+            var nativeElapsed = Stopwatch.StartNew();
             var nativeResult = await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
+            if (request.Trace)
+                Console.Error.WriteLine($"trace: native build phase {nativeElapsed.ElapsedMilliseconds} ms");
             if (nativeResult.ExitCode != 0)
                 return nativeResult.ExitCode;
             if (request.PrepareDebug == "launch")
@@ -135,30 +142,32 @@ internal static class CTildeCommand
                 return new CompilationOutcome(0, compilation.UsesInlineAssembly);
             }
 
+            var changedOutputs = 0;
             if (request.CLayout == GeneratedCLayout.Unity)
-                WriteAtomically(request.GeneratedCPath!, generated.ToString());
+                changedOutputs += AtomicFile.WriteTextIfChanged(request.GeneratedCPath!, generated.ToString()) ? 1 : 0;
             else
-                WriteBundle(request.GeneratedDirectory!, bundle!.Artifacts, request.GeneratedHeaderPath);
+                changedOutputs += WriteBundle(request.GeneratedDirectory!, bundle!.Artifacts, request.GeneratedHeaderPath);
             if (request.GeneratedHeaderPath is not null)
-                WriteAtomically(request.GeneratedHeaderPath, generatedHeader.ToString());
+                changedOutputs += AtomicFile.WriteTextIfChanged(request.GeneratedHeaderPath, generatedHeader.ToString()) ? 1 : 0;
             if (request.SymbolMapPath is not null)
             {
                 using var map = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
                 compilation.EmitSymbolMap(map);
-                WriteAtomically(request.SymbolMapPath, map.ToString());
+                changedOutputs += AtomicFile.WriteTextIfChanged(request.SymbolMapPath, map.ToString()) ? 1 : 0;
             }
             if (request.DebugMapPath is not null)
             {
                 using var debugMap = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
                 compilation.EmitDebugMap(debugMap);
-                WriteAtomically(request.DebugMapPath, debugMap.ToString());
+                changedOutputs += AtomicFile.WriteTextIfChanged(request.DebugMapPath, debugMap.ToString()) ? 1 : 0;
             }
             if (request.Trace)
             {
                 Console.Error.WriteLine("trace: semantic analysis and GNU C23 lowering complete");
-                Console.Error.WriteLine($"trace: wrote {(request.CLayout == GeneratedCLayout.Unity ? request.GeneratedCPath : request.GeneratedDirectory)}");
+                Console.Error.WriteLine($"trace: generated outputs changed={changedOutputs}");
+                Console.Error.WriteLine($"trace: emitted {(request.CLayout == GeneratedCLayout.Unity ? request.GeneratedCPath : request.GeneratedDirectory)}");
                 if (request.GeneratedHeaderPath is not null)
-                    Console.Error.WriteLine($"trace: wrote {request.GeneratedHeaderPath}");
+                    Console.Error.WriteLine($"trace: emitted {request.GeneratedHeaderPath}");
             }
             return new CompilationOutcome(0, compilation.UsesInlineAssembly);
         }
@@ -239,25 +248,7 @@ internal static class CTildeCommand
 
     private readonly record struct CompilationOutcome(int ExitCode, bool UsesInlineAssembly);
 
-    private static void WriteAtomically(string outputPath, string contents)
-    {
-        var directory = Path.GetDirectoryName(outputPath);
-        if (!string.IsNullOrEmpty(directory))
-            Directory.CreateDirectory(directory);
-        var temporaryPath = Path.Combine(directory ?? Directory.GetCurrentDirectory(), $".{Path.GetFileName(outputPath)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(temporaryPath, contents, new UTF8Encoding(false));
-            File.Move(temporaryPath, outputPath, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporaryPath))
-                File.Delete(temporaryPath);
-        }
-    }
-
-    private static void WriteBundle(string outputDirectory, IEnumerable<GeneratedCArtifact> artifacts, string? additionalOutput)
+    private static int WriteBundle(string outputDirectory, IEnumerable<GeneratedCArtifact> artifacts, string? additionalOutput)
     {
         Directory.CreateDirectory(outputDirectory);
         var materialized = artifacts.ToArray();
@@ -277,15 +268,20 @@ internal static class CTildeCommand
                 throw new IOException($"Refusing to overwrite handwritten file '{path}'.");
         }
 
+        var changed = 0;
         foreach (var artifact in materialized)
-            WriteAtomically(Path.Combine(outputDirectory, artifact.RelativePath), artifact.Content);
+            changed += AtomicFile.WriteTextIfChanged(Path.Combine(outputDirectory, artifact.RelativePath), artifact.Content) ? 1 : 0;
 
         foreach (var path in Directory.EnumerateFiles(outputDirectory, "*", SearchOption.TopDirectoryOnly))
         {
             var fullPath = Path.GetFullPath(path);
             if (!expected.Contains(fullPath) && IsCompilerMarked(fullPath))
+            {
                 File.Delete(fullPath);
+                changed++;
+            }
         }
+        return changed;
     }
 
     private static bool IsCompilerMarked(string path)

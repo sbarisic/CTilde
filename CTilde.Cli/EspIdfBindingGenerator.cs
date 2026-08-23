@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,8 +9,11 @@ namespace CTilde.Cli;
 
 internal static class EspIdfBindingGenerator
 {
+    private const int CacheSchemaVersion = 2;
+
     public static async Task<bool> RefreshAsync(BuildRequest request, bool verifyOnly, CancellationToken cancellationToken)
     {
+        var elapsed = Stopwatch.StartNew();
         var manifests = request.BindingManifests ?? [];
         if (manifests.Count == 0)
         {
@@ -21,6 +25,17 @@ internal static class EspIdfBindingGenerator
             throw new NativeBuildException("ESP-IDF bindings require an ESP-IDF project manifest.");
 
         ValidateOutputCollisions(request, manifests);
+        var cacheReason = request.GenerateBindingsOnly ? "explicit generation requested" : string.Empty;
+        if (!request.GenerateBindingsOnly && TryUseCache(request, manifests, out cacheReason))
+        {
+            var fragment = Path.Combine(request.BindingGeneratedDirectory!, "ctilde_bindings.cmake");
+            WriteBindingFragment(request, manifests, fragment, useProbe: false);
+            if (request.Trace)
+                Console.Error.WriteLine($"trace: ESP-IDF bindings cache hit ({elapsed.ElapsedMilliseconds} ms)");
+            return true;
+        }
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: ESP-IDF bindings cache miss: {cacheReason}");
         var context = PrepareBootstrap(request, manifests);
         await EspIdfBuildDriver.ReconfigureForBindingsAsync(request, cancellationToken);
         var clang = await ResolveEspClangAsync(request, cancellationToken);
@@ -53,9 +68,182 @@ internal static class EspIdfBindingGenerator
                     Console.Error.WriteLine($"trace: refreshed ESP-IDF bindings {output.Manifest.DeclarationsPath} and {output.Manifest.AdapterSourcePath}");
             }
         }
+        if (request.Trace && stale.Length != outputs.Length)
+            Console.Error.WriteLine($"trace: ESP-IDF binding outputs unchanged={outputs.Length - stale.Length}");
         WriteBindingFragment(request, manifests, context.FragmentPath, useProbe: false);
+        await WriteCacheAsync(request, manifests, compile, clang, cancellationToken);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: ESP-IDF bindings refreshed and validated ({elapsed.ElapsedMilliseconds} ms)");
         return true;
     }
+
+    private static bool TryUseCache(BuildRequest request, IReadOnlyList<EspIdfBindingManifest> manifests, out string reason)
+    {
+        var cachePath = CachePath(request);
+        if (!File.Exists(cachePath))
+        {
+            reason = "cache state is missing";
+            return false;
+        }
+        try
+        {
+            var state = JsonSerializer.Deserialize<BindingCacheState>(File.ReadAllText(cachePath));
+            if (state is null || state.SchemaVersion != CacheSchemaVersion)
+            {
+                reason = "cache schema changed";
+                return false;
+            }
+            if (!ManifestSignature(manifests).Equals(state.ManifestSignature, StringComparison.Ordinal))
+            {
+                reason = "binding manifest content changed";
+                return false;
+            }
+            if (!File.Exists(state.ClangPath))
+            {
+                reason = "cached Espressif Clang is missing";
+                return false;
+            }
+            var clang = new FileInfo(state.ClangPath);
+            if (clang.Length != state.ClangLength || clang.LastWriteTimeUtc.Ticks != state.ClangWriteTicks)
+            {
+                reason = "Espressif Clang changed";
+                return false;
+            }
+            foreach (var input in state.Inputs)
+            {
+                if (!File.Exists(input.Path) || !HashFile(input.Path).Equals(input.Hash, StringComparison.Ordinal))
+                {
+                    reason = $"input changed: {Path.GetFileName(input.Path)}";
+                    return false;
+                }
+            }
+            foreach (var output in state.Outputs)
+            {
+                if (!File.Exists(output.Path) || !HashFile(output.Path).Equals(output.Hash, StringComparison.Ordinal))
+                {
+                    reason = $"generated output changed: {Path.GetFileName(output.Path)}";
+                    return false;
+                }
+            }
+            var probe = Path.Combine(request.BindingGeneratedDirectory!, "ctilde_bindings_probe.c");
+            var compile = ReadCompileContext(request, probe);
+            if (!CompileSignature(compile).Equals(state.CompileSignature, StringComparison.Ordinal))
+            {
+                reason = "ESP-IDF compile context changed";
+                return false;
+            }
+            if (manifests.Count != state.ManifestCount)
+            {
+                reason = "binding manifest set changed";
+                return false;
+            }
+            if (!CacheConfigurationSignature(request).Equals(state.ConfigurationSignature, StringComparison.Ordinal))
+            {
+                reason = "ESP-IDF CMake or sdkconfig inputs changed";
+                return false;
+            }
+            reason = "current";
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException or NativeBuildException or InvalidOperationException or KeyNotFoundException)
+        {
+            reason = $"cache could not be validated: {exception.Message}";
+            return false;
+        }
+    }
+
+    private static async Task WriteCacheAsync(BuildRequest request, IReadOnlyList<EspIdfBindingManifest> manifests, CompileContext compile,
+        string clangPath, CancellationToken cancellationToken)
+    {
+        var inputPaths = ResolveImportedHeaders(manifests, compile)
+            .Concat(CacheConfigurationInputs(request, compile))
+            .Where(File.Exists)
+            .Select(Path.GetFullPath)
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        var outputPaths = manifests.SelectMany(manifest => new[] { manifest.DeclarationsPath, manifest.AdapterSourcePath })
+            .Append(Path.Combine(request.BindingGeneratedDirectory!, "ctilde_bindings.cmake"))
+            .Select(Path.GetFullPath).Order(StringComparer.Ordinal).ToArray();
+        var clang = new FileInfo(clangPath);
+        var version = await NativeProcessRunner.RunAsync(new NativeProcessRequest(clangPath, ["--version"], request.RootDirectory, ForwardOutput: false), cancellationToken);
+        if (version.ExitCode != 0)
+            throw new NativeBuildException("Could not read the selected Espressif Clang version for the binding cache.");
+        var state = new BindingCacheState(CacheSchemaVersion, manifests.Count, ManifestSignature(manifests), CompileSignature(compile), CacheConfigurationSignature(request), clang.FullName, clang.Length,
+            clang.LastWriteTimeUtc.Ticks, version.StandardOutput.Trim(), inputPaths.Select(path => new BindingCacheFile(path, HashFile(path))).ToArray(),
+            outputPaths.Select(path => new BindingCacheFile(path, HashFile(path))).ToArray());
+        var json = JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }) + "\n";
+        AtomicFile.WriteTextIfChanged(CachePath(request), json);
+    }
+
+    private static IEnumerable<string> CacheConfigurationInputs(BuildRequest request, CompileContext compile)
+    {
+        yield return compile.ConfigPath;
+        yield return Path.Combine(request.EspIdfProjectDirectory!, "CMakeLists.txt");
+        yield return Path.Combine(request.EspIdfProjectDirectory!, "main", "CMakeLists.txt");
+        yield return Path.Combine(request.EspIdfProjectDirectory!, "sdkconfig.defaults");
+        yield return Path.Combine(request.EspIdfProjectDirectory!, "dependencies.lock");
+    }
+
+    private static string CacheConfigurationSignature(BuildRequest request)
+    {
+        var project = request.EspIdfProjectDirectory!;
+        var candidates = new[]
+        {
+            Path.Combine(project, "CMakeLists.txt"),
+            Path.Combine(project, "sdkconfig"),
+            Path.Combine(project, "dependencies.lock"),
+            Path.Combine(project, "partitions.csv"),
+            Path.Combine(project, "main", "CMakeLists.txt"),
+            Path.Combine(project, "main", "idf_component.yml")
+        }.Concat(Directory.EnumerateFiles(project, "sdkconfig.defaults*", SearchOption.TopDirectoryOnly))
+         .Select(Path.GetFullPath)
+         .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+         .Order(StringComparer.Ordinal)
+         .ToArray();
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var path in candidates)
+        {
+            var relative = Path.GetRelativePath(project, path).Replace('\\', '/');
+            hash.AppendData(Encoding.UTF8.GetBytes(relative + "\n"));
+            hash.AppendData(File.Exists(path) ? File.ReadAllBytes(path) : "<missing>"u8);
+            hash.AppendData("\n"u8);
+        }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static string CompileSignature(CompileContext compile)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        void Add(string value) => hash.AppendData(Encoding.UTF8.GetBytes(value + "\n"));
+        Add(compile.Target); Add(compile.IdfVersion); Add(Path.GetFullPath(compile.Directory));
+        for (var index = 0; index < compile.Arguments.Count; index++)
+        {
+            var argument = compile.Arguments[index];
+            if (argument is "-o" or "-MF" or "-MT" or "-MQ") { index++; continue; }
+            if (argument.EndsWith(".c", StringComparison.OrdinalIgnoreCase) && File.Exists(Path.GetFullPath(argument, compile.Directory))) continue;
+            Add(argument);
+        }
+        foreach (var directory in compile.IncludeDirectories.Order(StringComparer.Ordinal)) Add(Path.GetFullPath(directory));
+        foreach (var component in compile.ComponentDirectories.OrderBy(pair => pair.Key, StringComparer.Ordinal)) { Add(component.Key); Add(Path.GetFullPath(component.Value)); }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static string ManifestSignature(IReadOnlyList<EspIdfBindingManifest> manifests)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        foreach (var manifest in manifests.OrderBy(item => item.ManifestPath, StringComparer.Ordinal))
+        {
+            hash.AppendData(Encoding.UTF8.GetBytes(Path.GetFullPath(manifest.ManifestPath) + "\n"));
+            hash.AppendData(Encoding.UTF8.GetBytes(manifest.CanonicalText()));
+        }
+        return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
+    }
+
+    private static string CachePath(BuildRequest request) =>
+        Path.Combine(request.EspIdfProjectDirectory!, "build", ".ctilde", "bindings", "state.json");
+
+    private static string HashFile(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
 
     private static BindingContext PrepareBootstrap(BuildRequest request, IReadOnlyList<EspIdfBindingManifest> manifests)
     {
@@ -550,15 +738,22 @@ internal static class EspIdfBindingGenerator
         Add("ctilde-esp-idf-bindings-v1\n"); Add(compile.Target); Add(compile.IdfVersion);
         foreach (var manifest in manifests) Add(manifest.CanonicalText());
         if (File.Exists(compile.ConfigPath)) hash.AppendData(File.ReadAllBytes(compile.ConfigPath));
-        foreach (var import in manifests.SelectMany(manifest => manifest.Imports).OrderBy(import => import.Header, StringComparer.Ordinal))
-        {
-            if (!compile.ComponentDirectories.TryGetValue(import.Component, out var componentDirectory))
-                throw new NativeBuildException($"ESP-IDF component '{import.Component}' was not present in the configured project.");
-            var header = ResolveHeader(import.Header, compile.IncludeDirectories, componentDirectory);
+        foreach (var header in ResolveImportedHeaders(manifests, compile))
             hash.AppendData(File.ReadAllBytes(header));
-        }
         return Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
     }
+
+    private static string[] ResolveImportedHeaders(IReadOnlyList<EspIdfBindingManifest> manifests, CompileContext compile) =>
+        manifests.SelectMany(manifest => manifest.Imports)
+            .OrderBy(import => import.Header, StringComparer.Ordinal)
+            .Select(import =>
+            {
+                if (!compile.ComponentDirectories.TryGetValue(import.Component, out var componentDirectory))
+                    throw new NativeBuildException($"ESP-IDF component '{import.Component}' was not present in the configured project.");
+                return ResolveHeader(import.Header, compile.IncludeDirectories, componentDirectory);
+            })
+            .Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+            .ToArray();
 
     private static string ResolveHeader(string header, IReadOnlyList<string> includeDirectories, string componentDirectory)
     {
@@ -623,17 +818,14 @@ internal static class EspIdfBindingGenerator
     private static bool IsInside(string path, string root) { var relative = Path.GetRelativePath(root, path); return relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathRooted(relative); }
     private static bool PathsEqual(string left, string right) => Path.GetFullPath(left).Equals(Path.GetFullPath(right), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    private static void WriteAtomically(string path, string contents)
-    {
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var temporary = path + $".{Environment.ProcessId}.tmp";
-        File.WriteAllText(temporary, contents, new UTF8Encoding(false));
-        File.Move(temporary, path, true);
-    }
+    private static void WriteAtomically(string path, string contents) => AtomicFile.WriteTextIfChanged(path, contents);
 
     private sealed record BindingContext(string ProbeSource, string FragmentPath);
     private sealed record CompileContext(string Directory, IReadOnlyList<string> Arguments, IReadOnlyList<string> IncludeDirectories, string Target, string IdfVersion, string ConfigPath, IReadOnlyDictionary<string, string> ComponentDirectories);
     private sealed record GeneratedBinding(EspIdfBindingManifest Manifest, string Declarations, string Adapter);
+    private sealed record BindingCacheFile(string Path, string Hash);
+    private sealed record BindingCacheState(int SchemaVersion, int ManifestCount, string ManifestSignature, string CompileSignature, string ConfigurationSignature, string ClangPath,
+        long ClangLength, long ClangWriteTicks, string ClangVersion, BindingCacheFile[] Inputs, BindingCacheFile[] Outputs);
 }
 
 file static class BindingHexExtensions

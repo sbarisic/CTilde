@@ -199,20 +199,5 @@ internal static class DebugPreparation
         }
     }
 
-    private static void WriteAtomically(string path, string contents)
-    {
-        var directory = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(directory);
-        var temporary = Path.Combine(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
-        try
-        {
-            File.WriteAllText(temporary, contents, new UTF8Encoding(false));
-            File.Move(temporary, path, overwrite: true);
-        }
-        finally
-        {
-            if (File.Exists(temporary))
-                File.Delete(temporary);
-        }
-    }
+    private static void WriteAtomically(string path, string contents) => AtomicFile.WriteTextIfChanged(path, contents);
 }

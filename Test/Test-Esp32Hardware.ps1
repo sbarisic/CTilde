@@ -376,7 +376,7 @@ try {
     Invoke-Checked "node" @("--test", $supportTest)
 
     Write-Host "`n=== ABI 15 Release workload ==="
-    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource -Clean
     if ($LASTEXITCODE -ne 0) { throw "Release firmware build failed with exit code $LASTEXITCODE." }
     $sizeOutput = Invoke-Captured "idf.py" @("size") $ProjectDirectory
     $sizeInput = Join-Path $artifactDirectory "$timestamp-size.txt"

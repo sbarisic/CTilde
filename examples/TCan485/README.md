@@ -1,6 +1,6 @@
 # T-CAN485 WS2812 hardware test
 
-This ESP-IDF project emits the Draft 0.15 ABI 15 modular C bundle under `main/generated`: shared runtime headers, one runtime implementation, reachable namespace sources, the entry/module-lifecycle source, a symbol map, and a CMake source fragment. The component includes that fragment, and the CLI's native build stage invokes `idf.py build`. ESP-IDF still owns chip selection, component resolution, incremental compilation, linking, flashing, and monitoring. The native shim is compiled by the component CMake project. It targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
+This ESP-IDF project emits the Draft 0.15 ABI 15 modular C bundle under `main/generated`: shared runtime headers, one runtime implementation, reachable namespace sources, the entry/module-lifecycle source, a symbol map, and CMake source fragments. `Bindings/esp-idf.bindings.json` also generates tracked declarations and adapters for the native timer, hardware RNG, GPIO, Wi-Fi station, network-interface, event-loop, HTTPS client, and certificate-bundle APIs. The component includes both fragments, and the CLI's native build stage invokes `idf.py build`. ESP-IDF still owns chip selection, component resolution, incremental compilation, linking, flashing, and monitoring. The native shim remains intact. The project targets the classic ESP32 T-CAN485: GPIO4 carries the onboard WS2812 data signal, while GPIO2 is reserved for the microSD MISO signal and is never driven by this test.
 
 From PowerShell:
 
@@ -19,7 +19,32 @@ The repeatable physical acceptance runner uses the connected board defaults and 
 
 Run it from the repository root. The normal command prompts once to confirm visible WS2812 activity. `-AutomatedOnly` performs all machine-verifiable checks but leaves that release gate pending. `-AcceptMemoryBaseline` is an explicit reviewer-controlled update; ordinary runs only validate the tracked versioned baseline and fail when the ESP-IDF or compiler version differs. Each run writes an ignored JSON report, raw UART bytes, and transcripts under `artifacts/esp32-hardware`.
 
-`Program.ct` exercises generic interface dispatch, scalar atomics, volatile publication, two source-created threads, recursive `lock`, scoped UTF-8 input, a move-only opaque resource released by `defer`, exact `EspError` naming, generated exports, an instance delegate through a callback/context adapter, attached native FreeRTOS tasks, per-task exceptions and cleanup, timer/function-pointer/native-buffer features, construction, boxing, strings, and ARC heap recovery. The checked component manifest pins Espressif `led_strip` 3.0.3 and uses its non-DMA RMT backend. All allocation-producing managed self-tests return before measurement and the permanent allocation-free loop.
+`Program.ct` exercises generic interface dispatch, scalar atomics, volatile publication, source-created threads, recursive `lock`, scoped UTF-8 input, a move-only opaque resource released by `defer`, exact `EspError` naming, generated exports, an instance delegate through a callback/context adapter, attached native FreeRTOS tasks, per-task exceptions and cleanup, generated timer/random/buffer bindings, construction, boxing, strings, and ARC heap recovery. It prints `generated bindings: ok` after the generated native calls succeed. The checked component manifest pins Espressif `led_strip` 3.0.3 and uses its non-DMA RMT backend. All allocation-producing managed self-tests return before measurement and the permanent allocation-free loop.
+
+## Default Wi-Fi HTTPS fetch
+
+The normal firmware calls the Wi-Fi/HTTPS demo after its managed self-tests. Configure `Ssid` and `Password` in `WifiSettings.ct` and optionally change the HTTPS URL. A clean checkout uses empty credential placeholders; an empty SSID prints `wifi: not configured`, skips native network initialization, and continues to the permanent WS2812 loop. Do not commit credentials or a locally edited settings file.
+
+When enabled, `WifiDemo.ct` starts an `IWebsiteFetcher` implementation on a C~ `Thread`. The main task keeps the WS2812 animated while the worker polls for an IPv4 address and downloads the response. The worker publishes its report through a `Mutex`, a volatile completion flag, and atomic state/counter values. It uses generated NVS, owned native handles, and `defer` to close and destroy HTTP, Wi-Fi, event-loop, network, and storage resources on success and failure. The response is limited to 64 KiB; only its first 256 bytes are retained, non-printable bytes are displayed as `.`, and the complete body receives a deterministic FNV-1a hash.
+
+A successful fetch prints the HTTP status, declared and received lengths, hash, elapsed microseconds, sanitized preview, and `generated wifi/http bindings: ok`. Connection, TLS, HTTP, response-limit, and C~ failures print `wifi/http error: ...`, briefly set the LED red, and then return to the normal firmware loop. The generated declarations are `[NoAlloc]` only with respect to the C~ heap; ESP-IDF Wi-Fi and TLS use native heap internally. HTTPS and the full certificate bundle intentionally increase flash and peak heap requirements.
+
+The opt-in hardware check takes credentials from the environment, temporarily edits the settings, validates a 2xx response and bounds retained first-use native state to 8 KiB, then restores and flashes the original settings when it changed them. If the source already contains the requested settings, the validated firmware remains flashed without a redundant rebuild:
+
+```powershell
+$env:CTILDE_TEST_WIFI_SSID = "your-network"
+$env:CTILDE_TEST_WIFI_PASSWORD = "your-password"
+.\Test\Test-Esp32Wifi.ps1
+```
+
+Run that command from the repository root. The test does not write credentials to its artifacts, but command-line `-Ssid` and `-Password` values can be visible to local process-inspection tools; environment variables avoid that exposure.
+
+Refresh or verify the tracked binding outputs with the matching installed ESP-IDF and Espressif Clang:
+
+```powershell
+ctilde --project .\ctilde.json --generate-bindings --idf-path C:\esp\v6.0.2\esp-idf --esp-clang C:\Espressif\tools\esp-clang\esp-20.1.1_20250829\esp-clang\bin\clang.exe
+ctilde --project .\ctilde.json --verify-bindings --idf-path C:\esp\v6.0.2\esp-idf --esp-clang C:\Espressif\tools\esp-clang\esp-20.1.1_20250829\esp-clang\bin\clang.exe
+```
 
 To verify the fatal runtime boundary:
 
@@ -44,6 +69,12 @@ Set `ctilde.debugger.serialPort` to the board port. This example uses 460800 bau
 ## Hardware evidence
 
 Draft 0.15 ABI 15 completed the full physical acceptance on 2026-08-23 using the ESP32-D0WDQ6-V3 revision 3.1 board on COM4 at 460800 baud, ESP-IDF 6.0.2, Xtensa GCC 15.2.0, and ESP-GDB 17.1. The ordinary Release image was 171,136 bytes and measured 171,013 image bytes, 78,554 bytes flash code, 36,608 bytes flash data, 45,391 bytes IRAM, and 14,652 bytes static DRAM. It reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom. Every ABI marker passed, including `draft15 concurrency: ok`, and 25 alternating WS2812 transitions completed. The operator confirmed that the onboard GPIO4 LED visibly alternated.
+
+That physical result predates the Wi-Fi/HTTPS worker. The normal firmware now includes and invokes that worker, while the clean-checkout image skips native network initialization because its tracked SSID is empty. ESP-IDF Wi-Fi, TLS, the HTTP client, and the full certificate bundle remain linked in both cases. The deliberately rebaselined ESP32 cross-build is 191,616 binary bytes and 191,497 image bytes: 87,174 bytes flash code, 44,776 bytes flash data, 48,463 bytes IRAM, and 15,444 bytes static DRAM. The ESP32-C3 cross-build is 208,192 binary bytes and 207,820 image bytes: 113,112 bytes flash code, 43,860 bytes flash data, and 56,824 bytes static DRAM. These are the tracked ESP-IDF 6.0.2/GCC 15.2.0 limits; a live-network acceptance run still requires local credentials because credentials are never tracked.
+
+An automated connected-board pass of that new network-disabled image completed on 2026-08-23. It printed `wifi: not configured`, completed all ABI markers and 25 alternating WS2812 transitions, and measured 291,696 bytes free heap, a 278,964-byte minimum, and 6,708 bytes of main-task stack headroom. The allocation-failure, exact-console, fatal-reset, debugger-v3, detach, and startup-timeout checks also passed, and the runner restored the 191,616-byte Release image. The ignored report is `artifacts/esp32-hardware/20260823-211534.json`. Because the run used `-AutomatedOnly`, the previous visual LED confirmation remains the latest human observation; no live HTTPS claim is made without local credentials.
+
+A configured live-network run then passed on the same hardware. The current 1,010,160-byte configured default image associated, obtained an IPv4 address, validated the TLS certificate, returned HTTP 200 from `https://example.com/`, read 559 bytes, and produced FNV-1a hash `1710764169`. ESP-IDF retained 7,280 bytes of bounded first-use Wi-Fi/TLS state after its cleanup sequence; ARC recovery and `CTILDE_ESP_OK` still passed and the LED loop continued. Credentials are intentionally omitted from this evidence and must not be committed.
 
 The ABI 15 layout fixture measured 16-byte objects, 20-byte string and array headers, 40-byte descriptors, and 12-byte probe vtables with totals of 720 descriptor bytes, 204 vtable bytes, and 496 literal-object bytes. Injected class, array, box, and dynamic-string allocation failures were caught, later allocations succeeded, and live ownership returned to zero. The exact 154-byte COM4 CRLF/UTF-8 frame passed. The isolated fatal image emitted `CTN0001`, aborted, and rebooted.
 

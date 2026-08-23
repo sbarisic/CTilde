@@ -322,6 +322,16 @@ internal static class HostedBuildDriver
 
 internal static class EspIdfBuildDriver
 {
+    public static async Task ReconfigureForBindingsAsync(BuildRequest request, CancellationToken cancellationToken)
+    {
+        var process = CreateIdfRequest(request, ["-D", "CMAKE_EXPORT_COMPILE_COMMANDS=ON", "reconfigure"]);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: preparing ESP-IDF header context in {request.EspIdfProjectDirectory}");
+        var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
+        if (result.ExitCode != 0)
+            throw new NativeBuildException($"ESP-IDF binding reconfigure failed with exit code {result.ExitCode}.");
+    }
+
     public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
     {
         var project = request.EspIdfProjectDirectory!;
@@ -343,6 +353,14 @@ internal static class EspIdfBuildDriver
             var generatedRelativePath = Path.GetRelativePath(componentDirectory, request.GeneratedCPath!).Replace('\\', '/');
             if (generatedRelativePath.StartsWith("../", StringComparison.Ordinal) || !componentContents.Contains(generatedRelativePath, StringComparison.Ordinal))
                 throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must register generated source '{generatedRelativePath}'.");
+        }
+        if (request.BindingManifests is { Count: > 0 })
+        {
+            var bindingFragment = Path.GetRelativePath(componentDirectory, Path.Combine(request.BindingGeneratedDirectory!, "ctilde_bindings.cmake")).Replace('\\', '/');
+            if (bindingFragment.StartsWith("../", StringComparison.Ordinal) || !componentContents.Contains(bindingFragment, StringComparison.Ordinal) ||
+                !componentContents.Contains("CTILDE_BINDING_SOURCES", StringComparison.Ordinal) ||
+                !componentContents.Contains("CTILDE_BINDING_REQUIRES", StringComparison.Ordinal))
+                throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must include generated binding fragment '{bindingFragment}' and register CTILDE_BINDING_SOURCES and CTILDE_BINDING_REQUIRES.");
         }
 
         var process = CreateIdfRequest(request, ["build"]);

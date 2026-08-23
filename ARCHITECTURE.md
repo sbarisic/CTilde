@@ -185,18 +185,18 @@ Draft 0.12 adds body-bearing `System.Vec2`, `System.Vec3`, and `System.Vec4` dec
 
 Generated global identifiers use kind-specific prefixes and the first 96 bits of SHA-256 over centralized canonical identities. The versioned symbol map preserves full identities and source locations. User text is never copied directly into a global C identifier.
 
-## Native interop and planned binding generation
+## Native interop and binding generation
 
-The current ESP target uses handwritten fixed-width shims. The intended next layer keeps the compiler independent from ESP-IDF while reducing repetitive wrapper code:
+The ESP target keeps handwritten fixed-width shims and adds an explicit project binding layer without coupling the core compiler to ESP-IDF:
 
-1. A binding manifest selects public component headers from the installed ESP-IDF project.
-2. A header-aware generator emits editor-visible C~ declarations and companion C adapters.
-3. The adapters include the real headers and perform designated initialization, default-macro expansion, static-inline or macro calls, and native error conversion.
-4. ESP-IDF compiles and links those adapters as ordinary component sources.
+1. A schema-versioned manifest selects public component headers and declarations.
+2. The CLI asks `idf.py reconfigure` for the actual compile database and project description, then validates selected declarations through Espressif Clang AST JSON and a strict adapter translation unit.
+3. Deterministic tracked C~ declarations expose functions, constants, opaque types, callbacks, flattened configuration operations, and selected output structures. Companion C adapters include the real headers, preserve native parameter order, apply validated initializer macros, map nested fields, bound fixed UTF-8 arrays, and perform native invocation.
+4. An ignored generated CMake fragment adds adapter sources and selected component requirements to the owning component.
 
-This design follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Private and example-only headers remain outside generated bindings by default.
+This follows ESP-IDF's source-compatibility boundary. Native configuration structures, enum numbers, and typedef implementation details do not become durable compiler metadata. Opaque returns carry explicit owned/borrowed and nullable contracts, so ordinary C~ ownership lowering checks their cleanup without exposing native layouts. Private, `esp_private`, example, preview, and experimental headers require an explicit unstable opt-in. Generated adapter symbols are project-private and do not alter runtime ABI 15 or the public native header.
 
-The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, scoped pointer-plus-length native buffers, scoped UTF-8 views, nominal opaque handles, and lexical native ownership. The compiler flattens buffers and UTF-8 inputs and renders qualified declarators from structured types. `defer` reserves opaque release obligations without making native resources managed objects. Broad ESP-IDF coverage still requires header-driven source-compatible binding generation.
+The language-side ABI has exact fixed-width and native-width scalars, checked `ref`/`in`/`out`, `void*`, scoped pointer-plus-length native buffers, scoped UTF-8 views, nominal opaque handles, and lexical native ownership. The compiler flattens buffers and UTF-8 inputs and renders qualified declarators from structured types. `defer` reserves opaque release obligations without making native resources managed objects. Binding manifests accept identifiers and structured mappings only; arbitrary compiler flags and source fragments remain rejected.
 
 Native-to-C~ calls form a separate layer. Unsafe function pointers represent raw C code addresses. Delegates represent ARC-managed method-and-target callables and are not ABI-compatible with function pointers. Export wrappers and callback trampolines accept any attached native thread. The entrypoint initializes the process runtime and primary thread; native-created threads use the generated-header attachment ABI, while Draft 0.15 `Thread` workers attach and detach internally. Wrappers convert escaping exceptions to panic `CTE0003`; unattached entry panics with `CTT0001`. Open generics, interface views, atomic storage, and managed Thread/Mutex objects do not cross native ABI boundaries. Retained callback lifetimes and ISR entry remain later profiles because their blocking, allocation, and IRAM-safety rules differ.
 
@@ -252,4 +252,4 @@ ESP-IDF is a target profile, not a separate language backend. It reuses the pars
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 
-See the [ESP-IDF and native-interop roadmap](TODO.md#esp-idf-and-native-interop) for the remaining binding, callback, ISR, and hardware-validation work.
+See the [ESP-IDF and native-interop roadmap](TODO.md#esp-idf-and-native-interop) for the remaining callback, ISR, panic-policy, and hardware-validation work.

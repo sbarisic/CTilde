@@ -47,14 +47,17 @@ test("task arguments apply only target-appropriate machine settings", () => {
   const launch = resolveCompilerLaunch("", "dotnet", path.resolve("extension"), path.resolve("workspace"));
   const manifest = path.resolve("workspace", "ctilde.json");
   assert.deepEqual(
-    compilerArguments(launch, manifest, "check", "hosted", { nativeCompiler: "clang", idfPath: "idf" }).slice(-3),
+    compilerArguments(launch, manifest, "check", "hosted", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-3),
     ["--project", manifest, "--check"]);
   assert.deepEqual(
-    compilerArguments(launch, manifest, "build", "hosted", { nativeCompiler: "clang", idfPath: "idf" }).slice(-5),
+    compilerArguments(launch, manifest, "build", "hosted", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-5),
     ["--project", manifest, "--build", "--compiler", "clang"]);
   assert.deepEqual(
-    compilerArguments(launch, manifest, "build", "esp-idf", { nativeCompiler: "clang", idfPath: "idf" }).slice(-5),
-    ["--project", manifest, "--build", "--idf-path", "idf"]);
+    compilerArguments(launch, manifest, "build", "esp-idf", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-7),
+    ["--project", manifest, "--build", "--idf-path", "idf", "--esp-clang", "esp-clang"]);
+  assert.deepEqual(
+    compilerArguments(launch, manifest, "bindings", "esp-idf", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-7),
+    ["--project", manifest, "--generate-bindings", "--idf-path", "idf", "--esp-clang", "esp-clang"]);
 });
 
 test("task project and nearest-manifest resolution are deterministic", () => {

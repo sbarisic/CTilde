@@ -1,4 +1,5 @@
 include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_sources.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_bindings.cmake")
 
 set(CTILDE_PRIVATE_REQUIRES
     esp_driver_gpio
@@ -11,9 +12,9 @@ if(NOT DEFINED ENV{CTILDE_FATAL_RUNTIME_BUILD})
 endif()
 
 idf_component_register(
-    SRCS ${CTILDE_GENERATED_SOURCES} "ctilde_esp_shim.c"
+    SRCS ${CTILDE_GENERATED_SOURCES} ${CTILDE_BINDING_SOURCES} "ctilde_esp_shim.c"
     INCLUDE_DIRS "."
-    PRIV_REQUIRES ${CTILDE_PRIVATE_REQUIRES})
+    PRIV_REQUIRES ${CTILDE_PRIVATE_REQUIRES} ${CTILDE_BINDING_REQUIRES})
 
 target_compile_options(${COMPONENT_LIB} PRIVATE -Wall -Wextra -Werror)
 

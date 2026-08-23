@@ -41,7 +41,17 @@ internal static class CTildeCommand
             if (request.PrepareDebug == "attach")
                 return DebugPreparation.ValidateAttach(request);
 
-            await using var buildLock = request.BuildNative ? BuildLock.Acquire(request.LockDirectory) : null;
+            await using var buildLock = request.BuildNative || request.BindingManifests is { Count: > 0 }
+                ? BuildLock.Acquire(request.LockDirectory)
+                : null;
+            if (request.BindingManifests is { Count: > 0 })
+            {
+                if (!await EspIdfBindingGenerator.RefreshAsync(request, request.VerifyBindings, cancellation.Token))
+                    return 1;
+                if (request.GenerateBindingsOnly || request.VerifyBindings)
+                    return 0;
+                request = request with { Inputs = CTildeProjectFile.Load(request.ManifestPath!).SourceFiles };
+            }
             var result = Compile(request);
             if (result.ExitCode != 0 || !request.BuildNative)
                 return result.ExitCode;
@@ -88,7 +98,11 @@ internal static class CTildeCommand
                 if (request.ManifestPath is not null)
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
             }
-            var trees = request.Inputs.Select(path => SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
+            var bindingDeclarations = (request.BindingManifests ?? []).Select(manifest => manifest.DeclarationsPath)
+                .ToHashSet(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            var trees = request.Inputs.Select(path => bindingDeclarations.Contains(Path.GetFullPath(path))
+                ? SyntaxTree.ParseEspIdfBinding(SourceText.FromFile(path))
+                : SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
             var sourceRoot = request.DebugInformation != DebugInformationMode.None
                 ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
                 : request.SourceRoot;
@@ -166,7 +180,8 @@ internal static class CTildeCommand
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
             options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
-            options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null)
+            options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null ||
+            options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null)
             return UsageError("--compile-directory cannot be combined with inputs, project, output, check, build, or native-build options.");
         try
         {
@@ -308,9 +323,11 @@ internal static class CTildeCommand
         Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
+        Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
+        Console.Error.WriteLine("ESP-IDF bindings: --generate-bindings --verify-bindings --esp-clang <path>");
         Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--debug-memory off|objects|guarded] [--serial-port <port>] [--baud-rate <rate>]");
     }
 }

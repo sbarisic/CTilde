@@ -27,6 +27,7 @@ test("manifest registers the C~ language and grammar", async () => {
     "onTaskType:ctilde",
     "onCommand:ctilde.project.check",
     "onCommand:ctilde.project.build",
+    "onCommand:ctilde.project.generateBindings",
     "onCommand:ctilde.project.debug",
     "onCommand:ctilde.project.attach",
     "onDebug:ctilde"
@@ -48,6 +49,8 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.compiler.nativeCompiler"].default, "");
   assert.equal(configuration["ctilde.compiler.idfPath"].default, "");
   assert.equal(configuration["ctilde.compiler.idfPath"].scope, "machine-overridable");
+  assert.equal(configuration["ctilde.compiler.espClangPath"].default, "");
+  assert.equal(configuration["ctilde.compiler.espClangPath"].scope, "machine-overridable");
   assert.equal(configuration["ctilde.debugger.gdbPath"].scope, "machine");
   assert.equal(configuration["ctilde.debugger.serialPort"].default, "");
   assert.equal(configuration["ctilde.debugger.baudRate"].default, 115200);
@@ -56,7 +59,7 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.debugger.showRuntimeFrames"].default, false);
   assert.match(configuration["ctilde.debugger.showRuntimeFrames"].description, /trap reports/);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].required, ["project", "mode"]);
-  assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build"]);
+  assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build", "bindings"]);
   assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
   assert.equal(manifest.contributes.problemMatchers[0].owner, "ctilde-build");
   assert.ok(manifest.files.includes("compiler/**"));
@@ -71,6 +74,7 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(debuggerContribution.configurationAttributes.launch.properties.memoryDiagnostics.default, "objects");
   assert.equal(debuggerContribution.initialConfigurations.length, 2);
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
+  assert.equal(manifest.contributes.jsonValidation[1].fileMatch, "**/*.bindings.json");
   const semanticScopes = manifest.contributes.semanticTokenScopes[0];
   assert.equal(semanticScopes.language, "ctilde");
   assert.deepEqual(semanticScopes.scopes.property, ["variable.other.property.ctilde"]);
@@ -90,6 +94,7 @@ test("manifest registers the C~ language and grammar", async () => {
   await access(path.resolve(extensionRoot, language.configuration));
   await access(path.resolve(extensionRoot, grammar.path));
   await access(path.resolve(extensionRoot, "schemas/ctilde.schema.json"));
+  await access(path.resolve(extensionRoot, "schemas/esp-idf-bindings.schema.json"));
 });
 
 test("ESP serial bridge opens without asserting reset control lines", async () => {
@@ -105,6 +110,19 @@ test("project schema includes native build configuration", async () => {
   assert.deepEqual(build.properties.configuration.enum, ["debug", "release"]);
   assert.equal(build.properties.compiler.default, "auto");
   assert.equal(build.properties.espIdfProjectDirectory.default, ".");
+  assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
+  const bindings = await readJson("schemas/esp-idf-bindings.schema.json");
+  assert.equal(bindings.properties.schemaVersion.const, 1);
+  assert.equal(bindings.$defs.import.additionalProperties, false);
+  assert.ok(bindings.$defs.import.properties.configAdapters);
+  assert.ok(bindings.$defs.import.properties.outputAdapters);
+  assert.deepEqual(bindings.$defs.function.properties.returnOwnership.enum, ["default", "owned", "borrowed"]);
+  assert.deepEqual(bindings.$defs.configField.properties.mapping.enum, ["value", "fixedUtf8"]);
+  assert.equal(bindings.$defs.configField.properties.maxBytes.minimum, 1);
+  assert.ok(bindings.$defs.configAdapter.properties.initializer);
+  assert.ok(bindings.$defs.configAdapter.properties.parameters);
+  assert.ok(bindings.$defs.outputAdapter.properties.parameters);
+  assert.match(bindings.$defs.memberPath.pattern, /\\\./);
 });
 
 test("grammar exposes the expected root scope and repositories", async () => {

@@ -1,0 +1,171 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "C~ ESP-IDF binding manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "namespace", "declarations", "adapterSource", "imports"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "namespace": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$" },
+    "declarations": { "$ref": "#/$defs/path" },
+    "adapterSource": { "$ref": "#/$defs/path" },
+    "imports": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/import" }
+    }
+  },
+  "$defs": {
+    "identifier": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+    "path": { "type": "string", "minLength": 1, "not": { "pattern": "(^[A-Za-z]:|^[/\\\\]|(^|[/\\\\])\\.\\.([/\\\\]|$))" } },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type", "nativeNames"],
+      "properties": {
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "type": "string", "minLength": 1 },
+        "nativeNames": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/identifier" } },
+        "ownership": { "enum": ["borrowed", "consumes", "retained", "creates"] },
+        "nullable": { "type": "boolean", "default": false },
+        "synchronousCallback": { "type": "boolean", "default": false }
+      }
+    },
+    "function": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "name", "returnType", "parameters"],
+      "properties": {
+        "symbol": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "returnType": { "type": "string", "minLength": 1 },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "noAlloc": { "type": "boolean", "default": false },
+        "callable": { "type": "boolean", "default": false },
+        "returnOwnership": { "enum": ["default", "owned", "borrowed"], "default": "default" },
+        "returnNullable": { "type": "boolean", "default": false }
+      }
+    },
+    "constant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "name", "type"],
+      "properties": {
+        "symbol": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "type": "string", "minLength": 1 },
+        "noAlloc": { "type": "boolean", "default": false }
+      }
+    },
+    "configField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "name", "type"],
+      "properties": {
+        "field": { "$ref": "#/$defs/memberPath" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "type": "string", "minLength": 1 },
+        "mapping": { "enum": ["value", "fixedUtf8"], "default": "value" },
+        "maxBytes": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "configDefault": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "symbol"],
+      "properties": {
+        "field": { "$ref": "#/$defs/memberPath" },
+        "symbol": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "configAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["function", "struct", "structParameter", "name", "returnType", "fields"],
+      "properties": {
+        "function": { "$ref": "#/$defs/identifier" },
+        "struct": { "$ref": "#/$defs/identifier" },
+        "structParameter": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "returnType": { "type": "string", "minLength": 1 },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/configField" } },
+        "defaults": { "type": "array", "items": { "$ref": "#/$defs/configDefault" } },
+        "initializer": { "$ref": "#/$defs/identifier" },
+        "noAlloc": { "type": "boolean", "default": false },
+        "returnOwnership": { "enum": ["default", "owned", "borrowed"], "default": "default" },
+        "returnNullable": { "type": "boolean", "default": false }
+      }
+    },
+    "outputField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "name", "type"],
+      "properties": {
+        "field": { "$ref": "#/$defs/memberPath" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "type": { "type": "string", "minLength": 1 }
+      }
+    },
+    "outputAdapter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["function", "struct", "structParameter", "name", "returnType", "fields"],
+      "properties": {
+        "function": { "$ref": "#/$defs/identifier" },
+        "struct": { "$ref": "#/$defs/identifier" },
+        "structParameter": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "returnType": { "type": "string", "minLength": 1 },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/parameter" } },
+        "fields": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/outputField" } },
+        "noAlloc": { "type": "boolean", "default": false }
+      }
+    },
+    "opaqueType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "name"],
+      "properties": { "symbol": { "$ref": "#/$defs/identifier" }, "name": { "$ref": "#/$defs/identifier" } }
+    },
+    "delegateParameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "type"],
+      "properties": { "name": { "$ref": "#/$defs/identifier" }, "type": { "type": "string", "minLength": 1 } }
+    },
+    "delegate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol", "name", "returnType", "parameters"],
+      "properties": {
+        "symbol": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/identifier" },
+        "returnType": { "type": "string", "minLength": 1 },
+        "parameters": { "type": "array", "items": { "$ref": "#/$defs/delegateParameter" } }
+      }
+    },
+    "import": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["component", "header", "container"],
+      "properties": {
+        "component": { "$ref": "#/$defs/identifier" },
+        "header": { "$ref": "#/$defs/path" },
+        "container": { "$ref": "#/$defs/identifier" },
+        "allowUnstable": { "type": "boolean", "default": false },
+        "opaqueTypes": { "type": "array", "items": { "$ref": "#/$defs/opaqueType" } },
+        "delegates": { "type": "array", "items": { "$ref": "#/$defs/delegate" } },
+        "functions": { "type": "array", "items": { "$ref": "#/$defs/function" } },
+        "constants": { "type": "array", "items": { "$ref": "#/$defs/constant" } },
+        "configAdapters": { "type": "array", "items": { "$ref": "#/$defs/configAdapter" } },
+        "outputAdapters": { "type": "array", "items": { "$ref": "#/$defs/outputAdapter" } }
+      },
+      "anyOf": [
+        { "required": ["opaqueTypes"] }, { "required": ["delegates"] }, { "required": ["functions"] },
+        { "required": ["constants"] }, { "required": ["configAdapters"] }, { "required": ["outputAdapters"] }
+      ]
+    },
+    "memberPath": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$" }
+  }
+}

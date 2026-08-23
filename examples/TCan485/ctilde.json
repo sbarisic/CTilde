@@ -1,8 +1,15 @@
 {
   "target": "esp-idf",
   "sources": [
-    "Program.ct"
+    "Program.ct",
+    "WifiDemo.ct",
+    "WifiSettings.ct"
   ],
+  "espIdf": {
+    "bindings": [
+      "Bindings/esp-idf.bindings.json"
+    ]
+  },
   "build": {
     "cLayout": "modules",
     "generatedDirectory": "main/generated",

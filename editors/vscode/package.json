@@ -20,6 +20,7 @@
     "onTaskType:ctilde",
     "onCommand:ctilde.project.check",
     "onCommand:ctilde.project.build",
+    "onCommand:ctilde.project.generateBindings",
     "onCommand:ctilde.project.debug",
     "onCommand:ctilde.project.attach",
     "onDebug:ctilde"
@@ -38,6 +39,7 @@
     "language-configuration.json",
     "syntaxes/ctilde.tmLanguage.json",
     "schemas/ctilde.schema.json",
+    "schemas/esp-idf-bindings.schema.json",
     "out/extension.js",
     "out/debugAdapter.js",
     "server/**",
@@ -92,6 +94,10 @@
       {
         "command": "ctilde.project.build",
         "title": "C~: Build Project"
+      },
+      {
+        "command": "ctilde.project.generateBindings",
+        "title": "C~: Generate ESP-IDF Bindings"
       },
       {
         "command": "ctilde.project.debug",
@@ -157,6 +163,12 @@
           "default": "",
           "scope": "machine-overridable",
           "description": "Optional ESP-IDF installation path used when idf.py is not already active. May be overridden by a workspace that targets a different ESP-IDF installation."
+        },
+        "ctilde.compiler.espClangPath": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "Optional Espressif Clang executable used to inspect configured ESP-IDF headers while generating bindings. Generic host Clang is not accepted."
         },
         "ctilde.debugger.gdbPath": {
           "type": "string",
@@ -348,9 +360,10 @@
             "type": "string",
             "enum": [
               "check",
-              "build"
+              "build",
+              "bindings"
             ],
-            "description": "Whether to check C~ semantics or produce native output."
+            "description": "Whether to check C~ semantics, produce native output, or generate tracked ESP-IDF bindings."
           }
         }
       }
@@ -375,6 +388,10 @@
       {
         "fileMatch": "**/ctilde.json",
         "url": "./schemas/ctilde.schema.json"
+      },
+      {
+        "fileMatch": "**/*.bindings.json",
+        "url": "./schemas/esp-idf-bindings.schema.json"
       }
     ],
     "languages": [

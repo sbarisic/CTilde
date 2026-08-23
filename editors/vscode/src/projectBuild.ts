@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-export type CTildeTaskMode = 'check' | 'build';
+export type CTildeTaskMode = 'check' | 'build' | 'bindings';
 export type CTildeProjectTarget = 'hosted' | 'esp-idf' | 'unknown';
 
 export interface CompilerLaunchConfiguration {
@@ -14,6 +14,7 @@ export interface CompilerLaunchConfiguration {
 export interface BuildArgumentSettings {
     readonly nativeCompiler: string;
     readonly idfPath: string;
+    readonly espClangPath: string;
 }
 
 export function resolveCompilerLaunch(
@@ -71,11 +72,14 @@ export function compilerArguments(
     target: CTildeProjectTarget,
     settings: BuildArgumentSettings,
 ): string[] {
-    const result = [...launch.prefixArguments, '--project', manifestPath, mode === 'build' ? '--build' : '--check'];
+    const result = [...launch.prefixArguments, '--project', manifestPath,
+        mode === 'build' ? '--build' : mode === 'bindings' ? '--generate-bindings' : '--check'];
     if (mode === 'build' && target === 'hosted' && settings.nativeCompiler.trim().length !== 0)
         result.push('--compiler', settings.nativeCompiler.trim());
-    if (mode === 'build' && target === 'esp-idf' && settings.idfPath.trim().length !== 0)
+    if (target === 'esp-idf' && settings.idfPath.trim().length !== 0)
         result.push('--idf-path', settings.idfPath.trim());
+    if (target === 'esp-idf' && settings.espClangPath.trim().length !== 0)
+        result.push('--esp-clang', settings.espClangPath.trim());
     return result;
 }
 

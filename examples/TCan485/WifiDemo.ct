@@ -1,0 +1,285 @@
+using System;
+using System.Runtime;
+using System.Threading;
+using Esp.Idf;
+using Examples.TCan485.Bindings;
+
+namespace Examples.TCan485;
+
+public enum NetworkState
+{
+    Disabled,
+    Starting,
+    Connecting,
+    Fetching,
+    Succeeded,
+    Failed
+}
+
+public sealed class WebsiteFetchReport
+{
+    public bool Succeeded;
+    public int StatusCode;
+    public long ContentLength;
+    public uint BytesRead;
+    public uint Hash;
+    public long DurationMicroseconds;
+    public uint FreeHeapBefore;
+    public uint FreeHeapAfter;
+    public byte[] Preview;
+    public int PreviewLength;
+    public string Error;
+
+    public WebsiteFetchReport()
+    {
+        Preview = new byte[WifiSettings.PreviewBytes];
+        Error = "";
+    }
+}
+
+public interface IWebsiteFetcher
+{
+    WebsiteFetchReport Fetch();
+}
+
+public sealed class EspWebsiteFetcher : object, IWebsiteFetcher
+{
+    public unsafe WebsiteFetchReport Fetch()
+    {
+        long started = NativeTimer.GetTimeMicroseconds();
+        WebsiteFetchReport report = new WebsiteFetchReport();
+
+        Require(NativeStorage.Initialize(), "NVS initialization");
+        defer NativeStorage.Deinitialize();
+
+        Require(NativeNetwork.Initialize(), "network initialization");
+        defer NativeNetwork.Deinitialize();
+
+        Require(NativeEventLoop.CreateDefault(), "event loop creation");
+        defer NativeEventLoop.DeleteDefault();
+
+        void* networkInterface = NativeWifiNetworkInterface.CreateStation();
+        defer NativeWifiNetworkInterface.Destroy(networkInterface);
+        if (networkInterface == null)
+            throw new Exception("default Wi-Fi station creation failed");
+
+        Require(NativeWifi.Initialize(true), "Wi-Fi initialization");
+        defer NativeWifi.Deinitialize();
+
+        Require(NativeWifi.SetMode(NativeWifi.StationMode), "Wi-Fi station mode");
+        NativeUtf8String ssid = NativeUtf8String.Borrow(WifiSettings.Ssid);
+        NativeUtf8String password = NativeUtf8String.Borrow(WifiSettings.Password);
+        Require(NativeWifi.ConfigureStation(NativeWifi.StationInterface, ssid, password, (byte)0), "Wi-Fi station configuration");
+        Require(NativeWifi.Start(), "Wi-Fi start");
+        defer NativeWifi.Stop();
+        Require(NativeWifi.Connect(), "Wi-Fi connect");
+        defer NativeWifi.Disconnect();
+
+        WifiDemo.SetState(NetworkState.Connecting);
+        WaitForAddress(networkInterface);
+        WifiDemo.SetState(NetworkState.Fetching);
+
+        NativeUtf8String url = NativeUtf8String.Borrow(WifiSettings.Url);
+        NativeHttpClient client = NativeHttp.Create(url, WifiSettings.HttpTimeoutMilliseconds);
+        defer NativeHttp.Cleanup(client);
+        if (client == null)
+            throw new Exception("HTTP client creation failed");
+
+        Require(NativeHttp.Open(client, 0), "HTTPS connection");
+        defer NativeHttp.Close(client);
+        long headerLength = NativeHttp.FetchHeaders(client);
+        if (headerLength < 0L)
+            throw new Exception("HTTP header fetch failed");
+
+        report.StatusCode = NativeHttp.GetStatusCode(client);
+        report.ContentLength = NativeHttp.GetContentLength(client);
+        if (report.StatusCode < 200 || report.StatusCode >= 300)
+            throw new Exception("HTTP response was not successful");
+
+        NativeBuffer<byte> chunk = stackalloc byte[256];
+        uint hash = 2166136261u;
+        while (true)
+        {
+            int count = NativeHttp.Read(client, (void*)chunk.Pointer, 256);
+            if (count < 0)
+                throw new Exception("HTTP response read failed");
+            if (count == 0)
+                break;
+            if (report.BytesRead + (uint)count > WifiSettings.MaximumResponseBytes)
+                throw new Exception("HTTP response exceeded the configured limit");
+
+            int index = 0;
+            while (index < count)
+            {
+                byte value = chunk[(nuint)index];
+                hash = (hash ^ (uint)value) * 16777619u;
+                if (report.PreviewLength < WifiSettings.PreviewBytes)
+                {
+                    report.Preview[report.PreviewLength] = value;
+                    report.PreviewLength = report.PreviewLength + 1;
+                }
+                index = index + 1;
+            }
+            report.BytesRead = report.BytesRead + (uint)count;
+            WifiDemo.SetDownloadedBytes(report.BytesRead);
+        }
+
+        report.Hash = hash;
+        report.DurationMicroseconds = NativeTimer.GetTimeMicroseconds() - started;
+        report.Succeeded = true;
+        return report;
+    }
+
+    private static unsafe void WaitForAddress(void* networkInterface)
+    {
+        long deadline = NativeTimer.GetTimeMicroseconds() + (long)WifiSettings.ConnectionTimeoutMilliseconds * 1000L;
+        while (NativeTimer.GetTimeMicroseconds() < deadline)
+        {
+            if (NativeNetwork.IsUp(networkInterface))
+            {
+                uint address;
+                uint gateway;
+                uint netmask;
+                EspError result = NativeNetwork.GetIpInfo(networkInterface, out address, out gateway, out netmask);
+                if (result.IsSuccess && address != 0u)
+                    return;
+            }
+            Thread.Sleep(100u);
+        }
+        throw new Exception("Wi-Fi connection timed out");
+    }
+
+    private static void Require(EspError result, string operation)
+    {
+        if (!result.IsSuccess)
+            throw new Exception(operation + ": " + result.GetName());
+    }
+}
+
+public static class WifiDemo
+{
+    private static Mutex reportMutex;
+    private static WebsiteFetchReport report;
+    private static volatile bool completed;
+    private static Atomic<int> state = new Atomic<int>((int)NetworkState.Disabled);
+    private static Atomic<uint> downloadedBytes = new Atomic<uint>(0u);
+
+    public static void Run()
+    {
+        if (WifiSettings.Ssid.Length == 0)
+        {
+            Console.WriteLine("wifi: not configured");
+            return;
+        }
+
+        reportMutex = new Mutex();
+        report = null;
+        completed = false;
+        state.Store((int)NetworkState.Starting, MemoryOrder.Release);
+        downloadedBytes.Store(0u, MemoryOrder.Relaxed);
+
+        Console.WriteLine("wifi: initializing");
+        Thread worker = new Thread(NetworkWorker, 16384u, ThreadPriority.Normal);
+        worker.Start();
+        bool purple = false;
+        while (!completed)
+        {
+            purple = !purple;
+            if (purple)
+                Ws2812.SetPixel(0u, 8u, 0u, 16u);
+            else
+                Ws2812.SetPixel(0u, 0u, 0u, 8u);
+            Ws2812.Refresh();
+            Thread.Sleep(100u);
+        }
+        worker.Join();
+
+        WebsiteFetchReport completedReport;
+        lock (reportMutex)
+        {
+            completedReport = report;
+        }
+        PrintReport(completedReport);
+        report = null;
+        reportMutex = null;
+    }
+
+    public static void SetState(NetworkState value)
+    {
+        state.Store((int)value, MemoryOrder.Release);
+    }
+
+    public static void SetDownloadedBytes(uint value)
+    {
+        downloadedBytes.Store(value, MemoryOrder.Relaxed);
+    }
+
+    private static void NetworkWorker()
+    {
+        WebsiteFetchReport result;
+        uint freeHeapBefore = EspSystem.GetFreeHeapSize();
+        try
+        {
+            IWebsiteFetcher fetcher = new EspWebsiteFetcher();
+            result = fetcher.Fetch();
+            SetState(NetworkState.Succeeded);
+        }
+        catch (Exception exception)
+        {
+            result = new WebsiteFetchReport();
+            result.Error = exception.Message;
+            SetState(NetworkState.Failed);
+        }
+        result.FreeHeapBefore = freeHeapBefore;
+        result.FreeHeapAfter = EspSystem.GetFreeHeapSize();
+
+        lock (reportMutex)
+        {
+            report = result;
+        }
+        completed = true;
+    }
+
+    private static void PrintReport(WebsiteFetchReport value)
+    {
+        if (!value.Succeeded)
+        {
+            Console.Write("wifi/http error: ");
+            Console.WriteLine(value.Error);
+            Ws2812.SetPixel(0u, 16u, 0u, 0u);
+            Ws2812.Refresh();
+            return;
+        }
+
+        Console.WriteLine("wifi: connected");
+        Console.Write("http status: ");
+        Console.WriteLine(value.StatusCode);
+        Console.Write("content length: ");
+        Console.WriteLine(value.ContentLength);
+        Console.Write("downloaded bytes: ");
+        Console.WriteLine(value.BytesRead);
+        Console.Write("body hash: ");
+        Console.WriteLine(value.Hash);
+        Console.Write("download time us: ");
+        Console.WriteLine(value.DurationMicroseconds);
+        Console.Write("wifi free heap before: ");
+        Console.WriteLine(value.FreeHeapBefore);
+        Console.Write("wifi free heap after: ");
+        Console.WriteLine(value.FreeHeapAfter);
+        Console.Write("body preview: ");
+        int index = 0;
+        while (index < value.PreviewLength)
+        {
+            byte item = value.Preview[index];
+            if (item >= (byte)32 && item <= (byte)126)
+                Console.Write((char)item);
+            else
+                Console.Write('.');
+            index = index + 1;
+        }
+        Console.WriteLine();
+        Console.WriteLine("generated wifi/http bindings: ok");
+        Ws2812.SetPixel(0u, 0u, 16u, 0u);
+        Ws2812.Refresh();
+    }
+}

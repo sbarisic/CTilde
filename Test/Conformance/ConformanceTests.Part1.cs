@@ -338,7 +338,7 @@ internal static partial class ConformanceTests
                 using (var buildLock = new FileStream(Path.Combine(directory, "out", ".ctilde-build.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
                 {
                     var overlapping = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
-                    Assert(overlapping.ExitCode == 1 && overlapping.StandardError.Contains("Another C~ native build", StringComparison.Ordinal), "An overlapping project native build was not rejected.");
+                    Assert(overlapping.ExitCode == 1 && overlapping.StandardError.Contains("Another C~ project build", StringComparison.Ordinal), "An overlapping project native build was not rejected.");
                 }
                 var conflict = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--target", "hosted", "--check"]);
                 Assert(conflict.ExitCode == 2, "Project and target were not rejected as conflicting CLI inputs.");
@@ -350,6 +350,97 @@ internal static partial class ConformanceTests
                 try { CTildeProjectFile.Load(Path.Combine(directory, "invalid.json")); }
                 catch (CTildeProjectException) { invalidRejected = true; }
                 Assert(invalidRejected, "A project build output escaping the project directory was accepted.");
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+
+        suite.Run("ESP-IDF binding manifest model", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-binding-manifest-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(Path.Combine(directory, "Bindings", "Generated"));
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+                File.WriteAllText(Path.Combine(directory, "Bindings", "Generated", "Api.g.ct"), "namespace Test.Bindings; public static class Clock { }");
+                File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"esp-idf\",\"sources\":[\"Program.ct\"],\"espIdf\":{\"bindings\":[\"Bindings/api.bindings.json\"]}}");
+                const string manifestText = """
+                    {
+                      "schemaVersion": 1,
+                      "namespace": "Test.Bindings",
+                      "declarations": "Bindings/Generated/Api.g.ct",
+                      "adapterSource": "Bindings/Generated/Api.g.c",
+                      "imports": [{
+                        "component": "esp_timer",
+                        "header": "esp_timer.h",
+                        "container": "Clock",
+                        "opaqueTypes": [{ "symbol": "esp_timer_handle_t", "name": "TimerHandle" }],
+                        "delegates": [{ "symbol": "timer_cb_t", "name": "TimerCallback", "returnType": "void", "parameters": [] }],
+                        "functions": [
+                          { "symbol": "esp_timer_get_time", "name": "Now", "returnType": "long", "parameters": [], "noAlloc": true },
+                          { "symbol": "esp_timer_get_handle", "name": "GetHandle", "returnType": "TimerHandle", "parameters": [], "returnOwnership": "borrowed", "returnNullable": true }
+                        ],
+                        "constants": [{ "symbol": "ESP_TIMER_TASK", "name": "TaskDispatch", "type": "int" }],
+                        "configAdapters": [{
+                          "function": "esp_timer_configure",
+                          "struct": "esp_timer_config_t",
+                          "structParameter": "config",
+                          "name": "Configure",
+                          "returnType": "EspError",
+                          "initializer": "ESP_TIMER_CONFIG_DEFAULT",
+                          "parameters": [{ "name": "handle", "type": "TimerHandle", "nativeNames": ["handle"] }],
+                          "fields": [{ "field": "options.name", "name": "name", "type": "NativeUtf8String", "mapping": "fixedUtf8", "maxBytes": 16 }],
+                          "noAlloc": true
+                        }],
+                        "outputAdapters": [{
+                          "function": "esp_timer_get_info",
+                          "struct": "esp_timer_info_t",
+                          "structParameter": "info",
+                          "name": "GetInfo",
+                          "returnType": "EspError",
+                          "parameters": [{ "name": "handle", "type": "TimerHandle", "nativeNames": ["handle"] }],
+                          "fields": [{ "field": "stats.invocations", "name": "invocations", "type": "uint" }],
+                          "noAlloc": true
+                        }]
+                      }]
+                    }
+                    """;
+                var manifestPath = Path.Combine(directory, "Bindings", "api.bindings.json");
+                File.WriteAllText(manifestPath, manifestText);
+                var project = CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json"));
+                Assert(project.Configuration.BindingManifests.Length == 1, "ESP-IDF binding manifest was not loaded.");
+                var binding = project.Configuration.BindingManifests[0];
+                Assert(project.SourceFiles.Contains(binding.DeclarationsPath), "Tracked generated declarations were not added outside the project source glob.");
+                Assert(binding.Imports[0].OpaqueTypes.Length == 1 && binding.Imports[0].Delegates.Length == 1, "Opaque and callback selections were not preserved.");
+                Assert(binding.Imports[0].Functions[1].ReturnOwnership == "borrowed" && binding.Imports[0].Functions[1].ReturnNullable, "Opaque return ownership metadata was not preserved.");
+                Assert(binding.Imports[0].ConfigAdapters[0].Initializer == "ESP_TIMER_CONFIG_DEFAULT", "Configuration initializer metadata was not preserved.");
+                Assert(binding.Imports[0].ConfigAdapters[0].Fields[0].Field == "options.name" && binding.Imports[0].ConfigAdapters[0].Fields[0].Mapping == "fixedUtf8" && binding.Imports[0].ConfigAdapters[0].Fields[0].MaxBytes == 16, "Nested fixed UTF-8 configuration metadata was not preserved.");
+                Assert(binding.Imports[0].OutputAdapters[0].Fields[0].Field == "stats.invocations", "Output-structure adapter metadata was not preserved.");
+                Assert(binding.CanonicalText() == EspIdfBindingManifest.Load("Bindings/api.bindings.json", directory).CanonicalText(), "Binding manifest canonicalization was not deterministic.");
+                Assert(binding.ManifestFingerprint.Length == 64, "Binding manifest fingerprint was not a SHA-256 value.");
+                const string reservedExtern = "public static class Native { [Extern(\"ct_idf_fake\")] public static int Call(); } public static class Program { [EntryPoint] public static void Main() { } }";
+                var userDiagnostics = Compilation.Create([SyntaxTree.ParseText(reservedExtern, "user-binding.ct")], new CompilationOptions(CompilationTarget.EspIdf)).GetDiagnostics();
+                Assert(userDiagnostics.Any(diagnostic => diagnostic.Code == "CT4101"), "User source impersonated the reserved generated-binding symbol prefix.");
+                var trustedDiagnostics = Compilation.Create([SyntaxTree.ParseEspIdfBinding(SourceText.From(reservedExtern, "generated-binding.ct"))], new CompilationOptions(CompilationTarget.EspIdf)).GetDiagnostics();
+                Assert(!trustedDiagnostics.Any(diagnostic => diagnostic.Code == "CT4101"), "A compiler-origin binding declaration was rejected as user impersonation.");
+
+                File.WriteAllText(manifestPath, manifestText.Replace("esp_timer_get_time", "esp_timer_get_time()", StringComparison.Ordinal));
+                var rawExpressionRejected = false;
+                try { CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json")); }
+                catch (CTildeProjectException) { rawExpressionRejected = true; }
+                Assert(rawExpressionRejected, "A raw native expression was accepted as a binding symbol.");
+                File.WriteAllText(manifestPath, manifestText.Replace("Bindings/Generated/Api.g.c", "../Api.g.c", StringComparison.Ordinal));
+                var escapingOutputRejected = false;
+                try { CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json")); }
+                catch (CTildeProjectException) { escapingOutputRejected = true; }
+                Assert(escapingOutputRejected, "A binding output outside the project root was accepted.");
+                File.WriteAllText(manifestPath, manifestText.Replace("\"maxBytes\": 16", "\"maxBytes\": 0", StringComparison.Ordinal));
+                var invalidFixedUtf8Rejected = false;
+                try { CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json")); }
+                catch (CTildeProjectException) { invalidFixedUtf8Rejected = true; }
+                Assert(invalidFixedUtf8Rejected, "A fixed UTF-8 field with an invalid bound was accepted.");
             }
             finally
             {

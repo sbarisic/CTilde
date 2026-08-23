@@ -9,7 +9,8 @@ public sealed record CTildeProjectConfiguration(
     CompilationTarget Target,
     ImmutableArray<string> Sources,
     ImmutableArray<string> Exclude,
-    CTildeProjectBuildConfiguration Build);
+    CTildeProjectBuildConfiguration Build,
+    ImmutableArray<EspIdfBindingManifest> BindingManifests);
 
 public enum CTildeNativeBuildConfiguration
 {
@@ -102,8 +103,27 @@ public static class CTildeProjectFile
         if (files.IsEmpty)
             throw new CTildeProjectException($"Project manifest '{fullManifestPath}' did not match any .ct source files.");
 
+        if (target == CompilationTarget.Hosted && document.EspIdf is not null)
+            throw new CTildeProjectException($"Property 'espIdf' in '{fullManifestPath}' is valid only for ESP-IDF projects.");
+        var bindingPaths = document.EspIdf?.Bindings ?? [];
+        var bindingManifests = bindingPaths.Select(path => EspIdfBindingManifest.Load(path, root)).OrderBy(binding => binding.ManifestPath, comparer).ToImmutableArray();
+        if (bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }).Distinct(comparer).Count() != bindingManifests.Length * 2)
+            throw new CTildeProjectException($"ESP-IDF binding outputs in '{fullManifestPath}' must be distinct.");
+        foreach (var declaration in bindingManifests.Select(binding => binding.DeclarationsPath))
+            if (files.Contains(declaration, comparer))
+                throw new CTildeProjectException($"ESP-IDF binding declaration '{declaration}' cannot overwrite an ordinary project source in '{fullManifestPath}'.");
+        files = files.Concat(bindingManifests.Select(binding => binding.DeclarationsPath).Where(File.Exists)).Distinct(comparer).OrderBy(path => path, comparer).ToImmutableArray();
         var build = CreateBuildConfiguration(document.Build, target, root, fullManifestPath, files);
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, sources, excludes, build), files);
+        foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
+            if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
+                throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, sources, excludes, build, bindingManifests), files);
+    }
+
+    private static bool IsInsideDirectory(string path, string directory)
+    {
+        var relative = Path.GetRelativePath(directory, path);
+        return relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathRooted(relative);
     }
 
     public static string? FindNearest(string sourcePath)
@@ -263,7 +283,10 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("target")] string? Target,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,
-        [property: JsonPropertyName("build")] BuildDocument? Build);
+        [property: JsonPropertyName("build")] BuildDocument? Build,
+        [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf);
+
+    private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
 
     private sealed record BuildDocument(
         [property: JsonPropertyName("generatedC")] string? GeneratedC,

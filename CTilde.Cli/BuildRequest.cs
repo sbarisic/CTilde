@@ -28,7 +28,12 @@ internal sealed record BuildRequest(
     string? PrepareDebug = null,
     string? DebugTargetPath = null,
     string? SerialPort = null,
-    int BaudRate = 115200)
+    int BaudRate = 115200,
+    IReadOnlyList<EspIdfBindingManifest>? BindingManifests = null,
+    string? BindingGeneratedDirectory = null,
+    bool GenerateBindingsOnly = false,
+    bool VerifyBindings = false,
+    string? EspClangPath = null)
 {
     public string LockDirectory => Target == CompilationTarget.Hosted
         ? Path.GetDirectoryName(ExecutablePath!)!
@@ -105,7 +110,8 @@ internal static class BuildRequestResolver
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? build.Compiler, executable,
             idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
-            options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate);
+            options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
+            build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -164,13 +170,21 @@ internal static class BuildRequestResolver
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
-            debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate);
+            debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
+            null, null, false, false, null);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
     {
         var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.Lto ||
-            options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null;
+            options.NativeOutput is not null || options.EspIdfProject is not null ||
+            (options.EspIdfPath is not null && !options.CheckOnly && !options.GenerateBindings && !options.VerifyBindings);
+        if (options.GenerateBindings && options.VerifyBindings)
+            throw new CommandLineException("--generate-bindings and --verify-bindings cannot be combined.");
+        if ((options.GenerateBindings || options.VerifyBindings) && (options.ProjectManifest is null || options.Inputs.Count != 0 || options.InputDirectory is not null))
+            throw new CommandLineException("Binding generation requires --project and cannot be combined with direct inputs or --compile-directory.");
+        if ((options.GenerateBindings || options.VerifyBindings) && (options.Build || options.CheckOnly || options.PrepareDebug is not null))
+            throw new CommandLineException("Binding-only modes cannot be combined with --build, --check, or --prepare-debug.");
         if (options.CheckOnly && (options.Build || hasNativeOptions || options.HeaderOutput is not null || options.SymbolMap is not null ||
             options.OutputDirectory is not null || options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null))
             throw new CommandLineException("--check cannot be combined with build outputs or native-build options.");
@@ -194,6 +208,8 @@ internal static class BuildRequestResolver
     {
         if (target == CompilationTarget.Hosted && (options.EspIdfProject is not null || options.EspIdfPath is not null))
             throw new CommandLineException("--idf-project and --idf-path are valid only for ESP-IDF builds.");
+        if (target == CompilationTarget.Hosted && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))
+            throw new CommandLineException("ESP-IDF binding options require an ESP-IDF project.");
         if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null || options.Configuration is not null))
             throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted builds.");
         if (target == CompilationTarget.EspIdf && options.Lto)
@@ -204,6 +220,8 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--serial-port is valid only for ESP-IDF debugging.");
         if (target == CompilationTarget.EspIdf && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))
             throw new CommandLineException("ESP-IDF debug preparation requires --serial-port.");
+        if (target == CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings) && options.ProjectManifest is null)
+            throw new CommandLineException("ESP-IDF binding generation requires --project.");
     }
 
     private static string? ResolveSourceRoot(CommandLineOptions options)

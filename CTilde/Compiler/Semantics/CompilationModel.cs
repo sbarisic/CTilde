@@ -1077,7 +1077,7 @@ internal sealed partial class CompilationModel
                         ReturnsNullable = returnsNullable is not null,
                         ExternName = externalName,
                         ExportName = exportName,
-                        IsTrustedExtern = !UserSyntaxTrees.Contains(tree),
+                        IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsAbstract = isAbstractMethod,
                         TypeParameters = methodTypeParameters,

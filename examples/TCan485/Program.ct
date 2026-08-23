@@ -2,6 +2,7 @@ using System;
 using System.Runtime;
 using System.Threading;
 using Esp.Idf;
+using Examples.TCan485.Bindings;
 
 namespace Examples.TCan485;
 
@@ -241,6 +242,15 @@ public static class Program
         else
             Console.WriteLine("TIMER64_FAILED");
 
+        long generatedTimer = NativeTimer.GetTimeMicroseconds();
+        HardwareRandom.NextUInt32();
+        NativeBuffer<byte> randomBytes = stackalloc byte[8];
+        HardwareRandom.Fill(randomBytes);
+        if (generatedTimer >= 0L && randomBytes.Length == 8u)
+            Console.WriteLine("generated bindings: ok");
+        else
+            Console.WriteLine("GENERATED_BINDINGS_FAILED");
+
         NativeBuffer<byte> nativeBuffer = stackalloc byte[1];
         if (NativeBufferApi.Fill(nativeBuffer) == 42U && nativeBuffer[0] == (byte)42)
             Console.WriteLine("native buffer: 42");
@@ -330,6 +340,8 @@ public static class Program
         Console.WriteLine("esp error: ESP_OK");
 
         RunManagedSelfTests();
+
+        WifiDemo.Run();
 
         Console.Write("free heap: ");
         Console.WriteLine(EspSystem.GetFreeHeapSize());

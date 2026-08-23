@@ -102,6 +102,8 @@ internal static partial class ConformanceTests
             Assert(generated.Contains("ct_managed_thread_start", StringComparison.Ordinal) && generated.Contains("ct_managed_mutex_enter", StringComparison.Ordinal), "Managed concurrency helpers were not emitted.");
             var espReady = generated.IndexOf("ct_atomic_store_release(&payload->Ready, 1u); created = xTaskCreate", StringComparison.Ordinal);
             Assert(espReady >= 0, "The ESP worker readiness gate must be published before xTaskCreate can preempt its creator.");
+            Assert(generated.Contains("xTaskCreate(ct_managed_thread_worker, \"C~ worker\", native_stack_bytes,", StringComparison.Ordinal), "ESP-IDF thread stack sizes must remain byte counts when passed to xTaskCreate.");
+            Assert(!generated.Contains("stack_words / 4u", StringComparison.Ordinal), "ESP-IDF xTaskCreate must not convert its byte-sized stack argument to words.");
         });
 
         suite.Run("draft 0.15 abstract interface dispatch and generic constraints", () =>

@@ -18,7 +18,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Live compiler diagnostics with related locations.
 - Hover, signature help, go-to-definition, document symbols, and workspace symbols.
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
-- JSON validation for `ctilde.json` project manifests.
+- JSON validation for `ctilde.json` projects and ESP-IDF binding manifests.
 - Check, native Build, Debug, and Attach commands for every workspace project.
 
 Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `exception`, `see`, `paramref`, and sole-element `inheritdoc`. Documentation warnings remain non-blocking. Links, documentation-tag completion, XML output files, raw Markdown/HTML, and block documentation comments are not implemented.
@@ -45,13 +45,13 @@ Put `ctilde.json` at a project root to select the target and source set:
 
 The nearest ancestor manifest owns a file. Source and exclusion globs are relative to the manifest and cannot escape its directory. A file excluded from that source set is analyzed independently with the manifest target. Without a manifest, the extension treats each file as a standalone hosted program.
 
-The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `target` defaults to `hosted`; `sources` is required. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. All manifest paths remain inside the project root.
+The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `target` defaults to `hosted`; `sources` is required. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. An ESP-IDF project can add `espIdf.bindings` with project-relative binding manifests. All manifest paths remain inside the project root.
 
 ## Project builds
 
 Use **C~: Check Project** or **C~: Build Project**. The active file's nearest manifest is selected; a picker appears when several projects are open and none owns the active file. The same actions are available under **Tasks: Run Task** as one Check and Build task per manifest. Command-driven builds save dirty source and manifest files first.
 
-Hosted Build emits C and a native header, discovers MSVC/GCC/Clang, and creates the configured executable. ESP-IDF Build emits into the component and invokes `idf.py build`; target selection, flashing, and monitoring remain ESP-IDF operations.
+Hosted Build emits C and a native header, discovers MSVC/GCC/Clang, and creates the configured executable. ESP-IDF Check and Build refresh declared bindings first; Build then emits into the component and invokes `idf.py build`. **C~: Generate ESP-IDF Bindings** refreshes only the tracked C~ declarations and C adapters. Binding-manifest completion and validation cover initializer macros, mixed native/configuration parameters, nested fields, bounded fixed UTF-8 arrays, output structures, and opaque return ownership. Target selection, flashing, and monitoring remain ESP-IDF operations.
 
 The VSIX includes a framework-dependent compiler fallback. For compiler development without rebuilding the extension, configure:
 
@@ -61,7 +61,7 @@ The VSIX includes a framework-dependent compiler fallback. For compiler developm
 }
 ```
 
-An external self-contained `ctilde` executable is also accepted. `ctilde.compiler.dotnetPath` selects the host for DLLs, `ctilde.compiler.nativeCompiler` optionally overrides the hosted C compiler, and `ctilde.compiler.idfPath` locates an ESP-IDF installation when its environment is not active. The ESP-IDF path is machine-local but workspace-overridable, so an example opened as its own workspace can select its installed IDF version. The CLI process is short-lived, so rebuilding an external compiler requires no extension restart or shadow copy.
+An external self-contained `ctilde` executable is also accepted. `ctilde.compiler.dotnetPath` selects the host for DLLs, `ctilde.compiler.nativeCompiler` optionally overrides the hosted C compiler, and `ctilde.compiler.idfPath` locates an ESP-IDF installation when its environment is not active. `ctilde.compiler.espClangPath` can select the matching Espressif Clang executable used for header-driven bindings. Both ESP settings are machine-local but workspace-overridable. The CLI process is short-lived, so rebuilding an external compiler requires no extension restart or shadow copy.
 
 ## Debugging
 

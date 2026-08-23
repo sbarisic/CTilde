@@ -7,6 +7,7 @@ export const requiredFirmwareMarkers = [
   'delegate: 42',
   'function pointer: 42',
   'timer64: ok',
+  'generated bindings: ok',
   'native buffer: 42',
   'native utf8: ok',
   'opaque defer: ok',
@@ -48,6 +49,8 @@ export function parseFirmwareTranscript(transcript, minimumTransitions = 25) {
   const missing = requiredFirmwareMarkers.filter(marker => !normalized.includes(marker));
   if (missing.length !== 0)
     throw new Error(`Firmware transcript omitted required marker(s): ${missing.join(', ')}.`);
+  if (!normalized.includes('wifi: not configured') && !normalized.includes('generated wifi/http bindings: ok'))
+    throw new Error("Firmware transcript omitted both the configured Wi-Fi success marker and the offline fallback marker.");
   const applicationStart = normalized.indexOf('C~ ESP-IDF hardware test');
   const applicationTranscript = applicationStart < 0 ? normalized : normalized.slice(applicationStart);
   const failure = /(?:\b[A-Z][A-Z0-9_]*FAILED\b|Guru Meditation|Task watchdog|panic(?:'ed)?|CTILDE runtime error|Rebooting\.\.\.|\brst:)/i.exec(applicationTranscript);

@@ -347,11 +347,13 @@ The runtime exports `ct_thread_attach()`, `ct_thread_detach()`, `ct_retain(ct_ob
 
 ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses scalar types, opaque native typedefs, `const char*`, and explicit pointer/`size_t` pairs; ESP-IDF configuration structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards `esp_timer_get_time()`. GPIO and `ct_esp_ws2812_*` operations return exact `esp_err_t` values.
 
+Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 15.
+
 ## Future native interop constraints
 
 This section records constraints that remain after draft 0.15.
 
-Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. A future binding generator must therefore compile generated C adapters against the selected ESP-IDF headers. It must not copy configuration-structure layouts or numeric enum values into a supposedly version-independent C~ ABI.
+Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 
 Native-sized integers, scoped pointer-plus-length buffers, and `NativeUtf8String` cover synchronous byte and NUL-terminated UTF-8 input. A UTF-8 view lowers to `{ ct_string* Owner; const uint8_t* Data; size_t ByteLength; }` inside C~ and flattens to `const char*` at an extern or export boundary. It retains its managed owner and is dropped lexically. Managed C~ strings and arrays never convert implicitly to `char*` or flat C arrays.
 

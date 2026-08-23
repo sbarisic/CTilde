@@ -227,13 +227,14 @@ public abstract record SyntaxNode(SourceText Source, TextSpan Span)
 
 public sealed record SyntaxTree
 {
-    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<SyntaxToken> tokens, ImmutableArray<SyntaxToken> skippedTokens, ImmutableArray<Diagnostic> diagnostics)
+    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<SyntaxToken> tokens, ImmutableArray<SyntaxToken> skippedTokens, ImmutableArray<Diagnostic> diagnostics, SyntaxTreeOrigin origin)
     {
         Text = text;
         Root = root;
         Tokens = tokens;
         SkippedTokens = skippedTokens;
         Diagnostics = diagnostics;
+        Origin = origin;
         Root.AttachTokens(tokens);
     }
 
@@ -242,6 +243,7 @@ public sealed record SyntaxTree
     public ImmutableArray<SyntaxToken> Tokens { get; }
     public ImmutableArray<SyntaxToken> SkippedTokens { get; }
     public ImmutableArray<Diagnostic> Diagnostics { get; }
+    internal SyntaxTreeOrigin Origin { get; private init; }
     public string ToFullString() => Text.Text;
 
     public static SyntaxTree Parse(SourceText text)
@@ -252,8 +254,10 @@ public sealed record SyntaxTree
         var parser = new Parser(text, lexicalTokens, diagnostics);
         var root = parser.ParseCompilationUnit();
         var tokens = MergeTokens(lexicalTokens, parser.MissingTokens, parser.SkippedTokens);
-        return new SyntaxTree(text, root, tokens, parser.SkippedTokens, diagnostics.ToImmutable());
+        return new SyntaxTree(text, root, tokens, parser.SkippedTokens, diagnostics.ToImmutable(), SyntaxTreeOrigin.User);
     }
+
+    internal static SyntaxTree ParseEspIdfBinding(SourceText text) => Parse(text) with { Origin = SyntaxTreeOrigin.EspIdfBinding };
 
     public static SyntaxTree ParseText(string text, string filePath = "<memory>") => Parse(SourceText.From(text, filePath));
 
@@ -284,6 +288,12 @@ public sealed record SyntaxTree
         result.AddRange(missingTokens);
         return [.. result.OrderBy(token => token.FullSpan.Start).ThenBy(token => token.IsMissing ? 0 : 1)];
     }
+}
+
+internal enum SyntaxTreeOrigin
+{
+    User,
+    EspIdfBinding,
 }
 
 public sealed record CompilationUnitSyntax(

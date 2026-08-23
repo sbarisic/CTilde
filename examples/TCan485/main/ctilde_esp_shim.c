@@ -20,7 +20,7 @@ static int32_t ct_esp_ws2812_pin = -1;
 static uint32_t ct_esp_ws2812_led_count;
 
 #ifndef CTILDE_FREERTOS_TLS_INDEX
-#define CTILDE_FREERTOS_TLS_INDEX 0
+#define CTILDE_FREERTOS_TLS_INDEX 1
 #endif
 
 static_assert(CTILDE_FREERTOS_TLS_INDEX >= 0, "C~ requires a non-negative FreeRTOS TLS index");

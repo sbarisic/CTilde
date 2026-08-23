@@ -132,6 +132,8 @@ ctilde <input.ct>... --check
 ctilde <input.ct>... -o <program.c> [--header <exports.h>]
 ctilde <input.ct>... --build [--compiler auto|msvc|gcc|clang]
 ctilde --project <ctilde.json> [--check|--build]
+ctilde --project <ctilde.json> --generate-bindings [--esp-clang <path>]
+ctilde --project <ctilde.json> --verify-bindings [--esp-clang <path>]
 ctilde --project <ctilde.json> --prepare-debug launch --debug-target <target.json> --debug-memory objects
 ctilde --project <ctilde.json> --prepare-debug attach --debug-target <target.json>
 ```
@@ -150,6 +152,8 @@ The published compiler still requires an external hosted C toolchain or ESP-IDF 
 
 The ESP-IDF target emits `app_main` and uses the same language and GNU C23 backend as hosted builds. ESP-IDF remains responsible for chip selection, components, linking, flashing, and monitoring; C~ does not have separate per-chip backends.
 
+ESP-IDF projects can list explicit binding manifests under `espIdf.bindings`. The CLI reconfigures the selected IDF project, derives its target, macros, and include paths from the exported compile database, validates allowlisted public declarations with Espressif Clang AST JSON, and emits tracked C~ declarations plus project-private C adapters. Structured adapters support validated native initializers, nested fields, bounded fixed UTF-8 arrays, output structures, ordinary native parameters, and explicit opaque-return ownership. Check, Build, and debug preparation refresh bindings automatically. `--verify-bindings` checks tracked output without accepting changes. Generic host Clang is never substituted for Espressif Clang.
+
 The checked T-CAN485 project builds modular firmware for Xtensa and RISC-V targets:
 
 ```powershell
@@ -158,7 +162,7 @@ cd .\examples\TCan485
 .\Build.ps1 -Target esp32 -Port COM4 -Flash -Monitor
 ```
 
-The project covers GPIO and an RMT-driven WS2812, FreeRTOS delays and counters, source-created threads, recursive locks, atomics, generic interface dispatch, attached native tasks, exports, synchronous callbacks, opaque resources, runtime failures, and ARC recovery. Its [hardware guide](examples/TCan485/README.md) records the complete ABI 15 physical-board validation.
+The project covers generated timer, hardware-random, GPIO, Wi-Fi, network-interface, and HTTPS bindings alongside its existing handwritten APIs, an RMT-driven WS2812, FreeRTOS delays and counters, source-created threads, recursive locks, atomics, generic interface dispatch, attached native tasks, exports, synchronous callbacks, opaque resources, runtime failures, and ARC recovery. Its default worker-thread firmware fetches `https://example.com/` when local credentials are configured and uses an offline fallback when the SSID is empty. The [hardware guide](examples/TCan485/README.md) records configuration and physical-board validation.
 
 ## Compiler API
 

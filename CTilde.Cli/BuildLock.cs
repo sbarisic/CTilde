@@ -21,7 +21,7 @@ internal sealed class BuildLock : IAsyncDisposable
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            throw new BuildLockException($"Another C~ native build is already using '{directory}'.", exception);
+            throw new BuildLockException($"Another C~ project build or binding refresh is already using '{directory}'.", exception);
         }
     }
 

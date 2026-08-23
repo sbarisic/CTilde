@@ -120,7 +120,7 @@ internal sealed class WorkspaceState
                 return cached.Snapshot;
             var sourceFiles = included ? project!.SourceFiles : [Path.GetFullPath(path)];
             var target = project?.Configuration.Target ?? CompilationTarget.Hosted;
-            var snapshot = CreateSnapshot(key, sourceFiles, target, null);
+            var snapshot = CreateSnapshot(key, sourceFiles, target, project is null ? null : BindingProjectError(project), BindingPaths(project));
             _projects[key] = new CachedProject(snapshot);
             return snapshot;
         }
@@ -144,7 +144,7 @@ internal sealed class WorkspaceState
                     catch (CTildeProjectException) { continue; }
                     if (_projects.ContainsKey(project.ManifestPath))
                         continue;
-                    _projects[project.ManifestPath] = new CachedProject(CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, null));
+                    _projects[project.ManifestPath] = new CachedProject(CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, BindingProjectError(project), BindingPaths(project)));
                 }
             }
             return [.. _projects.Values.Select(value => value.Snapshot).DistinctBy(value => value.Key)];
@@ -169,9 +169,32 @@ internal sealed class WorkspaceState
         }
     }
 
-    private ProjectSnapshot CreateStandalone(string path, CompilationTarget target, string error) => CreateSnapshot($"standalone:{path}:{target}", [path], target, error);
+    private ProjectSnapshot CreateStandalone(string path, CompilationTarget target, string error) => CreateSnapshot($"standalone:{path}:{target}", [path], target, error, null);
 
-    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, string? projectError)
+    private static IReadOnlySet<string>? BindingPaths(CTildeProject? project) => project?.Configuration.BindingManifests
+        .Select(manifest => manifest.DeclarationsPath).ToHashSet(PathComparer);
+
+    private static string? BindingProjectError(CTildeProject project)
+    {
+        foreach (var manifest in project.Configuration.BindingManifests)
+        {
+            if (!File.Exists(manifest.DeclarationsPath) || !File.Exists(manifest.AdapterSourcePath))
+                return $"ESP-IDF binding output for '{Path.GetFileName(manifest.ManifestPath)}' is missing. Run C~: Generate ESP-IDF Bindings.";
+            try
+            {
+                var firstLine = File.ReadLines(manifest.DeclarationsPath).FirstOrDefault() ?? string.Empty;
+                if (!firstLine.Contains($"manifest-fingerprint=\"{manifest.ManifestFingerprint}\"", StringComparison.Ordinal))
+                    return $"ESP-IDF binding output for '{Path.GetFileName(manifest.ManifestPath)}' is stale. Run C~: Generate ESP-IDF Bindings.";
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return $"Could not inspect ESP-IDF binding output '{manifest.DeclarationsPath}': {exception.Message}";
+            }
+        }
+        return null;
+    }
+
+    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, string? projectError, IReadOnlySet<string>? bindingPaths)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
         foreach (var path in sourceFiles)
@@ -179,7 +202,8 @@ internal sealed class WorkspaceState
             var open = _documents.Values.FirstOrDefault(document => PathComparer.Equals(document.Path, path));
             try
             {
-                trees.Add(open is null ? SyntaxTree.Parse(SourceText.FromFile(path)) : SyntaxTree.ParseText(open.Text, path));
+                var text = open is null ? SourceText.FromFile(path) : SourceText.From(open.Text, path);
+                trees.Add(bindingPaths?.Contains(path) == true ? SyntaxTree.ParseEspIdfBinding(text) : SyntaxTree.Parse(text));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
             {

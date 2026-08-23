@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 1,
+  "namespace": "Examples.TCan485.Bindings",
+  "declarations": "Bindings/Generated/EspIdf.g.ct",
+  "adapterSource": "Bindings/Generated/EspIdf.g.c",
+  "imports": [
+    {
+      "component": "esp_timer",
+      "header": "esp_timer.h",
+      "container": "NativeTimer",
+      "functions": [
+        {
+          "symbol": "esp_timer_get_time",
+          "name": "GetTimeMicroseconds",
+          "returnType": "long",
+          "parameters": [],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "esp_hw_support",
+      "header": "esp_random.h",
+      "container": "HardwareRandom",
+      "functions": [
+        {
+          "symbol": "esp_random",
+          "name": "NextUInt32",
+          "returnType": "uint",
+          "parameters": [],
+          "noAlloc": true
+        },
+        {
+          "symbol": "esp_fill_random",
+          "name": "Fill",
+          "returnType": "void",
+          "parameters": [
+            {
+              "name": "buffer",
+              "type": "NativeBuffer<byte>",
+              "nativeNames": ["buf", "len"],
+              "ownership": "borrowed",
+              "nullable": false,
+              "synchronousCallback": false
+            }
+          ],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "esp_driver_gpio",
+      "header": "driver/gpio.h",
+      "container": "NativeGpio",
+      "functions": [
+        {
+          "symbol": "gpio_set_level",
+          "name": "SetLevel",
+          "returnType": "EspError",
+          "parameters": [
+            { "name": "pin", "type": "int", "nativeNames": ["gpio_num"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false },
+            { "name": "level", "type": "uint", "nativeNames": ["level"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }
+          ],
+          "noAlloc": true
+        },
+        {
+          "symbol": "gpio_get_level",
+          "name": "GetLevel",
+          "returnType": "int",
+          "parameters": [
+            { "name": "pin", "type": "int", "nativeNames": ["gpio_num"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }
+          ],
+          "noAlloc": true
+        }
+      ],
+      "constants": [
+        { "symbol": "GPIO_MODE_INPUT", "name": "ModeInput", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_MODE_OUTPUT", "name": "ModeOutput", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_PULLUP_DISABLE", "name": "PullUpDisabled", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_PULLUP_ENABLE", "name": "PullUpEnabled", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_PULLDOWN_DISABLE", "name": "PullDownDisabled", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_PULLDOWN_ENABLE", "name": "PullDownEnabled", "type": "int", "noAlloc": true },
+        { "symbol": "GPIO_INTR_DISABLE", "name": "InterruptDisabled", "type": "int", "noAlloc": true }
+      ],
+      "configAdapters": [
+        {
+          "function": "gpio_config",
+          "struct": "gpio_config_t",
+          "structParameter": "pGPIOConfig",
+          "name": "Configure",
+          "returnType": "EspError",
+          "fields": [
+            { "field": "pin_bit_mask", "name": "pinMask", "type": "ulong" },
+            { "field": "mode", "name": "mode", "type": "int" },
+            { "field": "pull_up_en", "name": "pullUp", "type": "int" },
+            { "field": "pull_down_en", "name": "pullDown", "type": "int" },
+            { "field": "intr_type", "name": "interruptType", "type": "int" }
+          ],
+          "defaults": [],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "nvs_flash",
+      "header": "nvs_flash.h",
+      "container": "NativeStorage",
+      "functions": [
+        { "symbol": "nvs_flash_init", "name": "Initialize", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "nvs_flash_deinit", "name": "Deinitialize", "returnType": "EspError", "parameters": [], "noAlloc": true }
+      ]
+    },
+    {
+      "component": "esp_netif",
+      "header": "esp_netif.h",
+      "container": "NativeNetwork",
+      "functions": [
+        { "symbol": "esp_netif_init", "name": "Initialize", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_netif_deinit", "name": "Deinitialize", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        {
+          "symbol": "esp_netif_is_netif_up",
+          "name": "IsUp",
+          "returnType": "bool",
+          "parameters": [
+            { "name": "networkInterface", "type": "void*", "nativeNames": ["esp_netif"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }
+          ],
+          "noAlloc": true
+        }
+      ],
+      "outputAdapters": [
+        {
+          "function": "esp_netif_get_ip_info",
+          "struct": "esp_netif_ip_info_t",
+          "structParameter": "ip_info",
+          "name": "GetIpInfo",
+          "returnType": "EspError",
+          "parameters": [
+            { "name": "networkInterface", "type": "void*", "nativeNames": ["esp_netif"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }
+          ],
+          "fields": [
+            { "field": "ip.addr", "name": "address", "type": "uint" },
+            { "field": "gw.addr", "name": "gateway", "type": "uint" },
+            { "field": "netmask.addr", "name": "netmask", "type": "uint" }
+          ],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "esp_event",
+      "header": "esp_event.h",
+      "container": "NativeEventLoop",
+      "functions": [
+        { "symbol": "esp_event_loop_create_default", "name": "CreateDefault", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_event_loop_delete_default", "name": "DeleteDefault", "returnType": "EspError", "parameters": [], "noAlloc": true }
+      ]
+    },
+    {
+      "component": "esp_wifi",
+      "header": "esp_wifi_default.h",
+      "container": "NativeWifiNetworkInterface",
+      "functions": [
+        {
+          "symbol": "esp_netif_create_default_wifi_sta",
+          "name": "CreateStation",
+          "returnType": "void*",
+          "returnOwnership": "owned",
+          "returnNullable": true,
+          "parameters": [],
+          "noAlloc": true
+        },
+        {
+          "symbol": "esp_netif_destroy_default_wifi",
+          "name": "Destroy",
+          "returnType": "void",
+          "parameters": [
+            { "name": "networkInterface", "type": "void*", "nativeNames": ["esp_netif"], "ownership": "consumes", "nullable": true, "synchronousCallback": false }
+          ],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "esp_wifi",
+      "header": "esp_wifi.h",
+      "container": "NativeWifi",
+      "functions": [
+        { "symbol": "esp_wifi_set_mode", "name": "SetMode", "returnType": "EspError", "parameters": [{ "name": "mode", "type": "int", "nativeNames": ["mode"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_wifi_start", "name": "Start", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_wifi_connect", "name": "Connect", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_wifi_disconnect", "name": "Disconnect", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_wifi_stop", "name": "Stop", "returnType": "EspError", "parameters": [], "noAlloc": true },
+        { "symbol": "esp_wifi_deinit", "name": "Deinitialize", "returnType": "EspError", "parameters": [], "noAlloc": true }
+      ],
+      "constants": [
+        { "symbol": "WIFI_IF_STA", "name": "StationInterface", "type": "int", "noAlloc": true },
+        { "symbol": "WIFI_MODE_STA", "name": "StationMode", "type": "int", "noAlloc": true }
+      ],
+      "configAdapters": [
+        {
+          "function": "esp_wifi_init",
+          "struct": "wifi_init_config_t",
+          "structParameter": "config",
+          "name": "Initialize",
+          "returnType": "EspError",
+          "initializer": "WIFI_INIT_CONFIG_DEFAULT",
+          "fields": [
+            { "field": "nvs_enable", "name": "useNvs", "type": "bool" }
+          ],
+          "defaults": [],
+          "noAlloc": true
+        },
+        {
+          "function": "esp_wifi_set_config",
+          "struct": "wifi_config_t",
+          "structParameter": "conf",
+          "name": "ConfigureStation",
+          "returnType": "EspError",
+          "parameters": [
+            { "name": "networkInterface", "type": "int", "nativeNames": ["interface"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }
+          ],
+          "fields": [
+            { "field": "sta.ssid", "name": "ssid", "type": "NativeUtf8String", "mapping": "fixedUtf8", "maxBytes": 32 },
+            { "field": "sta.password", "name": "password", "type": "NativeUtf8String", "mapping": "fixedUtf8", "maxBytes": 63 },
+            { "field": "sta.failure_retry_cnt", "name": "retryCount", "type": "byte" }
+          ],
+          "defaults": [],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "esp_http_client",
+      "header": "esp_http_client.h",
+      "container": "NativeHttp",
+      "opaqueTypes": [
+        { "symbol": "esp_http_client_handle_t", "name": "NativeHttpClient" }
+      ],
+      "functions": [
+        { "symbol": "esp_http_client_open", "name": "Open", "returnType": "EspError", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }, { "name": "writeLength", "type": "int", "nativeNames": ["write_len"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_fetch_headers", "name": "FetchHeaders", "returnType": "long", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_read", "name": "Read", "returnType": "int", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }, { "name": "buffer", "type": "void*", "nativeNames": ["buffer"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }, { "name": "length", "type": "int", "nativeNames": ["len"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_get_status_code", "name": "GetStatusCode", "returnType": "int", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_get_content_length", "name": "GetContentLength", "returnType": "long", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_close", "name": "Close", "returnType": "EspError", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true },
+        { "symbol": "esp_http_client_cleanup", "name": "Cleanup", "returnType": "EspError", "parameters": [{ "name": "client", "type": "NativeHttpClient", "nativeNames": ["client"], "ownership": "consumes", "nullable": true, "synchronousCallback": false }], "noAlloc": true }
+      ],
+      "configAdapters": [
+        {
+          "function": "esp_http_client_init",
+          "struct": "esp_http_client_config_t",
+          "structParameter": "config",
+          "name": "Create",
+          "returnType": "NativeHttpClient",
+          "returnOwnership": "owned",
+          "returnNullable": true,
+          "fields": [
+            { "field": "url", "name": "url", "type": "NativeUtf8String" },
+            { "field": "timeout_ms", "name": "timeoutMilliseconds", "type": "int" }
+          ],
+          "defaults": [
+            { "field": "crt_bundle_attach", "symbol": "esp_crt_bundle_attach" }
+          ],
+          "noAlloc": true
+        }
+      ]
+    },
+    {
+      "component": "mbedtls",
+      "header": "esp_crt_bundle.h",
+      "container": "NativeCertificateBundle",
+      "functions": [
+        { "symbol": "esp_crt_bundle_attach", "name": "Attach", "returnType": "EspError", "parameters": [{ "name": "configuration", "type": "void*", "nativeNames": ["conf"], "ownership": "borrowed", "nullable": false, "synchronousCallback": false }], "noAlloc": true }
+      ]
+    }
+  ]
+}

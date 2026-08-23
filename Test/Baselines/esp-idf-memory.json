@@ -7,53 +7,53 @@
   "targets": {
     "esp32": {
       "observed": {
-        "binaryBytes": 171136,
-        "imageBytes": 171013,
-        "flashCode": 78554,
-        "flashData": 36608,
-        "iram": 45391,
-        "dram": 14652
+        "binaryBytes": 191616,
+        "imageBytes": 191497,
+        "flashCode": 87174,
+        "flashData": 44776,
+        "iram": 48463,
+        "dram": 15444
       },
       "maximum": {
-        "binaryBytes": 174559,
-        "imageBytes": 174434,
-        "flashCode": 80126,
-        "flashData": 37632,
-        "iram": 46299,
-        "dram": 15164
+        "binaryBytes": 195449,
+        "imageBytes": 195327,
+        "flashCode": 88918,
+        "flashData": 45800,
+        "iram": 49433,
+        "dram": 15956
       }
     },
     "esp32c3": {
       "observed": {
-        "binaryBytes": 178096,
-        "imageBytes": 177798,
-        "flashCode": 97260,
-        "flashData": 34116,
+        "binaryBytes": 208192,
+        "imageBytes": 207820,
+        "flashCode": 113112,
+        "flashData": 43860,
         "iram": 0,
-        "dram": 52078
+        "dram": 56824
       },
       "maximum": {
-        "binaryBytes": 181658,
-        "imageBytes": 181354,
-        "flashCode": 99206,
-        "flashData": 35140,
+        "binaryBytes": 212356,
+        "imageBytes": 211977,
+        "flashCode": 115375,
+        "flashData": 44884,
         "iram": 512,
-        "dram": 53120
+        "dram": 57961
       }
     }
   },
   "hardware": {
     "observed": {
-      "freeHeap": 296908,
-      "minimumFreeHeap": 284168,
-      "stackHighWater": 6736,
-      "tick": 16,
+      "freeHeap": 291696,
+      "minimumFreeHeap": 278964,
+      "stackHighWater": 6708,
+      "tick": 18,
       "transitions": 25
     },
     "minimum": {
-      "freeHeap": 292812,
-      "minimumFreeHeap": 280072,
-      "stackHighWater": 6224
+      "freeHeap": 287600,
+      "minimumFreeHeap": 274868,
+      "stackHighWater": 6196
     }
   },
   "layout": {

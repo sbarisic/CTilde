@@ -106,7 +106,6 @@ try {
 
         $hello = Join-Path $temporaryDirectory "hello.c"
         $exceptions = Join-Path $temporaryDirectory "exceptions.c"
-        $arcHeap = Join-Path $temporaryDirectory "arc-heap.c"
         $mathSource = Join-Path $temporaryDirectory "math.ct"
         $math = Join-Path $temporaryDirectory "math.c"
         $operatorsSource = Join-Path $temporaryDirectory "operators.ct"
@@ -121,7 +120,6 @@ try {
         [IO.File]::WriteAllText($assemblySource, 'public static class Program { [Export("ctilde_add")] public static int Add(int left, int right) { return left + right; } [EntryPoint] public static unsafe void Main() { int value = 1; [NoAlloc] asm (ref value) { } [NoAlloc] asm { nop } Console.WriteLine(value); } }')
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Hello.ct", "-o", $hello, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Exceptions.ct", "-o", $exceptions, "--target", "esp-idf")
-        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\TCan485\Program.ct", "-o", $arcHeap, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $mathSource, "-o", $math, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $operatorsSource, "-o", $operators, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $vectorsSource, "-o", $vectors, "--target", "esp-idf")
@@ -155,7 +153,14 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for inline assembly on esp32 with exit code $LASTEXITCODE." }
             & $buildScript -IdfPath $IdfPath -Target esp32c3 -Source $assemblySource
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for inline assembly on esp32c3 with exit code $LASTEXITCODE." }
-            Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", "--project", ".\examples\TCan485\ctilde.json")
+            Push-Location $exampleDirectory
+            try {
+                Invoke-Checked "idf.py" @("set-target", "esp32")
+            }
+            finally {
+                Pop-Location
+            }
+            Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", "--project", ".\examples\TCan485\ctilde.json", "--generate-bindings")
         }
     }
     finally {

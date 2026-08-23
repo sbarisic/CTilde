@@ -29,7 +29,10 @@ internal sealed record CommandLineOptions(
     string? PrepareDebug,
     string? DebugTarget,
     string? SerialPort,
-    int BaudRate)
+    int BaudRate,
+    bool GenerateBindings,
+    bool VerifyBindings,
+    string? EspClangPath)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -56,6 +59,7 @@ internal sealed record CommandLineOptions(
         string? prepareDebug = null;
         string? debugTarget = null;
         string? serialPort = null;
+        string? espClangPath = null;
         var baudRate = 115200;
         var check = false;
         var trace = false;
@@ -64,6 +68,8 @@ internal sealed record CommandLineOptions(
         var targetSpecified = false;
         var lto = false;
         var debugInfo = false;
+        var generateBindings = false;
+        var verifyBindings = false;
         DebugMemoryMode? debugMemory = null;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
@@ -90,6 +96,7 @@ internal sealed record CommandLineOptions(
                 case "--native-output": nativeOutput = RequireValue(); break;
                 case "--idf-project": idfProject = RequireValue(); break;
                 case "--idf-path": idfPath = RequireValue(); break;
+                case "--esp-clang": espClangPath = RequireValue(); break;
                 case "--output-directory": outputDirectory = RequireValue(); break;
                 case "--symbol-map": symbolMap = RequireValue(); break;
                 case "--debug-map": debugMap = RequireValue(); break;
@@ -135,6 +142,8 @@ internal sealed record CommandLineOptions(
                 case "--check": check = true; break;
                 case "--trace": trace = true; break;
                 case "--build": build = true; break;
+                case "--generate-bindings": generateBindings = true; break;
+                case "--verify-bindings": verifyBindings = true; break;
                 case "--configuration":
                     var value = RequireValue();
                     configuration = value switch
@@ -176,7 +185,7 @@ internal sealed record CommandLineOptions(
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
-            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate);
+            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath);
         return true;
     }
 }

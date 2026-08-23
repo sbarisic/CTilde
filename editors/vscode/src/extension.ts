@@ -39,6 +39,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => controller?.showOutput()),
         vscode.commands.registerCommand('ctilde.project.check', () => buildProvider.runProject('check')),
         vscode.commands.registerCommand('ctilde.project.build', () => buildProvider.runProject('build')),
+        vscode.commands.registerCommand('ctilde.project.generateBindings', () => buildProvider.runProject('bindings')),
         vscode.commands.registerCommand('ctilde.project.debug', () => debugProvider.runProject('launch')),
         vscode.commands.registerCommand('ctilde.project.attach', () => debugProvider.runProject('attach')),
         vscode.tasks.registerTaskProvider('ctilde', buildProvider),
@@ -60,12 +61,16 @@ class CTildeTaskProvider implements vscode.TaskProvider {
 
     public async provideTasks(): Promise<vscode.Task[]> {
         const manifests = await this.discoverProjects();
-        return manifests.flatMap(manifest => [this.createTask(manifest, 'build'), this.createTask(manifest, 'check')]);
+        return manifests.flatMap(manifest => {
+            const tasks = [this.createTask(manifest, 'build'), this.createTask(manifest, 'check')];
+            if (this.readProjectTarget(manifest) === 'esp-idf') tasks.push(this.createTask(manifest, 'bindings'));
+            return tasks;
+        });
     }
 
     public resolveTask(task: vscode.Task): vscode.Task | undefined {
         const definition = task.definition as Partial<CTildeTaskDefinition>;
-        if (typeof definition.project !== 'string' || (definition.mode !== 'build' && definition.mode !== 'check'))
+        if (typeof definition.project !== 'string' || (definition.mode !== 'build' && definition.mode !== 'check' && definition.mode !== 'bindings'))
             return undefined;
         const folder = typeof task.scope === 'object' ? task.scope : undefined;
         try {
@@ -108,14 +113,15 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         const args = compilerArguments(launch, project, mode, target, {
             nativeCompiler: configuration.get<string>('nativeCompiler', ''),
             idfPath: configuration.get<string>('idfPath', ''),
+            espClangPath: configuration.get<string>('espClangPath', ''),
         });
         const definition: CTildeTaskDefinition = { type: 'ctilde', project, mode };
         const projectName = path.basename(path.dirname(project));
-        const label = `${mode === 'build' ? 'Build' : 'Check'} ${projectName}`;
+        const label = `${mode === 'build' ? 'Build' : mode === 'bindings' ? 'Generate Bindings' : 'Check'} ${projectName}`;
         const execution = new vscode.ProcessExecution(launch.command, args, { cwd: path.dirname(project) });
         const task = new vscode.Task(definition, folder ?? vscode.TaskScope.Workspace, label, 'C~', execution,
             ['$ctilde', '$gcc', '$msCompile']);
-        task.group = mode === 'build' ? vscode.TaskGroup.Build : vscode.TaskGroup.Test;
+        task.group = mode === 'build' ? vscode.TaskGroup.Build : mode === 'check' ? vscode.TaskGroup.Test : undefined;
         task.runOptions = { reevaluateOnRerun: true, instanceLimit: 1 } as vscode.RunOptions & { instanceLimit: number };
         return task;
     }
@@ -264,6 +270,9 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                 const idfPath = compilerSettings.get<string>('idfPath', '').trim();
                 if (idfPath.length !== 0)
                     args.push('--idf-path', idfPath);
+                const espClangPath = compilerSettings.get<string>('espClangPath', '').trim();
+                if (espClangPath.length !== 0)
+                    args.push('--esp-clang', espClangPath);
                 args.push('--serial-port', serialPort, '--baud-rate', String(baudRate));
             }
             if (!await this.executePreparation(project, launch.command, args))
@@ -365,6 +374,7 @@ class LanguageServerController {
         this.sourceWatchers = [
             vscode.workspace.createFileSystemWatcher('**/*.ct'),
             vscode.workspace.createFileSystemWatcher('**/ctilde.json'),
+            vscode.workspace.createFileSystemWatcher('**/*.bindings.json'),
         ];
         context.subscriptions.push(...this.sourceWatchers);
         this.restartCoordinator = new RestartCoordinator(

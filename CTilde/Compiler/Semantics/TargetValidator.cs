@@ -46,6 +46,9 @@ internal static class TargetValidator
 
         var dynamicSymbols = emitter.DynamicGeneratedSymbols.ToHashSet(StringComparer.Ordinal);
         foreach (var method in model.Types.Values.SelectMany(type => type.Methods)
+                     .Where(method => method.ExternName?.StartsWith("ct_idf_", StringComparison.Ordinal) == true && !method.IsTrustedExtern))
+            model.Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' uses the reserved ESP-IDF binding prefix.", method.Syntax!.Source, method.Syntax.Span);
+        foreach (var method in model.Types.Values.SelectMany(type => type.Methods)
                      .Where(method => method.ExternName is not null && !method.IsTrustedExtern && dynamicSymbols.Contains(method.ExternName)))
         {
             model.Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a generated C symbol.", method.Syntax!.Source, method.Syntax.Span);

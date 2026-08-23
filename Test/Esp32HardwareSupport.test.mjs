@@ -31,7 +31,7 @@ test('source anchors must be unique', () => {
 test('firmware transcript extracts measurements and alternating transitions', () => {
   const markers = [
     'esp error: ESP_OK', 'C~ ESP-IDF hardware test', 'virtual: 42', 'delegate: 42',
-    'function pointer: 42', 'timer64: ok', 'native buffer: 42', 'native utf8: ok',
+    'function pointer: 42', 'timer64: ok', 'generated bindings: ok', 'wifi: not configured', 'native buffer: 42', 'native utf8: ok',
     'opaque defer: ok', 'delegate context: 42', 'export: 42', 'threading: ok', 'draft15 concurrency: ok',
     'boxed: 7', 'exception: caught on ESP32', 'arc heap recovery: True', 'CTILDE_ESP_OK',
     'free heap: 297000', 'minimum free heap: 286000', 'stack high water: 6500', 'tick: 19',
@@ -41,6 +41,9 @@ test('firmware transcript extracts measurements and alternating transitions', ()
   assert.deepEqual(parseFirmwareTranscript(markers.join('\n')), {
     freeHeap: 297000, minimumFreeHeap: 286000, stackHighWater: 6500, tick: 19, transitions: 25,
   });
+  const configuredMarkers = markers.map(marker => marker === 'wifi: not configured' ? 'generated wifi/http bindings: ok' : marker);
+  assert.equal(parseFirmwareTranscript(configuredMarkers.join('\n')).transitions, 25);
+  assert.throws(() => parseFirmwareTranscript(markers.filter(marker => marker !== 'wifi: not configured').join('\n')), /offline fallback marker/);
   assert.throws(() => parseFirmwareTranscript(markers.concat('WS2812_UPDATE_FAILED').join('\n')), /failure text/);
   assert.throws(() => parseFirmwareTranscript(markers.concat('Rebooting...').join('\n')), /failure text/);
 });
@@ -152,6 +155,23 @@ test('hardware runner writes UTF-8 without requiring PowerShell 7 encoding names
   assert.equal(runner.includes('-Encoding utf8NoBOM'), false);
   assert.match(runner, /\[IO\.File\]::WriteAllText/);
   assert.match(runner, /\$previousErrorActionPreference = \$ErrorActionPreference[\s\S]*\$ErrorActionPreference = "Continue"[\s\S]*\$exitCode = \$LASTEXITCODE[\s\S]*\$ErrorActionPreference = \$previousErrorActionPreference/);
+});
+
+test('Wi-Fi hardware runner splats named build parameters', () => {
+  const runner = readFileSync(new URL('./Test-Esp32Wifi.ps1', import.meta.url), 'utf8');
+  assert.match(runner, /\$buildParameters = @\{/);
+  assert.match(runner, /IdfPath = \$IdfPath/);
+  assert.match(runner, /Target = "esp32"/);
+  assert.match(runner, /& \$buildScript @buildParameters/);
+  assert.doesNotMatch(runner, /& \$buildScript @arguments/);
+  assert.match(runner, /sys\.stdout\.buffer\.write\(chunk\)/);
+  assert.match(runner, /sys\.stdout\.buffer\.flush\(\)/);
+  assert.doesNotMatch(runner, /sys\.stdout\.buffer\.write\(data\)/);
+  assert.match(runner, /Find-ByteSequence \$bytes \$applicationMarker/);
+  assert.match(runner, /\$utf8\.GetString\(\$applicationBytes\)/);
+  assert.match(runner, /\$freeAfter \+ 8192 -lt \$freeBefore/);
+  assert.match(runner, /Restored the original TCan485 firmware/);
+  assert.doesNotMatch(runner, /HTTPS success marker was not received\.`n\$transcript/);
 });
 
 test('visual confirmation is requested while the release workload is still running', () => {

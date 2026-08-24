@@ -2,6 +2,32 @@ namespace CTilde;
 
 internal sealed partial class CompilationModel
 {
+    private void ValidateNativeSections()
+    {
+        var declarations = Types.Values.Where(type => type.Syntax is not null)
+            .SelectMany(type => type.Methods.Where(method => method.SectionName is not null)
+                .Select(method => (Name: method.SectionName!, Kind: NativeSectionKind.Code, Syntax: method.Syntax!))
+                .Concat(type.Fields.Where(field => field.SectionName is not null)
+                    .Select(field => (Name: field.SectionName!, Kind: NativeSectionKind.Data, Syntax: field.Syntax!))))
+            .GroupBy(item => item.Syntax)
+            .Select(group => group.First())
+            .OrderBy(item => item.Syntax.Source.FilePath, StringComparer.Ordinal)
+            .ThenBy(item => item.Syntax.Span.Start)
+            .ToArray();
+        var sections = new Dictionary<string, (NativeSectionKind Kind, SyntaxNode Syntax)>(StringComparer.Ordinal);
+        foreach (var declaration in declarations)
+        {
+            if (!sections.TryGetValue(declaration.Name, out var previous))
+            {
+                sections.Add(declaration.Name, (declaration.Kind, declaration.Syntax));
+                continue;
+            }
+            if (previous.Kind != declaration.Kind)
+                Diagnostics.Add("CT4107", $"Native section '{declaration.Name}' cannot contain both code and data definitions.", declaration.Syntax.Source, declaration.Syntax.Span,
+                    previous.Syntax.Source.GetLocation(previous.Syntax.Span));
+        }
+    }
+
     private void ValidateExternalSymbols()
     {
         var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)

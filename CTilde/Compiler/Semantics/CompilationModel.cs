@@ -35,6 +35,7 @@ internal sealed partial class CompilationModel
         Documentation = DocumentationIndex.Build(this, target);
         ValidateRecursivePointerExposure();
         ValidateExternalSymbols();
+        ValidateNativeSections();
         ValidateEntryPoint();
     }
 
@@ -322,6 +323,7 @@ internal sealed partial class CompilationModel
             ReturnsNullable = method.ReturnsNullable,
             ExternName = method.ExternName,
             ExportName = method.ExportName,
+            SectionName = method.SectionName,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -384,6 +386,7 @@ internal sealed partial class CompilationModel
                 IsVolatile = field.IsVolatile,
                 Initializer = field.Initializer,
                 Offset = field.Offset,
+                SectionName = field.SectionName,
             });
         foreach (var property in definition.Properties)
         {
@@ -479,6 +482,7 @@ internal sealed partial class CompilationModel
             ReturnsNullable = method.ReturnsNullable,
             ExternName = method.ExternName,
             ExportName = method.ExportName,
+            SectionName = method.SectionName,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -845,11 +849,13 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
                     int? fieldOffset = null;
+                    var sectionAttribute = FindAttribute(field.Attributes, "Section");
+                    var sectionName = ParseSectionName(sectionAttribute);
                     var fieldOffsetAttribute = FindAttribute(field.Attributes, "FieldOffset");
                     if (fieldOffsetAttribute is not null)
                     {
@@ -874,6 +880,7 @@ internal sealed partial class CompilationModel
                         IsVolatile = isVolatile,
                         Initializer = field.Initializer,
                         Offset = fieldOffset,
+                        SectionName = sectionName,
                     };
                     if (symbol.Type.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
@@ -889,14 +896,20 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1220", "A field cannot be both const and readonly.", field.Source, field.Span);
                     if (isVolatile && (symbol.IsConst || symbol.IsReadonly || !IsVolatileType(symbol.Type)))
                         Diagnostics.Add("CT1274", "volatile requires a writable Boolean, integral, native-integral, enum, or unsafe-pointer field.", field.Source, field.Span);
+                    if (sectionAttribute is not null && (!symbol.IsStatic || symbol.IsConst || !IsCompleteUnmanagedType(symbol.Type)))
+                        Diagnostics.Add("CT1287", "Section requires a non-const static field with a complete unmanaged type.", sectionAttribute.Source, sectionAttribute.Span);
                     AddUnique(type, symbol);
                     break;
                 }
             case PropertyDeclarationSyntax property:
                 {
                     ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], property);
-                    ValidateAttributes(property.Attributes, property, ["NoAlloc"]);
+                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "Section"]);
                     var noAlloc = FindAttribute(property.Attributes, "NoAlloc");
+                    var propertySection = FindAttribute(property.Attributes, "Section");
+                    _ = ParseSectionName(propertySection);
+                    if (propertySection is not null)
+                        Diagnostics.Add("CT1287", "Section is not valid on a property.", propertySection.Source, propertySection.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
                         Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     if (property.Getter is null && property.Setter is null)
@@ -966,7 +979,11 @@ internal sealed partial class CompilationModel
             case ConstructorDeclarationSyntax constructor:
                 {
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
-                    ValidateAttributes(constructor.Attributes, constructor, []);
+                    ValidateAttributes(constructor.Attributes, constructor, ["Section"]);
+                    var constructorSection = FindAttribute(constructor.Attributes, "Section");
+                    _ = ParseSectionName(constructorSection);
+                    if (constructorSection is not null)
+                        Diagnostics.Add("CT1287", "Section is not valid on a constructor.", constructorSection.Source, constructorSection.Span);
                     if (isStatic)
                         Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.7.", constructor.Source, constructor.Span);
                     if (type.Kind == DeclaredTypeKind.Interface)
@@ -997,7 +1014,7 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
@@ -1005,6 +1022,8 @@ internal sealed partial class CompilationModel
                     var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
                     var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
                     var returnsNullable = FindAttribute(method.Attributes, "ReturnsNullable");
+                    var sectionAttribute = FindAttribute(method.Attributes, "Section");
+                    var sectionName = ParseSectionName(sectionAttribute);
                     var previousTypeParameters = _activeTypeParameters;
                     var methodTypeParameters = method.TypeParameters.Select(parameter => new TypeSymbol
                     {
@@ -1032,6 +1051,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1270", "An abstract method requires an abstract class.", method.Source, method.Span);
                     if (isAbstractMethod && method.Body is not null)
                         Diagnostics.Add("CT1270", "An abstract or interface method cannot have a body.", method.Source, method.Span);
+                    if (sectionAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
+                        Diagnostics.Add("CT1287", "Section requires a body-bearing static non-extern method.", sectionAttribute.Source, sectionAttribute.Span);
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
@@ -1106,6 +1127,7 @@ internal sealed partial class CompilationModel
                         ReturnsNullable = returnsNullable is not null,
                         ExternName = externalName,
                         ExportName = exportName,
+                        SectionName = sectionName,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsAbstract = isAbstractMethod,
@@ -1596,6 +1618,16 @@ internal sealed partial class CompilationModel
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);
+
+    private string? ParseSectionName(AttributeSyntax? attribute)
+    {
+        if (attribute is null)
+            return null;
+        if (attribute.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && NativeSection.IsValidName(value))
+            return value;
+        Diagnostics.Add("CT1286", "Section requires one ASCII section name of 1 to 128 characters using letters, digits, '.', '_', '$', or '-'.", attribute.Source, attribute.Span);
+        return null;
+    }
 
     private static bool IsPortableExternalIdentifier(string value) =>
         CIdentifier.IsMatch(value) && !value.StartsWith('_') && !CKeywords.Contains(value);

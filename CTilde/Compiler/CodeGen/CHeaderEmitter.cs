@@ -13,7 +13,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .Where(method => method.ExportName is not null)
             .OrderBy(method => method.ExportName, StringComparer.Ordinal)
             .ToArray();
-        var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method)));
+        var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -24,6 +24,10 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         if (ExportTypes(exports).Any(type => type.Kind == CTypeKind.EspError))
             writer.Append("#include <esp_err.h>\n");
         writer.Append("#if defined(__cplusplus)\n#define CT_ALIGNOF(type) alignof(type)\n#elif defined(_MSC_VER)\n#define CT_ALIGNOF(type) __alignof(type)\n#else\n#define CT_ALIGNOF(type) _Alignof(type)\n#endif\n");
+        var codeSections = exports.Where(method => method.SectionName is not null).Select(method => method.SectionName!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
+        foreach (var section in codeSections)
+            foreach (var line in NativeSection.MacroDefinition(NativeSectionKind.Code, section))
+                writer.Append(line).Append('\n');
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
         writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(").Append(CompilerContract.RuntimeAbiVersion).Append(")\n\n");
         writer.Append("typedef struct ct_object ct_object;\n");
@@ -61,12 +65,17 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             var ownership = OwnershipComment(method);
             if (ownership.Length != 0)
                 writer.Append("/* ownership: ").Append(ownership).Append(" */\n");
+            if (method.SectionName is not null)
+                writer.Append(NativeSection.MacroName(NativeSectionKind.Code, method.SectionName)).Append(' ');
             writer.Append(CTypeName(method.ReturnType)).Append(' ').Append(method.ExportName).Append('(');
             var parameters = method.Parameters.SelectMany(ParameterDeclarations).ToArray();
             writer.Append(parameters.Length == 0 ? "void" : string.Join(", ", parameters));
             writer.Append(");\n");
         }
-        writer.Append("\n#undef CT_ALIGNOF\n#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
+        writer.Append("\n#undef CT_ALIGNOF\n");
+        foreach (var section in codeSections)
+            writer.Append("#undef ").Append(NativeSection.MacroName(NativeSectionKind.Code, section)).Append('\n');
+        writer.Append("#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
         return writer.ToString();
     }
 

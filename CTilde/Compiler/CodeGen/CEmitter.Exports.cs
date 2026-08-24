@@ -11,7 +11,7 @@ internal sealed partial class CEmitter
             var declarations = method.Parameters
                 .SelectMany(parameter => ExportParameterDeclarations(parameter, NameMangler.Identifier(parameter.Name)))
                 .ToArray();
-            writer.WriteLine(CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
+            writer.WriteLine(SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
             writer.WriteLine("{");
             writer.WriteLine("    ct_runtime_require_ready();");
             writer.WriteLine("    jmp_buf ct_export_target;");

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.16 includes unions, packed and explicit aggregate layouts, `sizeof`/`alignof`/`offsetof`, interfaces and abstract classes, monomorphized generics, deterministic automatic reference counting, exceptions and `defer`, atomics, managed concurrency, native interop, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.17 includes controlled `[Section]` code/data placement, unions, packed and explicit aggregate layouts, `sizeof`/`alignof`/`offsetof`, interfaces and abstract classes, monomorphized generics, deterministic automatic reference counting, exceptions and `defer`, atomics, managed concurrency, native interop, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -88,7 +88,7 @@ Pass `--compiler clang` instead to use Clang. The example uses GNU AT&T x86 asse
 - Virtual dispatch, boxing, named single-cast delegates, unmanaged function pointers, and user-defined `+`, `-`, `*`, and `/` operators.
 - Typed exceptions, `try`/`catch`/`finally`, deterministic `defer`, and catchable allocation-free runtime faults.
 - Non-moving atomic reference counting with deterministic destruction of acyclic managed values. Reference cycles intentionally leak.
-- Explicit native contracts through attributes such as `[Extern]`, `[Export]`, `[NoAlloc]`, and ownership annotations.
+- Explicit native contracts through attributes such as `[Extern]`, `[Export]`, `[Section]`, `[NoAlloc]`, and ownership annotations.
 - Raw GNU inline assembly with typed operands for GCC and Clang builds. Programs containing `asm` are rejected by the MSVC native-build path.
 
 The bundled standard library supplies objects and exceptions, console I/O, single-precision math and vectors, runtime memory operations, hosted binary file I/O, and a small target-specific ESP-IDF surface. See [STDLIB.md](STDLIB.md) for signatures and runtime behavior.
@@ -191,7 +191,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.16 implementation, not a stable production language. Draft 0.16 uses runtime ABI 16 and debug metadata v3. Aggregate layout support passes the hosted native conformance pipeline; Draft 0.15 ABI 15 remains the latest complete ESP cross-build and connected-board baseline.
+C~ is an experimental Draft 0.17 implementation, not a stable production language. Draft 0.17 retains runtime ABI 16 and debug metadata v3. Controlled section placement passes hosted object inspection under MSVC, GCC, and Clang, and ABI 16 passes the ESP32 and ESP32-C3 cross-build gates. Draft 0.15 ABI 15 remains the latest complete connected-board baseline.
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -208,7 +208,7 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.16 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.17 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

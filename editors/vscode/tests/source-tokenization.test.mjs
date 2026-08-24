@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.16 keyword receives its intended scope", () => {
+test("every draft 0.17 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],

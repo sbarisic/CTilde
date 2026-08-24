@@ -911,7 +911,7 @@ internal sealed partial class CEmitter
         foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
         {
             var value = field.Type.Kind == CTypeKind.Struct ? "{0}" : DefaultValue(field.Type);
-            writer.WriteLine($"static {CDeclaration(field.Type, field.CName)} = {value};");
+            writer.WriteLine($"static {SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
         }
         if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();

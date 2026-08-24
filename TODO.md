@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.16 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.17 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -55,7 +55,6 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 ## Native interop
 
 - [ ] Add explicit MMIO operations without reusing C~ `volatile` fields or a `[Volatile]` attribute. Define exact-width observable loads and stores, compiler ordering, device ordering, supported element types, alignment, and target-specific barriers. Provide primitives such as `Mmio.Read<T>` and `Mmio.Write<T>`, or an equivalent typed view, then lower `[Register]` onto them.
-- [ ] Add section placement using `[Section("section")]`.
 - [ ] Add general alignment control through `[Align(n)]` for types and eligible static, local, and field storage. Validate target limits and propagate alignment through `alignof`, containing layouts, `sizeof`, stack allocation, static storage, and generated C alignment declarations. Keep this separate from function-stack controls such as `[StackAlign(n)]`.
 - [ ] Add native linker symbol declarations, weak imports and definitions, and explicit external reachability roots. Design an attribute such as `[Used]` so reachability preserves symbols referenced by linker scripts, hardware, interrupt vectors, boot ROM, startup assembly, or external loaders.
 - [ ] Add typed extern declarations for mutable, readonly, and C `volatile` native data symbols. Define symbol naming, mutability, type and layout checks, address-taking, unsafe access, headers, linkage, and ownership restrictions. Keep native C volatility separate from C~ acquire/release `volatile` fields and explicit MMIO operations.

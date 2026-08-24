@@ -5,8 +5,12 @@ internal sealed partial class CompilationModel
     private void DeclareOperator(TypeSymbol type, OperatorDeclarationSyntax syntax, SyntaxTree tree, Accessibility accessibility, bool isStatic)
     {
         ValidateAllowedModifiers(syntax.Modifiers, ["public", "static", "unsafe"], syntax);
-        ValidateAttributes(syntax.Attributes, syntax, ["NoAlloc"]);
+        ValidateAttributes(syntax.Attributes, syntax, ["NoAlloc", "Section"]);
         var noAlloc = FindAttribute(syntax.Attributes, "NoAlloc");
+        var section = FindAttribute(syntax.Attributes, "Section");
+        _ = ParseSectionName(section);
+        if (section is not null)
+            Diagnostics.Add("CT1287", "Section is not valid on an operator.", section.Source, section.Span);
         if (noAlloc is not null && noAlloc.Arguments.Length != 0)
             Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
 
@@ -23,7 +27,7 @@ internal sealed partial class CompilationModel
         var invalid = type.Kind is not DeclaredTypeKind.Class and not DeclaredTypeKind.Struct ||
             type.IsStatic || accessibility != Accessibility.Public || !isStatic ||
             syntax.Modifiers.Any(modifier => modifier is not "public" and not "static" and not "unsafe") ||
-            syntax.Attributes.Any(attribute => attribute.Name != "NoAlloc") ||
+            syntax.Attributes.Any(attribute => attribute.Name is not "NoAlloc" and not "Section") ||
             syntax.Parameters.Any(parameter => !parameter.Attributes.IsDefaultOrEmpty) ||
             !OperatorFacts.IsSupported(operatorKind) || !validArity ||
             parameters.Any(parameter => parameter.PassingKind != ParameterPassingKind.Value) ||

@@ -63,6 +63,87 @@ internal static partial class ConformanceTests
         }
     }
 
+    static NativeObjectInspection CompileAndInspectObject(string source)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ctilde-section-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var cPath = Path.Combine(directory, "program.c");
+            var objectPath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.obj" : "program.o");
+            File.WriteAllText(cPath, Emit(source), new UTF8Encoding(false));
+            var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+            if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var compiler = configured[4..];
+                var linuxSource = WslPath(cPath);
+                var linuxObject = WslPath(objectPath);
+                var compile = RunGnuObjectCompiler("wsl", ["--exec", compiler], linuxSource, linuxObject);
+                Assert(compile.ExitCode == 0, $"C object compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("wsl", ["--exec", "objdump", "-h", "-t", linuxObject]);
+                Assert(inspect.ExitCode == 0, $"objdump failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            if (!string.IsNullOrWhiteSpace(configured))
+            {
+                var compilerName = Path.GetFileNameWithoutExtension(configured);
+                if (compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase))
+                {
+                    var msvcCompile = RunProcess(configured, ["/nologo", "/std:clatest", "/Od", "/W4", "/WX", "/wd4702", "/c", $"/Fo:{objectPath}", cPath]);
+                    Assert(msvcCompile.ExitCode == 0, $"C object compiler failed:{Environment.NewLine}{msvcCompile.StandardOutput}{msvcCompile.StandardError}");
+                    var dumpbin = Path.Combine(Path.GetDirectoryName(configured) ?? string.Empty, "dumpbin.exe");
+                    var msvcInspect = RunProcess(File.Exists(dumpbin) ? dumpbin : "dumpbin", ["/nologo", "/headers", "/symbols", objectPath]);
+                    Assert(msvcInspect.ExitCode == 0, $"dumpbin failed:{Environment.NewLine}{msvcInspect.StandardOutput}{msvcInspect.StandardError}");
+                    return new NativeObjectInspection("msvc", msvcInspect.StandardOutput + msvcInspect.StandardError);
+                }
+
+                var compile = RunGnuObjectCompiler(configured, [], cPath, objectPath);
+                Assert(compile.ExitCode == 0, $"C object compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("objdump", ["-h", "-t", objectPath]);
+                Assert(inspect.ExitCode == 0, $"objdump failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                var compile = RunGnuObjectCompiler("cc", [], cPath, objectPath);
+                Assert(compile.ExitCode == 0, $"C object compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("objdump", ["-h", "-t", objectPath]);
+                Assert(inspect.ExitCode == 0, $"objdump failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
+            Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
+            var discovery = RunProcess(vsWhere, ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"]);
+            Assert(discovery.ExitCode == 0 && !string.IsNullOrWhiteSpace(discovery.StandardOutput), "Visual Studio C tools were not found.");
+            var vcVars = Path.Combine(discovery.StandardOutput.Trim(), "VC", "Auxiliary", "Build", "vcvars64.bat");
+            var commandFile = Path.Combine(directory, "inspect.cmd");
+            File.WriteAllText(commandFile,
+                $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /Od /W4 /WX /wd4702 /c /Fo:\"{objectPath}\" \"{cPath}\" || exit /b{Environment.NewLine}dumpbin /nologo /headers /symbols \"{objectPath}\"{Environment.NewLine}",
+                Encoding.ASCII);
+            var result = RunProcess("cmd.exe", ["/d", "/c", commandFile]);
+            Assert(result.ExitCode == 0, $"MSVC object inspection failed:{Environment.NewLine}{result.StandardOutput}{result.StandardError}");
+            return new NativeObjectInspection("msvc", result.StandardOutput + result.StandardError);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, true);
+        }
+    }
+
+    static ProcessResult RunGnuObjectCompiler(string command, IReadOnlyList<string> prefix, string cPath, string objectPath)
+    {
+        var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
+        var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
+        var result = RunProcess(command, [.. prefix, $"-std={standard}", "-O0", "-Wall", "-Wextra", "-Werror", "-c", "-o", objectPath, cPath]);
+        if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
+            return result;
+        return RunProcess(command, [.. prefix, "-std=gnu2x", "-O0", "-Wall", "-Wextra", "-Werror", "-c", "-o", objectPath, cPath]);
+    }
+
     static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false, bool layoutDiagnostics = false)
     {
         var diagnosticDefines = new List<string>();
@@ -263,3 +344,5 @@ internal static partial class ConformanceTests
 }
 
 internal sealed record ProcessResult(int ExitCode, string StandardOutput, string StandardError, byte[]? CapturedFile = null);
+
+internal sealed record NativeObjectInspection(string Toolchain, string Output);

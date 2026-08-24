@@ -204,6 +204,7 @@ internal sealed partial class CEmitter : ILoweringServices
         var moduleLifecycle = RenderModuleLifecycle(program.ModuleInitializers);
         var prefix = new CWriter();
         EmitPreamble(prefix);
+        EmitSectionSupport(prefix);
         EmitStringLiterals(prefix);
         EmitForwardDeclarations(prefix);
         EmitTypeLayouts(prefix);
@@ -300,7 +301,8 @@ internal sealed partial class CEmitter : ILoweringServices
 
     private static string BuildInternalHeader(string prefix)
     {
-        var writer = new StringBuilder("#ifndef CTILDE_INTERNAL_DRAFT_015_H\n#define CTILDE_INTERNAL_DRAFT_015_H\n\n");
+        var guard = "CTILDE_INTERNAL_DRAFT_" + CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0') + "_H";
+        var writer = new StringBuilder($"#ifndef {guard}\n#define {guard}\n\n");
         var skipInitializer = false;
         var skipFunction = false;
         var skipFunctionDepth = 0;
@@ -340,6 +342,7 @@ internal sealed partial class CEmitter : ILoweringServices
             var declaration = RemoveInternalLinkage(line);
             if (declaration is not null)
             {
+                declaration = NativeSection.StripDataDefinitionMacro(declaration);
                 if (LooksLikeFunctionDeclaration(declaration))
                 {
                     var openBrace = declaration.IndexOf('{');
@@ -1268,7 +1271,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 parameters.Add($"void* {parameterName}_context");
         }
         var storage = method.ExternName is not null ? "extern " : "static ";
-        var signature = storage + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
+        var signature = storage + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;
     }
 

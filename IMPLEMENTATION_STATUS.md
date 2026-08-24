@@ -4,7 +4,7 @@ Last reviewed: 2026-08-24
 
 ## Current state
 
-C~ draft 0.16 has one compiler path:
+C~ draft 0.17 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF GNU C23
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.16 coverage adds unions, natural and packed aggregate layouts, overlapping explicit field offsets, symbolic layout operators, deterministic unity/modular/header rendering, and strict native probes. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.17 coverage adds controlled method/static-field section placement, strict target and name diagnostics, generic propagation, deterministic unity/modular/header rendering, and MSVC/GCC/Clang object-table probes. Draft 0.16 coverage added unions, natural and packed aggregate layouts, overlapping explicit field offsets, and symbolic layout operators. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -149,6 +149,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | `[Extern]` | Implemented | Reserved-name, collision, alias, ABI, and prototype tests |
 | Native ownership attributes | Implemented | Borrowed, consumed, retained, created, nullable, owned-return, and borrowed-return tests |
 | `[Export]` and C headers | Implemented | Signature validation, wrappers, exception barriers, deterministic C/C++ declarations, and conflict tests |
+| `[Section]` native placement | Implemented | Controlled names and targets, code/data conflict diagnostics, generic propagation, unity/modular/header annotations, reachability preservation, runtime execution, and MSVC/GCC/Clang object inspection |
 | Synchronous delegate/context callbacks | Implemented | ARC lifetime, virtual dispatch, ABI placement, attachment guards, and exception barriers |
 | `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
 | Bundled `System.Object`, `System.Console`, `System.Environment`, `System.Math`, and `System.Runtime.Memory` sources | Implemented | Embedded-source, documentation, native math, and output tests |
@@ -283,7 +284,7 @@ The same acceptance run prepared a guarded instrumented image and drove the bund
 
 ## Deliberately deferred
 
-These features are outside draft 0.16:
+These features are outside draft 0.17:
 
 - Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
@@ -304,7 +305,7 @@ These features are outside draft 0.16:
 
 ## Release gate
 
-A draft 0.16 release requires:
+A draft 0.17 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -314,6 +315,6 @@ A draft 0.16 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-The hosted Draft 0.16 software gates pass. ABI 16 ESP32/ESP32-C3 cross-build and connected-board acceptance remain to be refreshed; the preserved ABI 15 results are the latest embedded evidence.
+The hosted Draft 0.17 software gates and ABI 16 ESP32/ESP32-C3 cross-build gates pass. No Draft 0.17 hardware run was performed; the preserved ABI 15 results remain the latest connected-board evidence.
 
-Draft 0.16 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Draft 0.15 ABI 15 is the latest complete measured physical-hardware baseline.
+Draft 0.17 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Draft 0.15 ABI 15 is the latest complete measured physical-hardware baseline.

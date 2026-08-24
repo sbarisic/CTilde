@@ -199,6 +199,7 @@ internal sealed class FieldSymbol : MemberSymbol
     public bool IsVolatile { get; init; }
     public ExpressionSyntax? Initializer { get; init; }
     public int? Offset { get; init; }
+    public string? SectionName { get; init; }
     public string CName => IsStatic ? NameMangler.Member(this) : NameMangler.Identifier(Name);
     public string CAccessPath => !IsStatic && ContainingType.AggregateLayout == AggregateLayoutKind.Explicit
         ? $"ct_layout.ct_slot_{CName}.{CName}"
@@ -248,6 +249,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool ReturnsNullable { get; init; }
     public string? ExternName { get; init; }
     public string? ExportName { get; init; }
+    public string? SectionName { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }
     public bool IsAbstract { get; init; }

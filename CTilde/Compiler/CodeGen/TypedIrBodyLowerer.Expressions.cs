@@ -30,6 +30,8 @@ internal sealed partial class TypedIrBodyLowerer
         };
         if (syntax is CallExpressionSyntax && _emitter.EmitDebugInstrumentation && !_analysisOnly)
             result.Prelude.Insert(0, $"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, syntax, "call")}));");
+        if (_optimizationFacts.KnownNonNullExpressions.Contains(syntax))
+            result.IsKnownNonNull = true;
         return RecordSemantic(syntax, result);
     }
 
@@ -62,7 +64,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (syntax.LiteralKind == SyntaxKind.NullKeyword)
             return Constant(CType.Null, null, "NULL");
         if (syntax.LiteralKind == SyntaxKind.StringToken)
-            return new IrExpressionValue { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal };
+            return new IrExpressionValue { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal, IsKnownNonNull = true };
         if (syntax.LiteralKind == SyntaxKind.CharacterToken)
             return Constant(CType.Char, syntax.Value, ((byte)syntax.Value!).ToString(CultureInfo.InvariantCulture));
         if (syntax.Value is NumericLiteralValue numeric)
@@ -105,6 +107,8 @@ internal sealed partial class TypedIrBodyLowerer
                 IsConstant = local.IsConst,
                 ConstantValue = local.ConstantValue,
                 Ownership = local.NativeResourceState == NativeResourceState.Owned ? OwnershipKind.Owned : local.NativeResourceState is NativeResourceState.Borrowed or NativeResourceState.Deferred ? OwnershipKind.Borrowed : OwnershipKind.None,
+                IsKnownNonNull = local.IsKnownNonNull,
+                KnownLength = local.KnownLength,
             };
         }
         if (_parameters.TryGetValue(syntax.Name, out var parameter))
@@ -160,7 +164,7 @@ internal sealed partial class TypedIrBodyLowerer
                 Code = "(*ct_self)",
                 LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" },
             };
-        return new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
+        return new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self", IsKnownNonNull = true };
     }
 
     private IrExpressionValue LowerBase(BaseExpressionSyntax syntax)
@@ -176,6 +180,7 @@ internal sealed partial class TypedIrBodyLowerer
             Type = baseType.Type,
             Code = $"({NameMangler.Type(baseType)}*)(void*)ct_self",
             IsBaseReceiver = true,
+            IsKnownNonNull = true,
         };
     }
 
@@ -209,13 +214,15 @@ internal sealed partial class TypedIrBodyLowerer
         if (receiver.Type.Kind == CTypeKind.String && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
-            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            if (!receiver.IsKnownNonNull)
+                receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.Kind == CTypeKind.Array && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
-            receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            if (!receiver.IsKnownNonNull)
+                receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.IsNativeBuffer && syntax.Name is "Length" or "Pointer")
@@ -290,7 +297,7 @@ internal sealed partial class TypedIrBodyLowerer
             }
             receiver ??= _method.ContainingType.Kind == DeclaredTypeKind.Struct
                 ? new IrExpressionValue { Type = _method.ContainingType.Type, Code = "(*ct_self)", LValue = new IrValueStorage { Store = value => $"*ct_self = {value}", Address = "ct_self" } }
-                : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self" };
+                : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self", IsKnownNonNull = true };
             var loweredReceiver = MaterializeReceiver(receiver, syntax);
             prelude.AddRange(loweredReceiver.Prelude);
             code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CName}";
@@ -409,8 +416,10 @@ internal sealed partial class TypedIrBodyLowerer
         prelude.AddRange(index.Prelude);
         if (receiver.Type.Kind == CTypeKind.Array)
         {
-            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
-            prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
+            if (!receiver.IsKnownNonNull)
+                prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            if (!IsProvenInBounds(receiver, index))
+                prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             var code = $"{receiver.Code}->Data[{index.Code}]";
             return new IrExpressionValue
             {
@@ -422,7 +431,8 @@ internal sealed partial class TypedIrBodyLowerer
         }
         if (receiver.Type.Kind == CTypeKind.String)
         {
-            prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            if (!receiver.IsKnownNonNull)
+                prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             return new IrExpressionValue { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
         }
@@ -470,7 +480,10 @@ internal sealed partial class TypedIrBodyLowerer
             _emitter.AllocationEffects.RecordDirect(_method, syntax, "array construction");
             var length = Materialize(Convert(LowerExpression(syntax.ArrayLength), CType.Int, syntax.ArrayLength, false), syntax.ArrayLength);
             var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
-            return OwnResult(type, code, length.Prelude);
+            var result = OwnResult(type, code, length.Prelude);
+            if (length.IsConstant && length.ConstantValue is int constantLength && constantLength >= 0)
+                result.KnownLength = constantLength;
+            return result;
         }
         if (type.IsNativeBuffer)
         {
@@ -530,11 +543,49 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2184", "A stackalloc count cannot be negative.", syntax.Count);
         count = Materialize(count, syntax.Count);
         var prelude = new List<string>(count.Prelude);
-        if (count.Type == CType.Int)
+        var constantSizeIsSafe = TryGetConstantStackAllocationCount(count, element, out _);
+        if (count.Type == CType.Int && !constantSizeIsSafe)
             prelude.Add($"if ({count.Code} < 0) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0002\", {_emitter.SourceArgument(syntax)});");
-        var bytes = $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
+        var bytes = constantSizeIsSafe
+            ? $"((size_t){count.Code} * sizeof({_emitter.CTypeName(element)}))"
+            : $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
         var pointer = $"((size_t){count.Code} == 0u ? NULL : ({_emitter.CTypeName(element)}*)CT_ALLOCA({bytes}))";
         return new IrExpressionValue { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
+    }
+
+    private static bool TryGetConstantStackAllocationCount(IrExpressionValue count, CType element, out ulong value)
+    {
+        value = count.ConstantValue switch
+        {
+            int signed when signed >= 0 => (ulong)signed,
+            uint unsigned => unsigned,
+            ulong nativeUnsigned => nativeUnsigned,
+            _ => ulong.MaxValue,
+        };
+        if (value == ulong.MaxValue)
+            return false;
+        var maximumElementSize = element.Kind switch
+        {
+            CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1UL,
+            CTypeKind.Short or CTypeKind.Ushort => 2UL,
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float => 4UL,
+            CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Pointer or CTypeKind.FunctionPointer => 8UL,
+            _ => 0UL,
+        };
+        return maximumElementSize != 0UL && value <= uint.MaxValue / maximumElementSize;
+    }
+
+    private static bool IsProvenInBounds(IrExpressionValue receiver, IrExpressionValue index)
+    {
+        if (receiver.KnownLength is not int length)
+            return false;
+        var value = index.ConstantValue switch
+        {
+            int signed when signed >= 0 => (ulong)signed,
+            uint unsigned => unsigned,
+            _ => ulong.MaxValue,
+        };
+        return value != ulong.MaxValue && value < (ulong)length;
     }
 
     private TypeSymbol? TryResolveTypeExpression(ExpressionSyntax expression)
@@ -681,7 +732,9 @@ internal sealed partial class TypedIrBodyLowerer
                 AddCapturedSlot(prelude, receiver.Type, slot, receiver.Code);
                 receiverCode = receiver.Type.Kind == CTypeKind.Struct
                     ? $"({_emitter.CTypeName(receiver.Type)}*)(void*)&{Durable(slot)}"
-                    : $"({_emitter.CTypeName(receiver.Type)})ct_require_nonnull({Durable(slot)}, {_emitter.SourceArgument(syntax.Target)})";
+                    : receiver.IsKnownNonNull
+                        ? Durable(slot)
+                        : $"({_emitter.CTypeName(receiver.Type)})ct_require_nonnull({Durable(slot)}, {_emitter.SourceArgument(syntax.Target)})";
             }
             else
             {
@@ -927,6 +980,8 @@ internal sealed partial class TypedIrBodyLowerer
                         prelude.Add($"*({address}) = {_emitter.DefaultValue(argument.Type)};");
                         MarkAssigned(argument.LValue);
                     }
+                    else if (signature.PassingKinds[index] == ParameterPassingKind.Ref)
+                        MarkAssigned(argument.LValue);
                     codes.Add(address);
                 }
             }

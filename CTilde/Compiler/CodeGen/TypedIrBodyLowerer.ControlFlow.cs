@@ -45,7 +45,7 @@ internal sealed partial class TypedIrBodyLowerer
         }
         ValidateNativeResourceObligations();
         EmitPrelude(writer, expression.Prelude);
-        EmitReturnTransfer(writer, expression.Code);
+        EmitReturnTransfer(writer, expression.Code, expression.Ownership, expression.OwnedCleanupRecord);
     }
 
     private void EmitThrow(ILoweringWriter writer, ThrowStatementSyntax syntax)
@@ -237,7 +237,7 @@ internal sealed partial class TypedIrBodyLowerer
                 using (writer.Block())
                 {
                     RestoreAssignments(before);
-                    BeginScope(writer, boundCatch.Syntax.Body.Span.End);
+                    BeginScope(writer, boundCatch.Syntax, boundCatch.Syntax.Body.Span.End);
                     DeclareCatchLocal(writer, boundCatch, $"ct_caught_{id}");
                     if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
                         writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, boundCatch.Syntax, "catch")}));");
@@ -325,7 +325,7 @@ internal sealed partial class TypedIrBodyLowerer
         EmitInitializeOwnedSlot(writer, symbol.Type, symbol.CName, $"({_emitter.CTypeName(symbol.Type)})(void*){exceptionCode}");
     }
 
-    private void EmitReturnTransfer(ILoweringWriter writer, string? value)
+    private void EmitReturnTransfer(ILoweringWriter writer, string? value, OwnershipKind ownership = OwnershipKind.None, string? ownedCleanupRecord = null)
     {
         if (_finallyContexts.Count != 0)
         {
@@ -337,9 +337,12 @@ internal sealed partial class TypedIrBodyLowerer
                 {
                     var raw = NewTemp();
                     writer.WriteLine($"{_emitter.CDeclaration(_method.ReturnType, raw)} = {value};");
-                    writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{raw}"));
+                    if (ownership != OwnershipKind.Immortal && ownedCleanupRecord is null)
+                        writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{raw}"));
                     writer.WriteLine($"{CEmitter.ValueDropName(_method.ReturnType)}((void*)(uintptr_t)&{pending});");
                     writer.WriteLine($"{pending} = {raw};");
+                    if (ownedCleanupRecord is not null)
+                        writer.WriteLine($"ct_cleanup_disarm(&{ownedCleanupRecord});");
                 }
                 else
                     writer.WriteLine($"{pending} = {value};");
@@ -355,8 +358,10 @@ internal sealed partial class TypedIrBodyLowerer
         {
             finalValue = NewTemp();
             writer.WriteLine($"{_emitter.CDeclaration(_method.ReturnType, finalValue)} = {value};");
-            if (_method.ReturnType.ContainsManagedReferences)
+            if (_method.ReturnType.ContainsManagedReferences && ownership != OwnershipKind.Immortal && ownedCleanupRecord is null)
                 writer.WriteLine(_emitter.RetainValueStatement(_method.ReturnType, $"&{finalValue}"));
+            if (ownedCleanupRecord is not null)
+                writer.WriteLine($"ct_cleanup_disarm(&{ownedCleanupRecord});");
         }
         writer.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
         EmitPopHandlersTo(writer, 0);
@@ -375,7 +380,9 @@ internal sealed partial class TypedIrBodyLowerer
             writer.WriteLine($"goto {context.CleanupLabel};");
             return;
         }
-        writer.WriteLine($"ct_cleanup_unwind_to({(isContinue ? _continueCleanupBoundaries.Peek() : _breakCleanupBoundaries.Peek())});");
+        var boundary = isContinue ? _continueCleanupBoundaries.Peek() : _breakCleanupBoundaries.Peek();
+        if (boundary is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
         EmitPopCrossedHandlers(writer, isContinue, depth);
         writer.WriteLine($"goto {(isContinue ? _continueLabels.Peek() : _breakLabels.Peek())};");
     }
@@ -394,7 +401,8 @@ internal sealed partial class TypedIrBodyLowerer
         else
         {
             var boundaries = isContinue ? _continueCleanupBoundaries : _breakCleanupBoundaries;
-            writer.WriteLine($"ct_cleanup_unwind_to({boundaries.Peek()});");
+            if (boundaries.Peek() is { } boundary)
+                writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
             EmitPopHandlersTo(writer, 0);
             writer.WriteLine($"goto {target};");
         }
@@ -446,7 +454,24 @@ internal sealed partial class TypedIrBodyLowerer
         writer.WriteLine($"{slot} = {temporary};");
     }
 
-    private void AddStrongStore(List<string> prelude, IrExpressionValue target, string value)
+    private void EmitInitializeOwnedSlot(ILoweringWriter writer, CType type, string slot, IrExpressionValue value)
+    {
+        if (value.Ownership == OwnershipKind.Owned && value.OwnedCleanupRecord is { } ownedRecord)
+        {
+            writer.WriteLine($"{slot} = {value.Code};");
+            writer.WriteLine($"ct_cleanup_disarm(&{ownedRecord});");
+            value.OwnedCleanupRecord = null;
+            return;
+        }
+        if (value.Ownership == OwnershipKind.Immortal)
+        {
+            writer.WriteLine($"{slot} = {value.Code};");
+            return;
+        }
+        EmitInitializeOwnedSlot(writer, type, slot, value.Code);
+    }
+
+    private void AddStrongStore(List<string> prelude, IrExpressionValue target, string value, IrExpressionValue? source = null)
     {
         var type = target.Type;
         var next = NewTemp();
@@ -456,20 +481,34 @@ internal sealed partial class TypedIrBodyLowerer
             prelude.Add(target.LValue.Store(next) + ";");
             return;
         }
-        prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
+        if (source?.Ownership != OwnershipKind.Immortal && source?.OwnedCleanupRecord is null)
+            prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
         var old = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(type, old)} = {target.Code};");
         prelude.Add(target.LValue.Store(next) + ";");
+        if (target.LValue.Property is null)
+            DisarmMovedSource(prelude, source);
         prelude.Add(_emitter.DropValueStatement(type, $"&{old}"));
     }
 
-    private void AddConstructStore(List<string> prelude, IrExpressionValue target, string value)
+    private void AddConstructStore(List<string> prelude, IrExpressionValue target, string value, IrExpressionValue? source = null)
     {
         var type = target.Type;
         var next = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(type, next)} = {value};");
-        prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
+        if (source?.Ownership != OwnershipKind.Immortal && (source?.OwnedCleanupRecord is null || target.LValue!.Property is not null))
+            prelude.Add(_emitter.RetainValueStatement(type, $"&{next}"));
         prelude.Add(target.LValue!.Store(next) + ";");
+        if (target.LValue.Property is null)
+            DisarmMovedSource(prelude, source);
+    }
+
+    private static void DisarmMovedSource(List<string> prelude, IrExpressionValue? source)
+    {
+        if (source?.OwnedCleanupRecord is not { } record)
+            return;
+        prelude.Add($"ct_cleanup_disarm(&{record});");
+        source.OwnedCleanupRecord = null;
     }
 
     private IrExpressionValue OwnResult(CType type, string code, IEnumerable<string> sourcePrelude, bool borrowed = false, object? symbol = null)
@@ -490,7 +529,16 @@ internal sealed partial class TypedIrBodyLowerer
             prelude.Add(_emitter.RetainValueStatement(type, $"&{raw}"));
         prelude.Add($"if ({record}.Active) {CEmitter.ValueDropName(type)}((void*)(uintptr_t)&{slot}); else ct_cleanup_push(&{record}, (void*)(uintptr_t)&{slot}, {CEmitter.ValueDropName(type)});");
         prelude.Add($"{slot} = {raw};");
-        return new IrExpressionValue { Type = type, Code = slot, Prelude = prelude, Ownership = OwnershipKind.Owned, Symbol = symbol };
+        return new IrExpressionValue
+        {
+            Type = type,
+            Code = slot,
+            Prelude = prelude,
+            Ownership = OwnershipKind.Owned,
+            Symbol = symbol,
+            OwnedCleanupRecord = record,
+            IsKnownNonNull = symbol is MethodSymbol { IsConstructor: true },
+        };
     }
 
     private void AddCapturedSlot(List<string> prelude, CType type, string slotName, string value)
@@ -511,16 +559,18 @@ internal sealed partial class TypedIrBodyLowerer
         prelude.Add($"{slot} = {raw};");
     }
 
-    private void BeginScope(ILoweringWriter writer, int debugScopeEnd)
+    private void BeginScope(ILoweringWriter writer, SyntaxNode syntax, int debugScopeEnd)
     {
-        var boundary = EmitCleanupBoundary(writer, "scope");
+        var boundary = EmitCleanupBoundary(writer, "scope", syntax);
         _cleanupBoundaries.Push(boundary);
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
         _debugScopeEnds.Push(debugScopeEnd);
     }
 
-    private string EmitCleanupBoundary(ILoweringWriter writer, string kind)
+    private string? EmitCleanupBoundary(ILoweringWriter writer, string kind, SyntaxNode syntax)
     {
+        if (!_analysisOnly && !_optimizationFacts.CleanupBoundaries.Contains(syntax))
+            return null;
         var boundary = $"ct_cleanup_{kind}_{_cleanupId++}";
         writer.WriteLine($"ct_cleanup_record* {boundary} = ct_cleanup_top;");
         writer.WriteLine($"(void){boundary};");
@@ -530,7 +580,7 @@ internal sealed partial class TypedIrBodyLowerer
     private void EndScope(ILoweringWriter writer, bool fallsThrough)
     {
         var boundary = _cleanupBoundaries.Pop();
-        if (fallsThrough)
+        if (fallsThrough && boundary is not null)
             writer.WriteLine($"ct_cleanup_unwind_to({boundary});");
         var scope = _scopes.Pop();
         _debugScopeEnds.Pop();
@@ -546,7 +596,7 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT1258", $"Owned native resource '{local.Name}' must be returned, consumed, retained, or scheduled with defer.", local.Syntax);
     }
     private AssignmentSnapshot SnapshotAssignments() => new(
-        ActiveLocals().ToDictionary(local => local, local => (local.IsAssigned, local.AssignmentCount, local.NativeResourceState)),
+        ActiveLocals().ToDictionary(local => local, local => (local.IsAssigned, local.AssignmentCount, local.NativeResourceState, local.IsKnownNonNull, local.KnownLength)),
         [.. _assignedFields],
         new Dictionary<FieldSymbol, int>(_fieldAssignmentCounts),
         [.. _assignedOutParameters]);
@@ -558,6 +608,8 @@ internal sealed partial class TypedIrBodyLowerer
             pair.Key.IsAssigned = pair.Value.IsAssigned;
             pair.Key.AssignmentCount = pair.Value.AssignmentCount;
             pair.Key.NativeResourceState = pair.Value.NativeResourceState;
+            pair.Key.IsKnownNonNull = pair.Value.IsKnownNonNull;
+            pair.Key.KnownLength = pair.Value.KnownLength;
         }
         _assignedFields.Clear();
         _assignedFields.UnionWith(snapshot.Fields);
@@ -575,7 +627,11 @@ internal sealed partial class TypedIrBodyLowerer
             pair => (
                 thenState.Locals.GetValueOrDefault(pair.Key).IsAssigned && elseState.Locals.GetValueOrDefault(pair.Key).IsAssigned,
                 Math.Max(thenState.Locals.GetValueOrDefault(pair.Key).AssignmentCount, elseState.Locals.GetValueOrDefault(pair.Key).AssignmentCount),
-                MergeNativeResourceState(thenState.Locals.GetValueOrDefault(pair.Key).NativeResourceState, elseState.Locals.GetValueOrDefault(pair.Key).NativeResourceState)));
+                MergeNativeResourceState(thenState.Locals.GetValueOrDefault(pair.Key).NativeResourceState, elseState.Locals.GetValueOrDefault(pair.Key).NativeResourceState),
+                thenState.Locals.GetValueOrDefault(pair.Key).IsKnownNonNull && elseState.Locals.GetValueOrDefault(pair.Key).IsKnownNonNull,
+                thenState.Locals.GetValueOrDefault(pair.Key).KnownLength == elseState.Locals.GetValueOrDefault(pair.Key).KnownLength
+                    ? thenState.Locals.GetValueOrDefault(pair.Key).KnownLength
+                    : null));
         var fields = new HashSet<FieldSymbol>(thenState.Fields);
         fields.IntersectWith(elseState.Fields);
         var fieldCounts = thenState.FieldCounts.Keys.Concat(elseState.FieldCounts.Keys).Distinct().ToDictionary(
@@ -728,7 +784,11 @@ internal sealed partial class TypedIrBodyLowerer
             pair => (
                 states.All(state => state.Locals.GetValueOrDefault(pair.Key).IsAssigned),
                 states.Max(state => state.Locals.GetValueOrDefault(pair.Key).AssignmentCount),
-                states.Select(state => state.Locals.GetValueOrDefault(pair.Key).NativeResourceState).Aggregate(MergeNativeResourceState)));
+                states.Select(state => state.Locals.GetValueOrDefault(pair.Key).NativeResourceState).Aggregate(MergeNativeResourceState),
+                states.All(state => state.Locals.GetValueOrDefault(pair.Key).IsKnownNonNull),
+                states.Select(state => state.Locals.GetValueOrDefault(pair.Key).KnownLength).Distinct().Count() == 1
+                    ? states[0].Locals.GetValueOrDefault(pair.Key).KnownLength
+                    : null));
         var fields = new HashSet<FieldSymbol>(first.Fields);
         foreach (var state in states.Skip(1))
             fields.IntersectWith(state.Fields);
@@ -751,7 +811,9 @@ internal sealed partial class TypedIrBodyLowerer
                 var finallyValue = finallyState.Locals.GetValueOrDefault(pair.Key);
                 var addedAssignments = Math.Max(0, finallyValue.AssignmentCount - beforeValue.AssignmentCount);
                 return (pair.Value.IsAssigned || finallyValue.IsAssigned, pair.Value.AssignmentCount + addedAssignments,
-                    finallyValue.NativeResourceState == beforeValue.NativeResourceState ? pair.Value.NativeResourceState : finallyValue.NativeResourceState);
+                    finallyValue.NativeResourceState == beforeValue.NativeResourceState ? pair.Value.NativeResourceState : finallyValue.NativeResourceState,
+                    pair.Value.IsKnownNonNull && finallyValue.IsKnownNonNull,
+                    pair.Value.KnownLength == finallyValue.KnownLength ? pair.Value.KnownLength : null);
             });
         var fields = new HashSet<FieldSymbol>(protectedState.Fields);
         fields.UnionWith(finallyState.Fields);
@@ -808,7 +870,7 @@ internal sealed partial class TypedIrBodyLowerer
     }
 
     private sealed record AssignmentSnapshot(
-        Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount, NativeResourceState NativeResourceState)> Locals,
+        Dictionary<LocalSymbol, (bool IsAssigned, int AssignmentCount, NativeResourceState NativeResourceState, bool IsKnownNonNull, int? KnownLength)> Locals,
         HashSet<FieldSymbol> Fields,
         Dictionary<FieldSymbol, int> FieldCounts,
         HashSet<ParameterSymbol> OutParameters);

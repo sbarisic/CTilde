@@ -35,17 +35,17 @@ internal sealed partial class CEmitter
     private void EmitOwnershipHelpers(CWriter writer)
     {
         var objectType = Model.Types["System.Object"];
-        if (_usesManagedThreading)
-        {
+        var layoutTypes = OrderLayoutTypes().ToArray();
+        if (layoutTypes.Any(type => type is { Namespace: "System.Threading", Name: "Thread" }))
             writer.WriteLine("static void ct_managed_thread_drop(ct_object* object);");
+        if (layoutTypes.Any(type => type is { Namespace: "System.Threading", Name: "Mutex" }))
             writer.WriteLine("static void ct_managed_mutex_drop(ct_object* object);");
-        }
         writer.WriteLine($"void ct_memory_retain({NameMangler.Type(objectType)}* value) {{ ct_retain((ct_object*)(void*)value); }}");
         writer.WriteLine($"void ct_memory_release({NameMangler.Type(objectType)}* value) {{ ct_release((ct_object*)(void*)value); }}");
         if (IsEspIdf && Model.Types.ContainsKey("Esp.Idf.EspError"))
             writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name((esp_err_t)code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
 
-        foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences))
+        foreach (var type in layoutTypes.Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences))
         {
             var valueType = type.Type;
             writer.WriteLine($"static void {ValueRetainName(valueType)}(void* storage)");
@@ -62,7 +62,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
         }
 
-        foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Class))
+        foreach (var type in layoutTypes.Where(type => type.Kind == DeclaredTypeKind.Class))
         {
             writer.WriteLine($"static void {ObjectDropName(type)}(ct_object* object)");
             writer.WriteLine("{");
@@ -79,7 +79,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
         }
 
-        foreach (var type in OrderLayoutTypes().Where(type => type.Kind == DeclaredTypeKind.Delegate))
+        foreach (var type in layoutTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate))
         {
             writer.WriteLine($"static void {DelegateDropName(type)}(ct_object* object)");
             writer.WriteLine("{");

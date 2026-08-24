@@ -148,6 +148,8 @@ internal static class BoundTreeFactory
                 .Select(child => CreateStatement(child, semantics)).ToImmutableArray(),
             CatchClauseSyntax @catch => [CreateStatement(@catch.Body, semantics)],
             FinallyClauseSyntax @finally => [CreateStatement(@finally.Body, semantics)],
+            SwitchStatementSyntax @switch => @switch.Sections.SelectMany(section => section.Statements)
+                .Select(child => CreateStatement(child, semantics)).ToImmutableArray(),
             _ => syntax.ChildNodesAndTokens()
                 .Where(child => child.IsNode)
                 .Select(child => child.Node)

@@ -133,6 +133,6 @@ static CT_UNUSED void ct_i_5b2fca84d28f14e98d6cac67(ct_t_99b091a0f75882e3ce5f2c4
     ct_i_cae3e82561de713c516791af(ct_self);
 static CT_UNUSED void ct_i_cae3e82561de713c516791af(ct_t_2f638cfd2bd153fc62b7c90a* ct_self)
     ct_i_5b2fca84d28f14e98d6cac67((ct_t_99b091a0f75882e3ce5f2c48*)(void*)ct_self, (4));
-    ct_t_2f638cfd2bd153fc62b7c90a* ct_tmp_7 = (ct_t_2f638cfd2bd153fc62b7c90a*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_d_b0f849cefa55ba4450045683, "test.ct", 63);
+    ct_t_2f638cfd2bd153fc62b7c90a* ct_tmp_5 = (ct_t_2f638cfd2bd153fc62b7c90a*)(void*)ct_checked_cast((ct_object*)(void*)ct_l_0, &ct_d_b0f849cefa55ba4450045683, "test.ct", 63);
     ct_i_59caa031b078430018f1b81f(ct_self);
 static CT_UNUSED void ct_i_59caa031b078430018f1b81f(ct_t_85f9bec51c25eec663cd1245* ct_self)

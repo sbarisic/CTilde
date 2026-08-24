@@ -10,6 +10,15 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
 
+## Compiler optimization
+
+The first typed-IR size tranche now removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
+
+- [ ] Replace namespace-only modular partitioning with stable per-source or finer dependency buckets so one edited source recompiles less native C.
+- [ ] Split the broad generated internal header into narrow dependency headers without duplicating declarations or changing public ABI output.
+- [ ] Add an optional readable-C mode with source-oriented names and annotations while preserving compact deterministic Release output by default.
+- [ ] Investigate aggregating compatible `defer` capture records when it reduces durable state without changing immediate capture, LIFO order, or exception replacement.
+
 ## Editor tooling
 
 - [ ] Add references, rename, formatting, code actions, and auto-import completion edits.

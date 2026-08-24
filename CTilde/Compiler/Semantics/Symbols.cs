@@ -277,6 +277,8 @@ internal sealed class LocalSymbol
     public int AssignmentCount { get; set; }
     public string? ConstantCode { get; set; }
     public object? ConstantValue { get; set; }
+    public bool IsKnownNonNull { get; set; }
+    public int? KnownLength { get; set; }
     public bool IsDurable { get; init; }
     public NativeResourceState NativeResourceState { get; set; }
     public string StorageName => IsDurable ? $"ct_lp_{Id}" : $"ct_l_{Id}";

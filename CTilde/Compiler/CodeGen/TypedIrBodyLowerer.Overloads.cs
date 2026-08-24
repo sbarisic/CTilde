@@ -229,6 +229,8 @@ internal sealed partial class TypedIrBodyLowerer
                     if (parameter.NativeOwnership == NativeParameterOwnership.Creates && argument.LValue.Local is { } createdLocal)
                         createdLocal.NativeResourceState = NativeResourceState.Owned;
                 }
+                else if (parameter.PassingKind == ParameterPassingKind.Ref)
+                    MarkAssigned(argument.LValue);
                 codes.Add(address);
                 continue;
             }

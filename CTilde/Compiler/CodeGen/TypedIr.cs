@@ -36,6 +36,18 @@ internal sealed record IrThrowTerminator : IrTerminator;
 
 internal sealed record IrBasicBlock(int Id, ImmutableArray<IrInstruction> Instructions, IrTerminator Terminator);
 internal sealed record IrFunctionEmission(string Definition);
+internal sealed record IrOptimizationFacts(
+    ImmutableHashSet<SyntaxNode> CleanupBoundaries,
+    ImmutableDictionary<SyntaxNode, object?> Constants,
+    ImmutableHashSet<SyntaxNode> KnownNonNullExpressions,
+    ImmutableHashSet<SyntaxNode> OwnedMoveCandidates)
+{
+    public static IrOptimizationFacts Empty { get; } = new(
+        ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance),
+        ImmutableDictionary.Create<SyntaxNode, object?>(ReferenceEqualityComparer.Instance),
+        ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance),
+        ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance));
+}
 internal sealed record IrInitializerEmission(
     ImmutableArray<string> Prelude,
     string Code,
@@ -47,6 +59,7 @@ internal sealed record IrFunction(
     PropertySymbol? Property,
     bool IsGetter,
     ImmutableArray<IrBasicBlock> Blocks,
+    IrOptimizationFacts? Optimization = null,
     IrFunctionEmission? Emission = null);
 internal sealed record IrStaticInitializer(
     FieldSymbol Field,
@@ -113,7 +126,12 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
             Add(method.ConstructorInitializerTarget);
         }
 
-        return ir with { Functions = ir.Functions.Where(function => reachable.Contains(function.Method)).ToImmutableArray() };
+        return ir with
+        {
+            Functions = ir.Functions.Where(function => reachable.Contains(function.Method))
+                .Select(function => function with { Optimization = Analyze(function) })
+                .ToImmutableArray(),
+        };
 
         void AddDependencies(BoundBody body)
         {
@@ -135,6 +153,74 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
                             Add(candidate);
                         break;
                 }
+            }
+        }
+
+        IrOptimizationFacts Analyze(IrFunction function)
+        {
+            var cleanupBoundaries = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
+            var constants = ImmutableDictionary.CreateBuilder<SyntaxNode, object?>(ReferenceEqualityComparer.Instance);
+            var knownNonNull = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
+            var ownedMoves = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
+
+            foreach (var block in function.Blocks)
+            {
+                foreach (var instruction in block.Instructions)
+                {
+                    if (instruction.Output is { } output && instruction.Syntax is ExpressionSyntax expression)
+                    {
+                        var semantic = function.Body.Semantics.GetValueOrDefault(expression);
+                        if (semantic?.ConstantValue is not null || expression is LiteralExpressionSyntax { LiteralKind: SyntaxKind.NullKeyword })
+                            constants[expression] = semantic?.ConstantValue;
+                        if (expression is ThisExpressionSyntax or BaseExpressionSyntax or NewExpressionSyntax or
+                            LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken })
+                            knownNonNull.Add(expression);
+                        if (output.Ownership == OwnershipKind.Owned && output.Type.ContainsManagedReferences)
+                            ownedMoves.Add(expression);
+                    }
+                }
+            }
+
+            MarkCleanupBoundaries(function.Body.Root);
+            return new IrOptimizationFacts(cleanupBoundaries.ToImmutable(), constants.ToImmutable(), knownNonNull.ToImmutable(), ownedMoves.ToImmutable());
+
+            bool MarkCleanupBoundaries(BoundStatement statement)
+            {
+                var ownCleanup = statement.Kind is BoundStatementKind.Defer or BoundStatementKind.Try or BoundStatementKind.Catch or BoundStatementKind.Finally ||
+                    statement.Syntax is LockStatementSyntax ||
+                    statement.Expressions.SelectMany(ExpressionsAndSelf).Any(expression =>
+                        expression.Ownership == OwnershipKind.Owned && expression.Type.ContainsManagedReferences);
+                if (statement.Syntax is LocalDeclarationStatementSyntax local)
+                {
+                    var type = local.Type.Name == "var"
+                        ? statement.Expressions.FirstOrDefault()?.Type ?? CType.Error
+                        : program.Model.ResolveType(local.Type, program.Model.SyntaxTrees.First(tree => ReferenceEquals(tree.Text, local.Source)), function.Method.TypeSubstitutions);
+                    ownCleanup |= type.ContainsManagedReferences;
+                }
+                if (statement.Syntax is ForeachStatementSyntax @foreach)
+                {
+                    var collectionType = statement.Expressions.FirstOrDefault()?.Type ?? CType.Error;
+                    var elementType = collectionType.ElementType ?? CType.Error;
+                    var declaredType = @foreach.Type.Name == "var"
+                        ? elementType
+                        : program.Model.ResolveType(@foreach.Type, program.Model.SyntaxTrees.First(tree => ReferenceEquals(tree.Text, @foreach.Source)), function.Method.TypeSubstitutions);
+                    ownCleanup |= declaredType.ContainsManagedReferences;
+                }
+                var descendantCleanup = false;
+                foreach (var child in statement.Children)
+                    descendantCleanup |= MarkCleanupBoundaries(child);
+                var requiresCleanup = ownCleanup || descendantCleanup;
+                if (requiresCleanup)
+                    cleanupBoundaries.Add(statement.Syntax);
+                return requiresCleanup;
+            }
+
+            static IEnumerable<BoundExpression> ExpressionsAndSelf(BoundExpression expression)
+            {
+                yield return expression;
+                foreach (var child in expression.Children)
+                    foreach (var descendant in ExpressionsAndSelf(child))
+                        yield return descendant;
             }
         }
     }

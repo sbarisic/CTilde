@@ -122,7 +122,7 @@ internal sealed partial class TypedIrBodyLowerer
             case BlockStatementSyntax block:
                 using (writer.Block())
                 {
-                    BeginScope(writer, block.Span.End);
+                    BeginScope(writer, block, block.Span.End);
                     var flow = EmitStatements(writer, block.Statements);
                     EndScope(writer, flow.FallsThrough);
                     return flow;
@@ -434,6 +434,8 @@ internal sealed partial class TypedIrBodyLowerer
             AssignmentCount = initializer is null ? 0 : 1,
             ConstantCode = syntax.IsConst ? initializer?.Code : null,
             ConstantValue = syntax.IsConst ? initializer?.ConstantValue : null,
+            IsKnownNonNull = initializer?.IsKnownNonNull == true,
+            KnownLength = initializer?.KnownLength,
             IsDurable = RequiresDurableStorage(syntax.Name, syntax.Span.Start),
             NativeResourceState = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer
                 ? initializer?.Ownership == OwnershipKind.Owned ? NativeResourceState.Owned :
@@ -456,7 +458,7 @@ internal sealed partial class TypedIrBodyLowerer
         {
             EmitPrelude(writer, initializer.Prelude);
             if (type.ContainsManagedReferences)
-                EmitInitializeOwnedSlot(writer, type, symbol.CName, initializer.Code);
+                EmitInitializeOwnedSlot(writer, type, symbol.CName, initializer);
             else
                 writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
@@ -469,11 +471,19 @@ internal sealed partial class TypedIrBodyLowerer
     {
         var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
         EmitPrelude(writer, condition.Prelude);
+        if (!_emitter.EmitDebugInstrumentation && condition.IsConstant && condition.ConstantValue is bool constantCondition)
+        {
+            if (constantCondition)
+                return EmitEmbedded(writer, syntax.Then);
+            return syntax.Else is null ? FlowResult.None : EmitEmbedded(writer, syntax.Else);
+        }
         var before = SnapshotAssignments();
         writer.WriteLine($"if {FormatCondition(condition.Code)}");
+        ApplyNullGuard(syntax.Condition, conditionIsTrue: true);
         var thenFlow = EmitEmbedded(writer, syntax.Then);
         var thenAssignments = SnapshotAssignments();
         RestoreAssignments(before);
+        ApplyNullGuard(syntax.Condition, conditionIsTrue: false);
         FlowResult elseFlow = FlowResult.None;
         AssignmentSnapshot elseAssignments;
         if (syntax.Else is not null)
@@ -483,7 +493,7 @@ internal sealed partial class TypedIrBodyLowerer
             elseAssignments = SnapshotAssignments();
         }
         else
-            elseAssignments = before;
+            elseAssignments = SnapshotAssignments();
         var fallthroughStates = new List<AssignmentSnapshot>();
         if (thenFlow.FallsThrough)
             fallthroughStates.Add(thenAssignments);
@@ -493,13 +503,28 @@ internal sealed partial class TypedIrBodyLowerer
         return new FlowResult(thenFlow.Exits | elseFlow.Exits);
     }
 
+    private void ApplyNullGuard(ExpressionSyntax condition, bool conditionIsTrue)
+    {
+        if (condition is not BinaryExpressionSyntax { OperatorKind: SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken } binary)
+            return;
+        var name = binary.Left is NameExpressionSyntax leftName && binary.Right is LiteralExpressionSyntax { LiteralKind: SyntaxKind.NullKeyword }
+            ? leftName
+            : binary.Right is NameExpressionSyntax rightName && binary.Left is LiteralExpressionSyntax { LiteralKind: SyntaxKind.NullKeyword }
+                ? rightName
+                : null;
+        if (name is null || FindLocal(name.Name) is not { Type.IsPointerLike: true } local)
+            return;
+        var inequality = binary.OperatorKind == SyntaxKind.BangEqualsToken;
+        local.IsKnownNonNull = conditionIsTrue == inequality;
+    }
+
     private FlowResult EmitEmbedded(ILoweringWriter writer, StatementSyntax statement)
     {
         if (statement is BlockStatementSyntax)
             return EmitStatement(writer, statement);
         using (writer.Block())
         {
-            BeginScope(writer, statement.Span.End);
+            BeginScope(writer, statement, statement.Span.End);
             var flow = EmitStatement(writer, statement);
             EndScope(writer, flow.FallsThrough);
             return flow;
@@ -508,7 +533,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitWhile(ILoweringWriter writer, WhileStatementSyntax syntax)
     {
-        var cleanup = EmitCleanupBoundary(writer, "while");
+        var cleanup = EmitCleanupBoundary(writer, "while", syntax);
         var start = NewLabel("while_test");
         var @continue = NewLabel("while_continue");
         var @break = NewLabel("while_break");
@@ -516,7 +541,15 @@ internal sealed partial class TypedIrBodyLowerer
         writer.WriteLine($"{start}:;");
         var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
         EmitPrelude(writer, condition.Prelude);
-        writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
+        if (condition.IsConstant && condition.ConstantValue is bool constantCondition)
+        {
+            if (!constantCondition)
+                writer.WriteLine($"goto {@break};");
+            else
+                writer.WriteLine($"if (false) goto {@break};");
+        }
+        else
+            writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
         _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
@@ -528,16 +561,18 @@ internal sealed partial class TypedIrBodyLowerer
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         RestoreAssignments(before);
     }
 
     private FlowResult EmitDo(ILoweringWriter writer, DoStatementSyntax syntax)
     {
-        var cleanup = EmitCleanupBoundary(writer, "do");
+        var cleanup = EmitCleanupBoundary(writer, "do", syntax);
         var start = NewLabel("do_body");
         var @continue = NewLabel("do_continue");
         var @break = NewLabel("do_break");
@@ -549,6 +584,8 @@ internal sealed partial class TypedIrBodyLowerer
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
         _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
         var canRepeat = syntax.Condition is not LiteralExpressionSyntax { LiteralKind: SyntaxKind.FalseKeyword };
+        if (!canRepeat)
+            writer.WriteLine($"if (false) goto {start};");
         if (canRepeat)
             _repeatableLoopDepth++;
         var bodyFlow = EmitEmbedded(writer, syntax.Body);
@@ -560,7 +597,8 @@ internal sealed partial class TypedIrBodyLowerer
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var conditionStates = new List<AssignmentSnapshot>(continueStates);
         if (bodyFlow.FallsThrough)
             conditionStates.Add(bodyState);
@@ -571,11 +609,18 @@ internal sealed partial class TypedIrBodyLowerer
             var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
             EmitPrelude(writer, condition.Prelude);
             conditionExit = SnapshotAssignments();
-            writer.WriteLine($"if {FormatCondition(condition.Code)} goto {start};");
+            if (condition.IsConstant && condition.ConstantValue is bool constantCondition)
+            {
+                if (constantCondition)
+                    writer.WriteLine($"goto {start};");
+            }
+            else
+                writer.WriteLine($"if {FormatCondition(condition.Code)} goto {start};");
         }
         writer.WriteLine($"goto {@break};");
         writer.WriteLine($"{@break}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var exits = new List<AssignmentSnapshot>(breakStates);
         if (conditionExit is not null)
             exits.Add(conditionExit);
@@ -588,20 +633,28 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitFor(ILoweringWriter writer, ForStatementSyntax syntax)
     {
-        BeginScope(writer, syntax.Span.End);
+        BeginScope(writer, syntax, syntax.Span.End);
         if (syntax.Initializer is not null)
             EmitStatement(writer, syntax.Initializer);
         var start = NewLabel("for_test");
         var @continue = NewLabel("for_continue");
         var @break = NewLabel("for_break");
         var before = SnapshotAssignments();
-        var cleanup = EmitCleanupBoundary(writer, "for");
+        var cleanup = EmitCleanupBoundary(writer, "for", syntax);
         writer.WriteLine($"{start}:;");
         if (syntax.Condition is not null)
         {
             var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
             EmitPrelude(writer, condition.Prelude);
-            writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
+            if (condition.IsConstant && condition.ConstantValue is bool constantCondition)
+            {
+                if (!constantCondition)
+                    writer.WriteLine($"goto {@break};");
+                else
+                    writer.WriteLine($"if (false) goto {@break};");
+            }
+            else
+                writer.WriteLine($"if (!{FormatCondition(condition.Code)}) goto {@break};");
         }
         _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
         _breakLabels.Push(@break); _continueLabels.Push(@continue);
@@ -614,7 +667,8 @@ internal sealed partial class TypedIrBodyLowerer
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         if (syntax.Iterator is not null)
         {
             var iterator = LowerExpression(syntax.Iterator);
@@ -629,12 +683,12 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitForeach(ILoweringWriter writer, ForeachStatementSyntax syntax)
     {
-        BeginScope(writer, syntax.Span.End);
+        BeginScope(writer, syntax, syntax.Span.End);
         var collection = Materialize(LowerExpression(syntax.Collection), syntax.Collection);
         if (collection.Type.Kind != CTypeKind.Array)
             Report("CT2105", "foreach requires a one-dimensional array.", syntax.Collection);
         EmitPrelude(writer, collection.Prelude);
-        var cleanup = EmitCleanupBoundary(writer, "foreach");
+        var cleanup = EmitCleanupBoundary(writer, "foreach", syntax);
         var elementType = collection.Type.ElementType ?? CType.Error;
         var declaredType = syntax.Type.Name == "var" ? elementType : ResolveType(syntax.Type);
         if (!TypeFacts.CanImplicitlyConvert(elementType, declaredType))
@@ -684,12 +738,16 @@ internal sealed partial class TypedIrBodyLowerer
         _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
         writer.WriteLine($"goto {@continue};");
         writer.WriteLine($"{@continue}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         writer.WriteLine($"{index} = ct_i32_add({index}, 1);");
         writer.WriteLine($"goto {start};");
         writer.WriteLine($"{@break}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+        {
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        }
         EndScope(writer, fallsThrough: true);
         RestoreAssignments(before);
     }
@@ -701,7 +759,7 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2107", "switch requires an integral or enum expression.", syntax.Expression);
         EmitPrelude(writer, value.Prelude);
         var @break = NewLabel("switch_break");
-        var cleanup = EmitCleanupBoundary(writer, "switch");
+        var cleanup = EmitCleanupBoundary(writer, "switch", syntax);
         var before = SnapshotAssignments();
         var breakStates = new List<AssignmentSnapshot>();
         _breakAssignmentStates.Push(breakStates);
@@ -739,7 +797,7 @@ internal sealed partial class TypedIrBodyLowerer
                         writer.WriteLine($"case {code}:;");
                     }
                 }
-                BeginScope(writer, section.Span.End);
+                BeginScope(writer, syntax, section.Span.End);
                 var flow = EmitStatements(writer, section.Statements, allowDefer: false);
                 var sectionState = SnapshotAssignments();
                 EndScope(writer, flow.FallsThrough);
@@ -754,7 +812,8 @@ internal sealed partial class TypedIrBodyLowerer
         _breakLabels.Pop();
         _breakAssignmentStates.Pop();
         writer.WriteLine($"{@break}:;");
-        writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
         var switchExitStates = new List<AssignmentSnapshot>(breakStates);
         switchExitStates.AddRange(fallthroughStates);
         if (!hasDefault)

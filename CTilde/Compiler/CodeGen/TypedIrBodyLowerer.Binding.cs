@@ -426,13 +426,18 @@ internal sealed partial class TypedIrBodyLowerer
             if (target.Type.ContainsManagedReferences)
             {
                 if (IsUninitializedOut(target.LValue))
-                    AddConstructStore(prelude, target, temp);
+                    AddConstructStore(prelude, target, temp, value);
                 else
-                    AddStrongStore(prelude, target, temp);
+                    AddStrongStore(prelude, target, temp, value);
             }
             else
                 prelude.Add(target.LValue.Store(temp) + ";");
             MarkAssigned(target.LValue);
+            if (target.LValue.Local is { } assignedLocal)
+            {
+                assignedLocal.IsKnownNonNull = value.IsKnownNonNull;
+                assignedLocal.KnownLength = value.KnownLength;
+            }
             return new IrExpressionValue { Type = target.Type, Code = temp, Prelude = prelude };
         }
 
@@ -461,7 +466,7 @@ internal sealed partial class TypedIrBodyLowerer
             var overloadedResult = NewTemp();
             overloadedPrelude.Add($"{_emitter.CDeclaration(target.Type, overloadedResult)} = {convertedResult.Code};");
             if (target.Type.ContainsManagedReferences)
-                AddStrongStore(overloadedPrelude, target, overloadedResult);
+                AddStrongStore(overloadedPrelude, target, overloadedResult, convertedResult);
             else
                 overloadedPrelude.Add(target.LValue.Store(overloadedResult) + ";");
             MarkAssigned(target.LValue);
@@ -541,6 +546,8 @@ internal sealed partial class TypedIrBodyLowerer
         {
             lvalue.Local.IsAssigned = true;
             lvalue.Local.AssignmentCount++;
+            lvalue.Local.IsKnownNonNull = false;
+            lvalue.Local.KnownLength = null;
         }
         if (lvalue.Field is not null)
         {
@@ -645,6 +652,10 @@ internal sealed partial class TypedIrBodyLowerer
                 IsConstant = expression.IsConstant,
                 ConstantValue = expression.ConstantValue,
                 Ownership = expression.Ownership,
+                Symbol = expression.Symbol,
+                IsKnownNonNull = expression.IsKnownNonNull,
+                KnownLength = expression.KnownLength,
+                OwnedCleanupRecord = expression.OwnedCleanupRecord,
             };
         if (expression.Type.Kind == CTypeKind.NativeBuffer && target.Kind == CTypeKind.ReadOnlyNativeBuffer && expression.Type.ElementType == target.ElementType)
             return new IrExpressionValue
@@ -705,7 +716,19 @@ internal sealed partial class TypedIrBodyLowerer
             : sourceType.IsPointerLike || target.IsPointerLike
                 ? $"({_emitter.CCastType(target)})(void*)({expression.Code})"
                 : $"({_emitter.CCastType(target)})({expression.Code})";
-        return new IrExpressionValue { Type = target, Code = code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue, Ownership = expression.Ownership };
+        return new IrExpressionValue
+        {
+            Type = target,
+            Code = code,
+            Prelude = expression.Prelude,
+            IsConstant = expression.IsConstant,
+            ConstantValue = expression.ConstantValue,
+            Ownership = expression.Ownership,
+            Symbol = expression.Symbol,
+            IsKnownNonNull = expression.IsKnownNonNull,
+            KnownLength = target.Kind == CTypeKind.Array ? expression.KnownLength : null,
+            OwnedCleanupRecord = expression.OwnedCleanupRecord,
+        };
     }
 
     private IrExpressionValue ConvertFunctionAddress(IrExpressionValue expression, CType target, SyntaxNode syntax)
@@ -805,6 +828,11 @@ internal sealed partial class TypedIrBodyLowerer
             Prelude = prelude,
             IsConstant = expression.IsConstant,
             ConstantValue = expression.ConstantValue,
+            Ownership = expression.Ownership,
+            Symbol = expression.Symbol,
+            IsKnownNonNull = expression.IsKnownNonNull,
+            KnownLength = expression.KnownLength,
+            OwnedCleanupRecord = expression.OwnedCleanupRecord,
         };
     }
 
@@ -815,8 +843,9 @@ internal sealed partial class TypedIrBodyLowerer
         {
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(receiver.Type, temp)} = {receiver.Code};");
-            prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
-            return new IrExpressionValue { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
+            if (!receiver.IsKnownNonNull)
+                prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
+            return new IrExpressionValue { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver, IsKnownNonNull = true, KnownLength = receiver.KnownLength };
         }
         if (receiver.Type.Kind == CTypeKind.Struct)
         {

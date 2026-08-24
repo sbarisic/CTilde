@@ -19,6 +19,9 @@ internal sealed class IrExpressionValue
     public MethodGroupBinding? MethodGroup { get; init; }
     public bool IsFunctionAddress { get; init; }
     public object? Symbol { get; init; }
+    public bool IsKnownNonNull { get; set; }
+    public int? KnownLength { get; set; }
+    public string? OwnedCleanupRecord { get; set; }
 }
 
 internal sealed record MethodGroupBinding(ImmutableArray<MethodSymbol> Candidates, IrExpressionValue? Receiver, bool IsBaseReceiver);
@@ -48,9 +51,9 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly string _temporaryPrefix;
     private readonly Stack<Dictionary<string, LocalSymbol>> _scopes = [];
     private readonly Stack<int> _debugScopeEnds = [];
-    private readonly Stack<string> _cleanupBoundaries = [];
-    private readonly Stack<string> _breakCleanupBoundaries = [];
-    private readonly Stack<string> _continueCleanupBoundaries = [];
+    private readonly Stack<string?> _cleanupBoundaries = [];
+    private readonly Stack<string?> _breakCleanupBoundaries = [];
+    private readonly Stack<string?> _continueCleanupBoundaries = [];
     private readonly HashSet<string> _cleanupRecords = new(StringComparer.Ordinal);
     private readonly Dictionary<string, ParameterSymbol> _parameters;
     private readonly Dictionary<ParameterSymbol, string> _durableParameters = [];
@@ -84,11 +87,12 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly int _externUseStart;
     private readonly bool _analysisOnly;
     private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
+    private readonly IrOptimizationFacts _optimizationFacts;
     private bool _capturingDirectDefer;
 
     private CType ResolveType(TypeSyntax syntax) => _model.ResolveType(syntax, TreeFor(syntax), _method.TypeSubstitutions);
 
-    public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null)
+    public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null, IrOptimizationFacts? optimizationFacts = null)
     {
         _emitter = emitter;
         _model = emitter.Model;
@@ -100,6 +104,7 @@ internal sealed partial class TypedIrBodyLowerer
         _temporaryPrefix = temporaryPrefix;
         _analysisOnly = analysisOnly;
         _semanticHints = semanticHints;
+        _optimizationFacts = optimizationFacts ?? IrOptimizationFacts.Empty;
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));

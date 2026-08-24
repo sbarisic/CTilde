@@ -185,6 +185,78 @@ internal static partial class ConformanceTests
             Assert(Normalize(result.StandardOutput) == "load-order\nfailure-order\njoin-before-start\nstart-twice\nnull-lock\n", result.StandardOutput);
         });
 
+        suite.Run("draft 0.15 cleanup liveness and owned moves", () =>
+        {
+            const string scalarOnly = "public static class Program { private static int Count() { int value = 0; { value = value + 1; } if (false) value = value * 99; while (true) { value = value + 1; if (value == 3) break; } return value; } [EntryPoint] public static void Main() { int result = Count(); } }";
+            var scalarOutput = Emit(scalarOnly);
+            Assert(!scalarOutput.Contains("ct_cleanup_scope_", StringComparison.Ordinal) &&
+                !scalarOutput.Contains("ct_cleanup_while_", StringComparison.Ordinal),
+                "Cleanup-free scalar blocks retained lexical cleanup boundaries.");
+            Assert(!scalarOutput.Contains("if (!(true))", StringComparison.Ordinal), "A constant true loop retained its runtime condition test.");
+            Assert(!scalarOutput.Contains("ct_i32_mul(", StringComparison.Ordinal), "A constant false branch retained its body and arithmetic helper.");
+            var instrumented = Emit(scalarOnly, new CompilationOptions(DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Off));
+            Assert(instrumented.Contains("ct_debug_site(", StringComparison.Ordinal) && instrumented.Contains("ct_i32_mul(", StringComparison.Ordinal),
+                "Instrumented emission removed logical sites from a constant branch.");
+
+            const string owned = "using System; public sealed class Node { } public sealed class Holder { public Node Value { get; set; } public Holder() { } } public static class Diagnostics { [Extern(\"ct_memory_diagnostic_live_objects\")] [NoAlloc] public static uint LiveObjects(); } public static class Program { private static Node Make() { return new Node(); } [EntryPoint] public static void Main() { uint baseline = Diagnostics.LiveObjects(); { Node value = Make(); value = new Node(); value = value; Holder holder = new Holder(); holder.Value = new Node(); string literal = \"immortal\"; } Console.WriteLine(Diagnostics.LiveObjects() == baseline); } }";
+            var ownedOutput = Emit(owned);
+            Assert(ownedOutput.Contains("ct_cleanup_scope_", StringComparison.Ordinal) &&
+                ownedOutput.Contains("ct_cleanup_disarm(&", StringComparison.Ordinal),
+                "Owned values did not retain required cleanup or move-disarm operations.");
+            var ownedResult = CompileAndRun(owned, memoryDiagnostics: true);
+            Assert(ownedResult.ExitCode == 0 && Normalize(ownedResult.StandardOutput) == "True\n", ownedResult.StandardError + ownedResult.StandardOutput);
+
+            const string foreachOwned = "public sealed class Node { } public static class Program { [EntryPoint] public static void Main() { Node[] values = new Node[1]; foreach (Node value in values) { if (value == null) continue; } } }";
+            var foreachOutput = Emit(foreachOwned);
+            Assert(foreachOutput.Contains("ct_cleanup_foreach_", StringComparison.Ordinal), "A managed foreach iteration lost its cleanup boundary.");
+        });
+
+        suite.Run("draft 0.15 null range and stack allocation facts", () =>
+        {
+            const string nullability = """
+                public sealed class Node { public int Value; }
+                public static class Program
+                {
+                    private static Node Maybe() { return new Node(); }
+                    private static void Touch(ref Node value) { }
+                    [EntryPoint] public static void Main()
+                    {
+                        Node created = new Node();
+                        int first = created.Value;
+                        Node guarded = Maybe();
+                        if (guarded == null) return;
+                        int second = guarded.Value;
+                        Touch(ref guarded);
+                        int third = guarded.Value;
+                    }
+                }
+                """;
+            var nullOutput = Emit(nullability);
+            var redundantNullChecks = System.Text.RegularExpressions.Regex.Matches(nullOutput, "ct_require_nonnull\\([^\\r\\n]+\"test\\.ct\", (9|12)\\)");
+            Assert(redundantNullChecks.Count == 0,
+                "A constructor or dominating null guard retained a redundant null check: " + string.Join(" | ", redundantNullChecks.Select(match => match.Value)));
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(nullOutput, "ct_require_nonnull\\([^\\r\\n]+\"test\\.ct\", 14\\)"),
+                "A by-reference call did not invalidate the local non-null fact.");
+
+            const string fixedBounds = "public static class Program { [EntryPoint] public static void Main() { int[] values = new int[4]; values[2] = 7; int result = values[2]; } }";
+            var fixedOutput = Emit(fixedBounds);
+            Assert(!fixedOutput.Contains("ct_bounds(", StringComparison.Ordinal), "A constant index into a fixed-length array retained a bounds check.");
+            const string dynamicBounds = "public static class Program { private static int Read(int[] values, int index) { return values[index]; } [EntryPoint] public static void Main() { int[] values = new int[4]; int result = Read(values, 2); } }";
+            Assert(Emit(dynamicBounds).Contains("ct_bounds(", StringComparison.Ordinal), "A dynamic array index lost its bounds check.");
+
+            const string stackAlloc = "using System.Runtime; public static class Program { private static unsafe void Dynamic(int count) { NativeBuffer<byte> data = stackalloc byte[count]; } [EntryPoint] public static unsafe void Main() { NativeBuffer<byte> fixedData = stackalloc byte[16]; Dynamic(4); } }";
+            var stackOutput = Emit(stackAlloc);
+            Assert(stackOutput.Contains("ct_stack_bytes(", StringComparison.Ordinal), "A dynamic stack allocation lost its overflow check.");
+            Assert(System.Text.RegularExpressions.Regex.Matches(stackOutput, @"ct_stack_bytes\(").Count == 2,
+                "A valid constant stack allocation retained a runtime size check.");
+            Assert(Emit(fixedBounds) == fixedOutput, "Optimization facts changed deterministic emission.");
+
+            var bundle = Compile(fixedBounds).EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            Assert(bundle.Artifacts.All(artifact => !artifact.Content.Contains("ct_bounds(", StringComparison.Ordinal)),
+                "Unity and modular range simplification selected different helper sets.");
+        });
+
         suite.Run("draft 0.15 ABI and debug metadata", () =>
         {
             const string source = "public static class Program { [EntryPoint] public static void Main() { System.Threading.Atomic<int> value = new System.Threading.Atomic<int>(0); value.Store(1, System.Threading.MemoryOrder.Release); } }";

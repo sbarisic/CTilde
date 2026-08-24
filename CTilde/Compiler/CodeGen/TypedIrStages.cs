@@ -56,7 +56,8 @@ internal sealed class TypedIrEmissionLowerer(CEmitter emitter)
             name,
             function.Property,
             function.IsGetter,
-            semanticHints: function.Body.Semantics);
+            semanticHints: function.Body.Semantics,
+            optimizationFacts: function.Optimization);
         return function with { Emission = new IrFunctionEmission(lowerer.EmitDefinition()) };
     }
 

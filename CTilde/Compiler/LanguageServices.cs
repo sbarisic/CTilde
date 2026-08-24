@@ -58,9 +58,9 @@ public sealed record LanguageWorkspaceSymbol(
 
 public sealed partial class LanguageServiceSnapshot
 {
-    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "enum", "delegate", "opaque", "static", "sealed", "abstract"];
+    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "union", "enum", "delegate", "opaque", "static", "sealed", "abstract"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void"];
-    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
+    private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "sizeof", "alignof", "offsetof", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
@@ -77,7 +77,7 @@ public sealed partial class LanguageServiceSnapshot
     {
         _userTrees = syntaxTrees.ToImmutableArray();
         Options = options;
-        var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
+        var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
         var nativeUtf8 = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
         _allTrees = StandardLibrary.GetSyntaxTrees(
             options.Target,
@@ -282,7 +282,7 @@ public sealed partial class LanguageServiceSnapshot
                 children.Add(new LanguageDocumentSymbol(enumMember.Name, string.Empty, LanguageSymbolKind.EnumMember, enumMember.Span, NameSpan(enumMember, enumMember.Name), []));
             var typeKind = type.Kind switch
             {
-                TypeDeclarationKind.Struct => LanguageSymbolKind.Struct,
+                TypeDeclarationKind.Struct or TypeDeclarationKind.Union => LanguageSymbolKind.Struct,
                 TypeDeclarationKind.Enum => LanguageSymbolKind.Enum,
                 _ => LanguageSymbolKind.Class,
             };
@@ -338,6 +338,12 @@ public sealed partial class LanguageServiceSnapshot
         var insideBody = context.MemberDeclaration is not null;
         foreach (var keyword in insideBody ? StatementKeywords : insideType ? TypeKeywords : TopLevelKeywords)
             Add(keyword, LanguageCompletionKind.Keyword, "keyword", "0");
+        if (!insideBody)
+        {
+            Add("Packed", LanguageCompletionKind.Keyword, "aggregate layout attribute", "0");
+            if (insideType)
+                Add("FieldOffset", LanguageCompletionKind.Keyword, "explicit field layout attribute", "0");
+        }
         foreach (var builtIn in BuiltInTypes)
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
         Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1", documentationId: "T:System.Runtime.NativeBuffer<T>");
@@ -346,7 +352,7 @@ public sealed partial class LanguageServiceSnapshot
             Add("NativeUtf8String", LanguageCompletionKind.Struct, "System.Runtime.NativeUtf8String", "1", documentationId: "T:System.Runtime.NativeUtf8String");
 
         foreach (var type in VisibleTypes(context.Tree))
-            Add(type.Name, CompletionKind(type), $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}", "2", type);
+            Add(type.Name, CompletionKind(type), FormatType(type), "2", type);
         foreach (var @namespace in _model.Types.Values.Select(type => type.Namespace).Where(value => !string.IsNullOrEmpty(value)).Select(value => value.Split('.')[0]).Distinct(StringComparer.Ordinal))
             Add(@namespace, LanguageCompletionKind.Namespace, "namespace", "2");
 
@@ -448,6 +454,18 @@ public sealed partial class LanguageServiceSnapshot
             }
         }
         var tokenName = IdentifierValue(token);
+        var offsetOf = context.Nodes.OfType<OffsetOfExpressionSyntax>()
+            .Where(candidate => candidate.Span.Start <= token.Span.Start && candidate.Span.End >= token.Span.End && IdentifierEquals(candidate.FieldName, tokenName))
+            .OrderBy(candidate => candidate.Span.Length)
+            .FirstOrDefault();
+        if (offsetOf is not null)
+        {
+            var aggregate = _model.ResolveType(offsetOf.Type, context.Tree, false).Symbol;
+            var offsetField = aggregate?.Fields.FirstOrDefault(field => !field.IsStatic && IdentifierEquals(field.Name, tokenName));
+            if (offsetField is not null)
+                yield return offsetField;
+            yield break;
+        }
         var member = context.Nodes.OfType<MemberAccessExpressionSyntax>()
             .Where(candidate => IdentifierEquals(candidate.Name, tokenName) && candidate.Receiver.Span.End <= token.Span.Start && candidate.Span.End >= token.Span.End)
             .OrderBy(candidate => candidate.Span.Length).FirstOrDefault();
@@ -555,6 +573,8 @@ public sealed partial class LanguageServiceSnapshot
                 return new(_model.ResolveType(@new.Type, context.Tree, false), null);
             case StackAllocExpressionSyntax stackAlloc:
                 return new(new CType(CTypeKind.NativeBuffer, ElementType: _model.ResolveType(stackAlloc.ElementType, context.Tree, false)), null);
+            case SizeOfExpressionSyntax or AlignOfExpressionSyntax or OffsetOfExpressionSyntax:
+                return new(CType.Nuint, null);
             case CastExpressionSyntax cast:
                 return new(_model.ResolveType(cast.Type, context.Tree, false), null);
             case IndexExpressionSyntax index:

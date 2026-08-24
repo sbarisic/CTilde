@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -137,7 +137,7 @@ public static class Program
     const hover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, useOffset) });
     assert.match(hover.contents.value, /operator \+/);
     const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, useOffset) });
-    assert.equal(definition.uri, uri);
+    assert.equal(path.normalize(fileURLToPath(definition.uri)).toLowerCase(), path.normalize(await realpath(programPath)).toLowerCase());
     assert.deepEqual(definition.range.start, positionAt(source, source.indexOf("+")));
 
     const documentSymbols = await client.request("textDocument/documentSymbol", { textDocument: { uri } });

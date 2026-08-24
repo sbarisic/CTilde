@@ -65,6 +65,11 @@ internal sealed partial class TypedIrBodyLowerer
             if (methodGroup.MethodGroup is not null)
                 return new IrExpressionValue { Type = CType.Error, Code = string.Empty, Prelude = methodGroup.Prelude, MethodGroup = methodGroup.MethodGroup, IsFunctionAddress = true };
             var operand = LowerAssignable(syntax.Operand);
+            if (operand.LValue?.Field is { ContainingType.HasNonNaturalLayout: true })
+            {
+                Report("CT2190", "A field in a packed or explicit-layout aggregate cannot have its address taken.", syntax.Operand);
+                return ErrorExpression(operand.Prelude);
+            }
             if (operand.LValue?.Address is null)
             {
                 Report("CT2124", "The address-of operator requires an addressable value.", syntax.Operand);
@@ -121,7 +126,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (syntax.OperatorKind == SyntaxKind.BangToken)
         {
             var operand = RequireBoolean(operandExpression, syntax.Operand);
-            return new IrExpressionValue { Type = CType.Bool, Code = $"!({operand.Code})", Prelude = operand.Prelude, IsConstant = operand.IsConstant };
+            return new IrExpressionValue { Type = CType.Bool, Code = $"!({operand.Code})", Prelude = operand.Prelude, IsConstant = operand.IsConstant, ConstantValue = SymbolicConstant(operand) };
         }
         if (!operandExpression.Type.IsNumeric && !operandExpression.Type.IsIntegral)
         {
@@ -138,6 +143,7 @@ internal sealed partial class TypedIrBodyLowerer
         string code = syntax.OperatorKind switch
         {
             SyntaxKind.PlusToken => operandValue.Code,
+            SyntaxKind.MinusToken when IsSymbolicConstant(operandValue) => $"-({operandValue.Code})",
             SyntaxKind.MinusToken when promoted == CType.Int => $"ct_i32_neg({operandValue.Code})",
             SyntaxKind.MinusToken when promoted == CType.Long => $"ct_i64_neg({operandValue.Code})",
             SyntaxKind.MinusToken when promoted == CType.Nint => $"ct_ni_neg({operandValue.Code})",
@@ -145,7 +151,7 @@ internal sealed partial class TypedIrBodyLowerer
             SyntaxKind.TildeToken => $"~({operandValue.Code})",
             _ => operandValue.Code,
         };
-        return new IrExpressionValue { Type = promoted, Code = code, Prelude = operandValue.Prelude, IsConstant = operandValue.IsConstant };
+        return new IrExpressionValue { Type = promoted, Code = code, Prelude = operandValue.Prelude, IsConstant = operandValue.IsConstant, ConstantValue = SymbolicConstant(operandValue) };
     }
 
     private IrExpressionValue LowerIncrement(UnaryExpressionSyntax syntax)
@@ -220,7 +226,7 @@ internal sealed partial class TypedIrBodyLowerer
             left = Materialize(Convert(left, common, syntax.Left, false), syntax.Left);
             right = Materialize(Convert(right, common, syntax.Right, false), syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
-            return new IrExpressionValue { Type = CType.Bool, Code = $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})", Prelude = prelude };
+            return new IrExpressionValue { Type = CType.Bool, Code = $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})", Prelude = prelude, IsConstant = left.IsConstant && right.IsConstant, ConstantValue = SymbolicConstant(left, right) };
         }
 
         if (syntax.OperatorKind is SyntaxKind.AmpersandToken or SyntaxKind.PipeToken or SyntaxKind.HatToken or SyntaxKind.LessLessToken or SyntaxKind.GreaterGreaterToken)
@@ -272,7 +278,7 @@ internal sealed partial class TypedIrBodyLowerer
                 SyntaxKind.GreaterGreaterToken => $"({left.Code} >> ((uint32_t){right.Code} & 31u))",
                 _ => $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})",
             };
-            return new IrExpressionValue { Type = common, Code = code, Prelude = prelude };
+            return new IrExpressionValue { Type = common, Code = code, Prelude = prelude, IsConstant = left.IsConstant && right.IsConstant, ConstantValue = SymbolicConstant(left, right) };
         }
 
         if (left.Type.Kind == CTypeKind.Pointer && right.Type.Kind is CTypeKind.Int or CTypeKind.Nint && syntax.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken)
@@ -316,13 +322,17 @@ internal sealed partial class TypedIrBodyLowerer
         }
         left = Materialize(Convert(left, resultType, syntax.Left, false), syntax.Left);
         right = Materialize(Convert(right, resultType, syntax.Right, false), syntax.Right);
+        var symbolicConstant = SymbolicConstant(left, right);
         var arithmeticPrelude = new List<string>(left.Prelude); arithmeticPrelude.AddRange(right.Prelude);
         return new IrExpressionValue
         {
             Type = resultType,
-            Code = NumericOperation(syntax.OperatorKind, resultType, left.Code, right.Code, syntax),
+            Code = symbolicConstant is not null
+                ? $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})"
+                : NumericOperation(syntax.OperatorKind, resultType, left.Code, right.Code, syntax),
             Prelude = arithmeticPrelude,
             IsConstant = left.IsConstant && right.IsConstant,
+            ConstantValue = symbolicConstant,
         };
     }
 
@@ -332,6 +342,14 @@ internal sealed partial class TypedIrBodyLowerer
         var right = RequireBoolean(LowerExpression(syntax.Right), syntax.Right);
         if (rawLeft.IsConstant && right.IsConstant && rawLeft.ConstantValue is bool && right.ConstantValue is bool && TryFoldBinary(syntax, rawLeft, right, out var folded))
             return folded;
+        if (rawLeft.IsConstant && right.IsConstant && SymbolicConstant(rawLeft, right) is { } symbolic)
+            return new IrExpressionValue
+            {
+                Type = CType.Bool,
+                Code = $"({rawLeft.Code} {OperatorText(syntax.OperatorKind)} {right.Code})",
+                IsConstant = true,
+                ConstantValue = symbolic,
+            };
         var left = Materialize(rawLeft, syntax.Left);
         var prelude = new List<string>(left.Prelude);
         var result = NewTemp();
@@ -382,7 +400,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (syntax.OperatorKind == SyntaxKind.BangEqualsToken)
             code = $"!({code})";
         var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
-        return new IrExpressionValue { Type = CType.Bool, Code = code, Prelude = prelude };
+        return new IrExpressionValue { Type = CType.Bool, Code = code, Prelude = prelude, IsConstant = left.IsConstant && right.IsConstant, ConstantValue = SymbolicConstant(left, right) };
     }
 
     private IrExpressionValue LowerAssignment(AssignmentExpressionSyntax syntax)
@@ -818,6 +836,8 @@ internal sealed partial class TypedIrBodyLowerer
     {
         if (expression.Type.Kind is CTypeKind.Void or CTypeKind.Error || expression.TypeReceiver is not null)
             return expression;
+        if (expression.IsConstant && expression.Prelude.Count == 0)
+            return expression;
         var prelude = new List<string>(expression.Prelude);
         var temp = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(expression.Type, temp)} = {expression.Code};");
@@ -835,6 +855,11 @@ internal sealed partial class TypedIrBodyLowerer
             OwnedCleanupRecord = expression.OwnedCleanupRecord,
         };
     }
+
+    private static bool IsSymbolicConstant(IrExpressionValue expression) => expression.ConstantValue is LayoutConstantValue;
+
+    private static object? SymbolicConstant(params IrExpressionValue[] expressions) =>
+        expressions.Any(IsSymbolicConstant) ? new LayoutConstantValue() : null;
 
     private IrExpressionValue MaterializeReceiver(IrExpressionValue receiver, SyntaxNode syntax)
     {

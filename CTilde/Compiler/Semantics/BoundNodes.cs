@@ -29,6 +29,7 @@ internal enum BoundExpressionKind
     Conversion,
     TypeTest,
     SafeCast,
+    LayoutConstant,
 }
 
 internal enum BoundStatementKind
@@ -216,6 +217,7 @@ internal static class BoundTreeFactory
             CastExpressionSyntax or ParenthesizedExpressionSyntax => BoundExpressionKind.Conversion,
             TypeTestExpressionSyntax => BoundExpressionKind.TypeTest,
             SafeCastExpressionSyntax => BoundExpressionKind.SafeCast,
+            SizeOfExpressionSyntax or AlignOfExpressionSyntax or OffsetOfExpressionSyntax => BoundExpressionKind.LayoutConstant,
             _ => BoundExpressionKind.Error,
         };
         return new BoundExpression(

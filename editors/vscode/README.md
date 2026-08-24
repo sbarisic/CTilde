@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.15 syntax and semantic classification, including interfaces, abstract members, generic declarations and uses, `volatile`, `lock`, draft 0.13 raw inline-assembly blocks, standard-library threading and atomic types, vectors, operators, and native interop.
+- Draft 0.16 syntax and semantic classification, including unions, packed and explicit layouts, layout operators, interfaces, generic declarations and uses, `volatile`, `lock`, raw inline assembly, standard-library threading and atomic types, vectors, operators, and native interop.
 - Target-aware hosted completion and documentation for console input, `System.IO.IOException`, and owned binary-file handles; ESP-IDF projects omit these APIs.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.

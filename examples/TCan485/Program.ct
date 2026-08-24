@@ -285,7 +285,7 @@ public static class Program
             Console.WriteLine("FAILED");
 
         if (ExerciseManagedConcurrency())
-            Console.WriteLine("draft15 concurrency: ok");
+            Console.WriteLine("draft16 concurrency: ok");
         else
             Console.WriteLine("DRAFT15_CONCURRENCY_FAILED");
 

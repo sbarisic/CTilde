@@ -212,6 +212,8 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 var argument = arguments[index];
                 prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Field is { ContainingType.HasNonNaturalLayout: true })
+                    Report("CT2190", "A field in a packed or explicit-layout aggregate cannot be passed by reference.", argumentSyntax);
                 if (argument.LValue?.Address is not { } address || argument.Type != parameter.Type)
                 {
                     Report("CT2171", $"A '{parameter.PassingKind.ToString().ToLowerInvariant()}' argument must be an addressable variable of exact type '{parameter.Type.DisplayName}'.", argumentSyntax);
@@ -285,6 +287,8 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 var argument = arguments[index];
                 prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Field is { ContainingType.HasNonNaturalLayout: true })
+                    Report("CT2190", "A field in a packed or explicit-layout aggregate cannot be captured by reference.", syntax[index]);
                 if (argument.LValue?.Address is not { } address || argument.Type != parameters[index].Type)
                 {
                     Report("CT2171", "Deferred by-reference arguments must remain addressable in the enclosing scope.", syntax[index]);

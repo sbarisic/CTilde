@@ -52,6 +52,7 @@ public enum SyntaxKind
     GreaterGreaterToken,
 
     AbstractKeyword,
+    AlignofKeyword,
     BoolKeyword,
     AsKeyword,
     AsmKeyword,
@@ -90,6 +91,7 @@ public enum SyntaxKind
     NewKeyword,
     NullKeyword,
     ObjectKeyword,
+    OffsetofKeyword,
     OpaqueKeyword,
     OperatorKeyword,
     OverrideKeyword,
@@ -103,6 +105,7 @@ public enum SyntaxKind
     SbyteKeyword,
     SealedKeyword,
     ShortKeyword,
+    SizeofKeyword,
     StaticKeyword,
     StackallocKeyword,
     StringKeyword,
@@ -114,6 +117,7 @@ public enum SyntaxKind
     TryKeyword,
     UintKeyword,
     UlongKeyword,
+    UnionKeyword,
     UnmanagedKeyword,
     UnsafeKeyword,
     UshortKeyword,
@@ -307,7 +311,7 @@ public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, stri
 
 public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Name, bool IsFileScoped) : SyntaxNode(Source, Span);
 
-public enum TypeDeclarationKind { Class, Struct, Interface, Enum, Delegate, Opaque }
+public enum TypeDeclarationKind { Class, Struct, Union, Interface, Enum, Delegate, Opaque }
 
 public enum ParameterPassingKind { Value, Ref, In, Out }
 
@@ -499,3 +503,6 @@ public sealed record CastExpressionSyntax(SourceText Source, TextSpan Span, Type
 public sealed record TypeTestExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record SafeCastExpressionSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record StackAllocExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax ElementType, ExpressionSyntax Count) : ExpressionSyntax(Source, Span);
+public sealed record SizeOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);
+public sealed record AlignOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);
+public sealed record OffsetOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string FieldName) : ExpressionSyntax(Source, Span);

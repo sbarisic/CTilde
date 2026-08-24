@@ -295,7 +295,7 @@ internal sealed class TypedIrLowerer(BoundProgram program)
                 var inputs = expression.Children.Where(values.ContainsKey).Select(child => values[child]).ToImmutableArray();
                 instructions.Add(expression.Syntax switch
                 {
-                    LiteralExpressionSyntax => new IrConstant(result, expression.Syntax, expression.ConstantValue),
+                    LiteralExpressionSyntax or SizeOfExpressionSyntax or AlignOfExpressionSyntax or OffsetOfExpressionSyntax => new IrConstant(result, expression.Syntax, expression.ConstantValue),
                     AssignmentExpressionSyntax => new IrStore(result, expression.Syntax, inputs),
                     UnaryExpressionSyntax unary when inputs.Length != 0 => new IrUnary(result, unary, inputs[0]),
                     BinaryExpressionSyntax binary when expression.Type == CType.String && binary.OperatorKind == SyntaxKind.PlusToken => new IrStringBuild(result, binary, inputs),

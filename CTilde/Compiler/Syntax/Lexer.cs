@@ -20,6 +20,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
     private static readonly IReadOnlyDictionary<string, SyntaxKind> Keywords = new Dictionary<string, SyntaxKind>(StringComparer.Ordinal)
     {
         ["abstract"] = SyntaxKind.AbstractKeyword,
+        ["alignof"] = SyntaxKind.AlignofKeyword,
         ["bool"] = SyntaxKind.BoolKeyword,
         ["as"] = SyntaxKind.AsKeyword,
         ["asm"] = SyntaxKind.AsmKeyword,
@@ -58,6 +59,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["new"] = SyntaxKind.NewKeyword,
         ["null"] = SyntaxKind.NullKeyword,
         ["object"] = SyntaxKind.ObjectKeyword,
+        ["offsetof"] = SyntaxKind.OffsetofKeyword,
         ["opaque"] = SyntaxKind.OpaqueKeyword,
         ["operator"] = SyntaxKind.OperatorKeyword,
         ["override"] = SyntaxKind.OverrideKeyword,
@@ -71,6 +73,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["sbyte"] = SyntaxKind.SbyteKeyword,
         ["sealed"] = SyntaxKind.SealedKeyword,
         ["short"] = SyntaxKind.ShortKeyword,
+        ["sizeof"] = SyntaxKind.SizeofKeyword,
         ["static"] = SyntaxKind.StaticKeyword,
         ["stackalloc"] = SyntaxKind.StackallocKeyword,
         ["string"] = SyntaxKind.StringKeyword,
@@ -82,6 +85,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["try"] = SyntaxKind.TryKeyword,
         ["uint"] = SyntaxKind.UintKeyword,
         ["ulong"] = SyntaxKind.UlongKeyword,
+        ["union"] = SyntaxKind.UnionKeyword,
         ["unmanaged"] = SyntaxKind.UnmanagedKeyword,
         ["unsafe"] = SyntaxKind.UnsafeKeyword,
         ["ushort"] = SyntaxKind.UshortKeyword,

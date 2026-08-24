@@ -328,7 +328,7 @@ internal static partial class ConformanceTests
                 Assert(!internalHeader.Contains("CT_DEBUG_NOINLINE static", StringComparison.Ordinal) && !internalHeader.Contains("static CT_DEBUG_NOINLINE static", StringComparison.Ordinal), "The modular debug header emitted a duplicate or internal hook declaration.");
                 Assert(runtimeSource.Contains("CT_DEBUG_NOINLINE void ct_debug_throw_hook", StringComparison.Ordinal), "The modular runtime omitted the external debug hook definition.");
                 Assert(debugMap == secondMapWriter.ToString(), "Debug-map emission was not deterministic.");
-                Assert(debugMap.Contains("\"version\": 3", StringComparison.Ordinal) && debugMap.Contains("\"runtimeAbi\": 15", StringComparison.Ordinal) && debugMap.Contains("\"instrumented\": false", StringComparison.Ordinal), "Source debug metadata did not use the v3 non-instrumented contract.");
+                Assert(debugMap.Contains("\"version\": 3", StringComparison.Ordinal) && debugMap.Contains("\"runtimeAbi\": 16", StringComparison.Ordinal) && debugMap.Contains("\"instrumented\": false", StringComparison.Ordinal), "Source debug metadata did not use the v3 non-instrumented contract.");
                 Assert(debugMap.Contains("\"displayName\": \"Program.Increment\"", StringComparison.Ordinal), "The debug map omitted the source method name.");
                 Assert(debugMap.Contains("\"name\": \"result\"", StringComparison.Ordinal) && debugMap.Contains("\"storage\": \"ct_l_0\"", StringComparison.Ordinal), "The debug map omitted local storage metadata.");
                 Assert(debugMap.Contains("\"file\": \"src/Program.ct\"", StringComparison.Ordinal), "The debug map did not use a reproducible project-relative source path.");

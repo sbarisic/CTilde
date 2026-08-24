@@ -111,7 +111,7 @@ internal sealed partial class Parser
             var before = _position;
             var attributes = ParseAttributes();
             var modifiers = ParseModifiers();
-            if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.InterfaceKeyword or SyntaxKind.EnumKeyword)
+            if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.UnionKeyword or SyntaxKind.InterfaceKeyword or SyntaxKind.EnumKeyword)
                 types.Add(ParseTypeDeclaration(attributes, modifiers));
             else if (Current.Kind == SyntaxKind.DelegateKeyword)
                 types.Add(ParseDelegateDeclaration(attributes, modifiers));
@@ -119,8 +119,8 @@ internal sealed partial class Parser
                 types.Add(ParseOpaqueDeclaration(attributes, modifiers));
             else
             {
-                Report("CT0102", "Expected a class, structure, interface, enumeration, delegate, or opaque declaration.", Current);
-                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
+                Report("CT0102", "Expected a class, structure, union, interface, enumeration, delegate, or opaque declaration.", Current);
+                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.UnionKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
             }
             if (_position == before)
                 SkipToken();
@@ -173,6 +173,7 @@ internal sealed partial class Parser
         var kind = kindToken.Kind switch
         {
             SyntaxKind.StructKeyword => TypeDeclarationKind.Struct,
+            SyntaxKind.UnionKeyword => TypeDeclarationKind.Union,
             SyntaxKind.InterfaceKeyword => TypeDeclarationKind.Interface,
             SyntaxKind.EnumKeyword => TypeDeclarationKind.Enum,
             _ => TypeDeclarationKind.Class,
@@ -187,7 +188,7 @@ internal sealed partial class Parser
             NextToken();
             underlying = ParseType();
         }
-        else if (kind is TypeDeclarationKind.Class or TypeDeclarationKind.Struct or TypeDeclarationKind.Interface && Current.Kind == SyntaxKind.ColonToken)
+        else if (kind is TypeDeclarationKind.Class or TypeDeclarationKind.Struct or TypeDeclarationKind.Union or TypeDeclarationKind.Interface && Current.Kind == SyntaxKind.ColonToken)
         {
             NextToken();
             while (Current.Kind is not SyntaxKind.OpenBraceToken and not SyntaxKind.WhereKeyword and not SyntaxKind.EndOfFileToken)
@@ -831,6 +832,11 @@ internal sealed partial class Parser
                 return ParseNew();
             case SyntaxKind.StackallocKeyword:
                 return ParseStackAlloc();
+            case SyntaxKind.SizeofKeyword:
+            case SyntaxKind.AlignofKeyword:
+                return ParseTypeLayoutOperator();
+            case SyntaxKind.OffsetofKeyword:
+                return ParseOffsetOf();
             case SyntaxKind.ThisKeyword:
                 NextToken();
                 return new ThisExpressionSyntax(_source, token.Span);
@@ -859,6 +865,29 @@ internal sealed partial class Parser
                     SkipToken();
                 return new LiteralExpressionSyntax(_source, token.Span, new NumericLiteralValue(0, IntegerLiteralSuffix.None, null), SyntaxKind.NumberToken);
         }
+    }
+
+    private ExpressionSyntax ParseTypeLayoutOperator()
+    {
+        var keyword = NextToken();
+        Match(SyntaxKind.OpenParenToken);
+        var type = ParseType();
+        var close = Match(SyntaxKind.CloseParenToken);
+        var span = TextSpan.FromBounds(keyword.Span.Start, close.Span.End);
+        return keyword.Kind == SyntaxKind.SizeofKeyword
+            ? new SizeOfExpressionSyntax(_source, span, type)
+            : new AlignOfExpressionSyntax(_source, span, type);
+    }
+
+    private OffsetOfExpressionSyntax ParseOffsetOf()
+    {
+        var start = NextToken().Span.Start;
+        Match(SyntaxKind.OpenParenToken);
+        var type = ParseType();
+        Match(SyntaxKind.CommaToken);
+        var field = Match(SyntaxKind.IdentifierToken);
+        var close = Match(SyntaxKind.CloseParenToken);
+        return new OffsetOfExpressionSyntax(_source, TextSpan.FromBounds(start, close.Span.End), type, field.Text);
     }
 
     private bool LooksLikeInvocationTypeArguments()

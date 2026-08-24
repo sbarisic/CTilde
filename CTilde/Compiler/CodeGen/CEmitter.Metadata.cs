@@ -52,13 +52,13 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)storage;");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences))
-                writer.WriteLine($"    {ValueRetainName(field.Type)}((void*)&value->{field.CName});");
+                writer.WriteLine($"    {ValueRetainName(field.Type)}((void*)&value->{field.CAccessPath});");
             writer.WriteLine("}");
             writer.WriteLine($"static void {ValueDropName(valueType)}(void* storage)");
             writer.WriteLine("{");
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)storage;");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences).Reverse())
-                writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CName});");
+                writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CAccessPath});");
             writer.WriteLine("}");
         }
 
@@ -73,7 +73,7 @@ internal sealed partial class CEmitter
             else if (type is { Namespace: "System.Threading", Name: "Mutex" })
                 writer.WriteLine("    ct_managed_mutex_drop(object);");
             foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Type.ContainsManagedReferences).Reverse())
-                writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CName});");
+                writer.WriteLine($"    {ValueDropName(field.Type)}((void*)&value->{field.CAccessPath});");
             if (type.BaseType is not null)
                 writer.WriteLine($"    {ObjectDropName(type.BaseType)}(object);");
             writer.WriteLine("}");
@@ -671,7 +671,7 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; uint32_t result = UINT32_C(2166136261);");
             foreach (var field in type.Symbol!.Fields.Where(field => !field.IsStatic))
-                writer.WriteLine($"    result = (result ^ {ValueHashExpression(field.Type, $"box->Value.{field.CName}")}) * UINT32_C(16777619);");
+                writer.WriteLine($"    result = (result ^ {ValueHashExpression(field.Type, $"box->Value.{field.CAccessPath}")}) * UINT32_C(16777619);");
             writer.WriteLine("    return ct_i32_bits(result); }");
         }
         else if (type.Kind == CTypeKind.Float)
@@ -745,7 +745,7 @@ internal sealed partial class CEmitter
     private static string StructEqualityExpression(TypeSymbol type, string left, string right)
     {
         var comparisons = type.Fields.Where(field => !field.IsStatic)
-            .Select(field => ValueEqualityExpression(field.Type, $"{left}.{field.CName}", $"{right}.{field.CName}"))
+            .Select(field => ValueEqualityExpression(field.Type, $"{left}.{field.CAccessPath}", $"{right}.{field.CAccessPath}"))
             .ToArray();
         return comparisons.Length == 0 ? "true" : string.Join(" && ", comparisons.Select(value => $"({value})"));
     }
@@ -772,7 +772,7 @@ internal sealed partial class CEmitter
     {
         var result = "UINT32_C(2166136261)";
         foreach (var field in type.Fields.Where(field => !field.IsStatic))
-            result = $"(({result} ^ {ValueHashExpression(field.Type, $"{value}.{field.CName}")}) * UINT32_C(16777619))";
+            result = $"(({result} ^ {ValueHashExpression(field.Type, $"{value}.{field.CAccessPath}")}) * UINT32_C(16777619))";
         return result;
     }
 

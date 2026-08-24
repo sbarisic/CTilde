@@ -27,8 +27,16 @@ internal sealed partial class TypedIrBodyLowerer
 
             var value = Materialize(Convert(LowerExpression(segment), CType.String, segment, false), segment);
             prelude.AddRange(value.Prelude);
-            prelude.Add($"{name}_parts[{index}] = {value.Code} == NULL ? NULL : {value.Code}->Data;");
-            prelude.Add($"{name}_lengths[{index}] = {value.Code} == NULL ? 0 : {value.Code}->Length;");
+            if (value.IsKnownNonNull)
+            {
+                prelude.Add($"{name}_parts[{index}] = ({value.Code})->Data;");
+                prelude.Add($"{name}_lengths[{index}] = ({value.Code})->Length;");
+            }
+            else
+            {
+                prelude.Add($"{name}_parts[{index}] = {value.Code} == NULL ? NULL : ({value.Code})->Data;");
+                prelude.Add($"{name}_lengths[{index}] = {value.Code} == NULL ? 0 : ({value.Code})->Length;");
+            }
         }
 
         _emitter.AllocationEffects.RecordDirect(_method, syntax, "fused string construction");

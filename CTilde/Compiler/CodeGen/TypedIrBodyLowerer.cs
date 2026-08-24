@@ -24,6 +24,8 @@ internal sealed class IrExpressionValue
     public string? OwnedCleanupRecord { get; set; }
 }
 
+internal sealed record LayoutConstantValue;
+
 internal sealed record MethodGroupBinding(ImmutableArray<MethodSymbol> Candidates, IrExpressionValue? Receiver, bool IsBaseReceiver);
 
 internal enum OwnershipKind { None, Borrowed, Owned, Immortal }
@@ -503,7 +505,7 @@ internal sealed partial class TypedIrBodyLowerer
     private void EmitAutomaticAccessor(ILoweringWriter writer)
     {
         var field = _property!.BackingField!;
-        var access = field.IsStatic ? field.CName : $"ct_self->{field.CName}";
+        var access = field.IsStatic ? field.CName : $"ct_self->{field.CAccessPath}";
         if (_isGetter)
         {
             if (field.Type.ContainsManagedReferences)
@@ -541,9 +543,9 @@ internal sealed partial class TypedIrBodyLowerer
             var expression = Convert(LowerExpression(field.Initializer!), field.Type, field.Initializer!, false);
             EmitPrelude(writer, expression.Prelude);
             if (field.Type.ContainsManagedReferences)
-                EmitInitializeOwnedSlot(writer, field.Type, $"ct_self->{field.CName}", expression.Code);
+                EmitInitializeOwnedSlot(writer, field.Type, $"ct_self->{field.CAccessPath}", expression.Code);
             else
-                writer.WriteLine($"ct_self->{field.CName} = {expression.Code};");
+                writer.WriteLine($"ct_self->{field.CAccessPath} = {expression.Code};");
             _assignedFields.Add(field);
             _fieldAssignmentCounts[field] = 1;
         }

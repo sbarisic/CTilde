@@ -17,7 +17,7 @@ export const requiredFirmwareMarkers = [
   'boxed: 7',
   'exception: caught on ESP32',
   'arc heap recovery: True',
-  'draft15 concurrency: ok',
+  'draft16 concurrency: ok',
   'CTILDE_ESP_OK',
 ];
 

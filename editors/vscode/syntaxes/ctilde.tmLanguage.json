@@ -328,6 +328,18 @@
           }
         },
         {
+          "name": "meta.declaration.union.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])(union)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "storage.type.union.ctilde"
+            },
+            "2": {
+              "name": "entity.name.type.struct.ctilde"
+            }
+          }
+        },
+        {
           "name": "meta.declaration.enum.ctilde",
           "match": "(?<![@_\\p{L}\\p{Nd}])(enum)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
           "captures": {
@@ -411,7 +423,7 @@
       "patterns": [
         {
           "name": "storage.type.declaration.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|interface|struct|enum|delegate|opaque)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|interface|struct|union|enum|delegate|opaque)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "keyword.declaration.namespace.ctilde",
@@ -473,7 +485,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|lock|return|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:alignof|asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|lock|offsetof|return|sizeof|switch|throw|try|while)(?![_\\p{L}\\p{Nd}])"
     },
     "other-keywords": {
       "patterns": [

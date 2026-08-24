@@ -238,6 +238,8 @@ internal sealed partial class CompilationModel
             Accessibility = definition.Accessibility,
             NativeTypeName = definition.NativeTypeName,
             NativeHeader = definition.NativeHeader,
+            AggregateLayout = definition.AggregateLayout,
+            Pack = definition.Pack,
             IsSealed = definition.IsSealed,
             IsAbstract = definition.IsAbstract,
             TypeArguments = arguments,
@@ -381,6 +383,7 @@ internal sealed partial class CompilationModel
                 IsConst = field.IsConst,
                 IsVolatile = field.IsVolatile,
                 Initializer = field.Initializer,
+                Offset = field.Offset,
             });
         foreach (var property in definition.Properties)
         {
@@ -584,7 +587,7 @@ internal sealed partial class CompilationModel
                 }
                 var kind = declaration.Kind switch
                 {
-                    TypeDeclarationKind.Struct => DeclaredTypeKind.Struct,
+                    TypeDeclarationKind.Struct or TypeDeclarationKind.Union => DeclaredTypeKind.Struct,
                     TypeDeclarationKind.Interface => DeclaredTypeKind.Interface,
                     TypeDeclarationKind.Enum => DeclaredTypeKind.Enum,
                     TypeDeclarationKind.Delegate => DeclaredTypeKind.Delegate,
@@ -602,11 +605,21 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT1218", "sealed applies only to classes.", declaration.Source, declaration.Span);
                 if (declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) && declaration.Kind != TypeDeclarationKind.Class)
                     Diagnostics.Add("CT1270", "abstract applies only to classes and their members.", declaration.Source, declaration.Span);
-                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind != TypeDeclarationKind.Struct))
+                foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind is not TypeDeclarationKind.Struct and not TypeDeclarationKind.Union))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
-                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : []);
+                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed"] : []);
                 string? nativeTypeName = null;
                 string? nativeHeader = null;
+                int? pack = null;
+                var packed = FindAttribute(declaration.Attributes, "Packed");
+                if (packed is not null)
+                {
+                    if (packed.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken }] &&
+                        numeric.FloatingPoint is null && (numeric.Integer == 1 || numeric.Integer == 2 || numeric.Integer == 4 || numeric.Integer == 8 || numeric.Integer == 16))
+                        pack = (int)numeric.Integer;
+                    else
+                        Diagnostics.Add("CT1280", "Packed requires one integral argument: 1, 2, 4, 8, or 16.", packed.Source, packed.Span);
+                }
                 if (declaration.Kind == TypeDeclarationKind.Opaque)
                 {
                     var nativeType = FindAttribute(declaration.Attributes, "NativeType");
@@ -637,6 +650,8 @@ internal sealed partial class CompilationModel
                     Accessibility = typeAccessibility,
                     NativeTypeName = nativeTypeName,
                     NativeHeader = nativeHeader,
+                    AggregateLayout = declaration.Kind == TypeDeclarationKind.Union ? AggregateLayoutKind.Union : AggregateLayoutKind.Sequential,
+                    Pack = pack,
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                     IsAbstract = declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) || kind == DeclaredTypeKind.Interface,
                     TypeParameters = typeParameters,
@@ -761,6 +776,7 @@ internal sealed partial class CompilationModel
         }
         _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
         FinalizeConstructedTypes();
+        ValidateAggregateLayouts();
     }
 
     private static string DeclarationKey(string fullName, TypeDeclarationSyntax declaration) =>
@@ -829,10 +845,22 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, []);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
+                    int? fieldOffset = null;
+                    var fieldOffsetAttribute = FindAttribute(field.Attributes, "FieldOffset");
+                    if (fieldOffsetAttribute is not null)
+                    {
+                        if (fieldOffsetAttribute.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue offset, LiteralKind: SyntaxKind.NumberToken }] &&
+                            offset.FloatingPoint is null && offset.Integer >= 0 && offset.Integer <= int.MaxValue)
+                            fieldOffset = (int)offset.Integer;
+                        else
+                            Diagnostics.Add("CT1281", "FieldOffset requires one nonnegative integral literal no greater than int.MaxValue.", fieldOffsetAttribute.Source, fieldOffsetAttribute.Span);
+                        if (type.Kind != DeclaredTypeKind.Struct || isStatic)
+                            Diagnostics.Add("CT1281", "FieldOffset is valid only on an instance field of a struct.", fieldOffsetAttribute.Source, fieldOffsetAttribute.Span);
+                    }
                     var symbol = new FieldSymbol
                     {
                         Name = field.Name,
@@ -845,6 +873,7 @@ internal sealed partial class CompilationModel
                         IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
                         IsVolatile = isVolatile,
                         Initializer = field.Initializer,
+                        Offset = fieldOffset,
                     };
                     if (symbol.Type.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
@@ -1207,6 +1236,91 @@ internal sealed partial class CompilationModel
             foreach (var entry in entries.Skip(1))
                 Diagnostics.Add("CT1301", "The program has more than one EntryPoint.", entry.Syntax!.Source, entry.Syntax.Span, entries[0].Syntax!.Source.GetLocation(entries[0].Syntax!.Span));
             EntryPoint = entries[0];
+        }
+    }
+
+    private void ValidateAggregateLayouts()
+    {
+        var definitions = Types.Values.Where(type => type is { Kind: DeclaredTypeKind.Struct, Syntax: not null, GenericDefinition: null }).Distinct().ToArray();
+        foreach (var type in definitions)
+        {
+            var declaration = type.Syntax!;
+            var isUnion = declaration.Kind == TypeDeclarationKind.Union;
+            var instanceFields = type.Fields.Where(field => !field.IsStatic).ToArray();
+
+            if (isUnion)
+            {
+                if (!declaration.BaseTypes.IsDefaultOrEmpty || declaration.BaseType is not null)
+                    Diagnostics.Add("CT1282", "A union cannot declare base types or interfaces.", declaration.Source, declaration.Span);
+                foreach (var member in declaration.Members)
+                {
+                    var permitted = member switch
+                    {
+                        FieldDeclarationSyntax => true,
+                        MethodDeclarationSyntax method => method.Modifiers.Contains("static", StringComparer.Ordinal),
+                        _ => false,
+                    };
+                    if (!permitted)
+                        Diagnostics.Add("CT1282", "A union permits instance fields, static fields or constants, and static methods only.", member.Source, member.Span);
+                }
+            }
+
+            if (isUnion && instanceFields.Any(field => field.Offset is not null))
+                foreach (var field in instanceFields.Where(field => field.Offset is not null))
+                    Diagnostics.Add("CT1281", "Union fields are implicitly located at offset zero and cannot use FieldOffset.", field.Syntax!.Source, field.Syntax.Span);
+
+            var explicitLayout = !isUnion && instanceFields.Any(field => field.Offset is not null);
+            if (explicitLayout)
+                type.AggregateLayout = AggregateLayoutKind.Explicit;
+            if (explicitLayout)
+            {
+                foreach (var field in instanceFields.Where(field => field.Offset is null))
+                    Diagnostics.Add("CT1283", "Every instance field in an explicit-layout struct requires FieldOffset.", field.Syntax!.Source, field.Syntax.Span);
+                foreach (var property in type.Properties.Where(property => !property.IsStatic && property.BackingField is not null))
+                    Diagnostics.Add("CT1283", "An explicit-layout struct cannot contain an auto-property because its backing field has no explicit offset.", property.Syntax!.Source, property.Syntax.Span);
+            }
+
+            foreach (var field in instanceFields)
+            {
+                if (field.Offset is not null && field.ContainingType.Kind != DeclaredTypeKind.Struct)
+                    Diagnostics.Add("CT1281", "FieldOffset is valid only on instance fields of a struct.", field.Syntax!.Source, field.Syntax.Span);
+                if ((isUnion || explicitLayout) && field.Initializer is not null)
+                    Diagnostics.Add("CT1284", "Union and explicit-layout instance fields cannot have initializers.", field.Syntax!.Source, field.Syntax.Span);
+            }
+        }
+
+        foreach (var type in Types.Values.Where(type => type.Kind == DeclaredTypeKind.Struct && !type.IsOpenConstructed).Distinct())
+        {
+            if (type.GenericDefinition is not null)
+            {
+                type.AggregateLayout = type.GenericDefinition.AggregateLayout;
+                foreach (var field in type.Fields.Where(field => !field.IsStatic && field.Offset is not null))
+                    type.AggregateLayout = AggregateLayoutKind.Explicit;
+            }
+            if (type.AggregateLayout == AggregateLayoutKind.Sequential && type.Pack is null)
+                continue;
+            foreach (var field in type.Fields.Where(field => !field.IsStatic))
+            {
+                if (!IsLayoutUnmanaged(field.Type, type, []))
+                    Diagnostics.Add("CT1285", $"Field '{field.Name}' must have a complete unmanaged type in a union, packed struct, or explicit-layout struct.", field.Syntax!.Source, field.Syntax.Span);
+                if (field.IsVolatile)
+                    Diagnostics.Add("CT1285", "Non-natural aggregate layouts cannot contain volatile fields.", field.Syntax!.Source, field.Syntax.Span);
+            }
+        }
+
+        bool IsLayoutUnmanaged(CType candidate, TypeSymbol context, HashSet<TypeSymbol> visiting)
+        {
+            if (candidate.Kind == CTypeKind.TypeParameter && candidate.Symbol is not null)
+                return context.TypeParameterConstraints.TryGetValue(candidate.Symbol.Name, out var constraint) && constraint.RequiresUnmanaged;
+            if (candidate.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+                CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
+                CTypeKind.Enum or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer)
+                return true;
+            if (candidate.Kind != CTypeKind.Struct || candidate.Symbol is null || !visiting.Add(candidate.Symbol))
+                return false;
+            var result = candidate.Symbol.Fields.Where(field => !field.IsStatic).All(field => IsLayoutUnmanaged(field.Type, candidate.Symbol, visiting));
+            visiting.Remove(candidate.Symbol);
+            return result;
         }
     }
 

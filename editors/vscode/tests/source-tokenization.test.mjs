@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.15 keyword receives its intended scope", () => {
+test("every draft 0.16 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
@@ -59,7 +59,7 @@ test("every draft 0.15 keyword receives its intended scope", () => {
       scope: "storage.modifier.ctilde"
     },
     {
-      words: ["break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "return", "switch", "throw", "try", "while"],
+      words: ["alignof", "break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "offsetof", "return", "sizeof", "switch", "throw", "try", "while"],
       scope: "keyword.control.ctilde"
     },
     {
@@ -96,6 +96,7 @@ test("every draft 0.15 keyword receives its intended scope", () => {
   expectScope("class Example", "class", "storage.type.class.ctilde");
   expectScope("interface IExample", "interface", "storage.type.declaration.ctilde");
   expectScope("struct Example", "struct", "storage.type.struct.ctilde");
+  expectScope("union Example", "union", "storage.type.union.ctilde");
   expectScope("enum Example", "enum", "storage.type.enum.ctilde");
   expectScope("opaque Handle", "opaque", "storage.type.declaration.ctilde");
   expectScope("where T : class", "where", "keyword.other.constraint.ctilde");

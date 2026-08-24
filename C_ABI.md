@@ -2,11 +2,11 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.15 and runtime ABI 15. Draft 0.15 adds closed-generic identities and layouts, interface dispatch slots, scalar atomic storage, managed thread and recursive-mutex payloads, and concurrency runtime faults to the Draft 0.14 process runtime.
+This document defines the generated C contract for C~ draft 0.16 and runtime ABI 16. Draft 0.16 adds union, packed, and explicit aggregate representations plus symbolic layout operators to the Draft 0.15 runtime contract.
 
-Draft 0.15 output is not ABI-compatible with ABI 14 or older generated modules. `[Export]`, `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross an extern or export boundary.
+Draft 0.16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross an extern or export boundary.
 
-Debug information is additive and does not change runtime ABI 15. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation; v2 instrumented images require a rebuild.
+Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
 The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `.c` file per reachable namespace, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
 
@@ -81,7 +81,7 @@ Generated prefixes identify symbol kinds:
 
 Unity definitions use translation-unit-local linkage where possible. Modular definitions used by another artifact have internal-header declarations and external linkage but remain compiler-private. `public` and `internal` are C~ access rules; they do not export a native symbol.
 
-`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 15.
+`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 16.
 
 ## Managed object header
 
@@ -140,6 +140,12 @@ The base structure is the first member. An upcast uses this prefix and keeps the
 `new` calls an allocation factory. The factory installs the most-derived descriptor and calls non-allocating constructor initializers.
 
 A structure lowers to the same C structure form but is passed, returned, assigned, and stored by value. A structure constructor initializes a zeroed local value and returns that value.
+
+Natural sequential structures use ordinary C member layout. `[Packed(n)]` surrounds each generated aggregate declaration with balanced compiler-specific packing state and restores the prior state afterward. A union emits a native C `union`, with an assertion that every member has offset zero; an empty union contains one private byte.
+
+An explicit-layout structure emits an outer structure containing one overlay union. Each source field has a deterministic packed carrier structure containing its byte prefix and value member, and generated field accesses use the complete nested carrier path. The overlay also contains alignment-marker members for the natural field alignments, capped by `[Packed(n)]` when present. Generated compile-time assertions verify every requested byte offset and each applicable packing contract. Unity files, modular files, and exported headers use this same renderer, and exported aggregate definitions are emitted in dependency order.
+
+`sizeof(T)` lowers to C `sizeof`, `offsetof(T, Field)` to `offsetof` over the generated access path, and `alignof(T)` to `__alignof` on MSVC or `_Alignof` on GCC and Clang. Each result is converted to `uintptr_t`. The expressions remain symbolic through C~ constant binding; native C performs the target layout evaluation.
 
 Instance methods and property accessors receive a first `ct_self` pointer. Static members do not.
 
@@ -339,7 +345,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler with the diagnostic and context; returning from the handler continues to the platform's default fatal termination. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.15.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.16.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -347,11 +353,11 @@ The runtime exports `ct_thread_attach()`, `ct_thread_detach()`, `ct_retain(ct_ob
 
 ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses scalar types, opaque native typedefs, `const char*`, and explicit pointer/`size_t` pairs; ESP-IDF configuration structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards `esp_timer_get_time()`. GPIO and `ct_esp_ws2812_*` operations return exact `esp_err_t` values.
 
-Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 15.
+Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 16.
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.15.
+This section records constraints that remain after draft 0.16.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

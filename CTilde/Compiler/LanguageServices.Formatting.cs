@@ -5,8 +5,8 @@ public sealed partial class LanguageServiceSnapshot
     private static string FormatSymbol(object symbol) => symbol switch
     {
         TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(FormatParameter))})",
-        TypeSymbol type => $"{type.Kind.ToString().ToLowerInvariant()} {type.FullName}",
-        FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}",
+        TypeSymbol type => FormatType(type),
+        FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}{(field.Offset is int offset ? $" [offset: {offset}]" : string.Empty)}",
         PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
         MethodSymbol method => FormatMethod(method),
         ParameterSymbol parameter => FormatParameter(parameter),
@@ -17,6 +17,21 @@ public sealed partial class LanguageServiceSnapshot
         EnumValueSymbol value => $"{value.Name} = {value.Value}",
         _ => string.Empty,
     };
+
+    private static string FormatType(TypeSymbol type)
+    {
+        var kind = type.Kind == DeclaredTypeKind.Struct && type.AggregateLayout == AggregateLayoutKind.Union
+            ? "union"
+            : type.Kind.ToString().ToLowerInvariant();
+        if (type.Kind != DeclaredTypeKind.Struct)
+            return $"{kind} {type.FullName}";
+        var details = new List<string>();
+        if (type.AggregateLayout == AggregateLayoutKind.Explicit)
+            details.Add("layout: explicit");
+        if (type.Pack is int pack)
+            details.Add($"pack: {pack}");
+        return $"{kind} {type.FullName}{(details.Count == 0 ? string.Empty : $" [{string.Join(", ", details)}]")}";
+    }
 
     private static string FormatMethod(MethodSymbol method) => method.IsOperator
         ? $"{AccessibilityText(method.Accessibility)}static {method.ReturnType.DisplayName} {method.ContainingType.FullName}.{OperatorFacts.DisplayName(method.OperatorKind)}({string.Join(", ", method.Parameters.Select(FormatParameter))})"

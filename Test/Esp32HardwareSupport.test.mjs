@@ -32,7 +32,7 @@ test('firmware transcript extracts measurements and alternating transitions', ()
   const markers = [
     'esp error: ESP_OK', 'C~ ESP-IDF hardware test', 'virtual: 42', 'delegate: 42',
     'function pointer: 42', 'timer64: ok', 'generated bindings: ok', 'wifi: not configured', 'native buffer: 42', 'native utf8: ok',
-    'opaque defer: ok', 'delegate context: 42', 'export: 42', 'threading: ok', 'draft15 concurrency: ok',
+    'opaque defer: ok', 'delegate context: 42', 'export: 42', 'threading: ok', 'draft16 concurrency: ok',
     'boxed: 7', 'exception: caught on ESP32', 'arc heap recovery: True', 'CTILDE_ESP_OK',
     'free heap: 297000', 'minimum free heap: 286000', 'stack high water: 6500', 'tick: 19',
   ];

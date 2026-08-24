@@ -68,7 +68,7 @@ public sealed class Compilation
                 return;
             var diagnostics = new DiagnosticBag();
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
-            var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword);
+            var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
             var hostedIo = target == CompilationTarget.Hosted && StandardLibrary.RequiresHostedIo(SyntaxTrees);
             var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);

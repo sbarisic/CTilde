@@ -26,6 +26,9 @@ internal sealed partial class TypedIrBodyLowerer
             TypeTestExpressionSyntax typeTest => LowerTypeTest(typeTest),
             SafeCastExpressionSyntax safeCast => LowerSafeCast(safeCast),
             StackAllocExpressionSyntax stackAlloc => LowerStackAlloc(stackAlloc),
+            SizeOfExpressionSyntax sizeOf => LowerSizeOf(sizeOf),
+            AlignOfExpressionSyntax alignOf => LowerAlignOf(alignOf),
+            OffsetOfExpressionSyntax offsetOf => LowerOffsetOf(offsetOf),
             _ => ErrorExpression(),
         };
         if (syntax is CallExpressionSyntax && _emitter.EmitDebugInstrumentation && !_analysisOnly)
@@ -33,6 +36,78 @@ internal sealed partial class TypedIrBodyLowerer
         if (_optimizationFacts.KnownNonNullExpressions.Contains(syntax))
             result.IsKnownNonNull = true;
         return RecordSemantic(syntax, result);
+    }
+
+    private IrExpressionValue LowerSizeOf(SizeOfExpressionSyntax syntax)
+    {
+        var type = ResolveLayoutOperatorType(syntax.Type, syntax);
+        return type.IsError ? ErrorExpression() : LayoutConstant(type, $"((uintptr_t)sizeof({_emitter.CCastType(type)}))", syntax);
+    }
+
+    private IrExpressionValue LowerAlignOf(AlignOfExpressionSyntax syntax)
+    {
+        var type = ResolveLayoutOperatorType(syntax.Type, syntax);
+        return type.IsError ? ErrorExpression() : LayoutConstant(type, $"((uintptr_t)CT_ALIGNOF({_emitter.CCastType(type)}))", syntax);
+    }
+
+    private IrExpressionValue LowerOffsetOf(OffsetOfExpressionSyntax syntax)
+    {
+        var type = ResolveType(syntax.Type);
+        if (type.Kind != CTypeKind.Struct || type.Symbol is null)
+        {
+            Report("CT2189", "offsetof requires a struct or union type.", syntax);
+            return ErrorExpression();
+        }
+        var field = type.Symbol.Fields.FirstOrDefault(candidate => !candidate.IsStatic && candidate.Name == syntax.FieldName);
+        if (field is null)
+        {
+            Report("CT1109", $"Type '{type.DisplayName}' has no directly declared instance field named '{syntax.FieldName}'.", syntax);
+            return ErrorExpression();
+        }
+        CheckAccess(field, syntax);
+        if (type.ContainsPointer || field.Type.ContainsPointer)
+            RequireUnsafe(syntax);
+        _emitter.RegisterType(type);
+        _emitter.RegisterType(CType.Nuint);
+        return new IrExpressionValue
+        {
+            Type = CType.Nuint,
+            Code = $"((uintptr_t){AggregateLayout.OffsetExpression(type.Symbol, field)})",
+            IsConstant = true,
+            ConstantValue = new LayoutConstantValue(),
+            Symbol = field,
+        };
+    }
+
+    private CType ResolveLayoutOperatorType(TypeSyntax syntax, SyntaxNode expression)
+    {
+        var type = ResolveType(syntax);
+        var valid = type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
+            CTypeKind.Enum or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer ||
+            type.Kind == CTypeKind.Struct && !type.ContainsManagedReferences && !type.ContainsAtomic;
+        if (!valid)
+        {
+            Report("CT2189", $"Layout operators require a complete unmanaged type, not '{type.DisplayName}'.", expression);
+            return CType.Error;
+        }
+        if (type.ContainsPointer)
+            RequireUnsafe(expression);
+        _emitter.RegisterType(type);
+        return type;
+    }
+
+    private IrExpressionValue LayoutConstant(CType measuredType, string code, SyntaxNode syntax)
+    {
+        _emitter.RegisterType(CType.Nuint);
+        return new IrExpressionValue
+        {
+            Type = CType.Nuint,
+            Code = code,
+            IsConstant = true,
+            ConstantValue = new LayoutConstantValue(),
+            Symbol = measuredType.Symbol,
+        };
     }
 
     private IrExpressionValue RecordSemantic(ExpressionSyntax syntax, IrExpressionValue expression)
@@ -300,7 +375,7 @@ internal sealed partial class TypedIrBodyLowerer
                 : new IrExpressionValue { Type = _method.ContainingType.Type, Code = "ct_self", IsKnownNonNull = true };
             var loweredReceiver = MaterializeReceiver(receiver, syntax);
             prelude.AddRange(loweredReceiver.Prelude);
-            code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CName}";
+            code = $"(({NameMangler.Type(field.ContainingType)}*)(void*){loweredReceiver.Code})->{field.CAccessPath}";
         }
         if (field.IsVolatile)
         {
@@ -324,7 +399,7 @@ internal sealed partial class TypedIrBodyLowerer
             Code = code,
             Prelude = prelude,
             IsConstant = field.IsConst,
-            LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})", Field = field },
+            LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = field.ContainingType.HasNonNaturalLayout ? null : $"&({code})", Field = field },
             Symbol = field,
         };
     }
@@ -824,8 +899,8 @@ internal sealed partial class TypedIrBodyLowerer
             return false;
         var valueType = selected.ContainingType.TypeArguments[0];
         var field = selected.ContainingType.Fields.Single(candidate => candidate.Name == "value");
-        var storage = $"(void*)&(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CName}";
-        var size = $"sizeof((({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CName})";
+        var storage = $"(void*)&(({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CAccessPath}";
+        var size = $"sizeof((({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode})->{field.CAccessPath})";
         string code;
         switch (selected.Name)
         {
@@ -964,6 +1039,8 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 var argument = arguments[index];
                 prelude.AddRange(argument.Prelude);
+                if (argument.LValue?.Field is { ContainingType.HasNonNaturalLayout: true })
+                    Report("CT2190", "A field in a packed or explicit-layout aggregate cannot be passed by reference.", syntax.Arguments[index]);
                 if (argument.LValue?.Address is not { } address)
                 {
                     Report("CT2171", "A by-reference function-pointer argument must be addressable.", syntax.Arguments[index]);

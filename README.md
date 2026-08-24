@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.15 includes interfaces and abstract classes, monomorphized generics, deterministic automatic reference counting, exceptions and `defer`, scalar atomics and volatile fields, managed threads, recursive mutexes and `lock`, native interop, raw GNU inline assembly, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.16 includes unions, packed and explicit aggregate layouts, `sizeof`/`alignof`/`offsetof`, interfaces and abstract classes, monomorphized generics, deterministic automatic reference counting, exceptions and `defer`, atomics, managed concurrency, native interop, modular C output, and hosted and ESP-IDF target profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -99,7 +99,7 @@ Managed objects, arrays, strings, boxes, and reference-bearing structures use au
 
 Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, invalid arguments, and managed allocation failure are ordinary catchable exceptions backed by allocation-free runtime objects. ABI, lifecycle, attachment, ARC-corruption, and native-boundary violations are panics. Each attached native thread has independent exception, cleanup, and release state.
 
-The generated native header exposes `[Export]` methods plus the ABI 15 runtime lifecycle, thread attachment, retain, and release operations. [C_ABI.md](C_ABI.md) defines the generated layouts and interop contract.
+The generated native header exposes `[Export]` methods plus the ABI 16 runtime lifecycle, thread attachment, retain, and release operations. [C_ABI.md](C_ABI.md) defines the generated layouts and interop contract.
 
 ## Files, projects, and native builds
 
@@ -191,7 +191,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.15 implementation, not a stable production language. Draft 0.15 uses runtime ABI 15 and debug metadata v3. Its interface, generic, atomic, volatile, thread, mutex, and lock coverage passes the hosted, ESP cross-build, and connected-board test pipeline.
+C~ is an experimental Draft 0.16 implementation, not a stable production language. Draft 0.16 uses runtime ABI 16 and debug metadata v3. Aggregate layout support passes the hosted native conformance pipeline; Draft 0.15 ABI 15 remains the latest complete ESP cross-build and connected-board baseline.
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -208,7 +208,7 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.15 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.16 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

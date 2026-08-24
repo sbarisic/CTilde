@@ -100,6 +100,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
 }
 
 internal enum DeclaredTypeKind { Class, Struct, Interface, TypeParameter, Enum, Delegate, Opaque, StaticClass }
+internal enum AggregateLayoutKind { Sequential, Union, Explicit }
 internal enum Accessibility { Private, Internal, Protected, Public }
 internal enum NativeParameterOwnership { Borrowed, Consumes, Retained, Creates }
 
@@ -128,6 +129,9 @@ internal sealed class TypeSymbol
     public Accessibility Accessibility { get; init; }
     public string? NativeTypeName { get; init; }
     public string? NativeHeader { get; init; }
+    public AggregateLayoutKind AggregateLayout { get; set; }
+    public int? Pack { get; init; }
+    public bool HasNonNaturalLayout => AggregateLayout == AggregateLayoutKind.Explicit || Pack is not null;
     public string FullName
     {
         get
@@ -194,7 +198,11 @@ internal sealed class FieldSymbol : MemberSymbol
     public required bool IsConst { get; init; }
     public bool IsVolatile { get; init; }
     public ExpressionSyntax? Initializer { get; init; }
+    public int? Offset { get; init; }
     public string CName => IsStatic ? NameMangler.Member(this) : NameMangler.Identifier(Name);
+    public string CAccessPath => !IsStatic && ContainingType.AggregateLayout == AggregateLayoutKind.Explicit
+        ? $"ct_layout.ct_slot_{CName}.{CName}"
+        : CName;
 }
 
 internal sealed class PropertySymbol : MemberSymbol

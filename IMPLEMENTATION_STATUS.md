@@ -1,10 +1,10 @@
 # Implementation status
 
-Last reviewed: 2026-08-23
+Last reviewed: 2026-08-24
 
 ## Current state
 
-C~ draft 0.15 has one compiler path:
+C~ draft 0.16 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF GNU C23
@@ -12,7 +12,7 @@ C~ draft 0.15 has one compiler path:
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable namespace, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for `[Export]` methods and runtime ABI 15. Source-debug emission adds C~ mappings and stable hooks. Debug Launch instead emits deterministic logical probes, version-3 scopes/sites/control metadata, constructed generic and interface views, per-thread method-depth tracking, and optional ARC object or guarded-memory diagnostics. Ordinary and Release output remain unchanged. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain, or prepare verified Launch/Attach descriptors. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
+The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable namespace, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for `[Export]` methods and runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate layout kind, packing, explicit offsets, and generated storage paths. Ordinary and Release output remain unchanged. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain, or prepare verified Launch/Attach descriptors. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
 
 ## Measured baseline
 
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. All 129 registered managed and native conformance checks pass. Draft 0.15 coverage adds abstract/interface validation and dispatch, structure boxing to interfaces, closed generic layouts and constraints, generic ARC cleanup, scalar atomics and memory-order validation, acquire/release volatile fields, source-created threads, recursive mutexes, cleanup-safe `lock`, and typed-IR cleanup/ownership/null/range size optimizations. Earlier deterministic debug, runtime-fault, modular-emission, immutable-metadata, layout, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.16 coverage adds unions, natural and packed aggregate layouts, overlapping explicit field offsets, symbolic layout operators, deterministic unity/modular/header rendering, and strict native probes. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -110,6 +110,8 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | Boxing and exact unboxing | Implemented | Scalar, enum, structure, and unsafe pointer tests |
 | Checked casts, `is`, and `as` | Implemented | Positive, null, mismatch, and runtime-failure tests |
 | Structures | Implemented | Native feature example |
+| Unions and controlled aggregate layout | Implemented | Natural and packed layouts, explicit overlapping offsets, generic unmanaged revalidation, deterministic unity/modular/header C rendering, and native probes |
+| `sizeof`, `alignof`, and `offsetof` | Implemented | Symbolic `nuint` constants, unsafe validation, arithmetic/comparison use, reachability, and native probes |
 | Enumerations and fixed underlying types | Implemented | Native enum and switch example |
 | Fields and static initialization | Implemented | Native ordered-evaluation and feature tests |
 | Constructors and `new` | Implemented | Class and structure native tests |
@@ -133,7 +135,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | Unsafe address, dereference, indexing, pointer arrays, and pointer arithmetic | Implemented | Recursive unsafe checks and native example |
 | `void*` data-pointer conversions | Implemented | Explicit typed conversion and operation-rejection tests |
 | `ref`, `in`, and constructive `out` parameters | Implemented | First-write construction, repeated replacement, methods, constructors, delegates, function pointers, externs, flow, readonly, ARC, mangling, and pointer ABI tests |
-| Runtime ABI 15 lifecycle | Implemented | Process initialization/shutdown, module descriptor, reverse static finalization, native attachment, source-created workers, thread gates, panic callback tests, and connected-board acceptance |
+| Runtime ABI 16 lifecycle | Implemented | Process initialization/shutdown, module descriptor, reverse static finalization, native attachment, source-created workers, thread gates, panic callback tests, and hosted acceptance; ABI 15 remains the latest connected-board baseline |
 | Unity and modular C artifacts | Implemented | Deterministic shuffled-input bundles, reachability partitioning, strict native builds, object cache, symbol maps, and LTO flag mapping |
 | C~-aware native debugging | Implemented | Source-only and instrumented modes, version-3 logical probes and scopes with closed-generic, interface, atomic, Thread, and Mutex presentation, cached C~ stepping and inspection, Run to Cursor, logical exception/log/function breakpoints, GDB watchpoints, ARC runtime inspection, ESP target-output forwarding and detach-and-continue, validated descriptors, WSL and ESP UART-stub resolution, MSVC fallback, and guarded ESP32 acceptance |
 | Scalar atomics and `volatile` | Implemented | Typed atomic operations and fences, operation-specific order validation, non-copyable storage, acquire/release volatile fields, MSVC/GNU/FreeRTOS lowering, concurrent native tests, and physical ESP32 publication checks |
@@ -156,7 +158,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 
 ## Conformance coverage
 
-The executable test project registers 125 checks, and all 125 pass. Coverage includes:
+The executable test project registers 132 checks, and all 132 pass. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -281,7 +283,7 @@ The same acceptance run prepared a guarded instrumented image and drove the bund
 
 ## Deliberately deferred
 
-These features are outside draft 0.15:
+These features are outside draft 0.16:
 
 - Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
@@ -302,7 +304,7 @@ These features are outside draft 0.15:
 
 ## Release gate
 
-A draft 0.15 release requires:
+A draft 0.16 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -312,6 +314,6 @@ A draft 0.15 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-The hosted software gates, ABI 15 ESP32/ESP32-C3 cross-builds, measured memory baseline, and connected T-CAN485 acceptance pass.
+The hosted Draft 0.16 software gates pass. ABI 16 ESP32/ESP32-C3 cross-build and connected-board acceptance remain to be refreshed; the preserved ABI 15 results are the latest embedded evidence.
 
-Draft 0.15 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Draft 0.15 ABI 15 is the latest complete measured physical-hardware baseline.
+Draft 0.16 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Draft 0.15 ABI 15 is the latest complete measured physical-hardware baseline.

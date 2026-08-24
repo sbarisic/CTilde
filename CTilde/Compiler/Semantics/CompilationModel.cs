@@ -20,9 +20,11 @@ internal sealed partial class CompilationModel
     private readonly Dictionary<(TypeSymbol Definition, string Arguments), TypeSymbol> _constructedTypes = [];
     private readonly Dictionary<(MethodSymbol Definition, string Arguments), MethodSymbol> _constructedMethods = [];
     private IReadOnlyDictionary<string, CType> _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
+    private readonly CompilationTarget _target;
 
     public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target)
     {
+        _target = target;
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
         Diagnostics = diagnostics;
@@ -42,6 +44,8 @@ internal sealed partial class CompilationModel
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
     public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
     public DiagnosticBag Diagnostics { get; }
+    public List<BoundStaticAssertion> StaticAssertions { get; } = [];
+    public HashSet<TypeSymbol> StaticAssertionLayoutTypes { get; } = [];
     public Dictionary<string, TypeSymbol> Types { get; }
     public DocumentationIndex Documentation { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
@@ -324,6 +328,8 @@ internal sealed partial class CompilationModel
             ExternName = method.ExternName,
             ExportName = method.ExportName,
             SectionName = method.SectionName,
+            IsUsed = method.IsUsed,
+            TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -387,6 +393,9 @@ internal sealed partial class CompilationModel
                 Initializer = field.Initializer,
                 Offset = field.Offset,
                 SectionName = field.SectionName,
+                ExternName = field.ExternName,
+                IsNativeVolatile = field.IsNativeVolatile,
+                IsUsed = field.IsUsed,
             });
         foreach (var property in definition.Properties)
         {
@@ -483,6 +492,8 @@ internal sealed partial class CompilationModel
             ExternName = method.ExternName,
             ExportName = method.ExportName,
             SectionName = method.SectionName,
+            IsUsed = method.IsUsed,
+            TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -849,13 +860,28 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
                     int? fieldOffset = null;
                     var sectionAttribute = FindAttribute(field.Attributes, "Section");
                     var sectionName = ParseSectionName(sectionAttribute);
+                    var usedAttribute = FindAttribute(field.Attributes, "Used");
+                    var externAttribute = FindAttribute(field.Attributes, "Extern");
+                    var nativeVolatileAttribute = FindAttribute(field.Attributes, "NativeVolatile");
+                    string? externName = null;
+                    if (externAttribute is not null)
+                    {
+                        if (externAttribute.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
+                            externName = value;
+                        else
+                            Diagnostics.Add("CT1289", "Extern data requires one string containing a portable C identifier.", externAttribute.Source, externAttribute.Span);
+                    }
+                    if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
+                        Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
+                    if (nativeVolatileAttribute is not null && nativeVolatileAttribute.Arguments.Length != 0)
+                        Diagnostics.Add("CT1290", "NativeVolatile does not accept arguments.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
                     var fieldOffsetAttribute = FindAttribute(field.Attributes, "FieldOffset");
                     if (fieldOffsetAttribute is not null)
                     {
@@ -881,6 +907,9 @@ internal sealed partial class CompilationModel
                         Initializer = field.Initializer,
                         Offset = fieldOffset,
                         SectionName = sectionName,
+                        ExternName = externName,
+                        IsNativeVolatile = nativeVolatileAttribute is not null,
+                        IsUsed = usedAttribute is not null,
                     };
                     if (symbol.Type.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
@@ -898,6 +927,12 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1274", "volatile requires a writable Boolean, integral, native-integral, enum, or unsafe-pointer field.", field.Source, field.Span);
                     if (sectionAttribute is not null && (!symbol.IsStatic || symbol.IsConst || !IsCompleteUnmanagedType(symbol.Type)))
                         Diagnostics.Add("CT1287", "Section requires a non-const static field with a complete unmanaged type.", sectionAttribute.Source, sectionAttribute.Span);
+                    if (usedAttribute is not null && (!symbol.IsStatic || symbol.IsConst || externAttribute is not null || !IsCompleteUnmanagedType(symbol.Type)))
+                        Diagnostics.Add("CT1288", "Used requires an owned non-const static field with a complete unmanaged type.", usedAttribute.Source, usedAttribute.Span);
+                    if (externAttribute is not null && (!symbol.IsStatic || symbol.IsConst || symbol.Initializer is not null || type.IsGenericDefinition || !IsCompleteUnmanagedType(symbol.Type) || sectionAttribute is not null || usedAttribute is not null || isVolatile))
+                        Diagnostics.Add("CT1289", "Extern data requires a non-generic static unmanaged field without an initializer, Section, Used, const, or C~ volatile.", externAttribute.Source, externAttribute.Span);
+                    if (nativeVolatileAttribute is not null && externAttribute is null)
+                        Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
                     AddUnique(type, symbol);
                     break;
                 }
@@ -1014,7 +1049,7 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
@@ -1023,6 +1058,21 @@ internal sealed partial class CompilationModel
                     var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
                     var returnsNullable = FindAttribute(method.Attributes, "ReturnsNullable");
                     var sectionAttribute = FindAttribute(method.Attributes, "Section");
+                    var usedAttribute = FindAttribute(method.Attributes, "Used");
+                    var taskEntryAttribute = FindAttribute(method.Attributes, "TaskEntry");
+                    uint? taskStackSize = null;
+                    if (taskEntryAttribute is not null)
+                    {
+                        if (taskEntryAttribute.Arguments is [AssignmentExpressionSyntax
+                            {
+                                Left: NameExpressionSyntax { Name: "StackSize" },
+                                OperatorKind: SyntaxKind.EqualsToken,
+                                Right: LiteralExpressionSyntax { Value: NumericLiteralValue stack }
+                            }] && stack.FloatingPoint is null && stack.Integer > 0 && stack.Integer <= uint.MaxValue && stack.Integer % 4 == 0)
+                            taskStackSize = (uint)stack.Integer;
+                        else
+                            Diagnostics.Add("CT1291", "TaskEntry requires one StackSize assignment using a positive uint value divisible by four.", taskEntryAttribute.Source, taskEntryAttribute.Span);
+                    }
                     var sectionName = ParseSectionName(sectionAttribute);
                     var previousTypeParameters = _activeTypeParameters;
                     var methodTypeParameters = method.TypeParameters.Select(parameter => new TypeSymbol
@@ -1057,6 +1107,10 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
                         Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
+                    if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
+                        Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
+                    if (usedAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
+                        Diagnostics.Add("CT1288", "Used requires a body-bearing static non-extern method.", usedAttribute.Source, usedAttribute.Span);
                     string? externalName = null;
                     string? exportName = null;
                     if (external is not null)
@@ -1128,6 +1182,8 @@ internal sealed partial class CompilationModel
                         ExternName = externalName,
                         ExportName = exportName,
                         SectionName = sectionName,
+                        IsUsed = usedAttribute is not null,
+                        TaskStackSize = taskStackSize,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsAbstract = isAbstractMethod,
@@ -1138,6 +1194,11 @@ internal sealed partial class CompilationModel
                     };
                     if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
                         Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
+                    if (taskEntryAttribute is not null &&
+                        (_target != CompilationTarget.EspIdf || accessibility != Accessibility.Public || !isStatic || method.Body is null || isAbstractMethod ||
+                         external is not null || exportName is null || entry is not null || !method.TypeParameters.IsDefaultOrEmpty || returnType != CType.Void ||
+                         methodParameters is not [{ Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
+                        Diagnostics.Add("CT1292", "TaskEntry requires an ESP-IDF public static non-generic exported void(void*) method body.", taskEntryAttribute.Source, taskEntryAttribute.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);

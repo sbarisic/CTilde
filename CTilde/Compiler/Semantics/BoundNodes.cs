@@ -90,6 +90,8 @@ internal sealed record BoundFlowSummary(
     bool ContainsExceptionRegion,
     bool ContainsDefer);
 
+internal sealed record BoundStaticAssertion(StaticAssertDeclarationSyntax Syntax, string ConditionCode, string Message);
+
 internal sealed record BoundBody(
     MethodSymbol Method,
     BoundStatement Root,
@@ -143,6 +145,8 @@ internal static class BoundTreeFactory
             .ToImmutableArray();
         var children = syntax switch
         {
+            StaticIfStatementSyntax @if when semantics.GetValueOrDefault(@if.Condition)?.ConstantValue is bool selected =>
+                (selected ? new[] { @if.Then } : @if.Else is null ? [] : new[] { @if.Else }).Select(child => CreateStatement(child, semantics)).ToImmutableArray(),
             TryStatementSyntax @try => new SyntaxNode[] { @try.Body }
                 .Concat(@try.Catches)
                 .Concat(@try.Finally is null ? [] : [@try.Finally])
@@ -164,6 +168,7 @@ internal static class BoundTreeFactory
             LocalDeclarationStatementSyntax => BoundStatementKind.LocalDeclaration,
             ExpressionStatementSyntax => BoundStatementKind.Expression,
             IfStatementSyntax => BoundStatementKind.If,
+            StaticIfStatementSyntax => BoundStatementKind.If,
             WhileStatementSyntax => BoundStatementKind.While,
             DoStatementSyntax => BoundStatementKind.Do,
             ForStatementSyntax => BoundStatementKind.For,

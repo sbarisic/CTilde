@@ -11,8 +11,15 @@ internal sealed partial class CEmitter
             var declarations = method.Parameters
                 .SelectMany(parameter => ExportParameterDeclarations(parameter, NameMangler.Identifier(parameter.Name)))
                 .ToArray();
-            writer.WriteLine(SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
+            writer.WriteLine(UsedAnnotation(method.IsUsed) + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(method.ReturnType, method.ExportName!, declarations));
             writer.WriteLine("{");
+            if (method.TaskStackSize is not null)
+            {
+                EmitTaskEntryBody(writer, method);
+                writer.WriteLine("}");
+                writer.WriteLine();
+                continue;
+            }
             writer.WriteLine("    ct_runtime_require_ready();");
             writer.WriteLine("    jmp_buf ct_export_target;");
             writer.WriteLine("    ct_exception_frame ct_export_frame = { &ct_export_target, ct_exception_top, ct_cleanup_top };");
@@ -59,6 +66,28 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
             writer.WriteLine();
         }
+    }
+
+    private void EmitTaskEntryBody(CWriter writer, MethodSymbol method)
+    {
+        var context = NameMangler.Identifier(method.Parameters[0].Name);
+        writer.WriteLine("    ct_thread_attach();");
+        writer.WriteLine("    jmp_buf ct_task_target;");
+        writer.WriteLine("    ct_exception_frame ct_task_frame = { &ct_task_target, ct_exception_top, ct_cleanup_top };");
+        writer.WriteLine("    if (setjmp(ct_task_target) != 0)");
+        writer.WriteLine("    {");
+        writer.WriteLine("        ct_object* ct_task_exception = ct_current_exception;");
+        writer.WriteLine("        ct_current_exception = NULL;");
+        writer.WriteLine("        ct_exception_top = ct_task_frame.Previous;");
+        writer.WriteLine("        ct_release(ct_task_exception);");
+        writer.WriteLine("        ct_fail(\"CTE0003\", \"<task-entry>\", 0);");
+        writer.WriteLine("    }");
+        writer.WriteLine("    ct_exception_top = &ct_task_frame;");
+        writer.WriteLine($"    {method.CName}({context});");
+        writer.WriteLine("    ct_exception_top = ct_task_frame.Previous;");
+        writer.WriteLine("    ct_thread_detach();");
+        writer.WriteLine("    vTaskDelete(NULL);");
+        writer.WriteLine("    for (;;) { }");
     }
 
     private IEnumerable<string> ExportParameterDeclarations(ParameterSymbol parameter, string name)

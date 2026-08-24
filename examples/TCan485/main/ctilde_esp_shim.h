@@ -37,6 +37,10 @@ int32_t ct_esp_call_export(int32_t left, int32_t right);
 int32_t ct_esp_threading_self_test(int32_t (*callback)(int32_t value, void* context), void* callback_context);
 void ct_esp_thread_cleanup(int32_t value);
 
+extern volatile uint32_t ct_draft018_native_data;
+uintptr_t ct_draft018_mmio_address(void);
+int32_t ct_draft018_start_task(void);
+
 esp_err_t ct_esp_gpio_configure_input(int32_t pin);
 esp_err_t ct_esp_gpio_configure_output(int32_t pin);
 esp_err_t ct_esp_gpio_write(int32_t pin, bool high);

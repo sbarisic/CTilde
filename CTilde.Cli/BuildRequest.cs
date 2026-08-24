@@ -5,6 +5,7 @@ namespace CTilde.Cli;
 internal sealed record BuildRequest(
     IReadOnlyCollection<string> Inputs,
     CompilationTarget Target,
+    CompilationArchitecture Architecture,
     string? ManifestPath,
     string RootDirectory,
     string? SourceRoot,
@@ -106,7 +107,9 @@ internal static class BuildRequestResolver
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
                 : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
-        return new BuildRequest(project.SourceFiles, project.Configuration.Target, project.ManifestPath,
+        var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
+            project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject);
+        return new BuildRequest(project.SourceFiles, project.Configuration.Target, architecture, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? build.Compiler, executable,
             idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
@@ -165,7 +168,8 @@ internal static class BuildRequestResolver
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
                 : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
-        return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, null, root,
+        var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject);
+        return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, architecture, null, root,
             ResolveSourceRoot(options),
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? "auto",
@@ -202,6 +206,42 @@ internal static class BuildRequestResolver
             throw new CommandLineException("-o cannot be combined with --c-layout modules; use --output-directory.");
         if (options.CLayout == GeneratedCLayout.Unity && options.OutputDirectory is not null)
             throw new CommandLineException("--output-directory requires --c-layout modules.");
+    }
+
+    private static CompilationArchitecture ResolveArchitecture(CompilationArchitecture requested, CompilationTarget target, string compiler, string? idfProject)
+    {
+        if (requested != CompilationArchitecture.Auto)
+            return requested;
+        if (target == CompilationTarget.Hosted)
+            return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+            {
+                System.Runtime.InteropServices.Architecture.X86 => CompilationArchitecture.X86,
+                System.Runtime.InteropServices.Architecture.X64 => CompilationArchitecture.X64,
+                System.Runtime.InteropServices.Architecture.Arm => CompilationArchitecture.Arm32,
+                System.Runtime.InteropServices.Architecture.Arm64 => CompilationArchitecture.Arm64,
+                _ => CompilationArchitecture.Auto,
+            };
+        if (idfProject is null)
+            return CompilationArchitecture.Auto;
+        var projectDescription = Path.Combine(idfProject, "build", "project_description.json");
+        if (File.Exists(projectDescription))
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(File.ReadAllText(projectDescription));
+            if (document.RootElement.TryGetProperty("target", out var targetName))
+                return targetName.GetString() is "esp32c3" or "esp32c6" or "esp32h2" ? CompilationArchitecture.RiscV32 : CompilationArchitecture.Xtensa;
+        }
+        var sdkconfig = Path.Combine(idfProject, "sdkconfig");
+        if (File.Exists(sdkconfig))
+        {
+            var text = File.ReadAllText(sdkconfig);
+            if (text.Contains("CONFIG_IDF_TARGET=\"esp32c3\"", StringComparison.Ordinal) ||
+                text.Contains("CONFIG_IDF_TARGET=\"esp32c6\"", StringComparison.Ordinal) ||
+                text.Contains("CONFIG_IDF_TARGET=\"esp32h2\"", StringComparison.Ordinal))
+                return CompilationArchitecture.RiscV32;
+            if (text.Contains("CONFIG_IDF_TARGET=", StringComparison.Ordinal))
+                return CompilationArchitecture.Xtensa;
+        }
+        return CompilationArchitecture.Auto;
     }
 
     private static void ValidateTargetOptions(CommandLineOptions options, CompilationTarget target)

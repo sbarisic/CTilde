@@ -92,7 +92,17 @@ public sealed partial class LanguageServiceSnapshot
         var sourceRoot = options.Target == CompilationTarget.Hosted && options.SourceRoot is not null && Path.IsPathFullyQualified(options.SourceRoot)
             ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.SourceRoot))
             : null;
-        _boundProgram = BoundProgramBuilder.Build(_model, options.Target, sourceRoot);
+        var architecture = options.Architecture == CompilationArchitecture.Auto && options.Target == CompilationTarget.Hosted
+            ? System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+            {
+                System.Runtime.InteropServices.Architecture.X86 => CompilationArchitecture.X86,
+                System.Runtime.InteropServices.Architecture.X64 => CompilationArchitecture.X64,
+                System.Runtime.InteropServices.Architecture.Arm => CompilationArchitecture.Arm32,
+                System.Runtime.InteropServices.Architecture.Arm64 => CompilationArchitecture.Arm64,
+                _ => CompilationArchitecture.Auto,
+            }
+            : options.Architecture;
+        _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
         _documentIndexes = new Dictionary<string, DocumentIndex>(_pathComparer);

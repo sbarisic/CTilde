@@ -57,7 +57,14 @@ internal sealed partial class CEmitter
             AddCType(initializer.Type);
             AddSemantics(initializer.Body.Semantics.Values);
         }
+        foreach (var field in Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.IsUsed || field.ExternName is not null))
+        {
+            AddType(field.ContainingType);
+            AddCType(field.Type);
+        }
         AddType(Model.Types.GetValueOrDefault("System.Object"));
+        foreach (var type in Model.StaticAssertionLayoutTypes)
+            AddType(type);
         foreach (var name in RuntimeFaultTypeNames)
             AddType(Model.Types.GetValueOrDefault(name));
         if (Model.Types.ContainsKey("System.IO.IOException"))

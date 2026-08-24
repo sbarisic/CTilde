@@ -190,6 +190,10 @@ public static class WifiDemo
             else
                 Ws2812.SetPixel(0u, 0u, 0u, 8u);
             Ws2812.Refresh();
+            if (purple)
+                Console.WriteLine("ws2812: on");
+            else
+                Console.WriteLine("ws2812: off");
             Thread.Sleep(100u);
         }
         worker.Join();

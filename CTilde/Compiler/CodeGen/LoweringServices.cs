@@ -11,6 +11,8 @@ internal interface ILoweringServices
     IEnumerable<string> DynamicGeneratedSymbols { get; }
     bool EmitDebugInformation { get; }
     bool EmitDebugInstrumentation { get; }
+    CompilationTarget Target { get; }
+    CompilationArchitecture Architecture { get; }
 
     string CTypeName(CType type);
     string CDeclaration(CType type, string name);

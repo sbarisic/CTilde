@@ -4,9 +4,9 @@ namespace CTilde;
 
 internal static class BoundProgramBuilder
 {
-    public static BoundProgram Build(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
+    public static BoundProgram Build(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null)
     {
-        var services = new AnalysisServices(model, target, sourceRoot);
+        var services = new AnalysisServices(model, target, architecture, sourceRoot);
         var bodies = ImmutableArray.CreateBuilder<BoundBody>();
         var analyzedMethods = new HashSet<MethodSymbol>();
         var analyzedAccessors = new HashSet<(PropertySymbol Property, bool Getter)>();
@@ -51,6 +51,7 @@ internal static class BoundProgramBuilder
         }
 
         AnalyzeModuleInitializers(model, services, bodies);
+        CompileTimeEvaluator.EvaluateAssertions(model, services);
         ValidateConstructorCycles(model);
         services.AllocationEffects.Validate(model.Diagnostics);
         TargetValidator.Validate(model, services, target);

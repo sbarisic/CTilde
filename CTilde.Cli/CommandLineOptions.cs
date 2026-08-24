@@ -13,6 +13,8 @@ internal sealed record CommandLineOptions(
     bool Trace,
     CompilationTarget Target,
     bool TargetSpecified,
+    CompilationArchitecture Architecture,
+    bool ArchitectureSpecified,
     bool Build,
     CTildeNativeBuildConfiguration? Configuration,
     string? Compiler,
@@ -66,6 +68,8 @@ internal sealed record CommandLineOptions(
         var build = false;
         var target = CompilationTarget.Hosted;
         var targetSpecified = false;
+        var architecture = CompilationArchitecture.Auto;
+        var architectureSpecified = false;
         var lto = false;
         var debugInfo = false;
         var generateBindings = false;
@@ -168,6 +172,24 @@ internal sealed record CommandLineOptions(
                     if (targetValue is not null && !Enum.IsDefined(target))
                         parseError = $"Unknown target '{targetValue}'; expected hosted or esp-idf.";
                     break;
+                case "--architecture":
+                    architectureSpecified = true;
+                    var architectureValue = RequireValue();
+                    architecture = architectureValue switch
+                    {
+                        "auto" => CompilationArchitecture.Auto,
+                        "x86" => CompilationArchitecture.X86,
+                        "x64" => CompilationArchitecture.X64,
+                        "arm32" => CompilationArchitecture.Arm32,
+                        "arm64" => CompilationArchitecture.Arm64,
+                        "xtensa" => CompilationArchitecture.Xtensa,
+                        "riscv32" => CompilationArchitecture.RiscV32,
+                        "riscv64" => CompilationArchitecture.RiscV64,
+                        _ => (CompilationArchitecture)(-1),
+                    };
+                    if (architectureValue is not null && !Enum.IsDefined(architecture))
+                        parseError = $"Unknown architecture '{architectureValue}'; expected auto, x86, x64, arm32, arm64, xtensa, riscv32, or riscv64.";
+                    break;
                 default:
                     if (argument.StartsWith("-", StringComparison.Ordinal))
                         parseError = $"Unknown option '{argument}'.";
@@ -184,7 +206,7 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
+            targetSpecified, architecture, architectureSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath);
         return true;
     }

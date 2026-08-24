@@ -53,9 +53,15 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <signal.h>");
         if (IsEspIdf)
             writer.WriteLine("#include \"ctilde_esp_shim.h\"");
+        if (IsEspIdf && Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.TaskStackSize is not null) && !_usesManagedThreading)
+        {
+            writer.WriteLine("#include <freertos/FreeRTOS.h>");
+            writer.WriteLine("#include <freertos/task.h>");
+        }
         if (EmitDebugInstrumentation && IsEspIdf)
             writer.WriteLine("#include <esp_cpu.h>");
         writer.WriteLine();
+        EmitMmioBarrier(writer);
         writer.WriteLine($"#define CTILDE_RUNTIME_ABI_VERSION UINT32_C({CompilerContract.RuntimeAbiVersion})");
         writer.WriteLine();
         writer.WriteLine("static_assert(CHAR_BIT == 8, \"C~ requires 8-bit bytes\");");
@@ -458,6 +464,26 @@ internal sealed partial class CEmitter
         }
         if (!IsEspIdf)
             writer.WriteLine("void ct_environment_exit(int32_t code) { exit((int)code); }");
+        writer.WriteLine();
+    }
+
+    private void EmitMmioBarrier(CWriter writer)
+    {
+        writer.WriteLine("static inline void ct_mmio_barrier(void)");
+        writer.WriteLine("{");
+        writer.WriteLine("#if defined(_MSC_VER)");
+        writer.WriteLine("    _ReadWriteBarrier(); MemoryBarrier(); _ReadWriteBarrier();");
+        writer.WriteLine("#else");
+        var instruction = _architecture switch
+        {
+            CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64 => "dmb sy",
+            CompilationArchitecture.Xtensa => "memw",
+            CompilationArchitecture.RiscV32 or CompilationArchitecture.RiscV64 => "fence iorw, iorw",
+            _ => "mfence",
+        };
+        writer.WriteLine($"    __asm__ volatile (\"{instruction}\" ::: \"memory\");");
+        writer.WriteLine("#endif");
+        writer.WriteLine("}");
         writer.WriteLine();
     }
 
@@ -908,10 +934,16 @@ internal sealed partial class CEmitter
 
     private void EmitGlobals(CWriter writer)
     {
-        foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>"))
+        foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>").OrderBy(field => field.CName, StringComparer.Ordinal))
         {
+            if (field.ExternName is not null)
+            {
+                var qualifiers = (field.IsReadonly ? "const " : string.Empty) + (field.IsNativeVolatile ? "volatile " : string.Empty);
+                writer.WriteLine($"extern {qualifiers}{CDeclaration(field.Type, field.CName)};");
+                continue;
+            }
             var value = field.Type.Kind == CTypeKind.Struct ? "{0}" : DefaultValue(field.Type);
-            writer.WriteLine($"static {SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
+            writer.WriteLine($"static {UsedAnnotation(field.IsUsed)}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
         }
         if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();

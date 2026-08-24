@@ -264,6 +264,26 @@ internal sealed partial class TypedIrBodyLowerer
         var staticType = TryResolveTypeExpression(syntax.Receiver);
         if (staticType is not null)
         {
+            if (staticType.FullName == "System.Runtime.Target")
+            {
+                if (_emitter.Architecture == CompilationArchitecture.Auto && syntax.Name is "Architecture" or "PointerSize")
+                {
+                    Report("CT4108", "The target architecture could not be resolved before evaluating this target query.", syntax);
+                    return ErrorExpression();
+                }
+                if (syntax.Name == "Profile")
+                    return Constant(_model.Types["System.Runtime.TargetProfile"].Type,
+                        _emitter.Target == CompilationTarget.Hosted ? 0 : 1,
+                        _emitter.Target == CompilationTarget.Hosted ? "0" : "1");
+                if (syntax.Name == "Architecture")
+                    return Constant(_model.Types["System.Runtime.TargetArchitecture"].Type,
+                        (int)_emitter.Architecture - 1, ((int)_emitter.Architecture - 1).ToString(CultureInfo.InvariantCulture));
+                if (syntax.Name == "PointerSize")
+                {
+                    var size = _emitter.Architecture is CompilationArchitecture.X64 or CompilationArchitecture.Arm64 or CompilationArchitecture.RiscV64 ? 8 : 4;
+                    return Constant(CType.Int, size, size.ToString(CultureInfo.InvariantCulture));
+                }
+            }
             if (staticType.Kind == DeclaredTypeKind.Enum)
             {
                 var enumValue = staticType.EnumValues.FirstOrDefault(value => value.Name == syntax.Name);
@@ -342,7 +362,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerField(FieldSymbol field, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
-        if (field.Type.ContainsPointer)
+        if (field.Type.ContainsPointer || field.ExternName is not null)
             RequireUnsafe(syntax);
         CheckAccess(field, syntax);
         if (!forWrite && field.IsConst && field.Initializer is not null)
@@ -825,6 +845,8 @@ internal sealed partial class TypedIrBodyLowerer
 
         if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, prelude, syntax, out var atomicResult))
             return atomicResult;
+        if (!captureForDefer && TryLowerMmioCall(selected, loweredArguments.Codes, prelude, syntax, out var mmioResult))
+            return mmioResult;
         if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, prelude, captureForDefer, out var threadingResult))
             return threadingResult;
 
@@ -881,6 +903,61 @@ internal sealed partial class TypedIrBodyLowerer
         return selected.ReturnType.ContainsManagedReferences
             ? OwnResult(selected.ReturnType, call, prelude, selected.ReturnsBorrowed, selected)
             : new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
+    }
+
+    private bool TryLowerMmioCall(MethodSymbol selected, IReadOnlyList<string> arguments, List<string> prelude,
+        CallExpressionSyntax syntax, out IrExpressionValue result)
+    {
+        result = null!;
+        if (selected.ContainingType.FullName != "System.Runtime.Mmio")
+            return false;
+        var ordered = selected.Name is "Read" or "Write" or "Barrier";
+        if (ordered && _emitter.Architecture == CompilationArchitecture.Auto)
+        {
+            Report("CT4109", "Ordered MMIO requires a supported resolved target architecture.", syntax);
+            result = ErrorExpression(prelude);
+            return true;
+        }
+        if (selected.Name == "Barrier")
+        {
+            prelude.Add("ct_mmio_barrier();");
+            result = new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+            return true;
+        }
+        var element = selected.TypeArguments.Length == 1 ? selected.TypeArguments[0] : CType.Error;
+        var valid = element.Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Enum;
+        if (!valid)
+            Report("CT2203", $"MMIO element type '{element.DisplayName}' must be a fixed-width integer or enum.", syntax);
+        var width = element.Kind switch
+        {
+            CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1,
+            CTypeKind.Short or CTypeKind.Ushort => 2,
+            CTypeKind.Long or CTypeKind.Ulong => 8,
+            CTypeKind.Enum => element.Symbol!.Fields.Single(field => field.Name == "<underlying>").Type.Kind is CTypeKind.Long or CTypeKind.Ulong ? 8 :
+                element.Symbol.Fields.Single(field => field.Name == "<underlying>").Type.Kind is CTypeKind.Short or CTypeKind.Ushort ? 2 : 4,
+            _ => 4,
+        };
+        if (syntax.Arguments[0].Expression is LiteralExpressionSyntax { Value: NumericLiteralValue literal } && literal.FloatingPoint is null && literal.Integer % width != 0)
+            Report("CT2203", $"MMIO address must be naturally aligned to {width} byte(s).", syntax.Arguments[0].Expression);
+        var ctype = _emitter.CTypeName(element);
+        var address = arguments.Count == 0 ? "0" : arguments[0];
+        if (ordered)
+            prelude.Add("ct_mmio_barrier();");
+        if (selected.Name is "Write" or "WriteRelaxed")
+        {
+            prelude.Add($"*(volatile {ctype}*)(uintptr_t)({address}) = ({ctype})({arguments[1]});");
+            if (ordered)
+                prelude.Add("ct_mmio_barrier();");
+            result = new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+            return true;
+        }
+        var temporary = NewTemp();
+        prelude.Add($"{ctype} {temporary} = *(volatile {ctype}*)(uintptr_t)({address});");
+        if (ordered)
+            prelude.Add("ct_mmio_barrier();");
+        result = new IrExpressionValue { Type = element, Code = temporary, Prelude = prelude, Symbol = selected };
+        return true;
     }
 
     private bool TryLowerAtomicCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments, List<string> prelude, SyntaxNode syntax, out IrExpressionValue result)

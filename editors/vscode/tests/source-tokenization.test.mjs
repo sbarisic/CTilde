@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.17 keyword receives its intended scope", () => {
+test("every draft 0.18 keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
@@ -59,7 +59,7 @@ test("every draft 0.17 keyword receives its intended scope", () => {
       scope: "storage.modifier.ctilde"
     },
     {
-      words: ["alignof", "break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "offsetof", "return", "sizeof", "switch", "throw", "try", "while"],
+      words: ["alignof", "assert", "break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "offsetof", "return", "sizeof", "switch", "throw", "try", "while"],
       scope: "keyword.control.ctilde"
     },
     {

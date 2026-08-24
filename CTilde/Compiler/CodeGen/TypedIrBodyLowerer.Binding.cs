@@ -373,6 +373,18 @@ internal sealed partial class TypedIrBodyLowerer
             left = Materialize(left, syntax.Left); right = Materialize(right, syntax.Right);
             code = $"ct_string_equal({left.Code}, {right.Code})";
         }
+        else if (left.Type.Kind is CTypeKind.Nint or CTypeKind.Nuint && right.IsConstant && right.Type.IsIntegral)
+        {
+            common = left.Type;
+            right = Convert(right, common, syntax.Right, false);
+            code = $"({left.Code} == {right.Code})";
+        }
+        else if (right.Type.Kind is CTypeKind.Nint or CTypeKind.Nuint && left.IsConstant && left.Type.IsIntegral)
+        {
+            common = right.Type;
+            left = Convert(left, common, syntax.Left, false);
+            code = $"({left.Code} == {right.Code})";
+        }
         else if (left.Type.IsNumeric && right.Type.IsNumeric)
         {
             common = TypeFacts.PromoteNumeric(left.Type, right.Type);

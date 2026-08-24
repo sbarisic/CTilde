@@ -1,0 +1,48 @@
+namespace System.Runtime;
+
+public enum TargetProfile
+{
+    Hosted,
+    EspIdf
+}
+
+public enum TargetArchitecture
+{
+    X86,
+    X64,
+    Arm32,
+    Arm64,
+    Xtensa,
+    RiscV32,
+    RiscV64
+}
+
+public static class Target
+{
+    [NoAlloc]
+    public static TargetProfile Profile { get { return TargetProfile.Hosted; } }
+
+    [NoAlloc]
+    public static TargetArchitecture Architecture { get { return TargetArchitecture.X86; } }
+
+    [NoAlloc]
+    public static int PointerSize { get { return 4; } }
+}
+
+public static class Mmio
+{
+    [NoAlloc]
+    public static unsafe T Read<T>(nuint address) where T : unmanaged { return (T)0; }
+
+    [NoAlloc]
+    public static unsafe void Write<T>(nuint address, T value) where T : unmanaged { }
+
+    [NoAlloc]
+    public static unsafe T ReadRelaxed<T>(nuint address) where T : unmanaged { return (T)0; }
+
+    [NoAlloc]
+    public static unsafe void WriteRelaxed<T>(nuint address, T value) where T : unmanaged { }
+
+    [NoAlloc]
+    public static unsafe void Barrier() { }
+}

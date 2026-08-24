@@ -111,7 +111,7 @@ internal sealed partial class TypedIrBodyLowerer
         ThrowStatementSyntax => "throw",
         TryStatementSyntax => "try",
         DeferStatementSyntax => "defer",
-        IfStatementSyntax or WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax or ForeachStatementSyntax or SwitchStatementSyntax => "condition",
+        IfStatementSyntax or StaticIfStatementSyntax or WhileStatementSyntax or DoStatementSyntax or ForStatementSyntax or ForeachStatementSyntax or SwitchStatementSyntax => "condition",
         _ => "statement",
     };
 
@@ -144,6 +144,8 @@ internal sealed partial class TypedIrBodyLowerer
                 }
             case IfStatementSyntax @if:
                 return EmitIf(writer, @if);
+            case StaticIfStatementSyntax @if:
+                return EmitStaticIf(writer, @if);
             case WhileStatementSyntax @while:
                 EmitWhile(writer, @while);
                 return FlowResult.None;
@@ -215,6 +217,22 @@ internal sealed partial class TypedIrBodyLowerer
             default:
                 return FlowResult.None;
         }
+    }
+
+    private FlowResult EmitStaticIf(ILoweringWriter writer, StaticIfStatementSyntax syntax)
+    {
+        var condition = LowerExpression(syntax.Condition);
+        if (condition.Type != CType.Bool || !condition.IsConstant || condition.ConstantValue is not bool selected)
+        {
+            Report(_emitter.Architecture == CompilationArchitecture.Auto ? "CT4108" : "CT2200",
+                _emitter.Architecture == CompilationArchitecture.Auto
+                    ? "The target architecture could not be resolved before compile-time selection."
+                    : "A static if condition must be a compile-time Boolean expression.", syntax.Condition);
+            return FlowResult.None;
+        }
+        return selected
+            ? EmitStatement(writer, syntax.Then)
+            : syntax.Else is null ? FlowResult.None : EmitStatement(writer, syntax.Else);
     }
 
     private FlowResult EmitLock(ILoweringWriter writer, LockStatementSyntax syntax)

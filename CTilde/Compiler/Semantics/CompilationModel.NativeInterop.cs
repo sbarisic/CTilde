@@ -79,7 +79,7 @@ internal sealed partial class CompilationModel
                 generatedSymbols.Add(CEmitter.DelegateFactoryName(type));
                 generatedSymbols.Add(CEmitter.DelegateDropName(type));
             }
-            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>"))
+            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>" && field.ExternName is null))
                 generatedSymbols.Add(field.CName);
             foreach (var value in type.EnumValues)
                 generatedSymbols.Add(NameMangler.Identifier(type.FullName + "." + value.Name));
@@ -118,6 +118,8 @@ internal sealed partial class CompilationModel
             .OrderBy(method => method.ExternName, StringComparer.Ordinal)
             .ThenBy(method => method.ContainingType.FullName, StringComparer.Ordinal)
             .ToArray();
+        var externFields = Types.Values.SelectMany(type => type.Fields).Where(field => field.ExternName is not null)
+            .OrderBy(field => field.ExternName, StringComparer.Ordinal).ThenBy(field => field.ContainingType.FullName, StringComparer.Ordinal).ToArray();
         var nativeTypeNames = Types.Values.Where(type => type.Kind == DeclaredTypeKind.Opaque && type.NativeTypeName is not null)
             .Select(type => type.NativeTypeName!).ToHashSet(StringComparer.Ordinal);
         foreach (var method in externs.Where(method => !method.IsTrustedExtern))
@@ -125,6 +127,9 @@ internal sealed partial class CompilationModel
             if (runtimeSymbols.Contains(method.ExternName!) || generatedSymbols.Contains(method.ExternName!) || nativeTypeNames.Contains(method.ExternName!) || IsExceptionLoweringName(method.ExternName!) || IsOwnershipLoweringName(method.ExternName!))
                 Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with a compiler-owned or generated C symbol.", method.Syntax!.Source, method.Syntax.Span);
         }
+        foreach (var field in externFields)
+            if (runtimeSymbols.Contains(field.ExternName!) || generatedSymbols.Contains(field.ExternName!) || nativeTypeNames.Contains(field.ExternName!))
+                Diagnostics.Add("CT4101", $"External data symbol '{field.ExternName}' conflicts with a compiler-owned or generated C symbol.", field.Syntax!.Source, field.Syntax.Span);
 
         foreach (var group in externs.GroupBy(method => method.ExternName!, StringComparer.Ordinal))
         {
@@ -137,9 +142,20 @@ internal sealed partial class CompilationModel
                     first.Syntax?.Source.GetLocation(first.Syntax.Span));
             }
         }
+        foreach (var group in externFields.GroupBy(field => field.ExternName!, StringComparer.Ordinal))
+        {
+            var first = group.First();
+            foreach (var field in group.Skip(1))
+                if (field.Type != first.Type || field.IsReadonly != first.IsReadonly || field.IsNativeVolatile != first.IsNativeVolatile)
+                    Diagnostics.Add("CT4102", $"External data symbol '{group.Key}' has incompatible ABI declarations.", field.Syntax!.Source, field.Syntax.Span,
+                        first.Syntax!.Source.GetLocation(first.Syntax.Span));
+        }
+        var functionSymbols = externs.Select(method => method.ExternName!).ToHashSet(StringComparer.Ordinal);
+        foreach (var field in externFields.Where(field => functionSymbols.Contains(field.ExternName!)))
+            Diagnostics.Add("CT4102", $"External symbol '{field.ExternName}' cannot be declared as both function and data.", field.Syntax!.Source, field.Syntax.Span);
 
         var exports = Types.Values.SelectMany(type => type.Methods).Where(method => method.ExportName is not null).ToArray();
-        var nativeSymbols = externs.Select(method => method.ExternName!).ToHashSet(StringComparer.Ordinal);
+        var nativeSymbols = externs.Select(method => method.ExternName!).Concat(externFields.Select(field => field.ExternName!)).ToHashSet(StringComparer.Ordinal);
         foreach (var method in exports)
         {
             if (runtimeSymbols.Contains(method.ExportName!) || generatedSymbols.Contains(method.ExportName!) || nativeSymbols.Contains(method.ExportName!) || nativeTypeNames.Contains(method.ExportName!) || IsExceptionLoweringName(method.ExportName!) || IsOwnershipLoweringName(method.ExportName!))

@@ -120,7 +120,8 @@ internal sealed class WorkspaceState
                 return cached.Snapshot;
             var sourceFiles = included ? project!.SourceFiles : [Path.GetFullPath(path)];
             var target = project?.Configuration.Target ?? CompilationTarget.Hosted;
-            var snapshot = CreateSnapshot(key, sourceFiles, target, project is null ? null : BindingProjectError(project), BindingPaths(project));
+            var architecture = project?.Configuration.Architecture ?? CompilationArchitecture.Auto;
+            var snapshot = CreateSnapshot(key, sourceFiles, target, architecture, project is null ? null : BindingProjectError(project), BindingPaths(project));
             _projects[key] = new CachedProject(snapshot);
             return snapshot;
         }
@@ -144,7 +145,7 @@ internal sealed class WorkspaceState
                     catch (CTildeProjectException) { continue; }
                     if (_projects.ContainsKey(project.ManifestPath))
                         continue;
-                    _projects[project.ManifestPath] = new CachedProject(CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, BindingProjectError(project), BindingPaths(project)));
+                    _projects[project.ManifestPath] = new CachedProject(CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, project.Configuration.Architecture, BindingProjectError(project), BindingPaths(project)));
                 }
             }
             return [.. _projects.Values.Select(value => value.Snapshot).DistinctBy(value => value.Key)];
@@ -169,7 +170,7 @@ internal sealed class WorkspaceState
         }
     }
 
-    private ProjectSnapshot CreateStandalone(string path, CompilationTarget target, string error) => CreateSnapshot($"standalone:{path}:{target}", [path], target, error, null);
+    private ProjectSnapshot CreateStandalone(string path, CompilationTarget target, string error) => CreateSnapshot($"standalone:{path}:{target}", [path], target, CompilationArchitecture.Auto, error, null);
 
     private static IReadOnlySet<string>? BindingPaths(CTildeProject? project) => project?.Configuration.BindingManifests
         .Select(manifest => manifest.DeclarationsPath).ToHashSet(PathComparer);
@@ -194,7 +195,7 @@ internal sealed class WorkspaceState
         return null;
     }
 
-    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, string? projectError, IReadOnlySet<string>? bindingPaths)
+    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, CompilationArchitecture architecture, string? projectError, IReadOnlySet<string>? bindingPaths)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
         foreach (var path in sourceFiles)
@@ -211,8 +212,8 @@ internal sealed class WorkspaceState
                 trees.Add(SyntaxTree.ParseText(open?.Text ?? string.Empty, path));
             }
         }
-        var service = LanguageServiceSnapshot.Create(trees, new CompilationOptions(target));
-        return new ProjectSnapshot(key, sourceFiles, target, service, projectError, _revision);
+        var service = LanguageServiceSnapshot.Create(trees, new CompilationOptions(target, Architecture: architecture));
+        return new ProjectSnapshot(key, sourceFiles, target, architecture, service, projectError, _revision);
     }
 
     private void SignalChanged()
@@ -236,4 +237,4 @@ internal sealed class WorkspaceState
 }
 
 internal sealed record OpenDocument(string Uri, string Path, int Version, string Text);
-internal sealed record ProjectSnapshot(string Key, ImmutableArray<string> SourceFiles, CompilationTarget Target, LanguageServiceSnapshot LanguageService, string? ProjectError, long Revision);
+internal sealed record ProjectSnapshot(string Key, ImmutableArray<string> SourceFiles, CompilationTarget Target, CompilationArchitecture Architecture, LanguageServiceSnapshot LanguageService, string? ProjectError, long Revision);

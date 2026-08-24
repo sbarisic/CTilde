@@ -13,7 +13,10 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .Where(method => method.ExportName is not null)
             .OrderBy(method => method.ExportName, StringComparer.Ordinal)
             .ToArray();
-        var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName));
+        var externFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.ExternName is not null && field.Accessibility == Accessibility.Public)
+            .OrderBy(field => field.ExternName, StringComparer.Ordinal).ToArray();
+        var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize)) +
+            "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -30,6 +33,10 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append(line).Append('\n');
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
         writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(").Append(CompilerContract.RuntimeAbiVersion).Append(")\n\n");
+        foreach (var method in exports.Where(method => method.TaskStackSize is not null))
+            writer.Append("#define CTILDE_TASK_STACK_").Append(TaskMacroIdentifier(method.ExportName!)).Append(" UINT32_C(").Append(method.TaskStackSize!.Value).Append(")\n");
+        if (exports.Any(method => method.TaskStackSize is not null))
+            writer.Append('\n');
         writer.Append("typedef struct ct_object ct_object;\n");
         writer.Append("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;\n");
         writer.Append("typedef void (*ct_panic_handler)(const ct_panic_info* info, void* context);\n");
@@ -72,12 +79,24 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             writer.Append(parameters.Length == 0 ? "void" : string.Join(", ", parameters));
             writer.Append(");\n");
         }
+        foreach (var field in externFields)
+        {
+            writer.Append("extern ");
+            if (field.IsReadonly)
+                writer.Append("const ");
+            if (field.IsNativeVolatile)
+                writer.Append("volatile ");
+            writer.Append(CTypeName(field.Type)).Append(' ').Append(field.ExternName).Append(";\n");
+        }
         writer.Append("\n#undef CT_ALIGNOF\n");
         foreach (var section in codeSections)
             writer.Append("#undef ").Append(NativeSection.MacroName(NativeSectionKind.Code, section)).Append('\n');
         writer.Append("#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
         return writer.ToString();
     }
+
+    private static string TaskMacroIdentifier(string name) => string.Concat(name.Select(character =>
+        char.IsAsciiLetterOrDigit(character) ? char.ToUpperInvariant(character) : '_'));
 
     private static string OwnershipComment(MethodSymbol method)
     {

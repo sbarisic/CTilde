@@ -75,6 +75,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["short"] = SyntaxKind.ShortKeyword,
         ["sizeof"] = SyntaxKind.SizeofKeyword,
         ["static"] = SyntaxKind.StaticKeyword,
+        ["assert"] = SyntaxKind.AssertKeyword,
         ["stackalloc"] = SyntaxKind.StackallocKeyword,
         ["string"] = SyntaxKind.StringKeyword,
         ["struct"] = SyntaxKind.StructKeyword,

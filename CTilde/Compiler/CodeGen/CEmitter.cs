@@ -52,6 +52,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
+    private readonly CompilationArchitecture _architecture;
     private readonly string? _sourceRoot;
     private readonly DebugInformationMode _debugInformation;
     private readonly DebugMemoryMode _debugMemory;
@@ -67,13 +68,14 @@ internal sealed partial class CEmitter : ILoweringServices
     private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
-    public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null,
+    public CEmitter(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null,
         DebugInformationMode debugInformation = DebugInformationMode.None,
         DebugMemoryMode debugMemory = DebugMemoryMode.Off)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
+        _architecture = architecture;
         _sourceRoot = sourceRoot;
         _debugInformation = debugInformation;
         _debugMemory = debugMemory;
@@ -100,6 +102,16 @@ internal sealed partial class CEmitter : ILoweringServices
         if (model.UserTypes.SelectMany(type => type.Methods).Any(method => method.ExportName is not null))
             _usesExceptions = true;
     }
+
+    public CEmitter(CompilationModel model, CompilationTarget target, string? sourceRoot = null,
+        DebugInformationMode debugInformation = DebugInformationMode.None,
+        DebugMemoryMode debugMemory = DebugMemoryMode.Off)
+        : this(model, target, CompilationArchitecture.Auto, sourceRoot, debugInformation, debugMemory)
+    {
+    }
+
+    public CompilationTarget Target => _target;
+    public CompilationArchitecture Architecture => _architecture;
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
@@ -210,9 +222,11 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitTypeLayouts(prefix);
         EmitArrayLayouts(prefix);
         EmitBoxLayouts(prefix);
+        EmitCompileTimeAssertions(prefix);
         EmitGlobals(prefix);
         EmitOwnershipHelpers(prefix);
         EmitPrototypes(prefix);
+        EmitUsedAnchors(prefix);
         EmitObjectMetadata(prefix);
         EmitRuntimeFaultSupport(prefix);
         EmitScalarAtomicSupport(prefix);
@@ -253,6 +267,33 @@ internal sealed partial class CEmitter : ILoweringServices
         var debugMap = EmitDebugInformation ? EmitDebugMapJson(program) : string.Empty;
         var artifacts = BuildModularArtifacts(prunedPrefix, suffix.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
         return new CEmitterOutput(unity, artifacts, symbolMap, debugMap);
+    }
+
+    private void EmitUsedAnchors(CWriter writer)
+    {
+        var methods = _reachableMethods.Where(method => method.IsUsed).OrderBy(method => method.CName, StringComparer.Ordinal).ToArray();
+        var fields = EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsUsed && field.ExternName is null).OrderBy(field => field.CName, StringComparer.Ordinal).ToArray();
+        if (methods.Length == 0 && fields.Length == 0)
+            return;
+        writer.WriteLine("#if defined(_MSC_VER)");
+        foreach (var method in methods)
+            writer.WriteLine($"static void (* volatile {NameMangler.Artifact("ct_ua_", NameMangler.MethodIdentity(method))})(void) = (void (*)(void)){method.CName};");
+        foreach (var field in fields)
+            writer.WriteLine($"static void* volatile {NameMangler.Artifact("ct_ua_", NameMangler.MemberIdentity(field))} = (void*)&{field.CName};");
+        writer.WriteLine("#endif");
+        writer.WriteLine();
+    }
+
+    private void EmitCompileTimeAssertions(CWriter writer)
+    {
+        foreach (var assertion in Model.StaticAssertions.OrderBy(assertion => assertion.Syntax.Source.FilePath, StringComparer.Ordinal)
+                     .ThenBy(assertion => assertion.Syntax.Span.Start))
+        {
+            var message = ("CT2201: " + assertion.Message).Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal);
+            writer.WriteLine($"static_assert({assertion.ConditionCode}, \"{message}\");");
+        }
+        if (Model.StaticAssertions.Count != 0)
+            writer.WriteLine();
     }
 
     private ImmutableArray<GeneratedCArtifact> BuildModularArtifacts(
@@ -336,6 +377,11 @@ internal sealed partial class CEmitter : ILoweringServices
             if (line.StartsWith("const ct_type_descriptor ", StringComparison.Ordinal) && line.Contains('='))
             {
                 writer.Append("extern ").Append(line.AsSpan(0, line.IndexOf('=')).TrimEnd()).Append(";\n");
+                continue;
+            }
+            if (line.Equals("static inline void ct_mmio_barrier(void)", StringComparison.Ordinal))
+            {
+                writer.Append(line).Append('\n');
                 continue;
             }
 
@@ -568,6 +614,7 @@ internal sealed partial class CEmitter : ILoweringServices
                     ["source"] = method.Syntax is null ? null : DebugSourceEntry(method.Syntax),
                     ["receiver"] = method.IsStatic || method.IsConstructor ? null : "ct_self",
                     ["receiverType"] = method.IsStatic || method.IsConstructor ? null : method.ContainingType.FullName,
+                    ["used"] = method.IsUsed,
                     ["parameters"] = method.Parameters.Select(parameter => new Dictionary<string, object?>
                     {
                         ["name"] = parameter.Name,
@@ -614,6 +661,9 @@ internal sealed partial class CEmitter : ILoweringServices
                         ["static"] = field.IsStatic,
                         ["volatile"] = field.IsVolatile,
                         ["atomic"] = field.Type.IsAtomic,
+                        ["nativeVolatile"] = field.IsNativeVolatile,
+                        ["extern"] = field.ExternName,
+                        ["used"] = field.IsUsed,
                         ["offset"] = field.Offset,
                     }).ToArray(),
             }).ToArray();
@@ -1271,7 +1321,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 parameters.Add($"void* {parameterName}_context");
         }
         var storage = method.ExternName is not null ? "extern " : "static ";
-        var signature = storage + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
+        var signature = storage + UsedAnnotation(method.IsUsed) + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;
     }
 

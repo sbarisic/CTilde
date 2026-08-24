@@ -13,13 +13,15 @@ internal sealed class AnalysisServices : ILoweringServices
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
+    private readonly CompilationArchitecture _architecture;
     private readonly string? _sourceRoot;
 
-    public AnalysisServices(CompilationModel model, CompilationTarget target, string? sourceRoot = null)
+    public AnalysisServices(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
+        _architecture = architecture;
         _sourceRoot = sourceRoot;
         foreach (var type in model.Types.Values)
         {
@@ -43,6 +45,8 @@ internal sealed class AnalysisServices : ILoweringServices
     public bool UsesExceptions { get; private set; }
     public bool EmitDebugInformation => false;
     public bool EmitDebugInstrumentation => false;
+    public CompilationTarget Target => _target;
+    public CompilationArchitecture Architecture => _architecture;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })

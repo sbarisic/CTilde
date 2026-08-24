@@ -1,0 +1,81 @@
+using System;
+using System.Runtime;
+using Esp.Idf;
+
+namespace Examples.TCan485.Draft018;
+
+static assert(Target.Profile == TargetProfile.EspIdf, "Draft 0.18 hardware validation requires ESP-IDF");
+static assert(Target.PointerSize == 4, "ESP32 pointers must be 32 bits");
+
+public static class NativeFixture
+{
+    [Extern("ct_draft018_native_data")]
+    [NativeVolatile]
+    public static unsafe uint NativeData;
+
+    [Extern("ct_draft018_mmio_address")]
+    [NoAlloc]
+    public static unsafe nuint GetMmioAddress();
+
+    [Extern("ct_draft018_start_task")]
+    [NoAlloc]
+    public static unsafe int StartTask();
+}
+
+public static class Program
+{
+    [TaskEntry(StackSize = 8192)]
+    [Export("ctilde_draft018_task")]
+    public static unsafe void Draft018Task(void* context)
+    {
+        nuint address = NativeFixture.GetMmioAddress();
+        Mmio.WriteRelaxed<uint>(address, 0x12345678u);
+        uint relaxed = Mmio.ReadRelaxed<uint>(address);
+        Mmio.Write<uint>(address, relaxed + 1u);
+        uint ordered = Mmio.Read<uint>(address);
+
+        NativeFixture.NativeData = ordered;
+        Console.Write("draft018 stack headroom: ");
+        Console.WriteLine(FreeRtos.GetStackHighWaterMark());
+
+        static if (Target.Architecture == TargetArchitecture.Xtensa)
+        {
+            Console.WriteLine("draft018 architecture: xtensa");
+        }
+        else
+        {
+            ArchitectureApiUnavailableOnEsp32.Fail();
+        }
+    }
+
+    [EntryPoint]
+    public static unsafe void Main()
+    {
+        NativeFixture.NativeData = 0u;
+        if (NativeFixture.StartTask() != 0)
+        {
+            Console.WriteLine("CTILDE_DRAFT_018_TASK_CREATE_FAILED");
+            return;
+        }
+
+        int attempts = 0;
+        while (NativeFixture.NativeData != 0x12345679u && attempts < 200)
+        {
+            FreeRtos.DelayMilliseconds(10u);
+            attempts++;
+        }
+
+        if (NativeFixture.NativeData == 0x12345679u)
+        {
+            FreeRtos.DelayMilliseconds(100u);
+            Console.WriteLine("CTILDE_DRAFT_018_OK");
+        }
+        else
+        {
+            Console.WriteLine("CTILDE_DRAFT_018_DATA_FAILED");
+        }
+
+        while (true)
+            FreeRtos.DelayMilliseconds(1000u);
+    }
+}

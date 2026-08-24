@@ -67,6 +67,7 @@ internal sealed partial class Parser
 
         NamespaceSyntax? namespaceSyntax = null;
         var types = ImmutableArray.CreateBuilder<TypeDeclarationSyntax>();
+        var assertions = ImmutableArray.CreateBuilder<StaticAssertDeclarationSyntax>();
         if (Current.Kind == SyntaxKind.NamespaceKeyword)
         {
             var namespaceStart = NextToken().Span.Start;
@@ -75,13 +76,13 @@ internal sealed partial class Parser
             {
                 var end = NextToken().Span.End;
                 namespaceSyntax = new NamespaceSyntax(_source, TextSpan.FromBounds(namespaceStart, end), name, true);
-                ParseTypes(types, SyntaxKind.EndOfFileToken);
+                ParseTypes(types, assertions, SyntaxKind.EndOfFileToken);
             }
             else
             {
                 Match(SyntaxKind.OpenBraceToken);
                 namespaceSyntax = new NamespaceSyntax(_source, TextSpan.FromBounds(namespaceStart, Current.Span.Start), name, false);
-                ParseTypes(types, SyntaxKind.CloseBraceToken);
+                ParseTypes(types, assertions, SyntaxKind.CloseBraceToken);
                 Match(SyntaxKind.CloseBraceToken);
                 if (Current.Kind != SyntaxKind.EndOfFileToken)
                     Report("CT0101", "A file cannot contain declarations outside its block namespace.", Current);
@@ -89,11 +90,11 @@ internal sealed partial class Parser
         }
         else
         {
-            ParseTypes(types, SyntaxKind.EndOfFileToken);
+            ParseTypes(types, assertions, SyntaxKind.EndOfFileToken);
         }
 
         var eof = Match(SyntaxKind.EndOfFileToken);
-        return new CompilationUnitSyntax(_source, TextSpan.FromBounds(start, eof.Span.End), usings.ToImmutable(), namespaceSyntax, types.ToImmutable());
+        return new CompilationUnitSyntax(_source, TextSpan.FromBounds(start, eof.Span.End), usings.ToImmutable(), namespaceSyntax, types.ToImmutable(), assertions.ToImmutable());
     }
 
     private UsingDirectiveSyntax ParseUsing()
@@ -104,12 +105,17 @@ internal sealed partial class Parser
         return new UsingDirectiveSyntax(_source, TextSpan.FromBounds(start, end), name);
     }
 
-    private void ParseTypes(ImmutableArray<TypeDeclarationSyntax>.Builder types, SyntaxKind terminator)
+    private void ParseTypes(ImmutableArray<TypeDeclarationSyntax>.Builder types, ImmutableArray<StaticAssertDeclarationSyntax>.Builder assertions, SyntaxKind terminator)
     {
         while (Current.Kind != terminator && Current.Kind != SyntaxKind.EndOfFileToken)
         {
             var before = _position;
             var attributes = ParseAttributes();
+            if (attributes.IsEmpty && Current.Kind == SyntaxKind.StaticKeyword && Peek(1).Kind == SyntaxKind.AssertKeyword)
+            {
+                assertions.Add(ParseStaticAssert());
+                continue;
+            }
             var modifiers = ParseModifiers();
             if (Current.Kind is SyntaxKind.ClassKeyword or SyntaxKind.StructKeyword or SyntaxKind.UnionKeyword or SyntaxKind.InterfaceKeyword or SyntaxKind.EnumKeyword)
                 types.Add(ParseTypeDeclaration(attributes, modifiers));
@@ -207,18 +213,38 @@ internal sealed partial class Parser
 
         var members = ImmutableArray.CreateBuilder<MemberDeclarationSyntax>();
         var enumMembers = ImmutableArray.CreateBuilder<EnumMemberSyntax>();
+        var assertions = ImmutableArray.CreateBuilder<StaticAssertDeclarationSyntax>();
         while (Current.Kind is not SyntaxKind.CloseBraceToken and not SyntaxKind.EndOfFileToken)
         {
             var before = _position;
             if (kind == TypeDeclarationKind.Enum)
                 enumMembers.Add(ParseEnumMember());
+            else if (Current.Kind == SyntaxKind.StaticKeyword && Peek(1).Kind == SyntaxKind.AssertKeyword)
+                assertions.Add(ParseStaticAssert());
             else
                 members.Add(ParseMember(name.Text));
             if (_position == before)
                 SkipToken();
         }
         var close = Match(SyntaxKind.CloseBraceToken);
-        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, [], typeParameters, baseTypes.ToImmutable(), constraints);
+        return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, [], typeParameters, baseTypes.ToImmutable(), constraints, assertions.ToImmutable());
+    }
+
+    private StaticAssertDeclarationSyntax ParseStaticAssert()
+    {
+        var start = Match(SyntaxKind.StaticKeyword).Span.Start;
+        Match(SyntaxKind.AssertKeyword);
+        Match(SyntaxKind.OpenParenToken);
+        var condition = ParseExpression();
+        ExpressionSyntax? message = null;
+        if (Current.Kind == SyntaxKind.CommaToken)
+        {
+            NextToken();
+            message = ParseExpression();
+        }
+        Match(SyntaxKind.CloseParenToken);
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new StaticAssertDeclarationSyntax(_source, TextSpan.FromBounds(start, end), condition, message);
     }
 
     private EnumMemberSyntax ParseEnumMember()
@@ -492,6 +518,7 @@ internal sealed partial class Parser
             SyntaxKind.OpenBraceToken => ParseBlock(),
             SyntaxKind.SemicolonToken => new EmptyStatementSyntax(_source, NextToken().Span),
             SyntaxKind.IfKeyword => ParseIf(),
+            SyntaxKind.StaticKeyword when Peek(1).Kind == SyntaxKind.IfKeyword => ParseStaticIf(),
             SyntaxKind.WhileKeyword => ParseWhile(),
             SyntaxKind.DoKeyword => ParseDo(),
             SyntaxKind.ForKeyword => ParseFor(),
@@ -553,6 +580,23 @@ internal sealed partial class Parser
             @else = ParseStatement();
         }
         return new IfStatementSyntax(_source, TextSpan.FromBounds(start, (@else ?? then).Span.End), condition, then, @else);
+    }
+
+    private StaticIfStatementSyntax ParseStaticIf()
+    {
+        var start = NextToken().Span.Start;
+        Match(SyntaxKind.IfKeyword);
+        Match(SyntaxKind.OpenParenToken);
+        var condition = ParseExpression();
+        Match(SyntaxKind.CloseParenToken);
+        var then = ParseStatement();
+        StatementSyntax? @else = null;
+        if (Current.Kind == SyntaxKind.ElseKeyword)
+        {
+            NextToken();
+            @else = ParseStatement();
+        }
+        return new StaticIfStatementSyntax(_source, TextSpan.FromBounds(start, (@else ?? then).Span.End), condition, then, @else);
     }
 
     private WhileStatementSyntax ParseWhile()

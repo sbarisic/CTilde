@@ -84,6 +84,14 @@ internal sealed partial class TypedIrBodyLowerer
                 return true;
             }
         }
+        if (left.Type.Kind == CTypeKind.Enum && left.Type == right.Type && syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken)
+        {
+            var equal = BigInteger.Parse(left.ConstantValue!.ToString()!, CultureInfo.InvariantCulture) ==
+                BigInteger.Parse(right.ConstantValue!.ToString()!, CultureInfo.InvariantCulture);
+            var enumComparison = syntax.OperatorKind == SyntaxKind.EqualsEqualsToken ? equal : !equal;
+            result = Constant(CType.Bool, enumComparison, enumComparison ? "true" : "false");
+            return true;
+        }
         if (!left.Type.IsNumeric || !right.Type.IsNumeric)
             return false;
         var common = TypeFacts.PromoteNumeric(left.Type, right.Type);

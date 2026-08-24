@@ -107,6 +107,7 @@ public enum SyntaxKind
     ShortKeyword,
     SizeofKeyword,
     StaticKeyword,
+    AssertKeyword,
     StackallocKeyword,
     StringKeyword,
     StructKeyword,
@@ -305,7 +306,14 @@ public sealed record CompilationUnitSyntax(
     TextSpan Span,
     ImmutableArray<UsingDirectiveSyntax> Usings,
     NamespaceSyntax? Namespace,
-    ImmutableArray<TypeDeclarationSyntax> Types) : SyntaxNode(Source, Span);
+    ImmutableArray<TypeDeclarationSyntax> Types,
+    ImmutableArray<StaticAssertDeclarationSyntax> Assertions = default) : SyntaxNode(Source, Span);
+
+public sealed record StaticAssertDeclarationSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ExpressionSyntax Condition,
+    ExpressionSyntax? Message) : SyntaxNode(Source, Span);
 
 public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, string Name) : SyntaxNode(Source, Span);
 
@@ -346,7 +354,8 @@ public sealed record TypeDeclarationSyntax(
     ImmutableArray<ParameterSyntax> DelegateParameters,
     ImmutableArray<TypeParameterSyntax> TypeParameters = default,
     ImmutableArray<TypeSyntax> BaseTypes = default,
-    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default) : SyntaxNode(Source, Span);
+    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default,
+    ImmutableArray<StaticAssertDeclarationSyntax> Assertions = default) : SyntaxNode(Source, Span);
 
 public sealed record EnumMemberSyntax(SourceText Source, TextSpan Span, string Name, ExpressionSyntax? Value) : SyntaxNode(Source, Span);
 
@@ -449,6 +458,7 @@ public sealed record EmptyStatementSyntax(SourceText Source, TextSpan Span) : St
 public sealed record ExpressionStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : StatementSyntax(Source, Span);
 public sealed record LocalDeclarationStatementSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string Name, ExpressionSyntax? Initializer, bool IsConst, bool IsReadonly) : StatementSyntax(Source, Span);
 public sealed record IfStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Then, StatementSyntax? Else) : StatementSyntax(Source, Span);
+public sealed record StaticIfStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Then, StatementSyntax? Else) : StatementSyntax(Source, Span);
 public sealed record WhileStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Body) : StatementSyntax(Source, Span);
 public sealed record DoStatementSyntax(SourceText Source, TextSpan Span, StatementSyntax Body, ExpressionSyntax Condition) : StatementSyntax(Source, Span);
 public sealed record ForStatementSyntax(SourceText Source, TextSpan Span, StatementSyntax? Initializer, ExpressionSyntax? Condition, ExpressionSyntax? Iterator, StatementSyntax Body) : StatementSyntax(Source, Span);

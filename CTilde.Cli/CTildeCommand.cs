@@ -114,7 +114,7 @@ internal static class CTildeCommand
                 ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
                 : request.SourceRoot;
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
-                request.DebugInformation, request.DebugMemory));
+                request.DebugInformation, request.DebugMemory, request.Architecture));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -205,7 +205,7 @@ internal static class CTildeCommand
             foreach (var input in inputs)
             {
                 var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
-                var request = new BuildRequest([input], options.Target, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
+                var request = new BuildRequest([input], options.Target, options.Architecture, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
                     null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null,
                     GeneratedCLayout.Unity, null, null, false);
                 if (Compile(request).ExitCode != 0)
@@ -316,7 +316,7 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");

@@ -12,12 +12,15 @@
 #include "led_strip_rmt.h"
 
 extern int32_t ctilde_thread_probe(int32_t value) __attribute__((weak));
+extern int32_t ctilde_add(int32_t left, int32_t right) __attribute__((weak));
 
 static uint64_t ct_esp_configured_pins;
 static uint64_t ct_esp_output_pins;
 static led_strip_handle_t ct_esp_ws2812_strip;
 static int32_t ct_esp_ws2812_pin = -1;
 static uint32_t ct_esp_ws2812_led_count;
+volatile uint32_t ct_draft018_native_data;
+static volatile uint32_t ct_draft018_mmio_word;
 
 #ifndef CTILDE_FREERTOS_TLS_INDEX
 #define CTILDE_FREERTOS_TLS_INDEX 1
@@ -159,7 +162,7 @@ int32_t ct_esp_invoke_delegate(int32_t (*callback)(int32_t value, void* context)
 
 int32_t ct_esp_call_export(int32_t left, int32_t right)
 {
-    return ctilde_add(left, right);
+    return ctilde_add == NULL ? -1 : ctilde_add(left, right);
 }
 
 int32_t ct_esp_threading_self_test(int32_t (*callback)(int32_t value, void* context), void* callback_context)
@@ -185,6 +188,26 @@ int32_t ct_esp_threading_self_test(int32_t (*callback)(int32_t value, void* cont
 void ct_esp_thread_cleanup(int32_t value)
 {
     (void)value;
+}
+
+uintptr_t ct_draft018_mmio_address(void)
+{
+    return (uintptr_t)&ct_draft018_mmio_word;
+}
+
+int32_t ct_draft018_start_task(void)
+{
+#ifdef CTILDE_TASK_STACK_CTILDE_DRAFT018_TASK
+    return xTaskCreate(
+        ctilde_draft018_task,
+        "ctilde-draft018",
+        CTILDE_TASK_STACK_CTILDE_DRAFT018_TASK,
+        NULL,
+        tskIDLE_PRIORITY + 1,
+        NULL) == pdPASS ? 0 : -1;
+#else
+    return -1;
+#endif
 }
 
 esp_err_t ct_esp_gpio_configure_input(int32_t pin)

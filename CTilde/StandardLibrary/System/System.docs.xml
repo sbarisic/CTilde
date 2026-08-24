@@ -164,6 +164,19 @@
   <member id="M:System.Threading.Mutex.TryEnter()"><summary>Attempts to acquire the mutex without waiting.</summary><returns>True when the mutex was acquired.</returns></member>
   <member id="M:System.Threading.Mutex.Exit()"><summary>Releases one recursive acquisition.</summary></member>
 
+  <member id="T:System.Runtime.TargetProfile"><summary>Identifies the selected compilation profile.</summary></member>
+  <member id="T:System.Runtime.TargetArchitecture"><summary>Identifies the resolved native target architecture.</summary></member>
+  <member id="T:System.Runtime.Target"><summary>Provides compile-time constants for target-dependent source selection.</summary><remarks>Target queries emit no runtime storage or calls.</remarks></member>
+  <member id="P:System.Runtime.Target.Profile"><summary>Gets the selected compilation profile.</summary></member>
+  <member id="P:System.Runtime.Target.Architecture"><summary>Gets the resolved target architecture.</summary></member>
+  <member id="P:System.Runtime.Target.PointerSize"><summary>Gets the target pointer size in bytes.</summary></member>
+  <member id="T:System.Runtime.Mmio"><summary>Provides exact-width volatile memory-mapped I/O operations.</summary><remarks>Access is unsafe. The caller must provide a naturally aligned address.</remarks></member>
+  <member id="M:System.Runtime.Mmio.Read&lt;T&gt;(nuint)"><summary>Performs an ordered volatile load.</summary><param name="address">The naturally aligned native address.</param><returns>The loaded value.</returns></member>
+  <member id="M:System.Runtime.Mmio.Write&lt;T&gt;(nuint,T)"><summary>Performs an ordered volatile store.</summary><param name="address">The naturally aligned native address.</param><param name="value">The value to store.</param></member>
+  <member id="M:System.Runtime.Mmio.ReadRelaxed&lt;T&gt;(nuint)"><summary>Performs a volatile load without an I/O barrier.</summary><param name="address">The naturally aligned native address.</param><returns>The loaded value.</returns></member>
+  <member id="M:System.Runtime.Mmio.WriteRelaxed&lt;T&gt;(nuint,T)"><summary>Performs a volatile store without an I/O barrier.</summary><param name="address">The naturally aligned native address.</param><param name="value">The value to store.</param></member>
+  <member id="M:System.Runtime.Mmio.Barrier()"><summary>Issues a full target I/O barrier.</summary></member>
+
   <member id="T:System.Runtime.NativeBuffer&lt;T&gt;"><summary>Represents a scoped writable pointer-and-length view.</summary><remarks>The element type must be unmanaged. The view cannot be stored on the managed heap or returned.</remarks></member>
   <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Length"><summary>Gets the writable view length as an unsigned native-sized value.</summary></member>
   <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Pointer"><summary>Gets the writable data pointer.</summary><remarks>Access requires an unsafe context.</remarks></member>

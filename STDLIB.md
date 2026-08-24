@@ -2,7 +2,9 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.17. Object, standard runtime-fault exceptions, console output, single-precision math, mutable vectors, atomics, threads, mutexes, and runtime memory declarations are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.17 uses runtime ABI 16.
+This document is the canonical standard-library reference for C~ draft 0.18. Object, standard runtime-fault exceptions, console output, single-precision math, mutable vectors, atomics, threads, mutexes, runtime memory, compile-time target queries, and MMIO intrinsics are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.18 uses runtime ABI 16.
+
+`System.Runtime.Target` exposes compiler constants for `Profile`, `Architecture`, and byte-sized `PointerSize`. `System.Runtime.Mmio` provides exact-width `Read`, `Write`, `ReadRelaxed`, `WriteRelaxed`, and `Barrier` intrinsics for fixed-width integers and enums. Ordered accesses use a full target I/O barrier before and after the volatile access; relaxed accesses emit only the access.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -298,7 +300,7 @@ Conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFa
 
 ## Runtime native buffers
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.17 generics.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.18 generics.
 
 ```csharp
 NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);

@@ -21,6 +21,7 @@ $programSource = Join-Path $ProjectDirectory "Program.ct"
 $runtimeFailureSource = Join-Path $ProjectDirectory "RuntimeFailure.ct"
 $memoryValidationSource = Join-Path $ProjectDirectory "MemoryValidation.ct"
 $consoleValidationSource = Join-Path $ProjectDirectory "ConsoleValidation.ct"
+$draft018ValidationSource = Join-Path $ProjectDirectory "Draft018Validation.ct"
 $buildScript = Join-Path $ProjectDirectory "Build.ps1"
 $artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
 $timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
@@ -54,6 +55,7 @@ $report = [ordered]@{
     runtimeFailure = $null
     memoryValidation = $null
     consoleValidation = $null
+    draft018Validation = $null
     debugger = $null
     postDetach = $null
     startupTimeout = $null
@@ -392,7 +394,11 @@ try {
     Invoke-Checked "idf.py" @("-p", $Port, "flash") $ProjectDirectory
     $firmwareCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
         param($text)
-        ([regex]::Matches($text, "(?m)^ws2812:\s*(?:on|off)\s*$")).Count -ge 25
+        $hasTransitions = ([regex]::Matches($text, "(?m)^ws2812:\s*(?:on|off)\s*$")).Count -ge 25
+        $hasNetworkResult = $text.Contains("wifi: not configured") -or
+            $text.Contains("generated wifi/http bindings: ok") -or
+            $text.Contains("wifi/http error:")
+        $hasTransitions -and $hasNetworkResult
     } 90
     $firmwareTranscript = Select-FirmwareTranscript $firmwareCapture.Transcript
     if ($firmwareTranscript.Contains([char]0xfffd)) { throw "Firmware transcript contains malformed UTF-8 replacement characters." }
@@ -412,6 +418,25 @@ try {
             Write-Warning "Visible WS2812 confirmation was not provided. Automated acceptance will continue, but this run will not close the physical release gate."
         }
     }
+
+    Write-Host "`n=== Draft 0.18 compile-time and native-system facilities ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $draft018ValidationSource -Flash
+    if ($LASTEXITCODE -ne 0) { throw "Draft 0.18 validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    $draft018Capture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTILDE_DRAFT_018_OK") -or ($text.Contains("CTILDE_DRAFT_018_") -and $text.Contains("FAILED"))
+    } 45
+    $draft018Transcript = Select-FirmwareTranscript $draft018Capture.Transcript
+    if (-not $draft018Transcript.Contains("CTILDE_DRAFT_018_OK")) {
+        throw "Draft 0.18 validation did not emit its success marker.`n$draft018Transcript"
+    }
+    if (-not $draft018Transcript.Contains("draft018 architecture: xtensa") -or
+        -not $draft018Transcript.Contains("draft018 stack headroom:")) {
+        throw "Draft 0.18 validation did not report architecture and task stack evidence.`n$draft018Transcript"
+    }
+    $draft018TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft018.txt"
+    Write-Utf8NoBom $draft018TranscriptPath $draft018Transcript
+    $report.draft018Validation = [ordered]@{ elapsedSeconds = $draft018Capture.ElapsedSeconds; transcript = $draft018TranscriptPath }
 
     Write-Host "`n=== Managed layout and allocation failure ==="
     $previousMemoryBuild = $env:CTILDE_MEMORY_VALIDATION_BUILD

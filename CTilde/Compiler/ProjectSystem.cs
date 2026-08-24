@@ -7,6 +7,7 @@ namespace CTilde;
 
 public sealed record CTildeProjectConfiguration(
     CompilationTarget Target,
+    CompilationArchitecture Architecture,
     ImmutableArray<string> Sources,
     ImmutableArray<string> Exclude,
     CTildeProjectBuildConfiguration Build,
@@ -77,6 +78,7 @@ public static class CTildeProjectFile
             "esp-idf" => CompilationTarget.EspIdf,
             _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted or esp-idf."),
         };
+        var architecture = ParseArchitecture(document.Architecture, fullManifestPath);
         var root = Path.GetDirectoryName(fullManifestPath)!;
         var sources = ValidatePatterns(document.Sources, "sources", fullManifestPath);
         var excludes = ValidatePatterns([.. DefaultExcludes, .. document.Exclude ?? []], "exclude", fullManifestPath);
@@ -117,8 +119,21 @@ public static class CTildeProjectFile
         foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, sources, excludes, build, bindingManifests), files);
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests), files);
     }
+
+    private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
+    {
+        null or "auto" => CompilationArchitecture.Auto,
+        "x86" => CompilationArchitecture.X86,
+        "x64" => CompilationArchitecture.X64,
+        "arm32" => CompilationArchitecture.Arm32,
+        "arm64" => CompilationArchitecture.Arm64,
+        "xtensa" => CompilationArchitecture.Xtensa,
+        "riscv32" => CompilationArchitecture.RiscV32,
+        "riscv64" => CompilationArchitecture.RiscV64,
+        _ => throw new CTildeProjectException($"Unknown architecture '{value}' in '{manifestPath}'; expected auto, x86, x64, arm32, arm64, xtensa, riscv32, or riscv64."),
+    };
 
     private static bool IsInsideDirectory(string path, string directory)
     {
@@ -281,6 +296,7 @@ public static class CTildeProjectFile
 
     private sealed record ProjectDocument(
         [property: JsonPropertyName("target")] string? Target,
+        [property: JsonPropertyName("architecture")] string? Architecture,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,
         [property: JsonPropertyName("build")] BuildDocument? Build,

@@ -68,6 +68,7 @@ public sealed class Compilation
                 return;
             var diagnostics = new DiagnosticBag();
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
+            var architecture = ResolveArchitecture(target, Options.Architecture);
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
             var hostedIo = target == CompilationTarget.Hosted && StandardLibrary.RequiresHostedIo(SyntaxTrees);
@@ -79,7 +80,7 @@ public sealed class Compilation
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target);
-            _boundProgram = BoundProgramBuilder.Build(model, Options.Target, sourceRoot);
+            _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
         }
@@ -148,11 +149,27 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
-        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory);
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);
         _generatedOutput = emitter.EmitOutput(emissionIr, new CHeaderEmitter(_boundProgram).Emit());
+    }
+
+    private static CompilationArchitecture ResolveArchitecture(CompilationTarget target, CompilationArchitecture architecture)
+    {
+        if (architecture != CompilationArchitecture.Auto)
+            return architecture;
+        if (target == CompilationTarget.EspIdf)
+            return CompilationArchitecture.Auto;
+        return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
+        {
+            System.Runtime.InteropServices.Architecture.X86 => CompilationArchitecture.X86,
+            System.Runtime.InteropServices.Architecture.X64 => CompilationArchitecture.X64,
+            System.Runtime.InteropServices.Architecture.Arm => CompilationArchitecture.Arm32,
+            System.Runtime.InteropServices.Architecture.Arm64 => CompilationArchitecture.Arm64,
+            _ => CompilationArchitecture.Auto,
+        };
     }
 
     private string? ValidateSourceRoot(DiagnosticBag diagnostics, CompilationTarget target)

@@ -34,7 +34,7 @@ internal static class AggregateLayout
                 writeLine($"typedef struct {SlotTypeName(field)} {{");
                 if (field.Offset > 0)
                     writeLine($"    uint8_t ct_padding_{field.CName}[{field.Offset}];");
-                writeLine($"    {declaration(field.Type, field.CName)};");
+                writeLine($"    {Alignment(field.Alignment)}{declaration(field.Type, field.CName)};");
                 writeLine($"}} {SlotTypeName(field)};");
                 writeLine("#pragma pack(pop)");
                 writeLine("#if defined(_MSC_VER)");
@@ -52,29 +52,35 @@ internal static class AggregateLayout
             }
             writeLine($"}} {StorageTypeName(type)};");
             PopPack(type, writeLine);
-            writeLine(includeTypedef ? $"typedef struct {name} {{" : $"struct {name}\n{{");
+            writeLine(includeTypedef ? $"typedef struct {Alignment(type.Alignment)}{name} {{" : $"struct {Alignment(type.Alignment)}{name}\n{{");
             writeLine($"    {StorageTypeName(type)} ct_layout;");
             writeLine(includeTypedef ? $"}} {name};" : "};");
             foreach (var field in fields)
                 writeLine($"static_assert({OffsetExpression(type, field)} == (size_t){field.Offset}, \"C~ explicit field offset mismatch\");");
             AssertPack(type, name, writeLine);
+            if (type.Alignment is int alignment)
+                writeLine($"static_assert(CT_ALIGNOF({name}) >= (size_t){alignment}, \"C~ aggregate alignment mismatch\");");
             return;
         }
 
         PushPack(type, writeLine);
         var tag = type.AggregateLayout == AggregateLayoutKind.Union ? "union" : "struct";
-        writeLine(includeTypedef ? $"typedef {tag} {name} {{" : $"{tag} {name}\n{{");
+        writeLine(includeTypedef ? $"typedef {tag} {Alignment(type.Alignment)}{name} {{" : $"{tag} {Alignment(type.Alignment)}{name}\n{{");
         if (fields.Length == 0)
             writeLine("    uint8_t ct_empty;");
         foreach (var field in fields)
-            writeLine($"    {declaration(field.Type, field.CName)};");
+            writeLine($"    {Alignment(field.Alignment)}{declaration(field.Type, field.CName)};");
         writeLine(includeTypedef ? $"}} {name};" : "};");
         PopPack(type, writeLine);
         if (type.AggregateLayout == AggregateLayoutKind.Union)
             foreach (var field in fields)
                 writeLine($"static_assert(offsetof({name}, {field.CName}) == (size_t)0, \"C~ union field offset mismatch\");");
         AssertPack(type, name, writeLine);
+        if (type.Alignment is int requestedAlignment)
+            writeLine($"static_assert(CT_ALIGNOF({name}) >= (size_t){requestedAlignment}, \"C~ aggregate alignment mismatch\");");
     }
+
+    private static string Alignment(int? alignment) => alignment is int value ? $"CT_ALIGN({value}) " : string.Empty;
 
     private static void PushPack(TypeSymbol type, Action<string> writeLine)
     {

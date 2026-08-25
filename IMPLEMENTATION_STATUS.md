@@ -1,10 +1,10 @@
 # Implementation status
 
-Last reviewed: 2026-08-24
+Last reviewed: 2026-08-25
 
 ## Current state
 
-C~ draft 0.18 has one compiler path:
+C~ draft 0.19 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF GNU C23
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.18 coverage adds architecture inputs and target constants, inactive-branch pruning for `static if`, semantic and native layout assertions, `[Used]`, typed extern data, MMIO lowering, and ESP-IDF task-entry wrappers. Draft 0.17 added controlled method/static-field section placement and object-table probes. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.19 coverage adds typed constant specializations, inline-array value layouts and ARC traversal, general alignment, strict newtypes, closed-call recursion checks, and portable CPU intrinsics. Draft 0.18 added architecture inputs and target constants, inactive-branch pruning for `static if`, semantic and native layout assertions, `[Used]`, typed extern data, MMIO lowering, and ESP-IDF task-entry wrappers. Draft 0.17 added controlled method/static-field section placement and object-table probes. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -282,9 +282,21 @@ The connected allocation-failure image caught injected OOM during class, array, 
 
 The same acceptance run prepared a guarded instrumented image and drove the bundled debug adapter through DAP. It verified the pre-initialization and first-statement stops, six simultaneous logical source breakpoints, C~ Step Over/Into/Out, five FreeRTOS tasks, caught-exception translation, lexical locals, live ARC-object inspection, intact canaries, a reference-count hardware watchpoint, immediate console forwarding, and complete ARC recovery with 3,356 allocations and 3,356 final releases. Clean Disconnect removed logical and hardware debugger state; four later WS2812 messages arrived without retrapping or rebooting. A separate instrumented boot without a debugger passed the 15-second startup gate after 14.16 seconds. The ignored automated evidence report is `artifacts/esp32-hardware/20260822-155832.json`. After the runner restored the ordinary Release image, the operator confirmed that its onboard GPIO4 WS2812 visibly alternated. This completes the Draft 0.14 ABI 14 physical acceptance.
 
+## Draft 0.19 compile-time layout and low-level facilities
+
+The ESP32 hardware baseline now reflects clean ESP-IDF dependency linkage. The previously accepted DRAM increase from 15,444 to 38,871 bytes accounts for the measured free-heap change from 291,696 to 268,224 bytes; the acceptance margins remain 4 KiB for heap measurements and 512 bytes for stack headroom.
+
+The compiler accepts integral constant parameters on types and methods. Explicit checked values participate in closed-specialization identity and substitute into inline lengths, compile-time expressions, and alignment attributes. Inline `T[N]` values emit named wrapper structures, preserve by-value behavior, perform static and dynamic bounds validation, and generate element-wise ARC helpers for reference-bearing elements.
+
+`[Align]` is carried through eligible types, fields, statics, and locals to MSVC/clang-cl and GCC/Clang declarations and native assertions. Strict `newtype` declarations retain underlying ABI representation while requiring explicit immediate-underlying conversions; the standard library defines physical, virtual, and I/O address domains on this facility. Public headers, symbol maps, and version-3 debug maps record the new layouts and specialization values.
+
+`[NoRecursion]`, top-level `noRecursion`, and CLI `--no-recursion` validate pruned closed call graphs and report deterministic cycle witnesses or unprovable dispatch. `System.Runtime.Cpu` lowers ordinary-memory barriers, spin hints, byte swaps, population counts, and leading-zero counts without optional ISA requirements or C~ runtime calls. Runtime ABI 16 and debug metadata version 3 remain unchanged.
+
+The Draft 0.18 connected-board measurements above remain historical evidence. Draft 0.19 does not silently accept a changed ESP32 heap baseline; the acceptance runner must attribute any change to generated code, configuration, toolchain, sections, or symbol sizes before updating the versioned baseline.
+
 ## Deliberately deferred
 
-These features are outside draft 0.18:
+These features are outside draft 0.19:
 
 - Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
@@ -305,7 +317,7 @@ These features are outside draft 0.18:
 
 ## Release gate
 
-A draft 0.18 release requires:
+A draft 0.19 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -315,6 +327,6 @@ A draft 0.18 release requires:
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
 
-The Draft 0.18 acceptance status is recorded by the validation commands below. Historical Draft 0.17 hosted and cross-build evidence remains preserved in Git history.
+The Draft 0.19 acceptance status is recorded by the validation commands below. Historical Draft 0.18 and Draft 0.17 hosted and cross-build evidence remains preserved in Git history.
 
-Draft 0.18 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Historical connected-board baselines remain recorded above.
+Draft 0.19 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Historical connected-board baselines remain recorded above.

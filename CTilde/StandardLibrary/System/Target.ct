@@ -46,3 +46,33 @@ public static class Mmio
     [NoAlloc]
     public static unsafe void Barrier() { }
 }
+
+public static class Cpu
+{
+    [NoAlloc]
+    public static void MemoryBarrier() { }
+
+    [NoAlloc]
+    public static void Pause() { }
+
+    [NoAlloc]
+    public static ushort ByteSwap(ushort value) { return value; }
+
+    [NoAlloc]
+    public static uint ByteSwap(uint value) { return value; }
+
+    [NoAlloc]
+    public static ulong ByteSwap(ulong value) { return value; }
+
+    [NoAlloc]
+    public static int PopCount(uint value) { return 0; }
+
+    [NoAlloc]
+    public static int PopCount(ulong value) { return 0; }
+
+    [NoAlloc]
+    public static int LeadingZeroCount(uint value) { return 0; }
+
+    [NoAlloc]
+    public static int LeadingZeroCount(ulong value) { return 0; }
+}

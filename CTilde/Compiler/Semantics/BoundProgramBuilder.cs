@@ -4,7 +4,7 @@ namespace CTilde;
 
 internal static class BoundProgramBuilder
 {
-    public static BoundProgram Build(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null)
+    public static BoundProgram Build(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null, bool noRecursion = false)
     {
         var services = new AnalysisServices(model, target, architecture, sourceRoot);
         var bodies = ImmutableArray.CreateBuilder<BoundBody>();
@@ -19,7 +19,7 @@ internal static class BoundProgramBuilder
             var changed = false;
             foreach (var type in model.UserTypes.ToArray())
             {
-                if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Interface)
+                if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Newtype or DeclaredTypeKind.Interface)
                     continue;
                 foreach (var constructor in type.Constructors.Where(constructor => analyzedMethods.Add(constructor)))
                 {
@@ -54,6 +54,7 @@ internal static class BoundProgramBuilder
         CompileTimeEvaluator.EvaluateAssertions(model, services);
         ValidateConstructorCycles(model);
         services.AllocationEffects.Validate(model.Diagnostics);
+        RecursionAnalyzer.Validate(model, bodies, noRecursion);
         TargetValidator.Validate(model, services, target);
 
         var semanticMap = ImmutableDictionary.CreateBuilder<SyntaxNode, BoundSemanticEntry>();

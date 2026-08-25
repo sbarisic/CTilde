@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.18 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.19 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -9,8 +9,6 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 - [ ] Extend vectors only with application-backed requirements such as interpolation, clamping, distance, swizzles, conversions, or SIMD-aware lowering.
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
-- [ ] Add constant generic parameters for compile-time integral values, with syntax such as `RingBuffer<T, const int Capacity>`. Require compile-time arguments, include each value in monomorphized type identity, and permit their use in fixed layouts and compile-time expressions.
-- [ ] Add inline compile-time-sized arrays with `T[N]` syntax, distinct from managed ARC arrays written as `T[]`. Store exactly `N` elements inside the containing value, and accept constant generic arguments for `N`. Define initialization, indexing, bounds checks, copying, ownership, layout, alignment, native ABI use, and zero-length behavior without adding a `fixed` keyword.
 - [ ] Add zero-cost explicit-endianness integer types such as `be16`, `be32`, `le16`, and `le32`, with deterministic conversion to and from native-endian values for protocols and hardware registers.
 
 ## Compiler optimization
@@ -26,7 +24,6 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 - [ ] Add explicit stack controls such as `[NoStackProbe]` and `[StackAlign(n)]`; support `[StackUsage(n)]` when the compiler can calculate or verify the bound.
 - [ ] Add compile-time stack-usage analysis with per-call-path costs and a worst-case static stack report, especially for MCU builds.
-- [ ] Add a no-recursion effect through `[NoRecursion]` and a project-wide option, enforcing it wherever bounded static stack analysis is required.
 - [ ] Generalize the transitive `[NoAlloc]` analysis into an effect system. Define and infer effects such as `[NoThrow]`, `[NoBlock]`, and possibly `[NoRuntime]`, and report complete call paths when a restricted method reaches a forbidden operation.
 
 ## Editor tooling
@@ -51,12 +48,10 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 ## Native interop
 
-- [ ] Add general alignment control through `[Align(n)]` for types and eligible static, local, and field storage. Validate target limits and propagate alignment through `alignof`, containing layouts, `sizeof`, stack allocation, static storage, and generated C alignment declarations. Keep this separate from function-stack controls such as `[StackAlign(n)]`.
 - [ ] Add native linker-symbol declarations, weak imports and definitions, and final-image retention controls. Draft 0.18 `[Used]` guarantees object emission only; linker `KEEP`, weak resolution, entry symbols, and linker-script declarations remain separate work.
-- [ ] Add zero-cost nominal `newtype` declarations over eligible underlying value types, with syntax such as `public newtype PhysicalAddress : nuint;`. Preserve the underlying representation and ABI, but reject implicit conversion between distinct newtypes. Define construction, explicit conversion, operators, constants, generic use, and native interop. Build `PhysicalAddress`, `VirtualAddress`, and `IoAddress` on this facility, and require explicit mapping between address domains.
 - [ ] Add compile-time register definitions such as `[Register(0x60004000)]`, with `[Bit(n)]` and `[Bits(first, last)]` members lowered to deterministic mask-and-shift operations rather than C bitfields.
 - [ ] Add deterministic compiler-defined bitfields such as `[BitField(typeof(uint))]`, `[Bit(n)]`, and `[Bits(first, last)]` for peripheral registers, protocol headers, page-table entries, and CPU control registers.
-- [ ] Add portable CPU intrinsics for interrupt control, memory barriers, pause/halt, byte swapping, population count, and leading-zero count, plus target-specific namespaces for operations such as x86 CPUID/control registers, RISC-V CSRs, and Xtensa memory barriers.
+- [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
 - [ ] Add naked functions and first-class interrupt handlers.
 - [ ] Add naked assembly functions: like naked functions, except the body is one complete `asm` block.
 - [ ] Define retained callback registration, unregistration, rooting, and cross-thread lifetime rules separately from the existing synchronous callback profile.

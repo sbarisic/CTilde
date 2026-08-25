@@ -34,7 +34,8 @@ internal sealed record CommandLineOptions(
     int BaudRate,
     bool GenerateBindings,
     bool VerifyBindings,
-    string? EspClangPath)
+    string? EspClangPath,
+    bool NoRecursion)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -74,6 +75,7 @@ internal sealed record CommandLineOptions(
         var debugInfo = false;
         var generateBindings = false;
         var verifyBindings = false;
+        var noRecursion = false;
         DebugMemoryMode? debugMemory = null;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
@@ -148,6 +150,7 @@ internal sealed record CommandLineOptions(
                 case "--build": build = true; break;
                 case "--generate-bindings": generateBindings = true; break;
                 case "--verify-bindings": verifyBindings = true; break;
+                case "--no-recursion": noRecursion = true; break;
                 case "--configuration":
                     var value = RequireValue();
                     configuration = value switch
@@ -207,7 +210,7 @@ internal sealed record CommandLineOptions(
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, architecture, architectureSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
-            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath);
+            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion);
         return true;
     }
 }

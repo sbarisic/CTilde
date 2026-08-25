@@ -45,6 +45,30 @@ internal sealed partial class CEmitter
         if (IsEspIdf && Model.Types.ContainsKey("Esp.Idf.EspError"))
             writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name((esp_err_t)code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
 
+        foreach (var valueType in layoutTypes.Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences).Select(type => type.Type)
+                     .Concat(_inlineArrayTypes.Where(type => type.ContainsManagedReferences)).OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+        {
+            writer.WriteLine($"static void {ValueRetainName(valueType)}(void* storage);");
+            writer.WriteLine($"static void {ValueDropName(valueType)}(void* storage);");
+        }
+
+        foreach (var inline in _inlineArrayTypes.Where(type => type.ContainsManagedReferences).OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+        {
+            var name = NameMangler.InlineArray(inline);
+            writer.WriteLine($"static void {ValueRetainName(inline)}(void* storage)");
+            writer.WriteLine("{");
+            writer.WriteLine($"    {name}* value = ({name}*)storage;");
+            writer.WriteLine($"    for (int32_t index = 0; index < {inline.InlineArrayLength}; ++index)");
+            writer.WriteLine($"        {ValueRetainName(inline.ElementType!)}((void*)&value->Data[index]);");
+            writer.WriteLine("}");
+            writer.WriteLine($"static void {ValueDropName(inline)}(void* storage)");
+            writer.WriteLine("{");
+            writer.WriteLine($"    {name}* value = ({name}*)storage;");
+            writer.WriteLine($"    for (int32_t index = {inline.InlineArrayLength}; index > 0; --index)");
+            writer.WriteLine($"        {ValueDropName(inline.ElementType!)}((void*)&value->Data[index - 1]);");
+            writer.WriteLine("}");
+        }
+
         foreach (var type in layoutTypes.Where(type => type.Kind == DeclaredTypeKind.Struct && type.Type.ContainsManagedReferences))
         {
             var valueType = type.Type;

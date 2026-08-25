@@ -15,18 +15,22 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .ToArray();
         var externFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.ExternName is not null && field.Accessibility == Accessibility.Public)
             .OrderBy(field => field.ExternName, StringComparer.Ordinal).ToArray();
+        var exportedTypes = ExportTypes(exports).Concat(externFields.SelectMany(field => ExpandType(field.Type))).Distinct().ToArray();
         var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize)) +
-            "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile));
+            "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile + ":" + field.Alignment)) +
+            "\n" + string.Join("\n", exportedTypes.Where(type => type.Symbol is not null).Select(type => NameMangler.CanonicalType(type) + ":align=" + type.Symbol!.Alignment).OrderBy(value => value, StringComparer.Ordinal));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
         writer.Append("#define ").Append(guard).Append("\n\n");
         writer.Append("#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n");
-        foreach (var header in ExportTypes(exports).Where(type => type.Kind == CTypeKind.Opaque).Select(type => type.Symbol!.NativeHeader!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal))
+        foreach (var header in exportedTypes.Where(type => type.Kind == CTypeKind.Opaque).Select(type => type.Symbol!.NativeHeader!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal))
             writer.Append("#include <").Append(header).Append(">\n");
-        if (ExportTypes(exports).Any(type => type.Kind == CTypeKind.EspError))
+        if (exportedTypes.Any(type => type.Kind == CTypeKind.EspError))
             writer.Append("#include <esp_err.h>\n");
         writer.Append("#if defined(__cplusplus)\n#define CT_ALIGNOF(type) alignof(type)\n#elif defined(_MSC_VER)\n#define CT_ALIGNOF(type) __alignof(type)\n#else\n#define CT_ALIGNOF(type) _Alignof(type)\n#endif\n");
+        writer.Append("#if defined(_MSC_VER)\n#define CT_ALIGN(n) __declspec(align(n))\n#else\n#define CT_ALIGN(n) __attribute__((aligned(n)))\n#endif\n");
+        writer.Append("#if defined(_MSC_VER)\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef __declspec(align(n)) base name\n#else\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef base name __attribute__((aligned(n)))\n#endif\n");
         var codeSections = exports.Where(method => method.SectionName is not null).Select(method => method.SectionName!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
         foreach (var section in codeSections)
             foreach (var line in NativeSection.MacroDefinition(NativeSectionKind.Code, section))
@@ -51,19 +55,32 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         writer.Append("void ct_runtime_test_fail_allocation_after(int32_t successful_allocations);\n");
         writer.Append("#endif\n\n");
 
-        foreach (var type in ExportTypes(exports).Where(type => type.Kind == CTypeKind.Enum).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in exportedTypes.Where(type => type.Kind == CTypeKind.Enum).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             var underlying = type.Fields.Single(field => field.Name == "<underlying>").Type;
             writer.Append("typedef ").Append(CTypeName(underlying)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
         }
-        var exportedStructs = ExportTypes(exports).Where(type => type.Kind == CTypeKind.Struct).Select(type => type.Symbol!).Distinct().ToArray();
+        var exportedStructs = exportedTypes.Where(type => type.Kind == CTypeKind.Struct).Select(type => type.Symbol!).Distinct().ToArray();
+        var exportedInlineArrays = exportedTypes.Where(type => type.Kind == CTypeKind.InlineArray && type.InlineArrayLength > 0).Distinct().ToArray();
         foreach (var type in exportedStructs.OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             var tag = type.AggregateLayout == AggregateLayoutKind.Union ? "union" : "struct";
             writer.Append("typedef ").Append(tag).Append(' ').Append(NameMangler.Type(type)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
         }
-        foreach (var type in OrderStructs(exportedStructs))
-            AggregateLayout.EmitValueTypeDefinition(type, line => writer.Append(line).Append('\n'), (fieldType, name) => $"{CTypeName(fieldType)} {name}", includeTypedef: false);
+        foreach (var inline in exportedInlineArrays.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+            writer.Append("typedef struct ").Append(NameMangler.InlineArray(inline)).Append(' ').Append(NameMangler.InlineArray(inline)).Append(";\n");
+        foreach (var type in exportedTypes.Where(type => type.Kind == CTypeKind.Newtype).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
+        {
+            if (type.Alignment is int alignment)
+                writer.Append("CT_ALIGNED_TYPEDEF(").Append(CTypeName(type.UnderlyingType!)).Append(", ").Append(NameMangler.Type(type)).Append(", ").Append(alignment).Append(");\n");
+            else
+                writer.Append("typedef ").Append(CTypeName(type.UnderlyingType!)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
+        }
+        var emittedLayouts = new HashSet<CType>();
+        foreach (var type in exportedStructs.OrderBy(type => type.FullName, StringComparer.Ordinal))
+            EmitLayout(type.Type);
+        foreach (var inline in exportedInlineArrays.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+            EmitLayout(inline);
         if (exports.Length != 0)
             writer.Append('\n');
         foreach (var method in exports)
@@ -88,11 +105,32 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append("volatile ");
             writer.Append(CTypeName(field.Type)).Append(' ').Append(field.ExternName).Append(";\n");
         }
-        writer.Append("\n#undef CT_ALIGNOF\n");
+        writer.Append("\n#undef CT_ALIGNED_TYPEDEF\n#undef CT_ALIGN\n#undef CT_ALIGNOF\n");
         foreach (var section in codeSections)
             writer.Append("#undef ").Append(NativeSection.MacroName(NativeSectionKind.Code, section)).Append('\n');
         writer.Append("#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
         return writer.ToString();
+
+        void EmitLayout(CType type)
+        {
+            if (!emittedLayouts.Add(type))
+                return;
+            if (type.Kind == CTypeKind.InlineArray)
+            {
+                EmitLayout(type.ElementType!);
+                var name = NameMangler.InlineArray(type);
+                writer.Append("struct ").Append(name).Append(" { ").Append(CTypeName(type.ElementType!)).Append(" Data[")
+                    .Append(type.InlineArrayLength).Append("]; };\n");
+                writer.Append("static_assert(sizeof(").Append(name).Append(") == sizeof(").Append(CTypeName(type.ElementType!)).Append(") * (size_t)")
+                    .Append(type.InlineArrayLength).Append(", \"C~ inline-array size mismatch\");\n");
+                return;
+            }
+            if (type.Kind != CTypeKind.Struct || type.Symbol is null)
+                return;
+            foreach (var field in type.Symbol.Fields.Where(field => !field.IsStatic))
+                EmitLayout(field.Type);
+            AggregateLayout.EmitValueTypeDefinition(type.Symbol, line => writer.Append(line).Append('\n'), (fieldType, name) => $"{CTypeName(fieldType)} {name}", includeTypedef: false);
+        }
     }
 
     private static string TaskMacroIdentifier(string name) => string.Concat(name.Select(character =>
@@ -137,6 +175,9 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         yield return type;
         if (type.ElementType is not null)
             foreach (var nested in ExpandType(type.ElementType))
+                yield return nested;
+        if (type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying)
+            foreach (var nested in ExpandType(underlying))
                 yield return nested;
         if (type.Kind == CTypeKind.Struct)
             foreach (var field in type.Symbol!.Fields.Where(field => !field.IsStatic))
@@ -184,7 +225,8 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         CTypeKind.Pointer => CTypeName(type.ElementType!) + "*",
         CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
         CTypeKind.EspError => "esp_err_t",
-        CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
+        CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype => NameMangler.Type(type.Symbol!),
+        CTypeKind.InlineArray => NameMangler.InlineArray(type),
         _ => "void",
     };
 

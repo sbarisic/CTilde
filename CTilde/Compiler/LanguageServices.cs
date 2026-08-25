@@ -58,7 +58,7 @@ public sealed record LanguageWorkspaceSymbol(
 
 public sealed partial class LanguageServiceSnapshot
 {
-    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "union", "enum", "delegate", "opaque", "static", "sealed", "abstract"];
+    private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "union", "enum", "delegate", "opaque", "newtype", "static", "sealed", "abstract"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "sizeof", "alignof", "offsetof", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
@@ -88,7 +88,6 @@ public sealed partial class LanguageServiceSnapshot
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
-        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target);
         var sourceRoot = options.Target == CompilationTarget.Hosted && options.SourceRoot is not null && Path.IsPathFullyQualified(options.SourceRoot)
             ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.SourceRoot))
             : null;
@@ -102,6 +101,7 @@ public sealed partial class LanguageServiceSnapshot
                 _ => CompilationArchitecture.Auto,
             }
             : options.Architecture;
+        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
@@ -292,7 +292,7 @@ public sealed partial class LanguageServiceSnapshot
                 children.Add(new LanguageDocumentSymbol(enumMember.Name, string.Empty, LanguageSymbolKind.EnumMember, enumMember.Span, NameSpan(enumMember, enumMember.Name), []));
             var typeKind = type.Kind switch
             {
-                TypeDeclarationKind.Struct or TypeDeclarationKind.Union => LanguageSymbolKind.Struct,
+                TypeDeclarationKind.Struct or TypeDeclarationKind.Union or TypeDeclarationKind.Newtype => LanguageSymbolKind.Struct,
                 TypeDeclarationKind.Enum => LanguageSymbolKind.Enum,
                 _ => LanguageSymbolKind.Class,
             };
@@ -826,14 +826,14 @@ public sealed partial class LanguageServiceSnapshot
 
     private static LanguageCompletionKind CompletionKind(TypeSymbol type) => type.Kind switch
     {
-        DeclaredTypeKind.Struct => LanguageCompletionKind.Struct,
+        DeclaredTypeKind.Struct or DeclaredTypeKind.Newtype => LanguageCompletionKind.Struct,
         DeclaredTypeKind.Enum => LanguageCompletionKind.Enum,
         _ => LanguageCompletionKind.Class,
     };
 
     private static LanguageSymbolKind TypeKind(TypeSymbol type) => type.Kind switch
     {
-        DeclaredTypeKind.Struct => LanguageSymbolKind.Struct,
+        DeclaredTypeKind.Struct or DeclaredTypeKind.Newtype => LanguageSymbolKind.Struct,
         DeclaredTypeKind.Enum => LanguageSymbolKind.Enum,
         _ => LanguageSymbolKind.Class,
     };

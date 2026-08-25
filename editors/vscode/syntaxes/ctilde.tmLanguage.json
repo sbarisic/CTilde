@@ -423,7 +423,7 @@
       "patterns": [
         {
           "name": "storage.type.declaration.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|interface|struct|union|enum|delegate|opaque)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:class|interface|struct|union|enum|delegate|opaque|newtype)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "keyword.declaration.namespace.ctilde",

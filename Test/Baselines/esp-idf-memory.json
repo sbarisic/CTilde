@@ -44,16 +44,16 @@
   },
   "hardware": {
     "observed": {
-      "freeHeap": 291696,
-      "minimumFreeHeap": 278964,
-      "stackHighWater": 6708,
-      "tick": 18,
+      "freeHeap": 268224,
+      "minimumFreeHeap": 249316,
+      "stackHighWater": 6804,
+      "tick": 15,
       "transitions": 25
     },
     "minimum": {
-      "freeHeap": 287600,
-      "minimumFreeHeap": 274868,
-      "stackHighWater": 6196
+      "freeHeap": 264128,
+      "minimumFreeHeap": 245220,
+      "stackHighWater": 6292
     }
   },
   "layout": {

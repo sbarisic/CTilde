@@ -123,10 +123,12 @@ internal sealed partial class Parser
                 types.Add(ParseDelegateDeclaration(attributes, modifiers));
             else if (Current.Kind == SyntaxKind.OpaqueKeyword)
                 types.Add(ParseOpaqueDeclaration(attributes, modifiers));
+            else if (Current.Kind == SyntaxKind.NewtypeKeyword)
+                types.Add(ParseNewtypeDeclaration(attributes, modifiers));
             else
             {
-                Report("CT0102", "Expected a class, structure, union, interface, enumeration, delegate, or opaque declaration.", Current);
-                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.UnionKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, terminator);
+                Report("CT0102", "Expected a class, structure, union, interface, enumeration, delegate, opaque, or newtype declaration.", Current);
+                Synchronize(SyntaxKind.ClassKeyword, SyntaxKind.StructKeyword, SyntaxKind.UnionKeyword, SyntaxKind.InterfaceKeyword, SyntaxKind.EnumKeyword, SyntaxKind.DelegateKeyword, SyntaxKind.OpaqueKeyword, SyntaxKind.NewtypeKeyword, terminator);
             }
             if (_position == before)
                 SkipToken();
@@ -228,6 +230,19 @@ internal sealed partial class Parser
         }
         var close = Match(SyntaxKind.CloseBraceToken);
         return new TypeDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), kind, name.Text, modifiers, attributes, baseType, members.ToImmutable(), underlying, enumMembers.ToImmutable(), null, [], typeParameters, baseTypes.ToImmutable(), constraints, assertions.ToImmutable());
+    }
+
+    private TypeDeclarationSyntax ParseNewtypeDeclaration(ImmutableArray<AttributeSyntax> attributes, ImmutableArray<string> modifiers)
+    {
+        var start = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
+        Match(SyntaxKind.NewtypeKeyword);
+        var name = Match(SyntaxKind.IdentifierToken);
+        Match(SyntaxKind.ColonToken);
+        var underlying = ParseType();
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new TypeDeclarationSyntax(
+            _source, TextSpan.FromBounds(start, end), TypeDeclarationKind.Newtype, name.Text,
+            modifiers, attributes, null, [], underlying, [], null, []);
     }
 
     private StaticAssertDeclarationSyntax ParseStaticAssert()
@@ -428,8 +443,19 @@ internal sealed partial class Parser
         var parameters = ImmutableArray.CreateBuilder<TypeParameterSyntax>();
         while (!AtTypeArgumentClose && Current.Kind != SyntaxKind.EndOfFileToken)
         {
-            var name = Match(SyntaxKind.IdentifierToken);
-            parameters.Add(new TypeParameterSyntax(_source, name.Span, name.Text));
+            var parameterStart = Current.Span.Start;
+            if (Current.Kind == SyntaxKind.ConstKeyword)
+            {
+                NextToken();
+                var constantType = ParseType(allowInlineArray: false);
+                var name = Match(SyntaxKind.IdentifierToken);
+                parameters.Add(new TypeParameterSyntax(_source, TextSpan.FromBounds(parameterStart, name.Span.End), name.Text, true, constantType));
+            }
+            else
+            {
+                var name = Match(SyntaxKind.IdentifierToken);
+                parameters.Add(new TypeParameterSyntax(_source, name.Span, name.Text));
+            }
             if (Current.Kind != SyntaxKind.CommaToken)
                 break;
             NextToken();
@@ -511,7 +537,9 @@ internal sealed partial class Parser
             var attributes = ParseAttributes();
             if (Current.Kind == SyntaxKind.AsmKeyword)
                 return ParseInlineAssembly(attributes);
-            Report("CT0109", "Statement attributes are supported only on asm statements.", Current);
+            if (LooksLikeLocalDeclaration())
+                return ParseLocalDeclaration(true, attributes);
+            Report("CT0109", "Statement attributes are supported only on asm statements and local declarations.", Current);
         }
         return Current.Kind switch
         {
@@ -538,9 +566,9 @@ internal sealed partial class Parser
         };
     }
 
-    private LocalDeclarationStatementSyntax ParseLocalDeclaration(bool consumeSemicolon)
+    private LocalDeclarationStatementSyntax ParseLocalDeclaration(bool consumeSemicolon, ImmutableArray<AttributeSyntax> attributes = default)
     {
-        var start = Current.Span.Start;
+        var start = !attributes.IsDefaultOrEmpty ? attributes[0].Span.Start : Current.Span.Start;
         var isConst = Current.Kind == SyntaxKind.ConstKeyword;
         var isReadonly = Current.Kind == SyntaxKind.ReadonlyKeyword;
         if (isConst || isReadonly)
@@ -556,7 +584,7 @@ internal sealed partial class Parser
         var end = initializer?.Span.End ?? name.Span.End;
         if (consumeSemicolon)
             end = Match(SyntaxKind.SemicolonToken).Span.End;
-        return new LocalDeclarationStatementSyntax(_source, TextSpan.FromBounds(start, end), type, name.Text, initializer, isConst, isReadonly);
+        return new LocalDeclarationStatementSyntax(_source, TextSpan.FromBounds(start, end), type, name.Text, initializer, isConst, isReadonly, attributes.IsDefault ? [] : attributes);
     }
 
     private StatementSyntax ParseExpressionStatement()
@@ -964,7 +992,7 @@ internal sealed partial class Parser
         var arguments = ImmutableArray.CreateBuilder<TypeSyntax>();
         while (Current.Kind is not SyntaxKind.GreaterToken and not SyntaxKind.EndOfFileToken)
         {
-            arguments.Add(ParseType());
+            arguments.Add(ParseGenericArgument());
             if (Current.Kind != SyntaxKind.CommaToken)
                 break;
             NextToken();
@@ -973,10 +1001,23 @@ internal sealed partial class Parser
         return arguments.ToImmutable();
     }
 
+    private TypeSyntax ParseGenericArgument()
+    {
+        if (Current.Kind is SyntaxKind.NumberToken or SyntaxKind.CharacterToken || Current.Kind == SyntaxKind.OpenParenToken ||
+            Current.Kind == SyntaxKind.MinusToken && Peek(1).Kind == SyntaxKind.NumberToken)
+        {
+            // Stop before the generic argument's closing '>'; arithmetic and
+            // shift operators remain available inside a constant argument.
+            var expression = ParseBinaryExpression(8);
+            return new TypeSyntax(_source, expression.Span, "#constant", ConstantArgument: expression);
+        }
+        return ParseType(allowInlineArray: false);
+    }
+
     private NewExpressionSyntax ParseNew()
     {
         var start = NextToken().Span.Start;
-        var type = ParseType();
+        var type = ParseType(allowInlineArray: false);
         if (Current.Kind == SyntaxKind.OpenBracketToken)
         {
             NextToken();
@@ -992,7 +1033,7 @@ internal sealed partial class Parser
     private StackAllocExpressionSyntax ParseStackAlloc()
     {
         var start = NextToken().Span.Start;
-        var elementType = ParseType();
+        var elementType = ParseType(allowInlineArray: false);
         Match(SyntaxKind.OpenBracketToken);
         var count = ParseExpression();
         var close = Match(SyntaxKind.CloseBracketToken);

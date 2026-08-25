@@ -28,6 +28,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("#include <float.h>");
         writer.WriteLine("#include <math.h>");
         writer.WriteLine("#if defined(_MSC_VER)\n#define CT_ALIGNOF(type) __alignof(type)\n#else\n#define CT_ALIGNOF(type) _Alignof(type)\n#endif");
+        writer.WriteLine("#if defined(_MSC_VER)\n#define CT_ALIGN(n) __declspec(align(n))\n#else\n#define CT_ALIGN(n) __attribute__((aligned(n)))\n#endif");
+        writer.WriteLine("#if defined(_MSC_VER)\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef __declspec(align(n)) base name\n#else\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef base name __attribute__((aligned(n)))\n#endif");
         writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#include <windows.h>\n#endif");
         if (_usesManagedThreading)
         {
@@ -62,6 +64,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <esp_cpu.h>");
         writer.WriteLine();
         EmitMmioBarrier(writer);
+        EmitCpuIntrinsics(writer);
         writer.WriteLine($"#define CTILDE_RUNTIME_ABI_VERSION UINT32_C({CompilerContract.RuntimeAbiVersion})");
         writer.WriteLine();
         writer.WriteLine("static_assert(CHAR_BIT == 8, \"C~ requires 8-bit bytes\");");
@@ -487,6 +490,49 @@ internal sealed partial class CEmitter
         writer.WriteLine();
     }
 
+    private void EmitCpuIntrinsics(CWriter writer)
+    {
+        writer.WriteLine("static void ct_cpu_memory_barrier(void)");
+        writer.WriteLine("{");
+        writer.WriteLine("#if defined(_MSC_VER)");
+        writer.WriteLine("    _ReadWriteBarrier(); MemoryBarrier(); _ReadWriteBarrier();");
+        writer.WriteLine("#else");
+        var barrier = _architecture switch
+        {
+            CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64 => "dmb ish",
+            CompilationArchitecture.Xtensa => "memw",
+            CompilationArchitecture.RiscV32 or CompilationArchitecture.RiscV64 => "fence rw, rw",
+            _ => "mfence",
+        };
+        writer.WriteLine($"    __asm__ volatile (\"{barrier}\" ::: \"memory\");");
+        writer.WriteLine("#endif");
+        writer.WriteLine("}");
+        writer.WriteLine("static void ct_cpu_pause(void)");
+        writer.WriteLine("{");
+        writer.WriteLine("#if defined(_MSC_VER)");
+        writer.WriteLine("    YieldProcessor();");
+        writer.WriteLine("#else");
+        var pause = _architecture switch
+        {
+            CompilationArchitecture.X86 or CompilationArchitecture.X64 => "pause",
+            CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64 => "yield",
+            CompilationArchitecture.Xtensa => "nop",
+            CompilationArchitecture.RiscV32 or CompilationArchitecture.RiscV64 => "nop",
+            _ => "nop",
+        };
+        writer.WriteLine($"    __asm__ volatile (\"{pause}\");");
+        writer.WriteLine("#endif");
+        writer.WriteLine("}");
+        writer.WriteLine("static uint16_t ct_cpu_bswap16(uint16_t value) { return (uint16_t)((value >> 8) | (value << 8)); }");
+        writer.WriteLine("static uint32_t ct_cpu_bswap32(uint32_t value) { return ((value & UINT32_C(0x000000ff)) << 24) | ((value & UINT32_C(0x0000ff00)) << 8) | ((value & UINT32_C(0x00ff0000)) >> 8) | ((value & UINT32_C(0xff000000)) >> 24); }");
+        writer.WriteLine("static uint64_t ct_cpu_bswap64(uint64_t value) { return ((uint64_t)ct_cpu_bswap32((uint32_t)value) << 32) | ct_cpu_bswap32((uint32_t)(value >> 32)); }");
+        writer.WriteLine("static int32_t ct_cpu_popcount32(uint32_t value) { int32_t count = 0; while (value != 0) { value &= value - 1; count++; } return count; }");
+        writer.WriteLine("static int32_t ct_cpu_popcount64(uint64_t value) { int32_t count = 0; while (value != 0) { value &= value - 1; count++; } return count; }");
+        writer.WriteLine("static int32_t ct_cpu_lzcnt32(uint32_t value) { int32_t count = 0; if (value == 0) return 32; while ((value & UINT32_C(0x80000000)) == 0) { count++; value <<= 1; } return count; }");
+        writer.WriteLine("static int32_t ct_cpu_lzcnt64(uint64_t value) { int32_t count = 0; if (value == 0) return 64; while ((value & UINT64_C(0x8000000000000000)) == 0) { count++; value <<= 1; } return count; }");
+        writer.WriteLine();
+    }
+
     private void EmitStringLiterals(CWriter writer)
     {
         foreach (var pair in _stringLiterals.OrderBy(pair => pair.Value))
@@ -518,7 +564,9 @@ internal sealed partial class CEmitter
         }
         if (_nativeBufferTypes.Count != 0)
             writer.WriteLine();
-        foreach (var type in EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError"))
+        foreach (var inline in _inlineArrayTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+            writer.WriteLine($"typedef struct {NameMangler.InlineArray(inline)} {NameMangler.InlineArray(inline)};");
+        foreach (var type in EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError"))
             writer.WriteLine($"typedef {(type.Kind == DeclaredTypeKind.Struct && type.AggregateLayout == AggregateLayoutKind.Union ? "union" : "struct")} {NameMangler.Type(type)} {NameMangler.Type(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.Array(array.ElementType!)} {NameMangler.Array(array.ElementType!)};");
@@ -528,7 +576,7 @@ internal sealed partial class CEmitter
             writer.WriteLine($"extern const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)};");
         foreach (var type in BoxedTypes)
             writer.WriteLine($"extern const ct_type_descriptor {BoxDescriptorName(type)};");
-        if (EmittedTypes.Any(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError") || _arrayTypes.Count > 0 || _boxedTypes.Count > 0)
+        if (EmittedTypes.Any(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque && type.FullName != "Esp.Idf.EspError") || _arrayTypes.Count > 0 || _boxedTypes.Count > 0)
             writer.WriteLine();
     }
 
@@ -542,8 +590,20 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"#define {NameMangler.Identifier(type.FullName + "." + value.Name)} (({NameMangler.Type(type)}){FormatIntegralConstant(value.Value, underlying)})");
             writer.WriteLine();
         }
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Newtype))
+        {
+            writer.WriteLine(type.Alignment is int alignment
+                ? $"CT_ALIGNED_TYPEDEF({CTypeName(type.UnderlyingType!)}, {NameMangler.Type(type)}, {alignment});"
+                : $"typedef {CTypeName(type.UnderlyingType!)} {NameMangler.Type(type)};");
+            if (type.Alignment is int requestedAlignment)
+                writer.WriteLine($"static_assert(CT_ALIGNOF({NameMangler.Type(type)}) >= (size_t){requestedAlignment}, \"C~ newtype alignment mismatch\");");
+            writer.WriteLine();
+        }
+        var emittedInlineArrays = new HashSet<CType>();
         foreach (var type in OrderLayoutTypes())
         {
+            foreach (var inline in type.Fields.Where(field => !field.IsStatic).SelectMany(field => InlineArrays(field.Type)))
+                EmitInlineLayout(inline);
             if (type.Kind == DeclaredTypeKind.Struct)
             {
                 AggregateLayout.EmitValueTypeDefinition(type, writer.WriteLine, CDeclaration, includeTypedef: false);
@@ -577,14 +637,39 @@ internal sealed partial class CEmitter
             writer.WriteLine("};");
             writer.WriteLine();
         }
+        foreach (var inline in _inlineArrayTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
+            EmitInlineLayout(inline);
         if (Model.Types.TryGetValue("System.Object", out var objectType) && EmittedTypes.Contains(objectType))
             writer.WriteLine($"typedef {NameMangler.Type(objectType)} ct_managed_object;");
         writer.WriteLine();
+
+        void EmitInlineLayout(CType inline)
+        {
+            if (inline.InlineArrayLength <= 0)
+                return;
+            if (!emittedInlineArrays.Add(inline))
+                return;
+            foreach (var nested in InlineArrays(inline.ElementType!))
+                EmitInlineLayout(nested);
+            var inlineName = NameMangler.InlineArray(inline);
+            writer.WriteLine($"struct {inlineName} {{ {CDeclaration(inline.ElementType!, "Data")}\x5b{inline.InlineArrayLength}\x5d; }};");
+            writer.WriteLine($"static_assert(sizeof({inlineName}) == sizeof({CTypeName(inline.ElementType!)}) * (size_t){inline.InlineArrayLength}, \"C~ inline-array size mismatch\");");
+            writer.WriteLine();
+        }
+
+        static IEnumerable<CType> InlineArrays(CType type)
+        {
+            if (type.Kind != CTypeKind.InlineArray)
+                yield break;
+            foreach (var nested in InlineArrays(type.ElementType!))
+                yield return nested;
+            yield return type;
+        }
     }
 
     private IEnumerable<TypeSymbol> OrderLayoutTypes()
     {
-        var types = EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError").ToArray();
+        var types = EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError").ToArray();
         var emitted = new HashSet<TypeSymbol>();
         var visiting = new HashSet<TypeSymbol>();
         foreach (var type in types)
@@ -600,12 +685,21 @@ internal sealed partial class CEmitter
             if (type.BaseType is not null)
                 foreach (var result in Visit(type.BaseType))
                     yield return result;
-            foreach (var dependency in type.Fields.Where(field => !field.IsStatic && field.Type.Kind == CTypeKind.Struct).Select(field => field.Type.Symbol!).Distinct())
+            foreach (var dependency in type.Fields.Where(field => !field.IsStatic).SelectMany(field => LayoutDependencies(field.Type)).Distinct())
                 foreach (var result in Visit(dependency))
                     yield return result;
             visiting.Remove(type);
             if (emitted.Add(type))
                 yield return type;
+        }
+
+        static IEnumerable<TypeSymbol> LayoutDependencies(CType type)
+        {
+            if (type.Kind == CTypeKind.Struct && type.Symbol is not null)
+                yield return type.Symbol;
+            if (type.Kind == CTypeKind.InlineArray)
+                foreach (var nested in LayoutDependencies(type.ElementType!))
+                    yield return nested;
         }
     }
 
@@ -942,8 +1036,9 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"extern {qualifiers}{CDeclaration(field.Type, field.CName)};");
                 continue;
             }
-            var value = field.Type.Kind == CTypeKind.Struct ? "{0}" : DefaultValue(field.Type);
-            writer.WriteLine($"static {UsedAnnotation(field.IsUsed)}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
+            var value = field.Type.Kind is CTypeKind.Struct or CTypeKind.InlineArray ? "{0}" : DefaultValue(field.Type);
+            var retention = field.IsUsed ? "CT_USED " : field.Alignment is not null ? "CT_UNUSED " : string.Empty;
+            writer.WriteLine($"{(field.Alignment is int alignment ? $"CT_ALIGN({alignment}) " : string.Empty)}static {retention}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
         }
         if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();

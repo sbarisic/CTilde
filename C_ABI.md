@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.18 and runtime ABI 16. Draft 0.18 adds object-retention annotations, native data declarations, target-specific MMIO barriers, compile-time C assertions, and ESP-IDF task-entry wrappers to the Draft 0.17 generated-C contract.
+This document defines the generated C contract for C~ draft 0.19 and runtime ABI 16. Draft 0.19 adds constant-specialization identities, inline-array wrappers, general alignment declarations, nominal newtype typedefs, recursion analysis, and portable CPU intrinsic lowering to the Draft 0.18 generated-C contract.
 
-Draft 0.18 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees presence in the native object, not final linked-image retention. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.19 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees presence in the native object, not final linked-image retention. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -48,6 +48,8 @@ Hosted programs that use console input or `System.IO` additionally include the C
 | `T*` | the mapped C type followed by `*` |
 | `void*` | `void*` |
 | `delegate* unmanaged<P..., R>` | exact `R (*)(P...)` function pointer |
+
+A nominal `newtype N : T` emits a named `typedef` with the representation and ABI of `T`. An inline `T[N]` value emits a deterministic named wrapper `struct` containing exactly `T Data[N]`; it is passed, returned, assigned, and stored by value. Generated retain/drop helpers traverse every element when `T` contains managed references. Public headers expose an inline wrapper only when its element is recursively complete and unmanaged.
 
 Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.10 defines two's-complement wrapping for fixed and native-width signed integers. Native shifts derive their mask from `sizeof(uintptr_t) * CHAR_BIT`.
 
@@ -143,6 +145,8 @@ A structure lowers to the same C structure form but is passed, returned, assigne
 
 Natural sequential structures use ordinary C member layout. `[Packed(n)]` surrounds each generated aggregate declaration with balanced compiler-specific packing state and restores the prior state afterward. A union emits a native C `union`, with an assertion that every member has offset zero; an empty union contains one private byte.
 
+`[Align(n)]` lowers to `__declspec(align(n))` on MSVC/clang-cl or `__attribute__((aligned(n)))` on GCC/Clang. The annotation is present on eligible aggregate declarations and field, static, and local storage. Aligned newtypes use a compiler-specific aligned typedef. Generated `CT_ALIGNOF` assertions verify the requested minimum. Alignment participates in exported-header signatures but does not define final-image placement.
+
 An explicit-layout structure emits an outer structure containing one overlay union. Each source field has a deterministic packed carrier structure containing its byte prefix and value member, and generated field accesses use the complete nested carrier path. The overlay also contains alignment-marker members for the natural field alignments, capped by `[Packed(n)]` when present. Generated compile-time assertions verify every requested byte offset and each applicable packing contract. Unity files, modular files, and exported headers use this same renderer, and exported aggregate definitions are emitted in dependency order.
 
 `sizeof(T)` lowers to C `sizeof`, `offsetof(T, Field)` to `offsetof` over the generated access path, and `alignof(T)` to `__alignof` on MSVC or `_Alignof` on GCC and Clang. Each result is converted to `uintptr_t`. The expressions remain symbolic through C~ constant binding; native C performs the target layout evaluation.
@@ -155,7 +159,7 @@ A box stores an object header followed by one copied scalar, enum, structure, or
 
 An interface reference uses `ct_object*`; it does not add a second pointer or allocate for class receivers. Every emitted interface contract contributes deterministic typed slots to the generated vtable shape. Each concrete class and boxed structure descriptor also owns an immutable `ct_interface_entry` array mapping implemented interface descriptors to the concrete vtable. Class entries use receiver-adjusting thunks; boxed-structure entries use thunks that address the inline boxed value. `ct_type_is_assignable` walks these tables for casts, `is`, and `as`.
 
-Each reachable closed generic type has a canonical identity containing its definition and recursively canonical type arguments. It receives an independent C layout, descriptor, vtable, drop/retain helpers, methods, and static fields. Each reachable closed generic method similarly receives its own substituted signature and function. Open generic identities are compiler-only and never appear in emitted C or the public native header.
+Each reachable closed generic type has a canonical identity containing its definition and recursively canonical arguments. A constant argument contributes its declared integral type and canonical checked value. It receives an independent C layout, descriptor, vtable, drop/retain helpers, methods, and static fields. Each reachable closed generic method similarly receives its own substituted signature and function. The same identities feed mangling, modular ownership, headers, symbol maps, and version-3 debug metadata. Open generic identities are compiler-only and never appear in emitted C or the public native header.
 
 `Atomic<T>` is emitted as ordinary aligned scalar storage inside a non-copyable generated structure. Its operations call private width-aware helpers using MSVC Interlocked operations or GCC/Clang atomics. A C~ `volatile` field remains an ordinary scalar declaration; all generated accesses use the same helpers with acquire loads and release stores.
 
@@ -328,6 +332,10 @@ An exported method places both its internal implementation and native wrapper, a
 
 Section placement affects the native object only. Linker scripts remain responsible for section ordering, retention, memory-region mapping, and final addresses. Alignment and weak-symbol behavior are separate contracts.
 
+## Portable CPU lowering
+
+`Cpu.MemoryBarrier` emits a full compiler and ordinary-memory barrier appropriate to x86/x64, ARM32/ARM64, Xtensa, or RISC-V. It remains distinct from the MMIO I/O barrier. `Cpu.Pause` emits the baseline target hint or a conservative compiler-safe no-op. Byte swap, population count, and leading-zero count use deterministic inline helpers and do not require optional instruction-set extensions. These helpers allocate no C~ storage, call no C~ runtime service, and do not change runtime ABI 16.
+
 ## Opaque ownership and exports
 
 `[NativeType("typedef", "header")]` uses the native typedef directly and adds its header wherever the generated translation unit or public export header requires it. Opaque values are nominal even when two declarations name the same C representation. Value inputs are borrowed unless annotated. `[Consumes]` and opaque `[Retained]` transfer ownership; `[Creates] out` and `[ReturnsOwned]` produce an owned value. Non-null contracts call the runtime null check before native entry.
@@ -355,7 +363,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler with the diagnostic and context; returning from the handler continues to the platform's default fatal termination. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.18.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.19.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -367,7 +375,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.18.
+This section records constraints that remain after draft 0.19.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

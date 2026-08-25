@@ -34,7 +34,8 @@ internal sealed record BuildRequest(
     string? BindingGeneratedDirectory = null,
     bool GenerateBindingsOnly = false,
     bool VerifyBindings = false,
-    string? EspClangPath = null)
+    string? EspClangPath = null,
+    bool NoRecursion = false)
 {
     public string LockDirectory => Target == CompilationTarget.Hosted
         ? Path.GetDirectoryName(ExecutablePath!)!
@@ -114,7 +115,8 @@ internal static class BuildRequestResolver
             configuration, options.Compiler ?? build.Compiler, executable,
             idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
-            build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath);
+            build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
+            options.NoRecursion || project.Configuration.NoRecursion);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -175,7 +177,7 @@ internal static class BuildRequestResolver
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null);
+            null, null, false, false, null, options.NoRecursion);
     }
 
     private static void ValidateCommon(CommandLineOptions options)

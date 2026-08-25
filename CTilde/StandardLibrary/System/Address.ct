@@ -1,0 +1,5 @@
+namespace System.Runtime;
+
+public newtype PhysicalAddress : nuint;
+public newtype VirtualAddress : nuint;
+public newtype IoAddress : nuint;

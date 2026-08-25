@@ -174,8 +174,9 @@ internal sealed partial class CompilationModel
     {
         CTypeKind.Void or CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
-        CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer or CTypeKind.NativeUtf8String => true,
+        CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer or CTypeKind.NativeUtf8String => true,
         CTypeKind.Struct => !type.ContainsManagedReferences && type.Symbol!.Fields.Where(field => !field.IsStatic).All(field => IsExportParameterType(field.Type)),
+        CTypeKind.InlineArray => type.InlineArrayLength > 0 && IsExportParameterType(type.ElementType!),
         _ => false,
     };
 

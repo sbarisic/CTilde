@@ -68,7 +68,7 @@ internal static class TargetValidator
 
         var complete = new HashSet<TypeSymbol>();
         var active = new HashSet<TypeSymbol>();
-        foreach (var type in model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Opaque))
+        foreach (var type in model.UserTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque))
             VisitLayout(type);
 
         void VisitLayout(TypeSymbol type)

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.18 adds compile-time target queries, statement-level `static if`, file/type `static assert`, `[Used]` object retention, typed extern data, ordered and relaxed MMIO, and ESP-IDF `[TaskEntry]` exports. It retains Draft 0.17 section placement, aggregate layouts, interfaces, monomorphized generics, deterministic ARC, exceptions, concurrency, native interop, modular C output, and hosted and ESP-IDF profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.19 adds typed constant generic parameters, inline `T[N]` values, `[Align]`, strict nominal `newtype`, `[NoRecursion]` and project-wide recursion enforcement, and portable `System.Runtime.Cpu` intrinsics. It retains Draft 0.18 target selection, assertions, native object/data controls, MMIO, task entries, deterministic ARC, exceptions, concurrency, native interop, modular C output, and hosted and ESP-IDF profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -191,7 +191,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.18 implementation, not a stable production language. Draft 0.18 retains runtime ABI 16 and debug metadata v3. Draft 0.18 compile-time and native-system facilities pass hosted conformance; ESP-IDF cross-build and connected-board evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.19 implementation, not a stable production language. Draft 0.19 retains runtime ABI 16 and debug metadata v3. Constant layouts, nominal ABI types, recursion restrictions, and CPU intrinsics are covered by hosted conformance; ESP-IDF cross-build and connected-board evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -208,7 +208,7 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.18 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.19 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

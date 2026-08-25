@@ -162,6 +162,17 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerName(NameExpressionSyntax syntax, bool forWrite)
     {
+        if (_method.TypeSubstitutions.TryGetValue(syntax.Name, out var substitution) &&
+            substitution.Kind == CTypeKind.Constant && substitution.ConstantValue is { } constantValue &&
+            substitution.ElementType is { } constantType)
+        {
+            if (forWrite)
+            {
+                Report("CT2202", $"Constant parameter '{syntax.Name}' cannot be assigned.", syntax);
+                return ErrorExpression();
+            }
+            return ConstantGenericValue(constantType, constantValue);
+        }
         var local = FindLocal(syntax.Name);
         if (local is not null)
         {
@@ -223,6 +234,30 @@ internal sealed partial class TypedIrBodyLowerer
             return new IrExpressionValue { Type = CType.Error, Code = string.Empty, TypeReceiver = type };
         Report("CT1107", $"Name '{syntax.Name}' does not exist in the current context.", syntax);
         return ErrorExpression();
+    }
+
+    private IrExpressionValue ConstantGenericValue(CType type, BigInteger value)
+    {
+        var underlying = type.Kind == CTypeKind.Enum ? type.Symbol?.UnderlyingType ?? CType.Int : type;
+        object boxed = underlying.Kind switch
+        {
+            CTypeKind.Byte => (byte)value,
+            CTypeKind.Sbyte => (sbyte)value,
+            CTypeKind.Short => (short)value,
+            CTypeKind.Ushort => (ushort)value,
+            CTypeKind.Char => (char)(ushort)value,
+            CTypeKind.Int => (int)value,
+            CTypeKind.Uint => (uint)value,
+            CTypeKind.Long or CTypeKind.Nint => (long)value,
+            CTypeKind.Ulong or CTypeKind.Nuint => (ulong)value,
+            _ => (int)value,
+        };
+        var literal = underlying.Kind is CTypeKind.Ulong or CTypeKind.Nuint
+            ? FormatUInt64((ulong)value)
+            : underlying.Kind == CTypeKind.Uint
+                ? $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})"
+                : FormatInt64((long)value);
+        return Constant(type, boxed, $"({_emitter.CTypeName(type)}){literal}");
     }
 
     private IrExpressionValue LowerThis(ThisExpressionSyntax syntax)
@@ -320,6 +355,8 @@ internal sealed partial class TypedIrBodyLowerer
                 receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
             return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
+        if (receiver.Type.Kind == CTypeKind.InlineArray && syntax.Name == "Length")
+            return Constant(CType.Int, receiver.Type.InlineArrayLength, receiver.Type.InlineArrayLength.ToString(CultureInfo.InvariantCulture));
         if (receiver.Type.IsNativeBuffer && syntax.Name is "Length" or "Pointer")
         {
             RequireUnsafe(syntax);
@@ -504,7 +541,12 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerIndex(IndexExpressionSyntax syntax, bool forWrite)
     {
-        var receiver = Materialize(LowerExpression(syntax.Receiver), syntax.Receiver);
+        var loweredReceiver = LowerExpression(syntax.Receiver);
+        // Inline arrays are values, but indexing addressable storage must keep
+        // the original lvalue instead of indexing a materialized copy.
+        var receiver = loweredReceiver.Type.Kind == CTypeKind.InlineArray && loweredReceiver.LValue is not null
+            ? loweredReceiver
+            : Materialize(loweredReceiver, syntax.Receiver);
         var indexType = receiver.Type.IsNativeBuffer ? CType.Nuint : CType.Int;
         var index = Materialize(Convert(LowerExpression(syntax.Index), indexType, syntax.Index, false), syntax.Index);
         var prelude = new List<string>(receiver.Prelude);
@@ -516,6 +558,28 @@ internal sealed partial class TypedIrBodyLowerer
             if (!IsProvenInBounds(receiver, index))
                 prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             var code = $"{receiver.Code}->Data[{index.Code}]";
+            return new IrExpressionValue
+            {
+                Type = receiver.Type.ElementType!,
+                Code = code,
+                Prelude = prelude,
+                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" },
+            };
+        }
+        if (receiver.Type.Kind == CTypeKind.InlineArray)
+        {
+            var length = receiver.Type.InlineArrayLength;
+            var constantIndex = index.ConstantValue switch
+            {
+                int signed => (long)signed,
+                uint unsigned => unsigned,
+                _ => long.MinValue,
+            };
+            if (constantIndex != long.MinValue && (constantIndex < 0 || constantIndex >= length))
+                Report("CT2204", $"Inline-array index {constantIndex} is outside the range 0..{length - 1}.", syntax.Index);
+            else if (constantIndex == long.MinValue)
+                prelude.Add($"ct_bounds({index.Code}, {length}, {_emitter.SourceArgument(syntax)});");
+            var code = $"{receiver.Code}.Data[{index.Code}]";
             return new IrExpressionValue
             {
                 Type = receiver.Type.ElementType!,
@@ -847,6 +911,8 @@ internal sealed partial class TypedIrBodyLowerer
             return atomicResult;
         if (!captureForDefer && TryLowerMmioCall(selected, loweredArguments.Codes, prelude, syntax, out var mmioResult))
             return mmioResult;
+        if (!captureForDefer && TryLowerCpuCall(selected, loweredArguments.Codes, prelude, syntax, out var cpuResult))
+            return cpuResult;
         if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, prelude, captureForDefer, out var threadingResult))
             return threadingResult;
 
@@ -957,6 +1023,54 @@ internal sealed partial class TypedIrBodyLowerer
         if (ordered)
             prelude.Add("ct_mmio_barrier();");
         result = new IrExpressionValue { Type = element, Code = temporary, Prelude = prelude, Symbol = selected };
+        return true;
+    }
+
+    private bool TryLowerCpuCall(MethodSymbol selected, IReadOnlyList<string> arguments, List<string> prelude,
+        CallExpressionSyntax syntax, out IrExpressionValue result)
+    {
+        result = null!;
+        if (selected.ContainingType.FullName != "System.Runtime.Cpu")
+            return false;
+        if (selected.Name is "MemoryBarrier" or "Pause")
+        {
+            if (_emitter.Architecture == CompilationArchitecture.Auto)
+            {
+                Report("CT4110", $"Cpu.{selected.Name} requires a supported resolved target architecture.", syntax);
+                result = ErrorExpression(prelude);
+                return true;
+            }
+            prelude.Add(selected.Name == "MemoryBarrier" ? "ct_cpu_memory_barrier();" : "ct_cpu_pause();");
+            result = new IrExpressionValue { Type = CType.Void, Code = "0", Prelude = prelude, Symbol = selected };
+            return true;
+        }
+        var suffix = selected.Parameters[0].Type switch
+        {
+            { Kind: CTypeKind.Ushort } => "16",
+            { Kind: CTypeKind.Uint } => "32",
+            { Kind: CTypeKind.Ulong } => "64",
+            _ => string.Empty,
+        };
+        if (suffix.Length == 0)
+        {
+            Report("CT2207", $"Cpu.{selected.Name} requires an unsigned fixed-width integer.", syntax);
+            result = ErrorExpression(prelude);
+            return true;
+        }
+        var helper = selected.Name switch
+        {
+            "ByteSwap" => $"ct_cpu_bswap{suffix}",
+            "PopCount" => $"ct_cpu_popcount{suffix}",
+            "LeadingZeroCount" => $"ct_cpu_lzcnt{suffix}",
+            _ => string.Empty,
+        };
+        if (helper.Length == 0)
+        {
+            Report("CT2207", $"Unknown portable CPU intrinsic '{selected.Name}'.", syntax);
+            result = ErrorExpression(prelude);
+            return true;
+        }
+        result = new IrExpressionValue { Type = selected.ReturnType, Code = $"{helper}({arguments[0]})", Prelude = prelude, Symbol = selected };
         return true;
     }
 

@@ -37,4 +37,5 @@ public sealed record CompilationOptions(
     string? SourceRoot = null,
     DebugInformationMode DebugInformation = DebugInformationMode.None,
     DebugMemoryMode DebugMemory = DebugMemoryMode.Off,
-    CompilationArchitecture Architecture = CompilationArchitecture.Auto);
+    CompilationArchitecture Architecture = CompilationArchitecture.Auto,
+    bool NoRecursion = false);

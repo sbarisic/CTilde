@@ -89,6 +89,7 @@ public enum SyntaxKind
     NuintKeyword,
     NamespaceKeyword,
     NewKeyword,
+    NewtypeKeyword,
     NullKeyword,
     ObjectKeyword,
     OffsetofKeyword,
@@ -319,13 +320,13 @@ public sealed record UsingDirectiveSyntax(SourceText Source, TextSpan Span, stri
 
 public sealed record NamespaceSyntax(SourceText Source, TextSpan Span, string Name, bool IsFileScoped) : SyntaxNode(Source, Span);
 
-public enum TypeDeclarationKind { Class, Struct, Union, Interface, Enum, Delegate, Opaque }
+public enum TypeDeclarationKind { Class, Struct, Union, Interface, Enum, Delegate, Opaque, Newtype }
 
 public enum ParameterPassingKind { Value, Ref, In, Out }
 
 public enum TypeParameterConstraintKind { Type, Class, Struct, Unmanaged, Constructor }
 
-public sealed record TypeParameterSyntax(SourceText Source, TextSpan Span, string Name) : SyntaxNode(Source, Span);
+public sealed record TypeParameterSyntax(SourceText Source, TextSpan Span, string Name, bool IsConstant = false, TypeSyntax? ConstantType = null) : SyntaxNode(Source, Span);
 
 public sealed record TypeParameterConstraintSyntax(
     SourceText Source,
@@ -368,10 +369,10 @@ public sealed record FunctionPointerElementSyntax(SourceText Source, TextSpan Sp
 
 public sealed record FunctionPointerSignatureSyntax(SourceText Source, TextSpan Span, ImmutableArray<FunctionPointerElementSyntax> Elements) : SyntaxNode(Source, Span);
 
-public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false, FunctionPointerSignatureSyntax? FunctionPointer = null, ImmutableArray<TypeSyntax> TypeArguments = default) : SyntaxNode(Source, Span)
+public sealed record TypeSyntax(SourceText Source, TextSpan Span, string Name, int PointerDepth = 0, bool IsArray = false, FunctionPointerSignatureSyntax? FunctionPointer = null, ImmutableArray<TypeSyntax> TypeArguments = default, ExpressionSyntax? InlineArrayLength = null, ExpressionSyntax? ConstantArgument = null) : SyntaxNode(Source, Span)
 {
     public override string ToString() => FunctionPointer is null
-        ? Name + (TypeArguments.IsDefaultOrEmpty ? string.Empty : $"<{string.Join(", ", TypeArguments)}>") + new string('*', PointerDepth) + (IsArray ? "[]" : string.Empty)
+        ? (ConstantArgument?.ToString() ?? Name + (TypeArguments.IsDefaultOrEmpty ? string.Empty : $"<{string.Join(", ", TypeArguments)}>") + new string('*', PointerDepth) + (IsArray ? "[]" : InlineArrayLength is null ? string.Empty : $"[{InlineArrayLength}]"))
         : $"delegate* unmanaged<{string.Join(", ", FunctionPointer.Elements)}>";
 }
 
@@ -456,7 +457,7 @@ public abstract record StatementSyntax(SourceText Source, TextSpan Span) : Synta
 public sealed record BlockStatementSyntax(SourceText Source, TextSpan Span, ImmutableArray<StatementSyntax> Statements) : StatementSyntax(Source, Span);
 public sealed record EmptyStatementSyntax(SourceText Source, TextSpan Span) : StatementSyntax(Source, Span);
 public sealed record ExpressionStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : StatementSyntax(Source, Span);
-public sealed record LocalDeclarationStatementSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string Name, ExpressionSyntax? Initializer, bool IsConst, bool IsReadonly) : StatementSyntax(Source, Span);
+public sealed record LocalDeclarationStatementSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string Name, ExpressionSyntax? Initializer, bool IsConst, bool IsReadonly, ImmutableArray<AttributeSyntax> Attributes = default) : StatementSyntax(Source, Span);
 public sealed record IfStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Then, StatementSyntax? Else) : StatementSyntax(Source, Span);
 public sealed record StaticIfStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Then, StatementSyntax? Else) : StatementSyntax(Source, Span);
 public sealed record WhileStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Condition, StatementSyntax Body) : StatementSyntax(Source, Span);

@@ -40,6 +40,7 @@ internal sealed partial class CEmitter : ILoweringServices
 {
     private readonly Dictionary<string, int> _stringLiterals = new(StringComparer.Ordinal);
     private readonly HashSet<CType> _arrayTypes = [];
+    private readonly HashSet<CType> _inlineArrayTypes = [];
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly HashSet<CType> _nativeBufferTypes = [];
@@ -178,6 +179,7 @@ internal sealed partial class CEmitter : ILoweringServices
             Parameters = [.. parameters],
             Body = syntax.Body,
             IsNoAlloc = property.IsNoAlloc,
+            IsNoRecursion = property.IsNoRecursion,
             IsUnsafe = property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal),
             IsVirtual = property.IsVirtual,
             IsOverride = property.IsOverride,
@@ -615,6 +617,8 @@ internal sealed partial class CEmitter : ILoweringServices
                     ["receiver"] = method.IsStatic || method.IsConstructor ? null : "ct_self",
                     ["receiverType"] = method.IsStatic || method.IsConstructor ? null : method.ContainingType.FullName,
                     ["used"] = method.IsUsed,
+                    ["genericDefinition"] = method.GenericDefinition is null ? null : NameMangler.MethodIdentity(method.GenericDefinition),
+                    ["typeArguments"] = method.TypeArguments.Select(argument => argument.DisplayName).ToArray(),
                     ["parameters"] = method.Parameters.Select(parameter => new Dictionary<string, object?>
                     {
                         ["name"] = parameter.Name,
@@ -639,6 +643,8 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["kind"] = type.Kind.ToString().ToLowerInvariant(),
                 ["layout"] = type.AggregateLayout.ToString().ToLowerInvariant(),
                 ["pack"] = type.Pack,
+                ["alignment"] = type.Alignment,
+                ["underlyingType"] = type.UnderlyingType?.DisplayName,
                 ["base"] = type.BaseType?.FullName,
                 ["interfaces"] = type.Interfaces.Select(@interface => @interface.FullName).OrderBy(name => name, StringComparer.Ordinal).ToArray(),
                 ["genericDefinition"] = type.GenericDefinition?.FullName,
@@ -665,6 +671,7 @@ internal sealed partial class CEmitter : ILoweringServices
                         ["extern"] = field.ExternName,
                         ["used"] = field.IsUsed,
                         ["offset"] = field.Offset,
+                        ["alignment"] = field.Alignment,
                     }).ToArray(),
             }).ToArray();
         var arrays = _arrayTypes.OrderBy(type => type.DisplayName, StringComparer.Ordinal)
@@ -673,6 +680,14 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["type"] = type.DisplayName,
                 ["storage"] = CTypeName(type),
                 ["elementType"] = type.ElementType!.DisplayName,
+            }).ToArray();
+        var inlineArrays = _inlineArrayTypes.OrderBy(type => type.DisplayName, StringComparer.Ordinal)
+            .Select(type => new Dictionary<string, object?>
+            {
+                ["type"] = type.DisplayName,
+                ["storage"] = CTypeName(type),
+                ["elementType"] = type.ElementType!.DisplayName,
+                ["length"] = type.InlineArrayLength,
             }).ToArray();
         var boxes = _boxedTypes.OrderBy(type => type.DisplayName, StringComparer.Ordinal)
             .Select(type => new Dictionary<string, object?>
@@ -705,6 +720,7 @@ internal sealed partial class CEmitter : ILoweringServices
             ["functions"] = functions,
             ["types"] = types,
             ["arrays"] = arrays,
+            ["inlineArrays"] = inlineArrays,
             ["boxes"] = boxes,
             ["entryPoint"] = entryPoint,
             ["runtimeHooks"] = new Dictionary<string, object?>
@@ -932,7 +948,8 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
         CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
         CTypeKind.EspError => "esp_err_t",
-        CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
+        CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype => NameMangler.Type(type.Symbol!),
+        CTypeKind.InlineArray => NameMangler.InlineArray(type),
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
@@ -1019,6 +1036,8 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
         CTypeKind.NativeUtf8String => "(ct_native_utf8_string){ NULL, NULL, (size_t)0 }",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
+        CTypeKind.InlineArray => $"({CTypeName(type)}){{0}}",
+        CTypeKind.Newtype => $"({CTypeName(type)})0",
         _ => "0",
     };
 
@@ -1031,6 +1050,12 @@ internal sealed partial class CEmitter : ILoweringServices
         if (type.Kind == CTypeKind.Array)
         {
             _arrayTypes.Add(type);
+            RegisterType(type.ElementType!);
+        }
+        else if (type.Kind == CTypeKind.InlineArray)
+        {
+            if (type.InlineArrayLength > 0)
+                _inlineArrayTypes.Add(type);
             RegisterType(type.ElementType!);
         }
         else if (type.Kind == CTypeKind.Pointer)

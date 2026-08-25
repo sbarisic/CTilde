@@ -22,6 +22,7 @@ $runtimeFailureSource = Join-Path $ProjectDirectory "RuntimeFailure.ct"
 $memoryValidationSource = Join-Path $ProjectDirectory "MemoryValidation.ct"
 $consoleValidationSource = Join-Path $ProjectDirectory "ConsoleValidation.ct"
 $draft018ValidationSource = Join-Path $ProjectDirectory "Draft018Validation.ct"
+$draft019ValidationSource = Join-Path $ProjectDirectory "Draft019Validation.ct"
 $buildScript = Join-Path $ProjectDirectory "Build.ps1"
 $artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
 $timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
@@ -56,6 +57,7 @@ $report = [ordered]@{
     memoryValidation = $null
     consoleValidation = $null
     draft018Validation = $null
+    draft019Validation = $null
     debugger = $null
     postDetach = $null
     startupTimeout = $null
@@ -437,6 +439,21 @@ try {
     $draft018TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft018.txt"
     Write-Utf8NoBom $draft018TranscriptPath $draft018Transcript
     $report.draft018Validation = [ordered]@{ elapsedSeconds = $draft018Capture.ElapsedSeconds; transcript = $draft018TranscriptPath }
+
+    Write-Host "`n=== Draft 0.19 compile-time layout and low-level facilities ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $draft019ValidationSource -Flash
+    if ($LASTEXITCODE -ne 0) { throw "Draft 0.19 validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    $draft019Capture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTILDE_DRAFT_019_OK") -or $text.Contains("CTILDE_DRAFT_019_FAILED")
+    } 45
+    $draft019Transcript = Select-FirmwareTranscript $draft019Capture.Transcript
+    if (-not $draft019Transcript.Contains("CTILDE_DRAFT_019_OK")) {
+        throw "Draft 0.19 validation did not emit its success marker.`n$draft019Transcript"
+    }
+    $draft019TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft019.txt"
+    Write-Utf8NoBom $draft019TranscriptPath $draft019Transcript
+    $report.draft019Validation = [ordered]@{ elapsedSeconds = $draft019Capture.ElapsedSeconds; transcript = $draft019TranscriptPath }
 
     Write-Host "`n=== Managed layout and allocation failure ==="
     $previousMemoryBuild = $env:CTILDE_MEMORY_VALIDATION_BUILD

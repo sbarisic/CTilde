@@ -16,6 +16,17 @@
       "default": "hosted",
       "description": "Compiler target and target-specific standard library."
     },
+    "architecture": {
+      "type": "string",
+      "enum": ["auto", "x86", "x64", "arm32", "arm64", "xtensa", "riscv32", "riscv64"],
+      "default": "auto",
+      "description": "Compilation architecture used by compile-time target queries and target-specific intrinsics."
+    },
+    "noRecursion": {
+      "type": "boolean",
+      "default": false,
+      "description": "Reject recursion and calls whose possible targets cannot be closed statically in every reachable method."
+    },
     "sources": {
       "type": "array",
       "minItems": 1,

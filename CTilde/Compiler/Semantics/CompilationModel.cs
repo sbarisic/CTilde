@@ -21,10 +21,12 @@ internal sealed partial class CompilationModel
     private readonly Dictionary<(MethodSymbol Definition, string Arguments), MethodSymbol> _constructedMethods = [];
     private IReadOnlyDictionary<string, CType> _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
     private readonly CompilationTarget _target;
+    private readonly CompilationArchitecture _architecture;
 
-    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target)
+    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture)
     {
         _target = target;
+        _architecture = architecture;
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
         Diagnostics = diagnostics;
@@ -54,7 +56,15 @@ internal sealed partial class CompilationModel
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
         if (syntax.TypeArguments.IsDefaultOrEmpty && _activeTypeParameters.TryGetValue(syntax.Name, out var parameterType))
+        {
+            if (parameterType.Kind == CTypeKind.Constant)
+            {
+                if (report)
+                    Diagnostics.Add("CT2202", $"Constant parameter '{syntax.Name}' is a value and cannot be used as a type.", syntax.Source, syntax.Span);
+                return CType.Error;
+            }
             return ApplyTypeShape(parameterType, syntax, report);
+        }
         if ((syntax.Name is "NativeUtf8String" or "System.Runtime.NativeUtf8String") && syntax.TypeArguments.IsDefaultOrEmpty)
         {
             if (syntax.PointerDepth != 0 || syntax.IsArray)
@@ -74,7 +84,6 @@ internal sealed partial class CompilationModel
                     : CTypeKind.Error;
             if (bufferKind == CTypeKind.Error)
             {
-                var arguments = syntax.TypeArguments.Select(argument => ResolveType(argument, tree, report)).ToImmutableArray();
                 var definitions = ResolveNamedTypeCandidates(syntax.Name, tree, syntax.TypeArguments.Length).ToArray();
                 if (definitions.Length != 1)
                 {
@@ -84,6 +93,7 @@ internal sealed partial class CompilationModel
                             : $"Generic type '{syntax.Name}' is ambiguous.", syntax.Source, syntax.Span);
                     return CType.Error;
                 }
+                var arguments = ResolveGenericArguments(definitions[0].TypeParameters, syntax.TypeArguments, tree, syntax, report);
                 if (syntax.PointerDepth != 0 || syntax.IsArray)
                     return ApplyTypeShape(ConstructGenericType(definitions[0], arguments, tree, syntax).Type, syntax, report);
                 return ConstructGenericType(definitions[0], arguments, tree, syntax).Type;
@@ -174,6 +184,8 @@ internal sealed partial class CompilationModel
         }
         if (syntax.IsArray)
             baseType = new CType(CTypeKind.Array, ElementType: baseType);
+        if (syntax.InlineArrayLength is not null)
+            baseType = CreateInlineArray(baseType, syntax.InlineArrayLength, report);
         return baseType;
     }
 
@@ -212,7 +224,30 @@ internal sealed partial class CompilationModel
         }
         if (syntax.IsArray)
             baseType = new CType(CTypeKind.Array, ElementType: baseType);
+        if (syntax.InlineArrayLength is not null)
+            baseType = CreateInlineArray(baseType, syntax.InlineArrayLength, report);
         return baseType;
+    }
+
+    private CType CreateInlineArray(CType element, ExpressionSyntax lengthSyntax, bool report)
+    {
+        if (element.Kind == CTypeKind.Void || element.IsError || element.ContainsAtomic)
+        {
+            if (report)
+                Diagnostics.Add("CT2204", $"Inline-array element type '{element.DisplayName}' is not complete and storable.", lengthSyntax.Source, lengthSyntax.Span);
+            return CType.Error;
+        }
+        if (lengthSyntax is LiteralExpressionSyntax { Value: NumericLiteralValue numeric } && numeric.FloatingPoint is null && numeric.Integer > BigInteger.Zero && numeric.Integer <= int.MaxValue)
+            return new CType(CTypeKind.InlineArray, ElementType: element, InlineArrayLength: (int)numeric.Integer);
+        if (lengthSyntax is NameExpressionSyntax name && _activeTypeParameters.TryGetValue(name.Name, out var parameter) && parameter.Kind == CTypeKind.Constant)
+        {
+            if (parameter.ConstantValue is BigInteger value && value > BigInteger.Zero && value <= int.MaxValue)
+                return new CType(CTypeKind.InlineArray, ElementType: element, InlineArrayLength: (int)value);
+            return new CType(CTypeKind.InlineArray, ElementType: element, InlineArrayLengthParameter: name.Name);
+        }
+        if (report)
+            Diagnostics.Add("CT2204", "Inline-array length must be a positive compile-time integral value no greater than int.MaxValue.", lengthSyntax.Source, lengthSyntax.Span);
+        return CType.Error;
     }
 
     private TypeSymbol ConstructGenericType(TypeSymbol definition, ImmutableArray<CType> arguments, SyntaxTree tree, SyntaxNode syntax)
@@ -245,6 +280,9 @@ internal sealed partial class CompilationModel
             NativeHeader = definition.NativeHeader,
             AggregateLayout = definition.AggregateLayout,
             Pack = definition.Pack,
+            Alignment = ResolveAlignment(definition.Alignment, definition.AlignmentParameter,
+                definition.TypeParameters.Select((parameter, index) => (parameter.Name, arguments[index])).ToImmutableDictionary(pair => pair.Name, pair => pair.Item2, StringComparer.Ordinal), syntax),
+            AlignmentParameter = definition.AlignmentParameter,
             IsSealed = definition.IsSealed,
             IsAbstract = definition.IsAbstract,
             TypeArguments = arguments,
@@ -264,9 +302,21 @@ internal sealed partial class CompilationModel
     {
         for (var index = 0; index < Math.Min(parameters.Length, arguments.Length); index++)
         {
-            if (!constraints.TryGetValue(parameters[index].Name, out var constraint))
-                continue;
+            var parameter = parameters[index];
             var argument = arguments[index];
+            if (parameter.IsConstantParameter)
+            {
+                if (argument.Kind != CTypeKind.Constant || argument.ConstantValue is null || argument.ElementType != parameter.ConstantParameterType)
+                    Diagnostics.Add("CT2202", $"Constant argument '{argument.DisplayName}' is not valid for '{parameter.Name}'.", syntax.Source, syntax.Span);
+                continue;
+            }
+            if (argument.Kind == CTypeKind.Constant)
+            {
+                Diagnostics.Add("CT2202", $"Type parameter '{parameter.Name}' requires a type argument.", syntax.Source, syntax.Span);
+                continue;
+            }
+            if (!constraints.TryGetValue(parameter.Name, out var constraint))
+                continue;
             var valid = (!constraint.RequiresClass || argument.IsReference) &&
                 (!constraint.RequiresStruct || argument.IsValueType) &&
                 (!constraint.RequiresUnmanaged || IsCompleteUnmanagedType(argument)) &&
@@ -274,7 +324,7 @@ internal sealed partial class CompilationModel
                 (constraint.Interfaces.IsDefaultOrEmpty || constraint.Interfaces.All(contract => TypeFacts.CanImplicitlyConvert(argument, contract))) &&
                 (!constraint.RequiresConstructor || HasPublicParameterlessConstructor(argument));
             if (!valid)
-                Diagnostics.Add("CT1271", $"Type argument '{argument.DisplayName}' does not satisfy constraints for '{parameters[index].Name}'.", syntax.Source, syntax.Span);
+                Diagnostics.Add("CT1271", $"Type argument '{argument.DisplayName}' does not satisfy constraints for '{parameter.Name}'.", syntax.Source, syntax.Span);
         }
     }
 
@@ -321,6 +371,7 @@ internal sealed partial class CompilationModel
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
             IsNoAlloc = method.IsNoAlloc,
+            IsNoRecursion = method.IsNoRecursion,
             IsUnsafe = method.IsUnsafe,
             ReturnsBorrowed = method.ReturnsBorrowed,
             ReturnsOwned = method.ReturnsOwned,
@@ -370,6 +421,8 @@ internal sealed partial class CompilationModel
             return;
         var substitutions = definition.TypeParameters.Select((parameter, index) => (parameter.Name, Type: type.TypeArguments[index]))
             .ToImmutableDictionary(pair => pair.Name, pair => pair.Type, StringComparer.Ordinal);
+        if (definition.UnderlyingType is not null)
+            type.UnderlyingType = SubstituteType(definition.UnderlyingType, substitutions);
         if (definition.BaseType is not null)
             type.BaseType = SubstituteType(definition.BaseType.Type, substitutions).Symbol;
         foreach (var contract in definition.Interfaces)
@@ -392,6 +445,8 @@ internal sealed partial class CompilationModel
                 IsVolatile = field.IsVolatile,
                 Initializer = field.Initializer,
                 Offset = field.Offset,
+                Alignment = ResolveAlignment(field.Alignment, field.AlignmentParameter, substitutions, field.Syntax ?? type.Syntax!),
+                AlignmentParameter = field.AlignmentParameter,
                 SectionName = field.SectionName,
                 ExternName = field.ExternName,
                 IsNativeVolatile = field.IsNativeVolatile,
@@ -417,6 +472,7 @@ internal sealed partial class CompilationModel
                 IsSealedOverride = property.IsSealedOverride,
                 IsAbstract = property.IsAbstract,
                 IsNoAlloc = property.IsNoAlloc,
+                IsNoRecursion = property.IsNoRecursion,
             };
             cloned.ImplementedInterfaceProperties.AddRange(property.ImplementedInterfaceProperties);
             type.Properties.Add(cloned);
@@ -485,6 +541,7 @@ internal sealed partial class CompilationModel
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
             IsNoAlloc = method.IsNoAlloc,
+            IsNoRecursion = method.IsNoRecursion,
             IsUnsafe = method.IsUnsafe,
             ReturnsBorrowed = method.ReturnsBorrowed,
             ReturnsOwned = method.ReturnsOwned,
@@ -517,6 +574,13 @@ internal sealed partial class CompilationModel
             return replacement;
         if (type.Kind is CTypeKind.Array or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer)
             return type with { ElementType = SubstituteType(type.ElementType!, substitutions) };
+        if (type.Kind == CTypeKind.InlineArray)
+        {
+            var element = SubstituteType(type.ElementType!, substitutions);
+            if (type.InlineArrayLengthParameter is { } name && substitutions.TryGetValue(name, out var value) && value.Kind == CTypeKind.Constant && value.ConstantValue is BigInteger length)
+                return new CType(CTypeKind.InlineArray, ElementType: element, InlineArrayLength: (int)length);
+            return type with { ElementType = element };
+        }
         if (type.Symbol?.GenericDefinition is { } definition && !type.Symbol.TypeArguments.IsDefaultOrEmpty)
         {
             var arguments = type.Symbol.TypeArguments.Select(argument => SubstituteType(argument, substitutions)).ToImmutableArray();
@@ -525,6 +589,17 @@ internal sealed partial class CompilationModel
             return ConstructGenericType(definition, arguments, tree, definition.Syntax!).Type;
         }
         return type;
+    }
+
+    private int? ResolveAlignment(int? fixedAlignment, string? parameterName, IReadOnlyDictionary<string, CType> substitutions, SyntaxNode syntax)
+    {
+        if (fixedAlignment is not null || parameterName is null)
+            return fixedAlignment;
+        if (substitutions.TryGetValue(parameterName, out var value) && value.Kind == CTypeKind.Constant && value.ConstantValue is { } constant &&
+            constant >= BigInteger.One && constant <= new BigInteger(8192) && (constant & (constant - BigInteger.One)) == BigInteger.Zero)
+            return (int)constant;
+        Diagnostics.Add("CT1293", $"Align parameter '{parameterName}' must specialize to a power-of-two value from 1 through 8192.", syntax.Source, syntax.Span);
+        return null;
     }
 
     private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
@@ -537,6 +612,8 @@ internal sealed partial class CompilationModel
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
         CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
+        CTypeKind.Newtype => type.Symbol?.UnderlyingType is { } underlying && IsCompleteUnmanagedType(underlying),
+        CTypeKind.InlineArray => type.InlineArrayLength > 0 && IsCompleteUnmanagedType(type.ElementType!),
         CTypeKind.Struct => !type.ContainsManagedReferences,
         _ => false,
     };
@@ -607,6 +684,7 @@ internal sealed partial class CompilationModel
                     TypeDeclarationKind.Enum => DeclaredTypeKind.Enum,
                     TypeDeclarationKind.Delegate => DeclaredTypeKind.Delegate,
                     TypeDeclarationKind.Opaque => DeclaredTypeKind.Opaque,
+                    TypeDeclarationKind.Newtype => DeclaredTypeKind.Newtype,
                     _ when declaration.Modifiers.Contains("static", StringComparer.Ordinal) => DeclaredTypeKind.StaticClass,
                     _ => DeclaredTypeKind.Class,
                 };
@@ -622,10 +700,13 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT1270", "abstract applies only to classes and their members.", declaration.Source, declaration.Span);
                 foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind is not TypeDeclarationKind.Struct and not TypeDeclarationKind.Union))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
-                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed"] : []);
+                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed", "Align"] : declaration.Kind == TypeDeclarationKind.Newtype ? ["Align"] : []);
                 string? nativeTypeName = null;
                 string? nativeHeader = null;
                 int? pack = null;
+                var declaredTypeParameters = declaration.TypeParameters.IsDefault ? [] : declaration.TypeParameters;
+                var alignment = ParseAlignment(FindAttribute(declaration.Attributes, "Align"),
+                    declaredTypeParameters.Where(parameter => parameter.IsConstant).Select(parameter => parameter.Name).ToHashSet(StringComparer.Ordinal), out var alignmentParameter);
                 var packed = FindAttribute(declaration.Attributes, "Packed");
                 if (packed is not null)
                 {
@@ -655,7 +736,10 @@ internal sealed partial class CompilationModel
                     Syntax = null,
                     Accessibility = Accessibility.Private,
                     IsSealed = false,
+                    IsConstantParameter = parameter.IsConstant,
                 }).ToImmutableArray();
+                if (typeParameters.Select(parameter => parameter.Name).Distinct(StringComparer.Ordinal).Count() != typeParameters.Length)
+                    Diagnostics.Add("CT1271", "Generic type-parameter names must be unique.", declaration.Source, declaration.Span);
                 Types.Add(typeKey, new TypeSymbol
                 {
                     Namespace = namespaceName,
@@ -667,6 +751,8 @@ internal sealed partial class CompilationModel
                     NativeHeader = nativeHeader,
                     AggregateLayout = declaration.Kind == TypeDeclarationKind.Union ? AggregateLayoutKind.Union : AggregateLayoutKind.Sequential,
                     Pack = pack,
+                    Alignment = alignment,
+                    AlignmentParameter = alignmentParameter,
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                     IsAbstract = declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) || kind == DeclaredTypeKind.Interface,
                     TypeParameters = typeParameters,
@@ -683,8 +769,12 @@ internal sealed partial class CompilationModel
         {
             foreach (var declaration in tree.Root.Types)
             {
+                _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
                 var fullName = string.IsNullOrEmpty(_namespaces[tree]) ? declaration.Name : $"{_namespaces[tree]}.{declaration.Name}";
-                if (!Types.TryGetValue(DeclarationKey(fullName, declaration), out var type) || type.Kind is not (DeclaredTypeKind.Class or DeclaredTypeKind.Struct or DeclaredTypeKind.Interface))
+                if (!Types.TryGetValue(DeclarationKey(fullName, declaration), out var type))
+                    continue;
+                ResolveConstantParameterTypes(type.TypeParameters, declaration.TypeParameters, tree, declaration);
+                if (type.Kind is not (DeclaredTypeKind.Class or DeclaredTypeKind.Struct or DeclaredTypeKind.Interface))
                     continue;
                 _activeTypeParameters = type.TypeParameters.ToDictionary(parameter => parameter.Name, parameter => parameter.Type, StringComparer.Ordinal);
                 type.TypeParameterConstraints = BuildConstraintSets(declaration.TypeParameters, declaration.ConstraintClauses, tree, declaration);
@@ -770,6 +860,14 @@ internal sealed partial class CompilationModel
                 }
                 if (type.Kind == DeclaredTypeKind.Opaque)
                     continue;
+                if (type.Kind == DeclaredTypeKind.Newtype)
+                {
+                    var underlying = ResolveType(declaration.EnumUnderlyingType!, tree);
+                    type.UnderlyingType = underlying;
+                    if (!IsValidNewtypeUnderlying(underlying, type, []))
+                        Diagnostics.Add("CT1295", $"Newtype '{type.FullName}' requires a complete unmanaged non-void non-recursive underlying type.", declaration.Source, declaration.Span);
+                    continue;
+                }
                 foreach (var member in declaration.Members)
                     DeclareMember(type, member, tree);
                 if (!type.IsStatic && type.Kind != DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
@@ -812,6 +910,11 @@ internal sealed partial class CompilationModel
                 Diagnostics.Add("CT1271", $"Constraint clause names unknown type parameter '{clause.TypeParameterName}'.", clause.Source, clause.Span);
                 continue;
             }
+            if (parameters.First(parameter => parameter.Name == clause.TypeParameterName).IsConstant)
+            {
+                Diagnostics.Add("CT2202", $"Constant parameter '{clause.TypeParameterName}' cannot declare generic constraints.", clause.Source, clause.Span);
+                continue;
+            }
             var requiresClass = false;
             var requiresStruct = false;
             var requiresUnmanaged = false;
@@ -846,6 +949,217 @@ internal sealed partial class CompilationModel
         return result.ToImmutableDictionary(StringComparer.Ordinal);
     }
 
+    private void ResolveConstantParameterTypes(
+        ImmutableArray<TypeSymbol> symbols,
+        ImmutableArray<TypeParameterSyntax> syntax,
+        SyntaxTree tree,
+        SyntaxNode owner)
+    {
+        if (symbols.IsDefaultOrEmpty || syntax.IsDefaultOrEmpty)
+            return;
+        for (var index = 0; index < Math.Min(symbols.Length, syntax.Length); index++)
+        {
+            var parameter = symbols[index];
+            var declaration = syntax[index];
+            if (!declaration.IsConstant)
+                continue;
+            if (declaration.ConstantType is null)
+            {
+                Diagnostics.Add("CT2202", $"Constant parameter '{declaration.Name}' requires an integral declared type.", owner.Source, owner.Span);
+                parameter.ConstantParameterType = CType.Error;
+                continue;
+            }
+            var resolved = ResolveType(declaration.ConstantType, tree);
+            if (!IsConstantParameterType(resolved))
+            {
+                Diagnostics.Add("CT2202", $"Constant parameter '{declaration.Name}' requires an integral, character, native-integral, or enum type.", declaration.Source, declaration.Span);
+                parameter.ConstantParameterType = CType.Error;
+                continue;
+            }
+            parameter.ConstantParameterType = resolved;
+        }
+    }
+
+    internal ImmutableArray<CType> ResolveGenericArguments(
+        ImmutableArray<TypeSymbol> parameters,
+        ImmutableArray<TypeSyntax> arguments,
+        SyntaxTree tree,
+        SyntaxNode owner,
+        bool report = true)
+    {
+        var result = ImmutableArray.CreateBuilder<CType>(arguments.Length);
+        for (var index = 0; index < arguments.Length; index++)
+        {
+            var parameter = index < parameters.Length ? parameters[index] : null;
+            var argument = arguments[index];
+            if (parameter?.IsConstantParameter == true)
+            {
+                var expression = argument.ConstantArgument ?? new NameExpressionSyntax(argument.Source, argument.Span, argument.Name);
+                if (!TryEvaluateConstantArgument(expression, tree, out var value) ||
+                    parameter.ConstantParameterType is not { } declaredType ||
+                    !TryConvertConstant(value, declaredType, out var canonical))
+                {
+                    if (report)
+                        Diagnostics.Add("CT2202", $"Argument for constant parameter '{parameter.Name}' must be a known checked value of type '{parameter.ConstantParameterType?.DisplayName ?? "?"}'.", argument.Source, argument.Span);
+                    result.Add(new CType(CTypeKind.Constant, Symbol: parameter, ElementType: parameter.ConstantParameterType ?? CType.Error, ConstantValue: BigInteger.Zero));
+                }
+                else
+                    result.Add(new CType(CTypeKind.Constant, Symbol: parameter, ElementType: declaredType, ConstantValue: canonical));
+                continue;
+            }
+            if (argument.ConstantArgument is not null)
+            {
+                if (report)
+                    Diagnostics.Add("CT2202", $"Type parameter '{parameter?.Name ?? index.ToString(System.Globalization.CultureInfo.InvariantCulture)}' requires a type argument, not a constant value.", argument.Source, argument.Span);
+                result.Add(CType.Error);
+                continue;
+            }
+            result.Add(ResolveType(argument, tree, report));
+        }
+        return result.ToImmutable();
+    }
+
+    internal ImmutableArray<CType> ResolveGenericArguments(
+        ImmutableArray<TypeSymbol> parameters,
+        ImmutableArray<TypeSyntax> arguments,
+        SyntaxTree tree,
+        SyntaxNode owner,
+        IReadOnlyDictionary<string, CType> substitutions,
+        bool report = true)
+    {
+        var previous = _activeTypeParameters;
+        var builder = previous.ToImmutableDictionary(StringComparer.Ordinal).ToBuilder();
+        foreach (var substitution in substitutions)
+            builder[substitution.Key] = substitution.Value;
+        _activeTypeParameters = builder.ToImmutable();
+        try
+        {
+            return ResolveGenericArguments(parameters, arguments, tree, owner, report);
+        }
+        finally
+        {
+            _activeTypeParameters = previous;
+        }
+    }
+
+    private bool TryEvaluateConstantArgument(ExpressionSyntax expression, SyntaxTree tree, out BigInteger value)
+    {
+        switch (expression)
+        {
+            case LiteralExpressionSyntax { Value: NumericLiteralValue numeric } when numeric.FloatingPoint is null:
+                value = numeric.Integer;
+                return true;
+            case LiteralExpressionSyntax { Value: char character }:
+                value = character;
+                return true;
+            case ParenthesizedExpressionSyntax parenthesized:
+                return TryEvaluateConstantArgument(parenthesized.Expression, tree, out value);
+            case NameExpressionSyntax name when _activeTypeParameters.TryGetValue(name.Name, out var parameter) &&
+                                                parameter.Kind == CTypeKind.Constant && parameter.ConstantValue is { } constant:
+                value = constant;
+                return true;
+            case MemberAccessExpressionSyntax { Receiver: NameExpressionSyntax receiver } member:
+                {
+                    if (receiver.Name is "Target" or "System.Runtime.Target")
+                    {
+                        if (member.Name == "PointerSize" && _architecture != CompilationArchitecture.Auto)
+                        {
+                            value = _architecture is CompilationArchitecture.X64 or CompilationArchitecture.Arm64 or CompilationArchitecture.RiscV64 ? 8 : 4;
+                            return true;
+                        }
+                    }
+                    var enumType = ResolveNamedType(receiver.Name, tree);
+                    var enumValue = enumType?.EnumValues.FirstOrDefault(candidate => candidate.Name == member.Name);
+                    if (enumValue is not null)
+                    {
+                        value = enumValue.Value;
+                        return true;
+                    }
+                    break;
+                }
+            case CastExpressionSyntax cast when TryEvaluateConstantArgument(cast.Expression, tree, out var operand):
+                {
+                    var target = ResolveType(cast.Type, tree, report: false);
+                    return TryConvertConstant(operand, target, out value);
+                }
+            case UnaryExpressionSyntax unary when TryEvaluateConstantArgument(unary.Operand, tree, out var operand):
+                value = unary.OperatorKind switch
+                {
+                    SyntaxKind.PlusToken => operand,
+                    SyntaxKind.MinusToken => -operand,
+                    SyntaxKind.TildeToken => ~operand,
+                    _ => default,
+                };
+                return unary.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.TildeToken;
+            case BinaryExpressionSyntax binary when TryEvaluateConstantArgument(binary.Left, tree, out var left) &&
+                                                    TryEvaluateConstantArgument(binary.Right, tree, out var right):
+                try
+                {
+                    value = binary.OperatorKind switch
+                    {
+                        SyntaxKind.PlusToken => left + right,
+                        SyntaxKind.MinusToken => left - right,
+                        SyntaxKind.StarToken => left * right,
+                        SyntaxKind.SlashToken when right != 0 => left / right,
+                        SyntaxKind.PercentToken when right != 0 => left % right,
+                        SyntaxKind.AmpersandToken => left & right,
+                        SyntaxKind.PipeToken => left | right,
+                        SyntaxKind.HatToken => left ^ right,
+                        SyntaxKind.LessLessToken when right >= 0 && right <= int.MaxValue => left << (int)right,
+                        SyntaxKind.GreaterGreaterToken when right >= 0 && right <= int.MaxValue => left >> (int)right,
+                        _ => default,
+                    };
+                    return binary.OperatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or
+                        SyntaxKind.AmpersandToken or SyntaxKind.PipeToken or SyntaxKind.HatToken ||
+                        binary.OperatorKind is SyntaxKind.SlashToken or SyntaxKind.PercentToken && right != 0 ||
+                        binary.OperatorKind is SyntaxKind.LessLessToken or SyntaxKind.GreaterGreaterToken && right >= 0 && right <= int.MaxValue;
+                }
+                catch (ArithmeticException)
+                {
+                    break;
+                }
+        }
+        value = default;
+        return false;
+    }
+
+    private bool TryConvertConstant(BigInteger value, CType type, out BigInteger canonical)
+    {
+        var underlying = type.Kind == CTypeKind.Enum ? type.Symbol?.UnderlyingType ?? CType.Int : type;
+        var pointer64 = _architecture is CompilationArchitecture.X64 or CompilationArchitecture.Arm64 or CompilationArchitecture.RiscV64;
+        (BigInteger Min, BigInteger Max)? range = underlying.Kind switch
+        {
+            CTypeKind.Byte => (byte.MinValue, byte.MaxValue),
+            CTypeKind.Sbyte => (sbyte.MinValue, sbyte.MaxValue),
+            CTypeKind.Short => (short.MinValue, short.MaxValue),
+            CTypeKind.Ushort or CTypeKind.Char => (ushort.MinValue, ushort.MaxValue),
+            CTypeKind.Int => (int.MinValue, int.MaxValue),
+            CTypeKind.Uint => (uint.MinValue, uint.MaxValue),
+            CTypeKind.Long => (long.MinValue, long.MaxValue),
+            CTypeKind.Ulong => (ulong.MinValue, ulong.MaxValue),
+            CTypeKind.Nint when pointer64 => (long.MinValue, long.MaxValue),
+            CTypeKind.Nint => (int.MinValue, int.MaxValue),
+            CTypeKind.Nuint when pointer64 => (ulong.MinValue, ulong.MaxValue),
+            CTypeKind.Nuint => (uint.MinValue, uint.MaxValue),
+            _ => null,
+        };
+        canonical = value;
+        return range is { } bounds && value >= bounds.Min && value <= bounds.Max;
+    }
+
+    private static bool IsConstantParameterType(CType type) => type.Kind is
+        CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+        CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Enum;
+
+    private static bool IsValidNewtypeUnderlying(CType type, TypeSymbol owner, HashSet<TypeSymbol> visited)
+    {
+        if (type.Kind is CTypeKind.Void or CTypeKind.Error || type.Symbol == owner)
+            return false;
+        if (type.Kind == CTypeKind.Newtype)
+            return type.Symbol is { UnderlyingType: { } nested } symbol && visited.Add(symbol) && IsValidNewtypeUnderlying(nested, owner, visited);
+        return IsCompleteUnmanagedType(type);
+    }
+
     private void DeclareMember(TypeSymbol type, MemberDeclarationSyntax declaration, SyntaxTree tree)
     {
         ValidateModifiers(declaration.Modifiers, declaration);
@@ -860,11 +1174,13 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
                     int? fieldOffset = null;
+                    var fieldAlignment = ParseAlignment(FindAttribute(field.Attributes, "Align"),
+                        _activeTypeParameters.Where(pair => pair.Value.Kind == CTypeKind.Constant).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal), out var fieldAlignmentParameter);
                     var sectionAttribute = FindAttribute(field.Attributes, "Section");
                     var sectionName = ParseSectionName(sectionAttribute);
                     var usedAttribute = FindAttribute(field.Attributes, "Used");
@@ -906,6 +1222,8 @@ internal sealed partial class CompilationModel
                         IsVolatile = isVolatile,
                         Initializer = field.Initializer,
                         Offset = fieldOffset,
+                        Alignment = fieldAlignment,
+                        AlignmentParameter = fieldAlignmentParameter,
                         SectionName = sectionName,
                         ExternName = externName,
                         IsNativeVolatile = nativeVolatileAttribute is not null,
@@ -933,20 +1251,29 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1289", "Extern data requires a non-generic static unmanaged field without an initializer, Section, Used, const, or C~ volatile.", externAttribute.Source, externAttribute.Span);
                     if (nativeVolatileAttribute is not null && externAttribute is null)
                         Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
+                    if (fieldAlignment is not null && (symbol.IsConst || symbol.ExternName is not null || !symbol.IsStatic && type.Kind != DeclaredTypeKind.Struct))
+                        Diagnostics.Add("CT1293", "Align is valid only on owned non-const static storage or instance fields of value aggregates.", field.Source, field.Span);
+                    if (fieldAlignment is int requested && type.Pack is int packValue && !symbol.IsStatic && requested > packValue)
+                        Diagnostics.Add("CT1293", $"Field alignment {requested} exceeds containing pack {packValue}.", field.Source, field.Span);
+                    if (fieldAlignment is int explicitAlignment && fieldOffset is int explicitOffset && explicitOffset % explicitAlignment != 0)
+                        Diagnostics.Add("CT1293", $"Explicit field offset {explicitOffset} is not divisible by alignment {explicitAlignment}.", field.Source, field.Span);
                     AddUnique(type, symbol);
                     break;
                 }
             case PropertyDeclarationSyntax property:
                 {
                     ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], property);
-                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "Section"]);
+                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "NoRecursion", "Section"]);
                     var noAlloc = FindAttribute(property.Attributes, "NoAlloc");
+                    var noRecursion = FindAttribute(property.Attributes, "NoRecursion");
                     var propertySection = FindAttribute(property.Attributes, "Section");
                     _ = ParseSectionName(propertySection);
                     if (propertySection is not null)
                         Diagnostics.Add("CT1287", "Section is not valid on a property.", propertySection.Source, propertySection.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
                         Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
+                    if (noRecursion is not null && noRecursion.Arguments.Length != 0)
+                        Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
                     if (property.Getter is null && property.Setter is null)
                         Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
                     var propertyType = ResolveType(property.Type, tree);
@@ -1003,7 +1330,10 @@ internal sealed partial class CompilationModel
                         IsOverride = property.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = property.Modifiers.Contains("sealed", StringComparer.Ordinal),
                         IsNoAlloc = noAlloc is not null,
+                        IsNoRecursion = noRecursion is not null,
                     };
+                    if (noRecursion is not null && isAbstractProperty)
+                        Diagnostics.Add("CT1294", "NoRecursion requires body-bearing accessors.", noRecursion.Source, noRecursion.Span);
                     if (AccessRank(symbol.GetterAccessibility) > AccessRank(accessibility) || AccessRank(symbol.SetterAccessibility) > AccessRank(accessibility))
                         Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
@@ -1014,11 +1344,14 @@ internal sealed partial class CompilationModel
             case ConstructorDeclarationSyntax constructor:
                 {
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
-                    ValidateAttributes(constructor.Attributes, constructor, ["Section"]);
+                    ValidateAttributes(constructor.Attributes, constructor, ["Section", "NoRecursion"]);
                     var constructorSection = FindAttribute(constructor.Attributes, "Section");
+                    var constructorNoRecursion = FindAttribute(constructor.Attributes, "NoRecursion");
                     _ = ParseSectionName(constructorSection);
                     if (constructorSection is not null)
                         Diagnostics.Add("CT1287", "Section is not valid on a constructor.", constructorSection.Source, constructorSection.Span);
+                    if (constructorNoRecursion is not null && constructorNoRecursion.Arguments.Length != 0)
+                        Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", constructorNoRecursion.Source, constructorNoRecursion.Span);
                     if (isStatic)
                         Diagnostics.Add("CT1203", "Static constructors are not part of draft 0.7.", constructor.Source, constructor.Span);
                     if (type.Kind == DeclaredTypeKind.Interface)
@@ -1035,6 +1368,7 @@ internal sealed partial class CompilationModel
                         Parameters = parameters,
                         Body = constructor.Body,
                         IsConstructor = true,
+                        IsNoRecursion = constructorNoRecursion is not null,
                         IsUnsafe = constructor.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ConstructorInitializer = constructor.Initializer,
                     };
@@ -1049,11 +1383,12 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
                     var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
+                    var noRecursion = FindAttribute(method.Attributes, "NoRecursion");
                     var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
                     var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
                     var returnsNullable = FindAttribute(method.Attributes, "ReturnsNullable");
@@ -1082,9 +1417,11 @@ internal sealed partial class CompilationModel
                         Kind = DeclaredTypeKind.TypeParameter,
                         Syntax = null,
                         Accessibility = Accessibility.Private,
+                        IsConstantParameter = parameter.IsConstant,
                     }).ToImmutableArray();
                     if (methodTypeParameters.Select(parameter => parameter.Name).Distinct(StringComparer.Ordinal).Count() != methodTypeParameters.Length)
                         Diagnostics.Add("CT1271", "Generic method type-parameter names must be unique.", method.Source, method.Span);
+                    ResolveConstantParameterTypes(methodTypeParameters, method.TypeParameters, tree, method);
                     var activeBuilder = previousTypeParameters.ToImmutableDictionary(StringComparer.Ordinal).ToBuilder();
                     foreach (var parameter in methodTypeParameters)
                     {
@@ -1107,6 +1444,10 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noAlloc is not null && noAlloc.Arguments.Length != 0)
                         Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
+                    if (noRecursion is not null && noRecursion.Arguments.Length != 0)
+                        Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
+                    if (noRecursion is not null && (method.Body is null || isAbstractMethod || external is not null))
+                        Diagnostics.Add("CT1294", "NoRecursion requires a body-bearing non-extern method.", noRecursion.Source, noRecursion.Span);
                     if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
                     if (usedAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
@@ -1175,6 +1516,7 @@ internal sealed partial class CompilationModel
                         Body = method.Body,
                         IsEntryPoint = entry is not null,
                         IsNoAlloc = noAlloc is not null,
+                        IsNoRecursion = noRecursion is not null,
                         IsUnsafe = method.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && (returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer),
                         ReturnsOwned = returnsOwned is not null,
@@ -1399,6 +1741,8 @@ internal sealed partial class CompilationModel
                 CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
                 CTypeKind.Enum or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer)
                 return true;
+            if (candidate.Kind == CTypeKind.Newtype && candidate.Symbol?.UnderlyingType is { } underlying)
+                return IsLayoutUnmanaged(underlying, context, visiting);
             if (candidate.Kind != CTypeKind.Struct || candidate.Symbol is null || !visiting.Add(candidate.Symbol))
                 return false;
             var result = candidate.Symbol.Fields.Where(field => !field.IsStatic).All(field => IsLayoutUnmanaged(field.Type, candidate.Symbol, visiting));
@@ -1679,6 +2023,23 @@ internal sealed partial class CompilationModel
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);
+
+    private int? ParseAlignment(AttributeSyntax? attribute, IReadOnlySet<string> symbolicNames, out string? parameterName)
+    {
+        parameterName = null;
+        if (attribute is null)
+            return null;
+        if (attribute.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken }] &&
+            numeric.FloatingPoint is null && numeric.Integer >= BigInteger.One && numeric.Integer <= new BigInteger(8192) && (numeric.Integer & (numeric.Integer - BigInteger.One)) == BigInteger.Zero)
+            return (int)numeric.Integer;
+        if (attribute.Arguments is [NameExpressionSyntax name] && symbolicNames.Contains(name.Name))
+        {
+            parameterName = name.Name;
+            return null;
+        }
+        Diagnostics.Add("CT1293", "Align requires one power-of-two integral constant from 1 through 8192.", attribute.Source, attribute.Span);
+        return null;
+    }
 
     private string? ParseSectionName(AttributeSyntax? attribute)
     {

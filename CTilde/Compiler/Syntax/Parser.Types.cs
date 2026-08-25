@@ -4,7 +4,7 @@ namespace CTilde;
 
 internal sealed partial class Parser
 {
-    private TypeSyntax ParseType(bool allowVar = false)
+    private TypeSyntax ParseType(bool allowVar = false, bool allowInlineArray = true)
     {
         var start = Current.Span.Start;
         if (Current.Kind == SyntaxKind.DelegateKeyword)
@@ -21,7 +21,7 @@ internal sealed partial class Parser
             var builder = ImmutableArray.CreateBuilder<TypeSyntax>();
             while (!AtTypeArgumentClose && Current.Kind != SyntaxKind.EndOfFileToken)
             {
-                builder.Add(ParseType());
+                builder.Add(ParseGenericArgument());
                 if (Current.Kind != SyntaxKind.CommaToken)
                     break;
                 NextToken();
@@ -36,13 +36,20 @@ internal sealed partial class Parser
             NextToken();
         }
         var isArray = false;
+        ExpressionSyntax? inlineArrayLength = null;
         if (Current.Kind == SyntaxKind.OpenBracketToken && Peek(1).Kind == SyntaxKind.CloseBracketToken)
         {
             NextToken();
             NextToken();
             isArray = true;
         }
-        return new TypeSyntax(_source, TextSpan.FromBounds(start, Peek(-1).Span.End), name, pointerDepth, isArray, TypeArguments: typeArguments);
+        else if (allowInlineArray && Current.Kind == SyntaxKind.OpenBracketToken)
+        {
+            NextToken();
+            inlineArrayLength = ParseExpression();
+            Match(SyntaxKind.CloseBracketToken);
+        }
+        return new TypeSyntax(_source, TextSpan.FromBounds(start, Peek(-1).Span.End), name, pointerDepth, isArray, TypeArguments: typeArguments, InlineArrayLength: inlineArrayLength);
     }
 
     private TypeSyntax ParseFunctionPointerType()
@@ -157,6 +164,18 @@ internal sealed partial class Parser
             index++;
         if (index + 1 < _tokens.Length && _tokens[index].Kind == SyntaxKind.OpenBracketToken && _tokens[index + 1].Kind == SyntaxKind.CloseBracketToken)
             index += 2;
+        else if (index < _tokens.Length && _tokens[index].Kind == SyntaxKind.OpenBracketToken)
+        {
+            var depth = 1;
+            index++;
+            while (index < _tokens.Length && depth != 0)
+            {
+                if (_tokens[index].Kind == SyntaxKind.OpenBracketToken) depth++;
+                else if (_tokens[index].Kind == SyntaxKind.CloseBracketToken) depth--;
+                index++;
+            }
+            if (depth != 0) return false;
+        }
         return true;
     }
 }

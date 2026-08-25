@@ -11,7 +11,8 @@ public sealed record CTildeProjectConfiguration(
     ImmutableArray<string> Sources,
     ImmutableArray<string> Exclude,
     CTildeProjectBuildConfiguration Build,
-    ImmutableArray<EspIdfBindingManifest> BindingManifests);
+    ImmutableArray<EspIdfBindingManifest> BindingManifests,
+    bool NoRecursion);
 
 public enum CTildeNativeBuildConfiguration
 {
@@ -119,7 +120,7 @@ public static class CTildeProjectFile
         foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests), files);
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, document.NoRecursion ?? false), files);
     }
 
     private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
@@ -299,6 +300,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("architecture")] string? Architecture,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,
+        [property: JsonPropertyName("noRecursion")] bool? NoRecursion,
         [property: JsonPropertyName("build")] BuildDocument? Build,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf);
 

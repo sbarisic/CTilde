@@ -215,9 +215,10 @@ internal sealed partial class TypedIrBodyLowerer
 
         if (syntax.OperatorKind is SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken)
         {
-            if (!(left.Type.IsNumeric && right.Type.IsNumeric) && !(left.Type.Kind == CTypeKind.Enum && left.Type == right.Type))
+            var sameNewtype = left.Type.Kind == CTypeKind.Newtype && left.Type == right.Type && left.Type.Symbol?.UnderlyingType?.IsNumeric == true;
+            if (!(left.Type.IsNumeric && right.Type.IsNumeric) && !(left.Type.Kind == CTypeKind.Enum && left.Type == right.Type) && !sameNewtype)
                 Report("CT2128", "Ordered comparison requires numeric operands or the same enum type.", syntax);
-            var common = left.Type.Kind == CTypeKind.Enum ? left.Type : TypeFacts.PromoteNumeric(left.Type, right.Type);
+            var common = left.Type.Kind is CTypeKind.Enum or CTypeKind.Newtype ? left.Type : TypeFacts.PromoteNumeric(left.Type, right.Type);
             if (common.IsError && !left.Type.IsError && !right.Type.IsError)
             {
                 Report("CT2128", "Ordered comparison has no valid common numeric type.", syntax);
@@ -231,6 +232,11 @@ internal sealed partial class TypedIrBodyLowerer
 
         if (syntax.OperatorKind is SyntaxKind.AmpersandToken or SyntaxKind.PipeToken or SyntaxKind.HatToken or SyntaxKind.LessLessToken or SyntaxKind.GreaterGreaterToken)
         {
+            if (left.Type.Kind == CTypeKind.Newtype || right.Type.Kind == CTypeKind.Newtype)
+            {
+                Report("CT2205", "Newtype bitwise and shift operations require explicit conversion to the underlying type.", syntax);
+                return ErrorExpression(left.Prelude.Concat(right.Prelude));
+            }
             if (!left.Type.IsIntegral || !right.Type.IsIntegral)
                 Report("CT2129", "Bitwise and shift operators require integral operands.", syntax);
             if (left.Type.Kind == CTypeKind.Enum)
@@ -311,7 +317,10 @@ internal sealed partial class TypedIrBodyLowerer
 
         if (!left.Type.IsNumeric || !right.Type.IsNumeric)
         {
-            Report("CT2130", "Arithmetic operators require numeric operands.", syntax);
+            Report(left.Type.Kind == CTypeKind.Newtype || right.Type.Kind == CTypeKind.Newtype ? "CT2205" : "CT2130",
+                left.Type.Kind == CTypeKind.Newtype || right.Type.Kind == CTypeKind.Newtype
+                    ? "Newtype arithmetic requires explicit conversion to the underlying type."
+                    : "Arithmetic operators require numeric operands.", syntax);
             return ErrorExpression(left.Prelude.Concat(right.Prelude));
         }
         var resultType = TypeFacts.PromoteNumeric(left.Type, right.Type);
@@ -698,7 +707,7 @@ internal sealed partial class TypedIrBodyLowerer
         var valid = explicitConversion ? TypeFacts.CanExplicitlyConvert(sourceType, target) : TypeFacts.CanImplicitlyConvert(sourceType, target) || CanImplicitNativeConstant(expression, target);
         if (!valid)
         {
-            Report("CT2137", $"Cannot {(explicitConversion ? "cast" : "implicitly convert")} '{expression.Type.DisplayName}' to '{target.DisplayName}'.", syntax);
+            Report(expression.Type.Kind == CTypeKind.Newtype || target.Kind == CTypeKind.Newtype ? "CT2205" : "CT2137", $"Cannot {(explicitConversion ? "cast" : "implicitly convert")} '{expression.Type.DisplayName}' to '{target.DisplayName}'.", syntax);
             return new IrExpressionValue { Type = target, Code = _emitter.DefaultValue(target), Prelude = expression.Prelude };
         }
         if (expression.IsConstant && TryConvertConstant(expression, target, out var constant))

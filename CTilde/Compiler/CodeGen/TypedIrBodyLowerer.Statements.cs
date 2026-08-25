@@ -438,6 +438,21 @@ internal sealed partial class TypedIrBodyLowerer
         _emitter.RegisterType(type);
         if (syntax.IsConst && initializer is not null && !initializer.IsConstant)
             Report("CT2104", "A const initializer must be a compile-time constant.", syntax.Initializer!);
+        var alignmentAttributes = (syntax.Attributes.IsDefault ? [] : syntax.Attributes).Where(attribute => attribute.Name == "Align").ToArray();
+        foreach (var attribute in (syntax.Attributes.IsDefault ? [] : syntax.Attributes).Where(attribute => attribute.Name != "Align"))
+            Report("CT1214", $"Attribute '{attribute.Name}' is not valid on a local declaration.", attribute);
+        if (alignmentAttributes.Length > 1)
+            Report("CT1214", "Attribute 'Align' cannot be applied more than once.", syntax);
+        int? alignment = null;
+        if (alignmentAttributes.FirstOrDefault() is { } alignmentAttribute)
+        {
+            var alignmentValue = alignmentAttribute.Arguments is [var argument] ? LowerExpression(argument) : null;
+            if (alignmentValue is { IsConstant: true } && TryGetIntegralValue(alignmentValue.ConstantValue, out var numeric) &&
+                numeric >= BigInteger.One && numeric <= new BigInteger(8192) && (numeric & (numeric - BigInteger.One)) == BigInteger.Zero && !syntax.IsConst)
+                alignment = (int)numeric;
+            else
+                Report("CT1293", "Align on a local requires one power-of-two integral constant from 1 through 8192 and cannot target const storage.", alignmentAttribute);
+        }
 
         var symbol = new LocalSymbol
         {
@@ -455,6 +470,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsKnownNonNull = initializer?.IsKnownNonNull == true,
             KnownLength = initializer?.KnownLength,
             IsDurable = RequiresDurableStorage(syntax.Name, syntax.Span.Start),
+            Alignment = alignment,
             NativeResourceState = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer
                 ? initializer?.Ownership == OwnershipKind.Owned ? NativeResourceState.Owned :
                     initializer?.Ownership == OwnershipKind.Borrowed ? NativeResourceState.Borrowed : NativeResourceState.None
@@ -466,10 +482,12 @@ internal sealed partial class TypedIrBodyLowerer
         _emitter.RegisterDebugLocal(_method, symbol, syntax.Span.End, _debugScopeEnds.Peek());
         if (symbol.IsDurable)
         {
+            if (symbol.Alignment is not null)
+                Report("CT1293", "An aligned local cannot require durable exception/defer storage.", syntax);
             RegisterDurableSlot(symbol.StorageName, type);
         }
         else
-            writer.WriteLine($"{_emitter.CDeclaration(type, symbol.CName)} = {_emitter.DefaultValue(type)};");
+            writer.WriteLine($"{(symbol.Alignment is int localAlignment ? $"CT_ALIGN({localAlignment}) " : string.Empty)}{_emitter.CDeclaration(type, symbol.CName)} = {_emitter.DefaultValue(type)};");
         if (type.ContainsManagedReferences)
             EmitActivateOwnedSlot(writer, type, symbol.CName, $"ct_cleanup_local_{symbol.Id}");
         if (initializer is not null)

@@ -237,7 +237,7 @@ internal sealed class TypedIrLowerer(BoundProgram program)
         var definitions = ImmutableArray.CreateBuilder<IrFunction>();
         foreach (var type in Model.UserTypes)
         {
-            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Interface)
+            if (type.Kind is DeclaredTypeKind.Enum or DeclaredTypeKind.Opaque or DeclaredTypeKind.Newtype or DeclaredTypeKind.Interface)
                 continue;
             foreach (var constructor in type.Constructors)
                 AddFunction(FindBoundBody(constructor));

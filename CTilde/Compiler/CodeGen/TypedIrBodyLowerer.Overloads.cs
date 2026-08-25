@@ -24,10 +24,12 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 if (explicitArguments.Length != candidate.TypeParameters.Length)
                     continue;
-                typeArguments = explicitArguments.Select(ResolveType).ToImmutableArray();
+                typeArguments = _model.ResolveGenericArguments(candidate.TypeParameters, explicitArguments, TreeFor(syntax), syntax, _method.TypeSubstitutions);
             }
             else
             {
+                if (candidate.TypeParameters.Any(parameter => parameter.IsConstantParameter))
+                    continue;
                 var inferred = new Dictionary<string, CType>(StringComparer.Ordinal);
                 if (candidate.Parameters.Length != arguments.Count)
                     continue;

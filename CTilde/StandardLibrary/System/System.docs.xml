@@ -176,6 +176,19 @@
   <member id="M:System.Runtime.Mmio.ReadRelaxed&lt;T&gt;(nuint)"><summary>Performs a volatile load without an I/O barrier.</summary><param name="address">The naturally aligned native address.</param><returns>The loaded value.</returns></member>
   <member id="M:System.Runtime.Mmio.WriteRelaxed&lt;T&gt;(nuint,T)"><summary>Performs a volatile store without an I/O barrier.</summary><param name="address">The naturally aligned native address.</param><param name="value">The value to store.</param></member>
   <member id="M:System.Runtime.Mmio.Barrier()"><summary>Issues a full target I/O barrier.</summary></member>
+  <member id="T:System.Runtime.Cpu"><summary>Provides portable allocation-free CPU operations.</summary></member>
+  <member id="M:System.Runtime.Cpu.MemoryBarrier()"><summary>Issues a full sequential compiler and ordinary-memory barrier.</summary></member>
+  <member id="M:System.Runtime.Cpu.Pause()"><summary>Issues a target spin-loop hint without an ordering guarantee.</summary></member>
+  <member id="M:System.Runtime.Cpu.ByteSwap(ushort)"><summary>Reverses the byte order of a 16-bit value.</summary></member>
+  <member id="M:System.Runtime.Cpu.ByteSwap(uint)"><summary>Reverses the byte order of a 32-bit value.</summary></member>
+  <member id="M:System.Runtime.Cpu.ByteSwap(ulong)"><summary>Reverses the byte order of a 64-bit value.</summary></member>
+  <member id="M:System.Runtime.Cpu.PopCount(uint)"><summary>Counts the set bits in a 32-bit value.</summary></member>
+  <member id="M:System.Runtime.Cpu.PopCount(ulong)"><summary>Counts the set bits in a 64-bit value.</summary></member>
+  <member id="M:System.Runtime.Cpu.LeadingZeroCount(uint)"><summary>Counts leading zero bits and returns 32 for zero.</summary></member>
+  <member id="M:System.Runtime.Cpu.LeadingZeroCount(ulong)"><summary>Counts leading zero bits and returns 64 for zero.</summary></member>
+  <member id="T:System.Runtime.PhysicalAddress"><summary>Represents a physical address domain as a strict native-sized newtype.</summary></member>
+  <member id="T:System.Runtime.VirtualAddress"><summary>Represents a virtual address domain as a strict native-sized newtype.</summary></member>
+  <member id="T:System.Runtime.IoAddress"><summary>Represents an I/O address domain as a strict native-sized newtype.</summary></member>
 
   <member id="T:System.Runtime.NativeBuffer&lt;T&gt;"><summary>Represents a scoped writable pointer-and-length view.</summary><remarks>The element type must be unmanaged. The view cannot be stored on the managed heap or returned.</remarks></member>
   <member id="P:System.Runtime.NativeBuffer&lt;T&gt;.Length"><summary>Gets the writable view length as an unsigned native-sized value.</summary></member>

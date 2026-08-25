@@ -8,7 +8,7 @@ namespace CTilde;
 internal enum CTypeKind
 {
     Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Int, Uint, Long, Ulong, Nint, Nuint, Float, String,
-    Class, Struct, Interface, TypeParameter, Enum, Delegate, Opaque, EspError, Array, Pointer, FunctionPointer, NativeBuffer, ReadOnlyNativeBuffer, NativeUtf8String, Null,
+    Class, Struct, Interface, TypeParameter, Constant, Enum, Delegate, Opaque, Newtype, EspError, Array, InlineArray, Pointer, FunctionPointer, NativeBuffer, ReadOnlyNativeBuffer, NativeUtf8String, Null,
 }
 
 internal sealed class FunctionPointerSignature(ImmutableArray<CType> parameterTypes, ImmutableArray<ParameterPassingKind> passingKinds, CType returnType) : IEquatable<FunctionPointerSignature>
@@ -30,7 +30,7 @@ internal sealed class FunctionPointerSignature(ImmutableArray<CType> parameterTy
     }
 }
 
-internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? ElementType = null, FunctionPointerSignature? FunctionPointer = null)
+internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? ElementType = null, FunctionPointerSignature? FunctionPointer = null, int InlineArrayLength = 0, string? InlineArrayLengthParameter = null, BigInteger? ConstantValue = null)
 {
     public static readonly CType Error = new(CTypeKind.Error);
     public static readonly CType Void = new(CTypeKind.Void);
@@ -61,12 +61,16 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public bool ContainsManagedReferences => ContainsManagedReferencesCore(this, []);
     public bool IsPointerLike => IsReference || Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Opaque;
     public bool ContainsPointer => ContainsPointerCore(this, []);
-    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.NativeUtf8String;
+    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.InlineArray or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.NativeUtf8String;
 
     public string DisplayName => Kind switch
     {
-        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Interface or CTypeKind.TypeParameter or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.EspError => Symbol!.FullName,
+        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Interface or CTypeKind.TypeParameter or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.Newtype or CTypeKind.EspError => Symbol!.FullName,
+        CTypeKind.Constant => ConstantValue is { } value
+            ? $"{ElementType!.DisplayName} {value.ToString(System.Globalization.CultureInfo.InvariantCulture)}"
+            : $"const {ElementType?.DisplayName ?? "?"} {Symbol?.Name ?? "?"}",
         CTypeKind.Array => $"{ElementType!.DisplayName}[]",
+        CTypeKind.InlineArray => $"{ElementType!.DisplayName}[{(InlineArrayLengthParameter ?? InlineArrayLength.ToString(System.Globalization.CultureInfo.InvariantCulture))}]",
         CTypeKind.Pointer => $"{ElementType!.DisplayName}*",
         CTypeKind.FunctionPointer => $"delegate* unmanaged<{string.Join(", ", FunctionPointer!.ParameterTypes.Select((type, index) => FunctionPointer.PassingKinds[index] == ParameterPassingKind.Value ? type.DisplayName : $"{FunctionPointer.PassingKinds[index].ToString().ToLowerInvariant()} {type.DisplayName}").Append(FunctionPointer.ReturnType.DisplayName))}>",
         CTypeKind.NativeBuffer => $"System.Runtime.NativeBuffer<{ElementType!.DisplayName}>",
@@ -77,6 +81,8 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
 
     private static bool ContainsPointerCore(CType type, HashSet<TypeSymbol> visited)
     {
+        if (type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying)
+            return ContainsPointerCore(underlying, visited);
         if (type.Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer)
             return true;
         if (type.ElementType is not null && ContainsPointerCore(type.ElementType, visited))
@@ -89,17 +95,21 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
 
     private static bool ContainsManagedReferencesCore(CType type, HashSet<TypeSymbol> visited)
     {
+        if (type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying)
+            return ContainsManagedReferencesCore(underlying, visited);
         if (type.Kind == CTypeKind.NativeUtf8String)
             return true;
         if (type.IsReference)
             return true;
+        if (type.Kind == CTypeKind.InlineArray)
+            return ContainsManagedReferencesCore(type.ElementType!, visited);
         if (type.Kind != CTypeKind.Struct || type.Symbol is null || !visited.Add(type.Symbol))
             return false;
         return type.Symbol.Fields.Any(field => !field.IsStatic && ContainsManagedReferencesCore(field.Type, visited));
     }
 }
 
-internal enum DeclaredTypeKind { Class, Struct, Interface, TypeParameter, Enum, Delegate, Opaque, StaticClass }
+internal enum DeclaredTypeKind { Class, Struct, Interface, TypeParameter, Enum, Delegate, Opaque, Newtype, StaticClass }
 internal enum AggregateLayoutKind { Sequential, Union, Explicit }
 internal enum Accessibility { Private, Internal, Protected, Public }
 internal enum NativeParameterOwnership { Borrowed, Consumes, Retained, Creates }
@@ -131,6 +141,11 @@ internal sealed class TypeSymbol
     public string? NativeHeader { get; init; }
     public AggregateLayoutKind AggregateLayout { get; set; }
     public int? Pack { get; init; }
+    public int? Alignment { get; set; }
+    public string? AlignmentParameter { get; init; }
+    public CType? UnderlyingType { get; set; }
+    public bool IsConstantParameter { get; init; }
+    public CType? ConstantParameterType { get; set; }
     public bool HasNonNaturalLayout => AggregateLayout == AggregateLayoutKind.Explicit || Pack is not null;
     public string FullName
     {
@@ -144,16 +159,22 @@ internal sealed class TypeSymbol
             return TypeParameters.IsDefaultOrEmpty ? baseName : $"{baseName}<{string.Join(", ", TypeParameters.Select(parameter => parameter.Name))}>";
         }
     }
-    public CType Type => new(FullName == "Esp.Idf.EspError" ? CTypeKind.EspError : Kind switch
-    {
-        DeclaredTypeKind.Struct => CTypeKind.Struct,
-        DeclaredTypeKind.Interface => CTypeKind.Interface,
-        DeclaredTypeKind.TypeParameter => CTypeKind.TypeParameter,
-        DeclaredTypeKind.Enum => CTypeKind.Enum,
-        DeclaredTypeKind.Delegate => CTypeKind.Delegate,
-        DeclaredTypeKind.Opaque => CTypeKind.Opaque,
-        _ => CTypeKind.Class,
-    }, this);
+    public CType Type => IsConstantParameter
+        ? new CType(CTypeKind.Constant, Symbol: this, ElementType: ConstantParameterType)
+        : new(FullName == "Esp.Idf.EspError"
+            ? CTypeKind.EspError
+            : Kind switch
+            {
+                DeclaredTypeKind.Struct => CTypeKind.Struct,
+                DeclaredTypeKind.Interface => CTypeKind.Interface,
+                DeclaredTypeKind.TypeParameter => CTypeKind.TypeParameter,
+                DeclaredTypeKind.Enum => CTypeKind.Enum,
+                DeclaredTypeKind.Delegate => CTypeKind.Delegate,
+                DeclaredTypeKind.Opaque => CTypeKind.Opaque,
+                DeclaredTypeKind.Newtype => CTypeKind.Newtype,
+                _ => CTypeKind.Class,
+            },
+            this);
     public List<FieldSymbol> Fields { get; } = [];
     public List<PropertySymbol> Properties { get; } = [];
     public List<MethodSymbol> Methods { get; } = [];
@@ -178,6 +199,7 @@ internal sealed class TypeSymbol
     public bool Implements(TypeSymbol contract) => Interfaces.Any(candidate => candidate == contract || candidate.Implements(contract)) || BaseType?.Implements(contract) == true;
 
     private static bool ContainsTypeParameter(CType type) => type.Kind == CTypeKind.TypeParameter ||
+        type.Kind == CTypeKind.Constant && type.ConstantValue is null ||
         type.ElementType is not null && ContainsTypeParameter(type.ElementType) ||
         type.Symbol is { } symbol && !symbol.TypeArguments.IsDefaultOrEmpty && symbol.TypeArguments.Any(ContainsTypeParameter);
 }
@@ -199,6 +221,8 @@ internal sealed class FieldSymbol : MemberSymbol
     public bool IsVolatile { get; init; }
     public ExpressionSyntax? Initializer { get; init; }
     public int? Offset { get; init; }
+    public int? Alignment { get; init; }
+    public string? AlignmentParameter { get; init; }
     public string? SectionName { get; init; }
     public string? ExternName { get; init; }
     public bool IsNativeVolatile { get; init; }
@@ -222,6 +246,7 @@ internal sealed class PropertySymbol : MemberSymbol
     public bool IsOverride { get; init; }
     public bool IsSealedOverride { get; init; }
     public bool IsNoAlloc { get; set; }
+    public bool IsNoRecursion { get; set; }
     public PropertySymbol? OverriddenProperty { get; set; }
     public List<PropertySymbol> ImplementedInterfaceProperties { get; } = [];
 }
@@ -246,6 +271,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
     public bool IsNoAlloc { get; set; }
+    public bool IsNoRecursion { get; set; }
     public bool IsUnsafe { get; init; }
     public bool ReturnsBorrowed { get; init; }
     public bool ReturnsOwned { get; init; }
@@ -295,6 +321,7 @@ internal sealed class LocalSymbol
     public bool IsKnownNonNull { get; set; }
     public int? KnownLength { get; set; }
     public bool IsDurable { get; init; }
+    public int? Alignment { get; init; }
     public NativeResourceState NativeResourceState { get; set; }
     public string StorageName => IsDurable ? $"ct_lp_{Id}" : $"ct_l_{Id}";
     public string CName => IsDurable ? $"ct_state.{StorageName}" : StorageName;
@@ -304,6 +331,7 @@ internal static class NameMangler
 {
     public static string Type(TypeSymbol type) => Compact("ct_t_", TypeIdentity(type));
     public static string Array(CType elementType) => $"ct_a_{TypeCode(elementType)}";
+    public static string InlineArray(CType type) => $"ct_z_{TypeCode(type)}";
     public static string Member(MemberSymbol member) => Compact("ct_f_", MemberIdentity(member));
     public static string Method(MethodSymbol method)
     {
@@ -340,8 +368,10 @@ internal static class NameMangler
 
     public static string CanonicalType(CType type) => type.Kind switch
     {
-        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Interface or CTypeKind.TypeParameter or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.EspError => type.Symbol!.FullName,
+        CTypeKind.Class or CTypeKind.Struct or CTypeKind.Interface or CTypeKind.TypeParameter or CTypeKind.Enum or CTypeKind.Delegate or CTypeKind.Opaque or CTypeKind.Newtype or CTypeKind.EspError => type.Symbol!.FullName,
         CTypeKind.Array => $"array<{CanonicalType(type.ElementType!)}>",
+        CTypeKind.InlineArray => $"inline-array<{CanonicalType(type.ElementType!)},{type.InlineArrayLength}>",
+        CTypeKind.Constant => $"const<{CanonicalType(type.ElementType!)},{type.ConstantValue?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? type.Symbol?.Name ?? "?"}>",
         CTypeKind.Pointer => $"pointer<{CanonicalType(type.ElementType!)}>",
         CTypeKind.FunctionPointer => $"fn({string.Join(",", type.FunctionPointer!.ParameterTypes.Select((parameter, index) => $"{PassingCode(type.FunctionPointer.PassingKinds[index])}:{CanonicalType(parameter)}"))})->{CanonicalType(type.FunctionPointer.ReturnType)}",
         CTypeKind.NativeBuffer => $"native-buffer<{CanonicalType(type.ElementType!)}>",
@@ -374,8 +404,11 @@ internal static class NameMangler
         CTypeKind.Enum => $"e{Hash96(CanonicalType(type))}",
         CTypeKind.Delegate => $"d{Hash96(CanonicalType(type))}",
         CTypeKind.Opaque => $"o{Hash96(CanonicalType(type))}",
+        CTypeKind.Newtype => $"w{Hash96(CanonicalType(type))}",
         CTypeKind.EspError => "esperr",
         CTypeKind.Array => $"a{Hash96(CanonicalType(type))}",
+        CTypeKind.InlineArray => $"z{Hash96(CanonicalType(type))}",
+        CTypeKind.Constant => $"k{Hash96(CanonicalType(type))}",
         CTypeKind.Pointer => $"p{Hash96(CanonicalType(type))}",
         CTypeKind.FunctionPointer => $"f{Hash96(CanonicalType(type))}",
         CTypeKind.NativeBuffer => $"n{Hash96(CanonicalType(type))}",
@@ -470,6 +503,8 @@ internal static class TypeFacts
 
     public static bool CanExplicitlyConvert(CType from, CType to) =>
         CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
+        from.Kind == CTypeKind.Newtype && from.Symbol?.UnderlyingType == to ||
+        to.Kind == CTypeKind.Newtype && to.Symbol?.UnderlyingType == from ||
         from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum ||
         from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer ||
         from.Kind == CTypeKind.FunctionPointer && to.Kind == CTypeKind.FunctionPointer && from == to ||

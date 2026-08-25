@@ -6,6 +6,7 @@ internal sealed class AnalysisServices : ILoweringServices
 {
     private readonly Dictionary<string, int> _stringLiterals = new(StringComparer.Ordinal);
     private readonly HashSet<CType> _arrayTypes = [];
+    private readonly HashSet<CType> _inlineArrayTypes = [];
     private readonly HashSet<CType> _boxedTypes = [];
     private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
@@ -99,6 +100,7 @@ internal sealed class AnalysisServices : ILoweringServices
             Parameters = [.. parameters],
             Body = syntax.Body,
             IsNoAlloc = property.IsNoAlloc,
+            IsNoRecursion = property.IsNoRecursion,
             IsUnsafe = property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal),
             IsVirtual = property.IsVirtual,
             IsOverride = property.IsOverride,
@@ -134,7 +136,8 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Interface => "ct_object*",
         CTypeKind.Opaque => type.Symbol!.NativeTypeName!,
         CTypeKind.EspError => "esp_err_t",
-        CTypeKind.Struct or CTypeKind.Enum => NameMangler.Type(type.Symbol!),
+        CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype => NameMangler.Type(type.Symbol!),
+        CTypeKind.InlineArray => NameMangler.InlineArray(type),
         CTypeKind.Array => $"{NameMangler.Array(type.ElementType!)}*",
         CTypeKind.Pointer => $"{CTypeName(type.ElementType!)}*",
         CTypeKind.FunctionPointer => $"ct_fp_{NameMangler.TypeCode(type)}",
@@ -186,6 +189,8 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
         CTypeKind.NativeUtf8String => "(ct_native_utf8_string){ NULL, NULL, (size_t)0 }",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
+        CTypeKind.InlineArray => $"({CTypeName(type)}){{0}}",
+        CTypeKind.Newtype => $"({CTypeName(type)})0",
         _ => "0",
     };
 
@@ -194,6 +199,11 @@ internal sealed class AnalysisServices : ILoweringServices
         if (type.Kind == CTypeKind.Array)
         {
             _arrayTypes.Add(type);
+            RegisterType(type.ElementType!);
+        }
+        else if (type.Kind == CTypeKind.InlineArray)
+        {
+            _inlineArrayTypes.Add(type);
             RegisterType(type.ElementType!);
         }
         else if (type.Kind == CTypeKind.Pointer)

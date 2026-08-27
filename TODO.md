@@ -4,6 +4,15 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 
 ## Language and standard library
 
+The staged contracts for embedded resources, binary64 numbers, Unicode runes, lambdas, and repository source modules are documented in [FUTURE_FEATURES.md](FUTURE_FEATURES.md). Implement them as separate language revisions:
+
+- [ ] Add the source-owner identity used by embedded-resource paths, module-local `internal` access, canonical symbols, and dependency source navigation. Preserve current single-project behavior.
+- [ ] Add IEEE-754 binary64 `double` with `D` literals, decimal exponents, numeric promotion, native ABI mapping, formatting, math overloads, editor support, and cross-toolchain tests.
+- [ ] Add four-byte Unicode `rune` with suffixed scalar literals, validated construction, allocation-free UTF-8 decode and encode APIs, exact console bytes, and editor support. Keep `char` and string indexing byte-based.
+- [ ] Add `[Embed]` on static readonly `EmbeddedResource` fields. Resolve confined project or module paths before compilation and emit immutable, prunable resource artifacts for every target.
+- [ ] Add captureless lambdas that convert only to named delegates. Then add explicit by-value capture lists, closure objects, ARC rules, effect checks, source debugging, and editor support.
+- [ ] Add exact-pinned repository source modules with a lock file, content-addressed cache, direct import aliases, module-local access, deterministic lifecycle order, offline restore, vendoring, and no dependency scripts.
+
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
 - [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.
 - [ ] Extend vectors only with application-backed requirements such as interpolation, clamping, distance, swizzles, conversions, or SIMD-aware lowering.

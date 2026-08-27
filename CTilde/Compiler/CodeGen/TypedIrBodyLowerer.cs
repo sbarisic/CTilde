@@ -488,7 +488,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (target.IsUnsafe)
             RequireUnsafe(syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!);
         _method.ConstructorInitializerTarget = target;
-        _emitter.AllocationEffects.RecordCall(_method, target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!, requiresContract: false);
+        _emitter.Effects.RecordCall(_method, target, syntax ?? _method.Syntax ?? _method.ContainingType.Syntax!, requiresContract: false);
         var lowered = LowerArguments(arguments, target.Parameters, argumentSyntax);
         EmitPrelude(writer, lowered.Prelude);
         var self = syntax?.Kind == ConstructorInitializerKind.This
@@ -503,9 +503,12 @@ internal sealed partial class TypedIrBodyLowerer
 
     public IrExpressionValue ConvertStandalone(IrExpressionValue expression, CType target, SyntaxNode syntax) => Convert(expression, target, syntax, false);
 
+    private void RecordRuntimeFault(SyntaxNode syntax, string reason) =>
+        _emitter.Effects.Record(_method, syntax, EffectKind.Throws | EffectKind.UsesRuntime, reason);
+
     public BoundBody GetBoundBody()
     {
-        var effects = _emitter.AllocationEffects.Snapshot().GetValueOrDefault(_method, []);
+        var effects = _emitter.Effects.Snapshot().GetValueOrDefault(_method, []);
         var externUses = _emitter.ExternUses.Skip(_externUseStart).ToImmutableArray();
         var semantics = _semanticEntries.ToImmutableDictionary();
         var root = BoundTreeFactory.CreateRoot(_method, semantics);

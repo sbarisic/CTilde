@@ -6,7 +6,7 @@ internal interface ILoweringServices
 {
     CompilationModel Model { get; }
     DiagnosticBag Diagnostics { get; }
-    AllocationEffectRegistry AllocationEffects { get; }
+    EffectRegistry Effects { get; }
     IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses { get; }
     IEnumerable<string> DynamicGeneratedSymbols { get; }
     bool EmitDebugInformation { get; }

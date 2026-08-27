@@ -5,15 +5,13 @@ internal sealed partial class CompilationModel
     private void DeclareOperator(TypeSymbol type, OperatorDeclarationSyntax syntax, SyntaxTree tree, Accessibility accessibility, bool isStatic)
     {
         ValidateAllowedModifiers(syntax.Modifiers, ["public", "static", "unsafe"], syntax);
-        ValidateAttributes(syntax.Attributes, syntax, ["NoAlloc", "NoRecursion", "Section"]);
-        var noAlloc = FindAttribute(syntax.Attributes, "NoAlloc");
+        ValidateAttributes(syntax.Attributes, syntax, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "Section"]);
+        var effects = ParseEffectContracts(syntax.Attributes);
         var noRecursion = FindAttribute(syntax.Attributes, "NoRecursion");
         var section = FindAttribute(syntax.Attributes, "Section");
         _ = ParseSectionName(section);
         if (section is not null)
             Diagnostics.Add("CT1287", "Section is not valid on an operator.", section.Source, section.Span);
-        if (noAlloc is not null && noAlloc.Arguments.Length != 0)
-            Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
         if (noRecursion is not null && noRecursion.Arguments.Length != 0)
             Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
 
@@ -30,7 +28,7 @@ internal sealed partial class CompilationModel
         var invalid = type.Kind is not DeclaredTypeKind.Class and not DeclaredTypeKind.Struct ||
             type.IsStatic || accessibility != Accessibility.Public || !isStatic ||
             syntax.Modifiers.Any(modifier => modifier is not "public" and not "static" and not "unsafe") ||
-            syntax.Attributes.Any(attribute => attribute.Name is not "NoAlloc" and not "NoRecursion" and not "Section") ||
+            syntax.Attributes.Any(attribute => attribute.Name is not "NoAlloc" and not "NoThrow" and not "NoBlock" and not "NoRuntime" and not "NoRecursion" and not "Section") ||
             syntax.Parameters.Any(parameter => !parameter.Attributes.IsDefaultOrEmpty) ||
             !OperatorFacts.IsSupported(operatorKind) || !validArity ||
             parameters.Any(parameter => parameter.PassingKind != ParameterPassingKind.Value) ||
@@ -58,7 +56,7 @@ internal sealed partial class CompilationModel
             ReturnType = returnType,
             Parameters = parameters,
             Body = syntax.Body,
-            IsNoAlloc = noAlloc is not null,
+            DeclaredEffects = effects,
             IsNoRecursion = noRecursion is not null,
             IsUnsafe = syntax.Modifiers.Contains("unsafe", StringComparer.Ordinal),
             IsOperator = true,

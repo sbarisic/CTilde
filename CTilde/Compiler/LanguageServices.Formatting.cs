@@ -7,7 +7,7 @@ public sealed partial class LanguageServiceSnapshot
         TypeSymbol { Kind: DeclaredTypeKind.Delegate } type => $"delegate {type.DelegateReturnType!.DisplayName} {type.FullName}({string.Join(", ", type.DelegateParameters.Select(FormatParameter))})",
         TypeSymbol type => FormatType(type),
         FieldSymbol field => $"{AccessibilityText(field.Accessibility)}{(field.IsStatic ? "static " : string.Empty)}{field.Type.DisplayName} {field.ContainingType.FullName}.{field.Name}{(field.Offset is int offset ? $" [offset: {offset}]" : string.Empty)}",
-        PropertySymbol property => $"{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
+        PropertySymbol property => $"{EffectPrefix(property.DeclaredEffects)}{AccessibilityText(property.Accessibility)}{(property.IsStatic ? "static " : string.Empty)}{property.Type.DisplayName} {property.ContainingType.FullName}.{property.Name}",
         MethodSymbol method => FormatMethod(method),
         ParameterSymbol parameter => FormatParameter(parameter),
         LocalSymbol local => $"{local.Type.DisplayName} {local.Name}",
@@ -34,8 +34,14 @@ public sealed partial class LanguageServiceSnapshot
     }
 
     private static string FormatMethod(MethodSymbol method) => method.IsOperator
-        ? $"{AccessibilityText(method.Accessibility)}static {method.ReturnType.DisplayName} {method.ContainingType.FullName}.{OperatorFacts.DisplayName(method.OperatorKind)}({string.Join(", ", method.Parameters.Select(FormatParameter))})"
-        : $"{AccessibilityText(method.Accessibility)}{(method.IsStatic ? "static " : string.Empty)}{(method.IsConstructor ? string.Empty : method.ReturnType.DisplayName + " ")}{method.ContainingType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(FormatParameter))})";
+        ? $"{EffectPrefix(method.DeclaredEffects)}{AccessibilityText(method.Accessibility)}static {method.ReturnType.DisplayName} {method.ContainingType.FullName}.{OperatorFacts.DisplayName(method.OperatorKind)}({string.Join(", ", method.Parameters.Select(FormatParameter))})"
+        : $"{EffectPrefix(method.DeclaredEffects)}{AccessibilityText(method.Accessibility)}{(method.IsStatic ? "static " : string.Empty)}{(method.IsConstructor ? string.Empty : method.ReturnType.DisplayName + " ")}{method.ContainingType.FullName}.{method.Name}({string.Join(", ", method.Parameters.Select(FormatParameter))})";
+
+    private static string EffectPrefix(EffectContract effects)
+    {
+        var names = EffectFacts.IndividualContracts(effects).Select(name => $"[{EffectFacts.ContractName(name)}]").ToArray();
+        return names.Length == 0 ? string.Empty : string.Join(" ", names) + " ";
+    }
 
     private static string FormatParameter(ParameterSymbol parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type.DisplayName} {parameter.Name}";
     private static string FormatParameter(ParameterSyntax parameter) => $"{PassingPrefix(parameter.PassingKind)}{parameter.Type} {parameter.Name}";

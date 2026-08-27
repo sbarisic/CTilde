@@ -4,7 +4,7 @@ Last reviewed: 2026-08-27
 
 ## Current state
 
-C~ draft 0.21 has one compiler path:
+C~ draft 0.22 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding GNU C23
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.21 coverage adds target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Draft 0.20 added exact endian conversions, linker addresses, final-image retention, scalar bitfields, fixed-address registers, source-owned modules, and ESP-IDF panic policies. Draft 0.19 added typed constant specializations, inline-array value layouts and ARC traversal, general alignment, strict newtypes, closed-call recursion checks, and portable CPU intrinsics. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.22 coverage adds direct, recursive, transitive, inherited, generic, extern, assembly, runtime-check, blocking, bootstrap, symbol-map, completion, and hover effect cases. Draft 0.21 added target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Draft 0.20 added exact endian conversions, linker addresses, final-image retention, scalar bitfields, fixed-address registers, source-owned modules, and ESP-IDF panic policies. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -155,7 +155,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | Bitfields and fixed-address registers | Implemented | Scalar typedef layout, overlapping mask-and-shift views, readonly enforcement, storage-free ordered MMIO access, and invalid-range/address diagnostics |
 | ESP-IDF panic policies | Implemented | Manifest/CLI/editor state, abort/restart/halt terminal paths, hosted rejection, and halt `sdkconfig` validation |
 | Synchronous delegate/context callbacks | Implemented | ARC lifetime, virtual dispatch, ABI placement, attachment guards, and exception barriers |
-| `[NoAlloc]` | Implemented | Direct, recursive, transitive, extern, virtual, property, and defer-effect tests |
+| General effect contracts | Implemented | `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]`; direct, recursive, transitive, inherited, extern, assembly, runtime-check, and symbol-map tests |
 | Bundled `System.Object`, `System.Console`, `System.Environment`, `System.Math`, and `System.Runtime.Memory` sources | Implemented | Embedded-source, documentation, native math, and output tests |
 | Hosted console input and `System.IO` | Implemented | UTF-8 line/EOF behavior, Unicode paths, opaque ownership, binary round trip, exceptions, target filtering, and editor documentation |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
@@ -163,7 +163,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 
 ## Conformance coverage
 
-The executable test project registers 146 checks. The release gate below records their current managed and native result. Coverage includes:
+The executable test project registers 156 checks. The release gate below records their current managed and native result. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -198,7 +198,7 @@ The executable test project registers 146 checks. The release gate below records
 - Durable integer, string, structure, parameter, and return state across `longjmp`.
 - Handler cleanup on normal completion, return, loop transfer, catch, rethrow, and finally paths.
 - Stack-backed exception and defer state with no control-flow `ct_alloc` calls.
-- `[NoAlloc]` direct allocation categories, recursive inference, transitive witnesses, and trusted boundary contracts.
+- General-effect direct categories, recursive inference, transitive witnesses, inherited callable contracts, and independently trusted native/assembly boundaries.
 - ARC aliases, self-assignment, strong fields and array slots, nested structures, boxes, owned returns, constructor rollback, exception cleanup, native ownership transfer, balanced unsafe counts, cycle leakage, and a 10,000-object non-recursive destruction chain.
 
 The full examples in [examples/Features.ct](examples/Features.ct), [examples/ObjectModel.ct](examples/ObjectModel.ct), and [examples/Exceptions.ct](examples/Exceptions.ct) are part of the native and ABI checks.
@@ -221,7 +221,7 @@ Hosted compilations add `Console.Read`, UTF-8 `Console.ReadLine`, and synchronou
 
 ## Compiler pipeline status
 
-Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation effects and extern uses are analysis results rather than emitter state.
+Binding now produces immutable bound bodies and per-document semantic maps. Bound expressions carry resolved types, symbols, constants, value categories, and ARC ownership; bound statements preserve lexical scopes, control flow, exception regions, and defer/finally cleanup boundaries. Allocation, throw, block, managed-runtime, call, and extern operations are immutable analysis results rather than emitter state. One fixed-point engine validates all four public contracts and supplies freestanding heap and bootstrap queries.
 
 Typed IR contains typed values, basic blocks, loads, stores, calls, allocations, conversions, checks, ownership and cleanup actions, and structured terminators. Reachability, cleanup-record liveness, constant and fixed-range facts, conservative non-null propagation, owned-result moves, direct-defer cleanup facts, durable-state liveness, fused scalar string builds, and user metadata pruning run before artifact layout. The first size tranche removes cleanup boundaries that cannot acquire records, disarms moved fresh results instead of retaining and releasing them, treats immortal strings as ownership-neutral, omits proven redundant null and fixed-index bounds checks, and simplifies constant loops and valid constant `stackalloc` sizes. `ref`/`out` aliases, unsafe effects, fields, nullable native results, and uncertain control-flow joins invalidate proofs. `TypedIrEmissionLowerer` then creates immutable function and initializer plans only for retained IR, and `CEmitter` composes those plans without reopening method syntax. The former rendered-line classifier, `MethodLowerer`, `BodyPipeline`, `CBodyLowerer`, and `LoweredExpression` transition layers are gone. `GetDiagnostics()` is analysis-only and constructs no `CEmitter`, `CWriter`, typed IR, or generated C.
 
@@ -318,7 +318,13 @@ The project model and CLI accept contained linker scripts, explicit entry symbol
 
 ## Deliberately deferred
 
-These features are outside draft 0.21:
+## Draft 0.22 general effect contracts
+
+`EffectRegistry` replaces the allocation-only registry with flag-based direct operations and call edges. `EffectAnalyzer` computes recursive effects after target pruning and closed generic construction. `[NoThrow]` and `[NoRuntime]` apply their documented implications without creating implied diagnostics; `[NoBlock]` remains independent. Constructors, operators, properties/accessors, abstract/interface declarations, virtual implementations, externs, and inline assembly all preserve their contracts.
+
+Dynamic null, bounds, division, cast, stack-size, native-boundary, and atomic-order checks contribute throw/runtime effects unless semantic facts prove them unnecessary. Thread, mutex, console, file, extern, delegate, function-pointer, and assembly boundaries use explicit conservative classifications. Runtime-role bootstrap validation and freestanding heap inference query the shared result while retaining Draft 0.21 compatibility diagnostics. Symbol-map version 1 additively records sorted declared and inferred effect arrays; generated C signatures and public headers are unchanged.
+
+These features are outside draft 0.22:
 
 - Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
@@ -340,7 +346,7 @@ These features are outside draft 0.21:
 
 ## Release gate
 
-A draft 0.21 release requires:
+A draft 0.22 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -353,4 +359,4 @@ A draft 0.21 release requires:
 
 On 2026-08-25, the solution build completed with zero warnings and errors, all 146 conformance cases passed under MSVC, WSL GCC, and WSL Clang, and the focused final-image retention probe preserved every requested symbol with LTO and dead-section elimination under all three toolchains. The ESP-IDF runner passed its direct Xtensa and RISC-V probes and full ESP32 and ESP32-C3 builds. The connected automated T-CAN485 run passed the Draft 0.20 fixture, restart and halt policy images, debugger gates, and Release-firmware restoration; its report is `artifacts/esp32-hardware/20260825-134136.json`. VS Code tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The visual LED gate remains intentionally pending because the hardware run used `-AutomatedOnly`. Historical Draft 0.19, Draft 0.18, and Draft 0.17 hosted and cross-build evidence remains preserved in Git history.
 
-Draft 0.21 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate. MSVC latest-C mode remains an independent hosted compatibility check and is not an inline-assembly or freestanding backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.20 connected-board baselines remain recorded above.
+Draft 0.22 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate. MSVC latest-C mode remains an independent hosted compatibility check and is not an inline-assembly or freestanding backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.21 freestanding and Draft 0.20 connected-board baselines remain recorded above.

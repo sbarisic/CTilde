@@ -216,6 +216,8 @@ internal sealed partial class TypedIrBodyLowerer
                 Code = code,
                 LValue = parameter.Type.IsNativeBuffer ? null : new IrValueStorage { Store = value => $"{code} = {value}", Address = byReference ? name : $"&{name}", Parameter = parameter },
                 Symbol = parameter,
+                IsKnownNonNull = _method.RuntimeImplementation == RuntimeImplementationRole.Free &&
+                    ReferenceEquals(parameter, _method.Parameters[0]),
             };
         }
         var field = Hierarchy(_method.ContainingType).SelectMany(type => type.Fields).FirstOrDefault(candidate => candidate.Name == syntax.Name);
@@ -353,14 +355,20 @@ internal sealed partial class TypedIrBodyLowerer
         {
             receiver = Materialize(receiver, syntax.Receiver);
             if (!receiver.IsKnownNonNull)
+            {
+                RecordRuntimeFault(syntax, "dynamic string null check");
                 receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            }
             return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.Kind == CTypeKind.Array && syntax.Name == "Length")
         {
             receiver = Materialize(receiver, syntax.Receiver);
             if (!receiver.IsKnownNonNull)
+            {
+                RecordRuntimeFault(syntax, "dynamic array null check");
                 receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            }
             return new IrExpressionValue { Type = CType.Int, Code = $"{receiver.Code}->Length", Prelude = receiver.Prelude };
         }
         if (receiver.Type.Kind == CTypeKind.InlineArray && syntax.Name == "Length")
@@ -589,7 +597,7 @@ internal sealed partial class TypedIrBodyLowerer
             ? property.Setter is null ? null : _emitter.GetAccessorMethod(property, getter: false)
             : property.Getter is null ? null : _emitter.GetAccessorMethod(property, getter: true);
         if (selectedAccessor is not null)
-            _emitter.AllocationEffects.RecordCall(_method, selectedAccessor, syntax, property.IsVirtual && !baseReceiver);
+            _emitter.Effects.RecordCall(_method, selectedAccessor, syntax, property.IsVirtual && !baseReceiver);
         var typedReceiver = property.IsStatic ? string.Empty : $"({NameMangler.Type(property.ContainingType)}*)(void*){receiverArgument}";
         var objectReceiver = property.IsStatic ? string.Empty : $"((ct_object*)(void*){receiverArgument})";
         var getterCode = property.Getter is null
@@ -633,9 +641,15 @@ internal sealed partial class TypedIrBodyLowerer
         if (receiver.Type.Kind == CTypeKind.Array)
         {
             if (!receiver.IsKnownNonNull)
+            {
+                RecordRuntimeFault(syntax, "dynamic array null check");
                 prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            }
             if (!IsProvenInBounds(receiver, index))
+            {
+                RecordRuntimeFault(syntax, "dynamic array bounds check");
                 prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
+            }
             var code = $"{receiver.Code}->Data[{index.Code}]";
             return new IrExpressionValue
             {
@@ -657,7 +671,10 @@ internal sealed partial class TypedIrBodyLowerer
             if (constantIndex != long.MinValue && (constantIndex < 0 || constantIndex >= length))
                 Report("CT2204", $"Inline-array index {constantIndex} is outside the range 0..{length - 1}.", syntax.Index);
             else if (constantIndex == long.MinValue)
+            {
+                RecordRuntimeFault(syntax, "dynamic inline-array bounds check");
                 prelude.Add($"ct_bounds({index.Code}, {length}, {_emitter.SourceArgument(syntax)});");
+            }
             var code = $"{receiver.Code}.Data[{index.Code}]";
             return new IrExpressionValue
             {
@@ -670,13 +687,18 @@ internal sealed partial class TypedIrBodyLowerer
         if (receiver.Type.Kind == CTypeKind.String)
         {
             if (!receiver.IsKnownNonNull)
+            {
+                RecordRuntimeFault(syntax, "dynamic string null check");
                 prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(syntax)});");
+            }
+            RecordRuntimeFault(syntax, "dynamic string bounds check");
             prelude.Add($"ct_bounds({index.Code}, {receiver.Code}->Length, {_emitter.SourceArgument(syntax)});");
             return new IrExpressionValue { Type = CType.Char, Code = $"{receiver.Code}->Data[{index.Code}]", Prelude = prelude };
         }
         if (receiver.Type.IsNativeBuffer)
         {
             RequireUnsafe(syntax);
+            RecordRuntimeFault(syntax, "dynamic native-buffer bounds check");
             prelude.Add($"ct_native_bounds((size_t){index.Code}, {receiver.Code}.Length, {_emitter.SourceArgument(syntax)});");
             var code = $"{receiver.Code}.Data[(size_t){index.Code}]";
             var writable = receiver.Type.Kind == CTypeKind.NativeBuffer;
@@ -715,7 +737,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (type.Kind != CTypeKind.Array)
                 return ErrorExpression();
             _emitter.RegisterType(type);
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, "array construction");
+            _emitter.Effects.RecordAllocation(_method, syntax, "array construction");
             var length = Materialize(Convert(LowerExpression(syntax.ArrayLength), CType.Int, syntax.ArrayLength, false), syntax.ArrayLength);
             var code = $"ct_new_{NameMangler.Array(type.ElementType!)}({length.Code}, {_emitter.SourceArgument(syntax)})";
             var result = OwnResult(type, code, length.Prelude);
@@ -755,9 +777,9 @@ internal sealed partial class TypedIrBodyLowerer
         CheckAccess(constructor, syntax);
         if (constructor.IsUnsafe)
             RequireUnsafe(syntax);
-        _emitter.AllocationEffects.RecordCall(_method, constructor, syntax, requiresContract: false);
+        _emitter.Effects.RecordCall(_method, constructor, syntax, requiresContract: false);
         if (type.Kind == CTypeKind.Class)
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"construction of class '{type.DisplayName}'");
+            _emitter.Effects.RecordAllocation(_method, syntax, $"construction of class '{type.DisplayName}'");
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
         var construction = $"{constructor.CName}({string.Join(", ", lowered.Codes)})";
         return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude, symbol: constructor) : new IrExpressionValue { Type = type, Code = construction, Prelude = lowered.Prelude, Symbol = constructor };
@@ -783,10 +805,15 @@ internal sealed partial class TypedIrBodyLowerer
         var prelude = new List<string>(count.Prelude);
         var constantSizeIsSafe = TryGetConstantStackAllocationCount(count, element, out _);
         if (count.Type == CType.Int && !constantSizeIsSafe)
+        {
+            RecordRuntimeFault(syntax, "dynamic stack allocation count check");
             prelude.Add($"if ({count.Code} < 0) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0002\", {_emitter.SourceArgument(syntax)});");
+        }
         var bytes = constantSizeIsSafe
             ? $"((size_t){count.Code} * sizeof({_emitter.CTypeName(element)}))"
             : $"ct_stack_bytes((size_t){count.Code}, sizeof({_emitter.CTypeName(element)}), {_emitter.SourceArgument(syntax)})";
+        if (!constantSizeIsSafe)
+            RecordRuntimeFault(syntax, "dynamic stack allocation size check");
         var pointer = $"((size_t){count.Code} == 0u ? NULL : ({_emitter.CTypeName(element)}*)CT_ALLOCA({bytes}))";
         return new IrExpressionValue { Type = type, Code = $"({_emitter.CTypeName(type)}){{ {pointer}, (size_t){count.Code} }}", Prelude = prelude };
     }
@@ -943,7 +970,7 @@ internal sealed partial class TypedIrBodyLowerer
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
-        _emitter.AllocationEffects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
+        _emitter.Effects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
         if (selected.ExternName == "ct_native_utf8_borrow" &&
             syntax.Arguments is [{ Expression: LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string utf8Literal } }] &&
             utf8Literal.Contains('\0'))
@@ -973,6 +1000,8 @@ internal sealed partial class TypedIrBodyLowerer
                     : receiver.IsKnownNonNull
                         ? Durable(slot)
                         : $"({_emitter.CTypeName(receiver.Type)})ct_require_nonnull({Durable(slot)}, {_emitter.SourceArgument(syntax.Target)})";
+                if (receiver.Type.Kind != CTypeKind.Struct && !receiver.IsKnownNonNull)
+                    RecordRuntimeFault(syntax.Target, "deferred receiver null check");
             }
             else
             {
@@ -986,7 +1015,7 @@ internal sealed partial class TypedIrBodyLowerer
             : LowerArguments(arguments, selected.Parameters, syntax.Arguments);
         prelude.AddRange(loweredArguments.Prelude);
 
-        if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, prelude, syntax, out var atomicResult))
+        if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, arguments, prelude, syntax, out var atomicResult))
             return atomicResult;
         if (!captureForDefer && TryLowerMmioCall(selected, loweredArguments.Codes, prelude, syntax, out var mmioResult))
             return mmioResult;
@@ -994,7 +1023,7 @@ internal sealed partial class TypedIrBodyLowerer
             return cpuResult;
         if (!captureForDefer && TryLowerEndianCall(selected, loweredArguments.Codes, arguments, prelude, syntax, out var endianResult))
             return endianResult;
-        if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, prelude, captureForDefer, out var threadingResult))
+        if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, arguments, prelude, syntax, captureForDefer, out var threadingResult))
             return threadingResult;
 
         var callArguments = new List<string>();
@@ -1024,7 +1053,7 @@ internal sealed partial class TypedIrBodyLowerer
             return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnType.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None, Symbol = selected };
         if (loweredArguments.Postlude.Count != 0)
         {
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, "synchronous native delegate callback");
+            _emitter.Effects.RecordAllocation(_method, syntax, "synchronous native delegate callback");
             if (selected.ReturnType == CType.Void)
             {
                 prelude.Add(call + ";");
@@ -1043,6 +1072,7 @@ internal sealed partial class TypedIrBodyLowerer
                 var nativeResult = NewTemp();
                 prelude.Add($"{_emitter.CDeclaration(selected.ReturnType, nativeResult)} = {call};");
                 prelude.Add($"(void)ct_require_nonnull((void*){nativeResult}, {_emitter.SourceArgument(syntax)});");
+                RecordRuntimeFault(syntax, "native result null check");
                 call = nativeResult;
             }
             return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = selected.ReturnsOwned ? OwnershipKind.Owned : OwnershipKind.Borrowed, Symbol = selected };
@@ -1246,12 +1276,17 @@ internal sealed partial class TypedIrBodyLowerer
         }
     }
 
-    private bool TryLowerAtomicCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments, List<string> prelude, SyntaxNode syntax, out IrExpressionValue result)
+    private bool TryLowerAtomicCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments,
+        IReadOnlyList<IrExpressionValue> argumentValues, List<string> prelude, SyntaxNode syntax, out IrExpressionValue result)
     {
         result = null!;
         var definition = selected.ContainingType.GenericDefinition;
         var isAtomicValue = definition is { Namespace: "System.Threading", Name: "Atomic" } && selected.ContainingType.TypeArguments.Length == 1;
         var isFence = selected.ContainingType is { Namespace: "System.Threading", Name: "Atomic", IsStatic: true } && selected.Name == "Fence";
+        if ((isAtomicValue || isFence) && selected.Parameters.Select((parameter, index) => (parameter, index))
+            .Any(pair => pair.parameter.Type.Symbol is { Namespace: "System.Threading", Name: "MemoryOrder" } &&
+                (pair.index >= argumentValues.Count || !argumentValues[pair.index].IsConstant)))
+            RecordRuntimeFault(syntax, "dynamic atomic memory-order validation");
         if (isFence)
         {
             prelude.Add($"ct_atomic_fence((int32_t){arguments[0]});");
@@ -1299,7 +1334,7 @@ internal sealed partial class TypedIrBodyLowerer
     }
 
     private bool TryLowerManagedThreadingCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments,
-        List<string> prelude, bool captureForDefer, out IrExpressionValue result)
+        IReadOnlyList<IrExpressionValue> argumentValues, List<string> prelude, SyntaxNode syntax, bool captureForDefer, out IrExpressionValue result)
     {
         result = null!;
         string? call = selected.ContainingType.FullName switch
@@ -1315,10 +1350,32 @@ internal sealed partial class TypedIrBodyLowerer
         };
         if (call is null)
             return false;
+        var zeroSleep = selected.Name == "Sleep" && argumentValues.Count == 1 &&
+            argumentValues[0].IsConstant && IsZero(argumentValues[0].ConstantValue);
+        var threadingEffects = EffectKind.UsesRuntime;
+        if (selected.Name is "Start" or "Join" or "Enter" or "TryEnter" or "Exit" || selected.Name == "Sleep" && !zeroSleep)
+            threadingEffects |= EffectKind.Throws;
+        _emitter.Effects.Record(_method, syntax, threadingEffects, $"managed threading call to '{selected.Name}'");
+        if (selected.Name is "Join" or "Enter" || selected.Name == "Sleep" && !zeroSleep)
+            _emitter.Effects.Record(_method, syntax, EffectKind.Blocks, $"blocking threading call to '{selected.Name}'");
         if (captureForDefer)
             _deferId++;
         result = new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Symbol = selected };
         return true;
+
+        static bool IsZero(object? value) => value switch
+        {
+            BigInteger number => number.IsZero,
+            byte number => number == 0,
+            sbyte number => number == 0,
+            short number => number == 0,
+            ushort number => number == 0,
+            int number => number == 0,
+            uint number => number == 0,
+            long number => number == 0,
+            ulong number => number == 0,
+            _ => false,
+        };
     }
 
     private (List<string> Prelude, List<string> Codes, List<string> Postlude) CaptureDeferredArgumentsWithPostlude(
@@ -1374,7 +1431,8 @@ internal sealed partial class TypedIrBodyLowerer
         var prelude = new List<string>(target.Prelude);
         prelude.AddRange(loweredArguments.Prelude);
         prelude.Add($"(void)ct_require_nonnull({target.Code}, {_emitter.SourceArgument(syntax.Target)});");
-        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"indirect invocation of delegate '{delegateType.FullName}'");
+        RecordRuntimeFault(syntax.Target, "delegate null check");
+        _emitter.Effects.Record(_method, syntax, EffectKind.All, $"indirect invocation of delegate '{delegateType.FullName}'");
         var callArguments = new[] { $"{target.Code}->ct_target" }.Concat(loweredArguments.Codes);
         var call = $"{target.Code}->ct_invoke({string.Join(", ", callArguments)})";
         var returnType = delegateType.DelegateReturnType!;
@@ -1442,7 +1500,8 @@ internal sealed partial class TypedIrBodyLowerer
             }
         }
         prelude.Add($"(void)ct_require_nonnull((void*){target.Code}, {_emitter.SourceArgument(syntax.Target)});");
-        _emitter.AllocationEffects.RecordDirect(_method, syntax, "unmanaged function-pointer invocation");
+        RecordRuntimeFault(syntax.Target, "function-pointer null check");
+        _emitter.Effects.Record(_method, syntax, EffectKind.All, "unmanaged function-pointer invocation");
         return new IrExpressionValue { Type = signature.ReturnType, Code = $"{target.Code}({string.Join(", ", codes)})", Prelude = prelude, Symbol = target.Type };
     }
 
@@ -1472,7 +1531,11 @@ internal sealed partial class TypedIrBodyLowerer
         if (receiver.Type.Kind == CTypeKind.String)
         {
             if (captureForDefer)
+            {
+                RecordRuntimeFault(member, "string receiver null check");
                 return new IrExpressionValue { Type = CType.String, Code = $"ct_string_v_to_string((ct_object*)(void*)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)}))", Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned };
+            }
+            RecordRuntimeFault(member, "string receiver null check");
             receiver.Prelude.Add($"(void)ct_require_nonnull({receiver.Code}, {_emitter.SourceArgument(member)});");
             return OwnResult(CType.String, "ct_string_v_to_string((ct_object*)(void*)" + receiver.Code + ")", receiver.Prelude);
         }
@@ -1497,7 +1560,7 @@ internal sealed partial class TypedIrBodyLowerer
             _ => receiver.Code,
         };
         var code = $"{function}({argument}, {_emitter.SourceArgument(member)})";
-        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"conversion of '{receiver.Type.DisplayName}' to string");
+        _emitter.Effects.RecordAllocation(_method, syntax, $"conversion of '{receiver.Type.DisplayName}' to string");
         return captureForDefer
             ? new IrExpressionValue { Type = CType.String, Code = code, Prelude = receiver.Prelude, Ownership = OwnershipKind.Owned }
             : OwnResult(CType.String, code, receiver.Prelude);

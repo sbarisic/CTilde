@@ -369,6 +369,7 @@ internal sealed partial class Parser
             AccessorSyntax? setter = null;
             while (Current.Kind is not SyntaxKind.CloseBraceToken and not SyntaxKind.EndOfFileToken)
             {
+                var accessorAttributes = ParseAttributes();
                 var accessorModifiers = ParseModifiers();
                 var accessor = Current;
                 if (accessor.Kind is not SyntaxKind.GetKeyword and not SyntaxKind.SetKeyword)
@@ -387,7 +388,8 @@ internal sealed partial class Parser
                     accessorBody = ParseBlock();
                     accessorEnd = accessorBody.Span.End;
                 }
-                var syntax = new AccessorSyntax(_source, TextSpan.FromBounds(accessor.Span.Start, accessorEnd), accessor.Text, accessorModifiers, accessorBody);
+                var accessorStart = accessorAttributes.IsDefaultOrEmpty ? accessor.Span.Start : accessorAttributes[0].Span.Start;
+                var syntax = new AccessorSyntax(_source, TextSpan.FromBounds(accessorStart, accessorEnd), accessor.Text, accessorAttributes, accessorModifiers, accessorBody);
                 if (accessor.Kind == SyntaxKind.GetKeyword)
                 {
                     if (getter is not null)

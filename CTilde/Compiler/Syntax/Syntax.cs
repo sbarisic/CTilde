@@ -440,6 +440,7 @@ public sealed record AccessorSyntax(
     SourceText Source,
     TextSpan Span,
     string Kind,
+    ImmutableArray<AttributeSyntax> Attributes,
     ImmutableArray<string> Modifiers,
     BlockStatementSyntax? Body) : SyntaxNode(Source, Span);
 

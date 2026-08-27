@@ -7,44 +7,9 @@ internal static class RecursionAnalyzer
     public static void Validate(CompilationModel model, ImmutableArray<BoundBody>.Builder bodies, bool projectWide)
     {
         var bodyByMethod = bodies.ToDictionary(body => body.Method);
-        var edges = bodyByMethod.Keys.ToDictionary(method => method, _ => new SortedSet<MethodSymbol>(MethodComparer.Instance));
-        var unknown = new Dictionary<MethodSymbol, SyntaxNode>();
-
-        foreach (var body in bodies)
-        {
-            foreach (var entry in body.Semantics.Values.Where(entry => entry.Syntax is CallExpressionSyntax))
-            {
-                if (entry.Symbol is MethodSymbol target && target.ExternName is null)
-                {
-                    var isBaseCall = entry.Syntax is CallExpressionSyntax { Target: MemberAccessExpressionSyntax { Receiver: BaseExpressionSyntax } };
-                    if (target.IsVirtual && !isBaseCall)
-                    {
-                        var possible = bodyByMethod.Keys.Where(candidate => !candidate.IsAbstract &&
-                            (ReferenceEquals(candidate, target) || Overrides(candidate, target) || candidate.ImplementedInterfaceMethods.Contains(target))).ToArray();
-                        if (possible.Length == 0)
-                            unknown.TryAdd(body.Method, entry.Syntax);
-                        foreach (var candidate in possible)
-                            edges[body.Method].Add(candidate);
-                    }
-                    else if (edges.ContainsKey(target))
-                        edges[body.Method].Add(target);
-                }
-                else if (entry.Syntax is CallExpressionSyntax call &&
-                         body.Semantics.GetValueOrDefault(call.Target) is { } targetEntry &&
-                         (targetEntry.Type.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer || SymbolType(targetEntry.Symbol)?.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer))
-                    unknown.TryAdd(body.Method, entry.Syntax);
-            }
-            if (body.Method.Body is not null)
-            {
-                var openCall = Descendants(body.Method.Body).OfType<CallExpressionSyntax>().FirstOrDefault(call => call.Target switch
-                {
-                    NameExpressionSyntax name => body.Method.Parameters.Any(parameter => parameter.Name == name.Name && parameter.Type.Kind is CTypeKind.Delegate or CTypeKind.FunctionPointer),
-                    _ => false,
-                });
-                if (openCall is not null)
-                    unknown.TryAdd(body.Method, openCall);
-            }
-        }
+        var edges = model.Effects.CallTargets.ToDictionary(pair => pair.Key,
+            pair => new SortedSet<MethodSymbol>(pair.Value, MethodComparer.Instance));
+        var unknown = model.Effects.UnknownCalls;
 
         var roots = new SortedSet<MethodSymbol>(MethodComparer.Instance);
         foreach (var method in bodyByMethod.Keys.Where(method => method.IsNoRecursion))

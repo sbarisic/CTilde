@@ -178,6 +178,8 @@ public sealed partial class LanguageServiceSnapshot
         var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
+        if (token.Kind == SyntaxKind.IdentifierToken && EffectAttributeHover(token.Text) is { } effectHover)
+            return new LanguageHover(effectHover, token.Span);
         if (token.Kind != SyntaxKind.IdentifierToken && !OperatorFacts.IsSupported(token.Kind))
         {
             var builtIn = TypeFacts.BuiltIn(token.Text);
@@ -354,6 +356,8 @@ public sealed partial class LanguageServiceSnapshot
             if (insideType)
                 Add("FieldOffset", LanguageCompletionKind.Keyword, "explicit field layout attribute", "0");
         }
+        foreach (var effect in new[] { "NoAlloc", "NoThrow", "NoBlock", "NoRuntime" })
+            Add(effect, LanguageCompletionKind.Keyword, "analysis-only effect contract attribute", "0");
         foreach (var builtIn in BuiltInTypes)
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
         Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1", documentationId: "T:System.Runtime.NativeBuffer<T>");
@@ -398,6 +402,15 @@ public sealed partial class LanguageServiceSnapshot
         void Add(string label, LanguageCompletionKind kind, string detail, string order, object? symbol = null, string? documentationId = null) =>
             results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label, documentationId ?? (symbol is null ? null : _model.Documentation.GetId(symbol))));
     }
+
+    private static string? EffectAttributeHover(string name) => name switch
+    {
+        "NoAlloc" => "[NoAlloc] - the callable and its transitive calls do not allocate managed storage.",
+        "NoThrow" => "[NoThrow] - the callable uses no exception machinery or potentially failing runtime checks; implies NoAlloc.",
+        "NoBlock" => "[NoBlock] - the callable does not wait for time, I/O, synchronization, another thread, or external progress.",
+        "NoRuntime" => "[NoRuntime] - the callable is bootstrap-safe and uses no managed runtime; implies NoThrow and NoAlloc.",
+        _ => null,
+    };
 
     private void AddMemberCompletions(List<LanguageCompletion> results, DocumentContext context, MemberAccessExpressionSyntax member, TextSpan replacement)
     {

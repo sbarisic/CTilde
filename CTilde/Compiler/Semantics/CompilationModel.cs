@@ -59,6 +59,7 @@ internal sealed partial class CompilationModel
         ImmutableDictionary<RuntimeImplementationRole, MethodSymbol>.Empty;
     public bool FreestandingRuntimeRequired { get; set; }
     public bool FreestandingHeapRequired { get; set; }
+    public EffectAnalysis Effects { get; set; } = EffectAnalysis.Empty;
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
@@ -379,7 +380,7 @@ internal sealed partial class CompilationModel
             Body = method.Body,
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
-            IsNoAlloc = method.IsNoAlloc,
+            DeclaredEffects = method.DeclaredEffects,
             IsNoRecursion = method.IsNoRecursion,
             IsUnsafe = method.IsUnsafe,
             ReturnsBorrowed = method.ReturnsBorrowed,
@@ -502,7 +503,9 @@ internal sealed partial class CompilationModel
                 IsOverride = property.IsOverride,
                 IsSealedOverride = property.IsSealedOverride,
                 IsAbstract = property.IsAbstract,
-                IsNoAlloc = property.IsNoAlloc,
+                DeclaredEffects = property.DeclaredEffects,
+                GetterDeclaredEffects = property.GetterDeclaredEffects,
+                SetterDeclaredEffects = property.SetterDeclaredEffects,
                 IsNoRecursion = property.IsNoRecursion,
             };
             cloned.ImplementedInterfaceProperties.AddRange(property.ImplementedInterfaceProperties);
@@ -519,15 +522,25 @@ internal sealed partial class CompilationModel
                 var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
                     .FirstOrDefault(candidate => candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract &&
                         HaveSameSourceSignature(candidate, required) && candidate.ReturnType == required.ReturnType);
-                if (implementation is not null && !implementation.ImplementedInterfaceMethods.Contains(required))
-                    implementation.ImplementedInterfaceMethods.Add(required);
+                if (implementation is not null)
+                {
+                    if (!implementation.ImplementedInterfaceMethods.Contains(required))
+                        implementation.ImplementedInterfaceMethods.Add(required);
+                    implementation.DeclaredEffects |= required.DeclaredEffects;
+                }
             }
             foreach (var required in contract.Properties)
             {
                 var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Properties)
                     .FirstOrDefault(candidate => ResolvesPropertyContract(candidate, required));
-                if (implementation is not null && !implementation.ImplementedInterfaceProperties.Contains(required))
-                    implementation.ImplementedInterfaceProperties.Add(required);
+                if (implementation is not null)
+                {
+                    if (!implementation.ImplementedInterfaceProperties.Contains(required))
+                        implementation.ImplementedInterfaceProperties.Add(required);
+                    implementation.DeclaredEffects |= required.DeclaredEffects;
+                    implementation.GetterDeclaredEffects |= required.GetterDeclaredEffects;
+                    implementation.SetterDeclaredEffects |= required.SetterDeclaredEffects;
+                }
             }
         }
         if (definition.Kind == DeclaredTypeKind.Delegate)
@@ -571,7 +584,7 @@ internal sealed partial class CompilationModel
             Body = method.Body,
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
-            IsNoAlloc = method.IsNoAlloc,
+            DeclaredEffects = method.DeclaredEffects,
             IsNoRecursion = method.IsNoRecursion,
             IsUnsafe = method.IsUnsafe,
             ReturnsBorrowed = method.ReturnsBorrowed,
@@ -1377,15 +1390,13 @@ internal sealed partial class CompilationModel
             case PropertyDeclarationSyntax property:
                 {
                     ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], property);
-                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "NoRecursion", "Section"]);
-                    var noAlloc = FindAttribute(property.Attributes, "NoAlloc");
+                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "Section"]);
+                    var propertyEffects = ParseEffectContracts(property.Attributes);
                     var noRecursion = FindAttribute(property.Attributes, "NoRecursion");
                     var propertySection = FindAttribute(property.Attributes, "Section");
                     _ = ParseSectionName(propertySection);
                     if (propertySection is not null)
                         Diagnostics.Add("CT1287", "Section is not valid on a property.", propertySection.Source, propertySection.Span);
-                    if (noAlloc is not null && noAlloc.Arguments.Length != 0)
-                        Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     if (noRecursion is not null && noRecursion.Arguments.Length != 0)
                         Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
                     if (property.Getter is null && property.Setter is null)
@@ -1399,10 +1410,20 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in properties.", property.Source, property.Span);
                     if (propertyType.ContainsAtomic)
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be stored in a property.", property.Source, property.Span);
+                    var getterEffects = EffectContract.None;
+                    var setterEffects = EffectContract.None;
                     if (property.Getter is not null)
+                    {
                         ValidateAllowedModifiers(property.Getter.Modifiers, ["public", "internal", "protected", "private"], property.Getter);
+                        ValidateAttributes(property.Getter.Attributes, property.Getter, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime"]);
+                        getterEffects = ParseEffectContracts(property.Getter.Attributes);
+                    }
                     if (property.Setter is not null)
+                    {
                         ValidateAllowedModifiers(property.Setter.Modifiers, ["public", "internal", "protected", "private"], property.Setter);
+                        ValidateAttributes(property.Setter.Attributes, property.Setter, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime"]);
+                        setterEffects = ParseEffectContracts(property.Setter.Attributes);
+                    }
                     var isAbstractProperty = type.Kind == DeclaredTypeKind.Interface || property.Modifiers.Contains("abstract", StringComparer.Ordinal);
                     if (type.Kind == DeclaredTypeKind.Interface && (isStatic || accessibility != Accessibility.Public))
                         Diagnostics.Add("CT1273", "Interface properties are public instance contracts.", property.Source, property.Span);
@@ -1443,7 +1464,9 @@ internal sealed partial class CompilationModel
                         IsAbstract = isAbstractProperty,
                         IsOverride = property.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = property.Modifiers.Contains("sealed", StringComparer.Ordinal),
-                        IsNoAlloc = noAlloc is not null,
+                        DeclaredEffects = propertyEffects,
+                        GetterDeclaredEffects = getterEffects,
+                        SetterDeclaredEffects = setterEffects,
                         IsNoRecursion = noRecursion is not null,
                     };
                     if (noRecursion is not null && isAbstractProperty)
@@ -1452,15 +1475,19 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1222", "An accessor cannot be more accessible than its property.", property.Source, property.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override property cannot be private.", property.Source, property.Span);
+                    if (((symbol.DeclaredEffects | symbol.GetterDeclaredEffects | symbol.SetterDeclaredEffects) & EffectContract.NoRuntime) != 0 &&
+                        propertyType.ContainsManagedReferences)
+                        Diagnostics.Add("CT1305", "NoRuntime properties cannot have managed accessor results or values.", property.Source, property.Span);
                     AddUnique(type, symbol);
                     break;
                 }
             case ConstructorDeclarationSyntax constructor:
                 {
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
-                    ValidateAttributes(constructor.Attributes, constructor, ["Section", "NoRecursion"]);
+                    ValidateAttributes(constructor.Attributes, constructor, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "Section", "NoRecursion"]);
                     var constructorSection = FindAttribute(constructor.Attributes, "Section");
                     var constructorNoRecursion = FindAttribute(constructor.Attributes, "NoRecursion");
+                    var constructorEffects = ParseEffectContracts(constructor.Attributes);
                     _ = ParseSectionName(constructorSection);
                     if (constructorSection is not null)
                         Diagnostics.Add("CT1287", "Section is not valid on a constructor.", constructorSection.Source, constructorSection.Span);
@@ -1482,6 +1509,7 @@ internal sealed partial class CompilationModel
                         Parameters = parameters,
                         Body = constructor.Body,
                         IsConstructor = true,
+                        DeclaredEffects = constructorEffects,
                         IsNoRecursion = constructorNoRecursion is not null,
                         IsUnsafe = constructor.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ConstructorInitializer = constructor.Initializer,
@@ -1497,11 +1525,12 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
                     var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
+                    var methodEffects = ParseEffectContracts(method.Attributes);
                     var noRecursion = FindAttribute(method.Attributes, "NoRecursion");
                     var returnsBorrowed = FindAttribute(method.Attributes, "ReturnsBorrowed");
                     var returnsOwned = FindAttribute(method.Attributes, "ReturnsOwned");
@@ -1559,8 +1588,6 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1287", "Section requires a body-bearing static non-extern method.", sectionAttribute.Source, sectionAttribute.Span);
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
-                    if (noAlloc is not null && noAlloc.Arguments.Length != 0)
-                        Diagnostics.Add("CT1233", "NoAlloc does not accept arguments.", noAlloc.Source, noAlloc.Span);
                     if (noRecursion is not null && noRecursion.Arguments.Length != 0)
                         Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
                     if (noRecursion is not null && (method.Body is null || isAbstractMethod || external is not null))
@@ -1635,7 +1662,7 @@ internal sealed partial class CompilationModel
                         Parameters = methodParameters,
                         Body = method.Body,
                         IsEntryPoint = entry is not null,
-                        IsNoAlloc = noAlloc is not null,
+                        DeclaredEffects = methodEffects,
                         IsNoRecursion = noRecursion is not null,
                         IsUnsafe = method.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && (returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer),
@@ -1672,6 +1699,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() method containing exactly one operand-free NoAlloc asm statement.", nakedAttribute.Source, nakedAttribute.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
+                    if (symbol.IsNoRuntime && (returnType.ContainsManagedReferences || methodParameters.Any(parameter => parameter.Type.ContainsManagedReferences)))
+                        Diagnostics.Add("CT1305", "NoRuntime methods cannot have managed parameters or results.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);
                     _activeTypeParameters = previousTypeParameters;
                     break;
@@ -1986,7 +2015,9 @@ internal sealed partial class CompilationModel
                     else
                     {
                         property.OverriddenProperty = candidate;
-                        property.IsNoAlloc |= candidate.IsNoAlloc;
+                        property.DeclaredEffects |= candidate.DeclaredEffects;
+                        property.GetterDeclaredEffects |= candidate.GetterDeclaredEffects;
+                        property.SetterDeclaredEffects |= candidate.SetterDeclaredEffects;
                     }
                 }
                 else if (candidate is not null)
@@ -2011,7 +2042,7 @@ internal sealed partial class CompilationModel
                     else
                     {
                         method.OverriddenMethod = candidate;
-                        method.IsNoAlloc |= candidate.IsNoAlloc;
+                        method.DeclaredEffects |= candidate.DeclaredEffects;
                     }
                 }
                 else if (candidate is not null && type.Kind == DeclaredTypeKind.Class)
@@ -2046,7 +2077,9 @@ internal sealed partial class CompilationModel
                     {
                         if (!implementation.ImplementedInterfaceProperties.Contains(required))
                             implementation.ImplementedInterfaceProperties.Add(required);
-                        implementation.IsNoAlloc |= required.IsNoAlloc;
+                        implementation.DeclaredEffects |= required.DeclaredEffects;
+                        implementation.GetterDeclaredEffects |= required.GetterDeclaredEffects;
+                        implementation.SetterDeclaredEffects |= required.SetterDeclaredEffects;
                     }
                     else if (concrete)
                         Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement interface property '{contract.FullName}.{required.Name}'.", type.Syntax!.Source, type.Syntax.Span);
@@ -2060,7 +2093,7 @@ internal sealed partial class CompilationModel
                     {
                         if (!implementation.ImplementedInterfaceMethods.Contains(required))
                             implementation.ImplementedInterfaceMethods.Add(required);
-                        implementation.IsNoAlloc |= required.IsNoAlloc;
+                        implementation.DeclaredEffects |= required.DeclaredEffects;
                     }
                     else if (concrete)
                         Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement interface method '{contract.FullName}.{required.Name}'.", type.Syntax!.Source, type.Syntax.Span);
@@ -2212,13 +2245,43 @@ internal sealed partial class CompilationModel
         foreach (var attribute in attributes)
         {
             if (!allowed.Contains(attribute.Name, StringComparer.Ordinal))
-                Diagnostics.Add("CT1213", $"Unknown or invalid attribute '{attribute.Name}' on this declaration.", attribute.Source, attribute.Span);
+            {
+                var code = attribute.Name switch
+                {
+                    "NoThrow" => "CT1303",
+                    "NoBlock" => "CT1304",
+                    "NoRuntime" => "CT1305",
+                    _ => "CT1213",
+                };
+                Diagnostics.Add(code, $"Unknown or invalid attribute '{attribute.Name}' on this declaration.", attribute.Source, attribute.Span);
+            }
         }
         foreach (var duplicate in attributes.GroupBy(attribute => attribute.Name, StringComparer.Ordinal).Where(group => group.Count() > 1))
             Diagnostics.Add("CT1214", $"Attribute '{duplicate.Key}' cannot be applied more than once.", syntax.Source, syntax.Span);
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);
+
+    private EffectContract ParseEffectContracts(ImmutableArray<AttributeSyntax> attributes)
+    {
+        var result = EffectContract.None;
+        foreach (var (name, contract, malformedCode) in new[]
+                 {
+                     ("NoAlloc", EffectContract.NoAlloc, "CT1233"),
+                     ("NoThrow", EffectContract.NoThrow, "CT1303"),
+                     ("NoBlock", EffectContract.NoBlock, "CT1304"),
+                     ("NoRuntime", EffectContract.NoRuntime, "CT1305"),
+                 })
+        {
+            var attribute = FindAttribute(attributes, name);
+            if (attribute is null)
+                continue;
+            result |= contract;
+            if (!attribute.Arguments.IsEmpty)
+                Diagnostics.Add(malformedCode, $"{name} does not accept arguments.", attribute.Source, attribute.Span);
+        }
+        return result;
+    }
 
     private int? ParseAlignment(AttributeSyntax? attribute, IReadOnlySet<string> symbolicNames, out string? parameterName)
     {

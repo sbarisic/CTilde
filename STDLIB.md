@@ -2,11 +2,13 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.21 and runtime ABI 16. Hosted and ESP-IDF retain the Draft 0.20 object, exception, console, math, vector, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
+This document is the canonical standard-library reference for C~ draft 0.22 and runtime ABI 16. Hosted and ESP-IDF retain the object, exception, console, math, vector, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
 `System.Runtime.Target` exposes compiler constants for `Profile`, `Architecture`, and byte-sized `PointerSize`. `System.Runtime.Mmio` provides exact-width `Read`, `Write`, `ReadRelaxed`, `WriteRelaxed`, and `Barrier` intrinsics for fixed-width integers and enums. Ordered accesses use a full target I/O barrier before and after the volatile access; relaxed accesses emit only the access.
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
+
+Draft 0.22 marks target queries, CPU operations, MMIO, and endian conversion with trusted `[NoRuntime]` and `[NoBlock]` contracts in addition to `[NoThrow]` and `[NoAlloc]`. Atomic operations are non-blocking, but dynamic memory-order validation can throw and use the managed runtime. `Thread.Join`, nonzero or dynamic `Thread.Sleep`, and `Mutex.Enter` are blocking; `TryEnter`, `Yield`, and CPU pause hints are not. Console, file, and unannotated native I/O remain conservative effect boundaries.
 
 All public `System`, compiler-intrinsic, and `Esp.Idf` APIs have embedded XML documentation. The compiler loads these sidecars into the same immutable documentation index as source `///` comments. Keeping descriptions outside the built-in `.ct` files preserves their virtual source locations and generated source-line metadata. ESP descriptions are available only when the compilation target is `esp-idf`.
 
@@ -319,7 +321,7 @@ public readonly struct RuntimePanicInfo
 
 ## Runtime native buffers
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.21 generics.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.22 generics.
 
 ```csharp
 NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);

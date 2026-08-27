@@ -41,7 +41,7 @@ internal sealed class AnalysisServices : ILoweringServices
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
-    public AllocationEffectRegistry AllocationEffects { get; } = new();
+    public EffectRegistry Effects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     public bool UsesExceptions { get; private set; }
     public bool EmitDebugInformation => false;
@@ -99,7 +99,7 @@ internal sealed class AnalysisServices : ILoweringServices
             ReturnType = getter ? property.Type : CType.Void,
             Parameters = [.. parameters],
             Body = syntax.Body,
-            IsNoAlloc = property.IsNoAlloc,
+            DeclaredEffects = property.DeclaredEffects | (getter ? property.GetterDeclaredEffects : property.SetterDeclaredEffects),
             IsNoRecursion = property.IsNoRecursion,
             IsUnsafe = property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal),
             IsVirtual = property.IsVirtual,

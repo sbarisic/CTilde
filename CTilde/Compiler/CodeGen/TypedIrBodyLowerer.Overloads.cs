@@ -252,14 +252,23 @@ internal sealed partial class TypedIrBodyLowerer
             }
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(converted.Type, temp)} = {converted.Code};");
-            if (!parameter.IsNullable && parameter.Type.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+            if (!parameter.IsNullable && !converted.IsKnownNonNull && parameter.Type.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
+            {
+                RecordRuntimeFault(argumentSyntax, "native argument null check");
                 prelude.Add($"(void)ct_require_nonnull((void*){temp}, {_emitter.SourceArgument(argumentSyntax)});");
+            }
             if (!parameter.IsNullable && parameter.Type.IsNativeUtf8String)
+            {
+                RecordRuntimeFault(argumentSyntax, "native UTF-8 argument null check");
                 prelude.Add($"(void)ct_require_nonnull((void*){temp}.Data, {_emitter.SourceArgument(argumentSyntax)});");
+            }
             if (parameter.IsSynchronousCallback)
             {
                 if (!parameter.IsNullable)
+                {
+                    RecordRuntimeFault(argumentSyntax, "synchronous callback null check");
                     prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(argumentSyntax)});");
+                }
                 prelude.Add($"ct_retain((ct_object*)(void*){temp});");
                 var adapter = _emitter.SynchronousCallbackAdapterName(parameter.Type.Symbol!);
                 codes.Add(parameter.IsNullable ? $"{temp} == NULL ? NULL : &{adapter}" : $"&{adapter}");

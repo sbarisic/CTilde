@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.21 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.22 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -22,7 +22,6 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 - [ ] Add explicit stack controls such as `[NoStackProbe]` and `[StackAlign(n)]`; support `[StackUsage(n)]` when the compiler can calculate or verify the bound.
 - [ ] Add compile-time stack-usage analysis with per-call-path costs and a worst-case static stack report, especially for MCU builds.
-- [ ] Generalize the transitive `[NoAlloc]` analysis into an effect system. Define and infer effects such as `[NoThrow]`, `[NoBlock]`, and possibly `[NoRuntime]`, and report complete call paths when a restricted method reaches a forbidden operation.
 
 ## Editor tooling
 

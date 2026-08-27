@@ -35,59 +35,110 @@ public enum TargetArchitecture
 public static class Target
 {
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static TargetProfile Profile { get { return TargetProfile.Hosted; } }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static TargetArchitecture Architecture { get { return TargetArchitecture.X86; } }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static int PointerSize { get { return 4; } }
 }
 
 public static class Mmio
 {
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static unsafe T Read<T>(nuint address) where T : unmanaged { return (T)0; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static unsafe void Write<T>(nuint address, T value) where T : unmanaged { }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static unsafe T ReadRelaxed<T>(nuint address) where T : unmanaged { return (T)0; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static unsafe void WriteRelaxed<T>(nuint address, T value) where T : unmanaged { }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static unsafe void Barrier() { }
 }
 
 public static class Cpu
 {
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static void MemoryBarrier() { }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static void Pause() { }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static ushort ByteSwap(ushort value) { return value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static uint ByteSwap(uint value) { return value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static ulong ByteSwap(ulong value) { return value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static int PopCount(uint value) { return 0; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static int PopCount(ulong value) { return 0; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static int LeadingZeroCount(uint value) { return 0; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static int LeadingZeroCount(ulong value) { return 0; }
 }

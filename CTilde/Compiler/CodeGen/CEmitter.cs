@@ -123,7 +123,7 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
-    public AllocationEffectRegistry AllocationEffects { get; } = new();
+    public EffectRegistry Effects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
     public bool EmitDebugInformation => _debugInformation != DebugInformationMode.None;
     public bool EmitDebugInstrumentation => _debugInformation == DebugInformationMode.Instrumented;
@@ -209,7 +209,7 @@ internal sealed partial class CEmitter : ILoweringServices
             ReturnType = getter ? property.Type : CType.Void,
             Parameters = [.. parameters],
             Body = syntax.Body,
-            IsNoAlloc = property.IsNoAlloc,
+            DeclaredEffects = property.DeclaredEffects | (getter ? property.GetterDeclaredEffects : property.SetterDeclaredEffects),
             IsNoRecursion = property.IsNoRecursion,
             IsUnsafe = property.Syntax is PropertyDeclarationSyntax propertySyntax && propertySyntax.Modifiers.Contains("unsafe", StringComparer.Ordinal),
             IsVirtual = property.IsVirtual,
@@ -636,6 +636,10 @@ internal sealed partial class CEmitter : ILoweringServices
                 _ => false,
             };
             entry["naked"] = method.IsNaked;
+            entry["declaredEffects"] = EffectFacts.IndividualContracts(method.DeclaredEffects)
+                .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+            entry["inferredEffects"] = EffectAnalyzer.IndividualEffects(Model.Effects.GetEffects(method))
+                .Select(EffectFacts.EffectName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             symbols.Add(entry);
         }
 

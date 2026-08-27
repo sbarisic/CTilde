@@ -257,16 +257,31 @@ internal sealed partial class TypedIrBodyLowerer
         if (_unsafeDepth == 0)
             Report("CT2190", "Inline assembly requires an unsafe method or block.", syntax);
 
-        var noAllocAttributes = syntax.Attributes.Where(attribute => attribute.Name == "NoAlloc").ToArray();
-        foreach (var attribute in syntax.Attributes.Where(attribute => attribute.Name != "NoAlloc"))
+        var allowedEffectAttributes = new Dictionary<string, (EffectContract Contract, string Diagnostic)>(StringComparer.Ordinal)
+        {
+            ["NoAlloc"] = (EffectContract.NoAlloc, "CT1233"),
+            ["NoThrow"] = (EffectContract.NoThrow, "CT1303"),
+            ["NoBlock"] = (EffectContract.NoBlock, "CT1304"),
+            ["NoRuntime"] = (EffectContract.NoRuntime, "CT1305"),
+        };
+        foreach (var attribute in syntax.Attributes.Where(attribute => !allowedEffectAttributes.ContainsKey(attribute.Name)))
             Report("CT2191", $"Attribute '{attribute.Name}' is not valid on an asm statement.", attribute);
-        if (noAllocAttributes.Length > 1)
-            Report("CT2191", "An asm statement cannot repeat the NoAlloc attribute.", noAllocAttributes[1]);
-        if (noAllocAttributes.FirstOrDefault() is { Arguments.Length: > 0 } invalidNoAlloc)
-            Report("CT1233", "NoAlloc does not accept arguments.", invalidNoAlloc);
-        var trustedNoAlloc = noAllocAttributes.Length == 1 && noAllocAttributes[0].Arguments.IsEmpty;
-        if (!trustedNoAlloc)
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, "inline assembly has no NoAlloc assertion");
+        var trustedContracts = EffectContract.None;
+        foreach (var pair in allowedEffectAttributes)
+        {
+            var attributes = syntax.Attributes.Where(attribute => attribute.Name == pair.Key).ToArray();
+            if (attributes.Length > 1)
+                Report("CT2191", $"An asm statement cannot repeat the {pair.Key} attribute.", attributes[1]);
+            if (attributes.FirstOrDefault() is not { } attribute)
+                continue;
+            if (!attribute.Arguments.IsEmpty)
+                Report(pair.Value.Diagnostic, $"{pair.Key} does not accept arguments.", attribute);
+            else
+                trustedContracts |= pair.Value.Contract;
+        }
+        if (_method.RuntimeImplementation is not null && trustedContracts.HasFlag(EffectContract.NoAlloc))
+            trustedContracts |= EffectContract.NoThrow | EffectContract.NoRuntime;
+        _emitter.Effects.Record(_method, syntax, EffectKind.All, "inline assembly boundary", trustedContracts);
 
         var aliases = new HashSet<string>(StringComparer.Ordinal);
         var symbols = new HashSet<object>(ReferenceEqualityComparer.Instance);
@@ -480,6 +495,8 @@ internal sealed partial class TypedIrBodyLowerer
             ConsumeOwnedExpression(initializer, syntax.Initializer!);
         _scopes.Peek()[syntax.Name] = symbol;
         _emitter.RegisterDebugLocal(_method, symbol, syntax.Span.End, _debugScopeEnds.Peek());
+        if (type.ContainsManagedReferences)
+            _emitter.Effects.Record(_method, syntax, EffectKind.UsesRuntime, "managed local or ARC operation");
         if (symbol.IsDurable)
         {
             if (symbol.Alignment is not null)

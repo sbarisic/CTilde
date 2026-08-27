@@ -97,7 +97,7 @@ internal sealed record BoundBody(
     BoundStatement Root,
     ImmutableDictionary<SyntaxNode, BoundSemanticEntry> Semantics,
     BoundFlowSummary Flow,
-    ImmutableArray<AllocationOperation> AllocationEffects,
+    ImmutableArray<EffectOperation> EffectOperations,
     ImmutableArray<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses,
     ImmutableArray<MethodSymbol> DeferredCalls);
 

@@ -8,26 +8,50 @@ public newtype le32 : uint;
 public static class Endian
 {
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static be16 ToBigEndian(ushort value) { return (be16)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static be32 ToBigEndian(uint value) { return (be32)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static ushort FromBigEndian(be16 value) { return (ushort)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static uint FromBigEndian(be32 value) { return (uint)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static le16 ToLittleEndian(ushort value) { return (le16)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static le32 ToLittleEndian(uint value) { return (le32)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static ushort FromLittleEndian(le16 value) { return (ushort)value; }
 
     [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public static uint FromLittleEndian(le32 value) { return (uint)value; }
 }

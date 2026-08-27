@@ -390,7 +390,7 @@ internal static partial class ConformanceTests
             Assert(invalidDiagnostics.Any(diagnostic => diagnostic.Code == "CT2155" && diagnostic.Message.Contains("function-pointer", StringComparison.OrdinalIgnoreCase)), "Function-pointer invocation was accepted in NoAlloc code.");
 
             const string invalidTargets = "[NoAlloc] public class Value { [NoAlloc] public int Field; [NoAlloc] public Value() { } } public static class Program { [EntryPoint] public static void Main() { } }";
-            Assert(Compile(invalidTargets).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1213") == 3, "NoAlloc was accepted on a type, field, or constructor.");
+            Assert(Compile(invalidTargets).GetDiagnostics().Count(diagnostic => diagnostic.Code == "CT1213") == 2, "NoAlloc was accepted on a type or field, or rejected on a constructor.");
         });
 
         suite.Run("exception unhandled and null failures", () =>

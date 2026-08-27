@@ -169,7 +169,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (target.LValue.Property is { Getter: not null } property)
         {
             var getter = _emitter.GetAccessorMethod(property, getter: true);
-            _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Operand, property.IsVirtual && !target.LValue.IsBaseReceiver);
+            _emitter.Effects.RecordCall(_method, getter, syntax.Operand, property.IsVirtual && !target.LValue.IsBaseReceiver);
         }
         var prelude = new List<string>(target.Prelude);
         var old = NewTemp();
@@ -209,7 +209,7 @@ internal sealed partial class TypedIrBodyLowerer
             left = Materialize(left, syntax.Left);
             right = Materialize(right, syntax.Right);
             var prelude = new List<string>(left.Prelude); prelude.AddRange(right.Prelude);
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, "nonconstant string concatenation");
+            _emitter.Effects.RecordAllocation(_method, syntax, "nonconstant string concatenation");
             return OwnResult(CType.String, $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", prelude);
         }
 
@@ -342,7 +342,7 @@ internal sealed partial class TypedIrBodyLowerer
             Type = resultType,
             Code = symbolicConstant is not null
                 ? $"({left.Code} {OperatorText(syntax.OperatorKind)} {right.Code})"
-                : NumericOperation(syntax.OperatorKind, resultType, left.Code, right.Code, syntax),
+                : NumericOperation(syntax.OperatorKind, resultType, left.Code, right.Code, syntax, IsProvenSafeNumericOperation(syntax.OperatorKind, resultType, right)),
             Prelude = arithmeticPrelude,
             IsConstant = left.IsConstant && right.IsConstant,
             ConstantValue = symbolicConstant,
@@ -503,7 +503,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (target.LValue.Property is { Getter: not null } overloadedProperty)
             {
                 var getter = _emitter.GetAccessorMethod(overloadedProperty, getter: true);
-                _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Left, overloadedProperty.IsVirtual && !target.LValue.IsBaseReceiver);
+                _emitter.Effects.RecordCall(_method, getter, syntax.Left, overloadedProperty.IsVirtual && !target.LValue.IsBaseReceiver);
             }
             var oldOperand = OwnResult(target.Type, target.Code, prelude, borrowed: target.Type.ContainsManagedReferences);
             var operatorResult = LowerOperatorCall(operation, [oldOperand, rawRight], [syntax.Left, syntax.Right], syntax);
@@ -534,7 +534,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (target.LValue.Property is { Getter: not null } property)
         {
             var getter = _emitter.GetAccessorMethod(property, getter: true);
-            _emitter.AllocationEffects.RecordCall(_method, getter, syntax.Left, property.IsVirtual && !target.LValue.IsBaseReceiver);
+            _emitter.Effects.RecordCall(_method, getter, syntax.Left, property.IsVirtual && !target.LValue.IsBaseReceiver);
         }
         var operationType = TypeFacts.PromoteNumeric(target.Type, rawRight.Type);
         if (operationType.IsError)
@@ -547,7 +547,7 @@ internal sealed partial class TypedIrBodyLowerer
         var rightTemp = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(operationType, rightTemp)} = {right.Code};");
         var operationResult = NewTemp();
-        prelude.Add($"{_emitter.CDeclaration(operationType, operationResult)} = {NumericOperation(operation, operationType, $"({_emitter.CCastType(operationType)})({old})", rightTemp, syntax)};");
+        prelude.Add($"{_emitter.CDeclaration(operationType, operationResult)} = {NumericOperation(operation, operationType, $"({_emitter.CCastType(operationType)})({old})", rightTemp, syntax, IsProvenSafeNumericOperation(operation, operationType, right))};");
         var result = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(target.Type, result)} = ({_emitter.CCastType(target.Type)})({operationResult});");
         prelude.Add(target.LValue.Store(result) + ";");
@@ -614,8 +614,13 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2175", $"Out parameter '{parameter.Name}' must be assigned on every normal return.", syntax);
     }
 
-    private string NumericOperation(SyntaxKind operation, CType type, string left, string right, SyntaxNode syntax)
+    private string NumericOperation(SyntaxKind operation, CType type, string left, string right, SyntaxNode syntax, bool provenSafe = false)
     {
+        var checkedArithmetic = type.Kind is CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint &&
+            operation is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken;
+        var checkedDivision = type.IsIntegral && operation is SyntaxKind.SlashToken or SyntaxKind.PercentToken;
+        if (!provenSafe && (checkedArithmetic || checkedDivision))
+            RecordRuntimeFault(syntax, $"potentially failing {OperatorText(operation)} operation");
         if (type == CType.Int)
         {
             return operation switch
@@ -682,6 +687,32 @@ internal sealed partial class TypedIrBodyLowerer
         return $"({left} {OperatorText(operation)} {right})";
     }
 
+    private static bool IsProvenSafeNumericOperation(SyntaxKind operation, CType type, IrExpressionValue right)
+    {
+        if (operation is not (SyntaxKind.SlashToken or SyntaxKind.PercentToken))
+            return false;
+        if (!TryIntegralConstant(right.ConstantValue, out var value) || value == 0)
+            return false;
+        return type.Kind is not (CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint) || value != -1;
+
+        static bool TryIntegralConstant(object? constant, out BigInteger value)
+        {
+            switch (constant)
+            {
+                case BigInteger number: value = number; return true;
+                case sbyte number: value = number; return true;
+                case byte number: value = number; return true;
+                case short number: value = number; return true;
+                case ushort number: value = number; return true;
+                case int number: value = number; return true;
+                case uint number: value = number; return true;
+                case long number: value = number; return true;
+                case ulong number: value = number; return true;
+                default: value = default; return false;
+            }
+        }
+    }
+
     private IrExpressionValue Convert(IrExpressionValue expression, CType target, SyntaxNode syntax, bool explicitConversion)
     {
         if (expression.IsFunctionAddress)
@@ -730,7 +761,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (sourceType.ContainsPointer)
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(sourceType);
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
+            _emitter.Effects.RecordAllocation(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
             var boxCode = $"{CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return OwnResult(target, boxCode, expression.Prelude);
         }
@@ -738,7 +769,7 @@ internal sealed partial class TypedIrBodyLowerer
         {
             _emitter.RegisterBox(sourceType);
             _emitter.RegisterType(target);
-            _emitter.AllocationEffects.RecordDirect(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
+            _emitter.Effects.RecordAllocation(_method, syntax, $"boxing of '{sourceType.DisplayName}'");
             var boxCode = $"({_emitter.CTypeName(target)})(void*){CEmitter.BoxFunctionName(sourceType)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return OwnResult(target, boxCode, expression.Prelude);
         }
@@ -747,6 +778,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (target.ContainsPointer)
                 RequireUnsafe(syntax);
             _emitter.RegisterBox(target);
+            RecordRuntimeFault(syntax, $"checked unboxing to '{target.DisplayName}'");
             var unboxCode = $"{CEmitter.UnboxFunctionName(target)}({expression.Code}, {_emitter.SourceArgument(syntax)})";
             return target.ContainsManagedReferences ? OwnResult(target, unboxCode, expression.Prelude) : new IrExpressionValue { Type = target, Code = unboxCode, Prelude = expression.Prelude };
         }
@@ -754,6 +786,7 @@ internal sealed partial class TypedIrBodyLowerer
             !(sourceType.Kind == CTypeKind.Class && target.Kind == CTypeKind.Class && sourceType.Symbol?.DerivesFrom(target.Symbol!) == true))
         {
             _emitter.RegisterType(target);
+            RecordRuntimeFault(syntax, $"checked cast to '{target.DisplayName}'");
             var castCode = $"({_emitter.CTypeName(target)})(void*)ct_checked_cast((ct_object*)(void*){expression.Code}, {_emitter.DescriptorExpression(target)}, {_emitter.SourceArgument(syntax)})";
             return new IrExpressionValue { Type = target, Code = castCode, Prelude = expression.Prelude };
         }
@@ -848,7 +881,7 @@ internal sealed partial class TypedIrBodyLowerer
         }
         var virtualDispatch = !selected.IsStatic && selected.IsVirtual && !group.IsBaseReceiver;
         var thunk = _emitter.RegisterDelegateThunk(target.Symbol!, selected, virtualDispatch);
-        _emitter.AllocationEffects.RecordDirect(_method, syntax, $"creation of delegate '{target.DisplayName}'");
+        _emitter.Effects.RecordAllocation(_method, syntax, $"creation of delegate '{target.DisplayName}'");
         var creation = $"{CEmitter.DelegateFactoryName(target.Symbol!)}({targetCode}, &{thunk}, {_emitter.SourceArgument(syntax)})";
         return OwnResult(target, creation, prelude);
     }
@@ -897,7 +930,10 @@ internal sealed partial class TypedIrBodyLowerer
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(receiver.Type, temp)} = {receiver.Code};");
             if (!receiver.IsKnownNonNull)
+            {
+                RecordRuntimeFault(syntax, "dynamic null check");
                 prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
+            }
             return new IrExpressionValue { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver, IsKnownNonNull = true, KnownLength = receiver.KnownLength };
         }
         if (receiver.Type.Kind == CTypeKind.Struct)

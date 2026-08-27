@@ -257,7 +257,29 @@ internal sealed class PropertySymbol : MemberSymbol
     public bool IsAbstract { get; init; }
     public bool IsOverride { get; init; }
     public bool IsSealedOverride { get; init; }
-    public bool IsNoAlloc { get; set; }
+    public EffectContract DeclaredEffects { get; set; }
+    public EffectContract GetterDeclaredEffects { get; set; }
+    public EffectContract SetterDeclaredEffects { get; set; }
+    public bool IsNoAlloc
+    {
+        get => (DeclaredEffects & EffectContract.NoAlloc) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoAlloc : DeclaredEffects & ~EffectContract.NoAlloc;
+    }
+    public bool IsNoThrow
+    {
+        get => (DeclaredEffects & EffectContract.NoThrow) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoThrow : DeclaredEffects & ~EffectContract.NoThrow;
+    }
+    public bool IsNoBlock
+    {
+        get => (DeclaredEffects & EffectContract.NoBlock) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoBlock : DeclaredEffects & ~EffectContract.NoBlock;
+    }
+    public bool IsNoRuntime
+    {
+        get => (DeclaredEffects & EffectContract.NoRuntime) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoRuntime : DeclaredEffects & ~EffectContract.NoRuntime;
+    }
     public bool IsNoRecursion { get; set; }
     public PropertySymbol? OverriddenProperty { get; set; }
     public List<PropertySymbol> ImplementedInterfaceProperties { get; } = [];
@@ -282,7 +304,27 @@ internal sealed class MethodSymbol : MemberSymbol
     public required BlockStatementSyntax? Body { get; init; }
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
-    public bool IsNoAlloc { get; set; }
+    public EffectContract DeclaredEffects { get; set; }
+    public bool IsNoAlloc
+    {
+        get => (DeclaredEffects & EffectContract.NoAlloc) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoAlloc : DeclaredEffects & ~EffectContract.NoAlloc;
+    }
+    public bool IsNoThrow
+    {
+        get => (DeclaredEffects & EffectContract.NoThrow) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoThrow : DeclaredEffects & ~EffectContract.NoThrow;
+    }
+    public bool IsNoBlock
+    {
+        get => (DeclaredEffects & EffectContract.NoBlock) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoBlock : DeclaredEffects & ~EffectContract.NoBlock;
+    }
+    public bool IsNoRuntime
+    {
+        get => (DeclaredEffects & EffectContract.NoRuntime) != 0;
+        set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoRuntime : DeclaredEffects & ~EffectContract.NoRuntime;
+    }
     public bool IsNoRecursion { get; set; }
     public bool IsUnsafe { get; init; }
     public bool ReturnsBorrowed { get; init; }

@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.21 and runtime ABI 16. Draft 0.21 adds GNU/ELF freestanding emission, role-based runtime hooks, explicit lifecycle control, and narrow naked startup to the Draft 0.20 generated-C contract.
+This document defines the generated C contract for C~ draft 0.22 and runtime ABI 16. Draft 0.22 adds analysis-only effect metadata to the Draft 0.21 generated-C contract.
 
-Draft 0.21 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.22 retains runtime ABI 16 and debug metadata version 3. Effect contracts do not change native signatures, public headers, name mangling, or ABI identity. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -327,7 +327,7 @@ The actual enum typedef names are deterministically mangled. Windows converts va
 
 `[Extern("symbol")]` applies to a static, bodyless method. The symbol string must be a portable C identifier. It cannot be a C23 keyword. It cannot start with an underscore.
 
-`[NoAlloc]` on an extern is a trusted assertion that its native implementation does not allocate through the C~ heap. The compiler cannot inspect native code. An unannotated extern is therefore an allocation boundary for a contracted caller.
+`[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]` on an extern are independent trusted assertions about its C~ semantic effects. The compiler cannot inspect native code. An unannotated extern is therefore unknown for every effect. These contracts are analysis-only: generated declarations and public headers remain unchanged. Generated ESP-IDF binding manifests continue to provide only their established `noAlloc` flag.
 
 The compiler emits an external C prototype using the mappings in this document. The native definition must use exactly that ABI. Arrays, strings, classes, and structures are C~ runtime layouts, not libc substitutes.
 
@@ -355,7 +355,7 @@ Section placement affects the native object only. Linker scripts remain responsi
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.21.
+Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.22.
 
 ## Portable CPU lowering
 
@@ -388,7 +388,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler, prints and flushes its diagnostic, then applies the selected ESP-IDF policy: `abort` uses the existing abort path, `restart` calls `esp_restart`, and `halt` enters `esp_system_abort` after the build driver verifies `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y`. Hosted output retains process failure. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.21.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.22.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -400,7 +400,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.21.
+This section records constraints that remain after draft 0.22.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

@@ -30,8 +30,8 @@ internal static class FreestandingValidator
             .ToArray();
         model.FreestandingRuntimeRequired = roots.Length != 0 || model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsUsed);
 
-        var reachable = ReachableMethods(roots, bodyByMethod);
-        model.FreestandingHeapRequired = reachable.Any(method => MayAllocate(method, bodyByMethod, []));
+        var reachable = model.Effects.ReachableMethods(roots);
+        model.FreestandingHeapRequired = reachable.Any(method => (model.Effects.GetEffects(method) & EffectKind.Allocates) != 0);
 
         if (model.FreestandingRuntimeRequired)
             Require(model, RuntimeImplementationRole.Panic);
@@ -62,7 +62,7 @@ internal static class FreestandingValidator
                 if (semantic.Symbol is TypeSymbol { FullName: "System.Math" } || semantic.Symbol is MethodSymbol { ContainingType.FullName: "System.Math" })
                     model.Diagnostics.Add("CT4115", "System.Math is unavailable in freestanding compilations.", semantic.Syntax.Source, semantic.Syntax.Span);
             }
-            foreach (var effect in body.AllocationEffects.Where(effect => effect.Reason.StartsWith("conversion of '", StringComparison.Ordinal)))
+            foreach (var effect in body.EffectOperations.Where(effect => effect.Reason.StartsWith("conversion of '", StringComparison.Ordinal)))
                 model.Diagnostics.Add("CT4115", "Runtime-formatted scalar conversion to string is unavailable in freestanding compilations.", effect.Syntax.Source, effect.Syntax.Span);
         }
 
@@ -70,65 +70,14 @@ internal static class FreestandingValidator
         {
             if (!bodyByMethod.TryGetValue(implementation, out var body))
                 continue;
-            ValidateBootstrapBody(model, implementation, body, bodyByMethod, []);
+            ValidateBootstrapBody(model, implementation);
         }
     }
 
-    private static HashSet<MethodSymbol> ReachableMethods(IEnumerable<MethodSymbol> roots, IReadOnlyDictionary<MethodSymbol, BoundBody> bodies)
+    private static bool ValidateBootstrapBody(CompilationModel model, MethodSymbol method)
     {
-        var reachable = new HashSet<MethodSymbol>();
-        var pending = new Queue<MethodSymbol>(roots);
-        while (pending.TryDequeue(out var method))
-        {
-            if (!reachable.Add(method) || !bodies.TryGetValue(method, out var body))
-                continue;
-            foreach (var target in body.AllocationEffects.Select(effect => effect.Target).Where(target => target is not null).Cast<MethodSymbol>())
-                pending.Enqueue(target);
-            foreach (var semantic in body.Semantics.Values)
-                if (semantic.Symbol is MethodSymbol target)
-                    pending.Enqueue(target);
-        }
-        return reachable;
-    }
-
-    private static bool MayAllocate(MethodSymbol method, IReadOnlyDictionary<MethodSymbol, BoundBody> bodies, HashSet<MethodSymbol> active)
-    {
-        if (!active.Add(method) || !bodies.TryGetValue(method, out var body))
-            return false;
-        try
-        {
-            foreach (var operation in body.AllocationEffects)
-            {
-                if (operation.Target is null || operation.Target.ExternName is not null && !operation.Target.IsNoAlloc ||
-                    operation.RequiresContract && !operation.Target.IsNoAlloc || MayAllocate(operation.Target, bodies, active))
-                    return true;
-            }
-            return false;
-        }
-        finally
-        {
-            active.Remove(method);
-        }
-    }
-
-    private static bool ValidateBootstrapBody(CompilationModel model, MethodSymbol method, BoundBody body,
-        IReadOnlyDictionary<MethodSymbol, BoundBody> bodies, HashSet<MethodSymbol> active)
-    {
-        if (!active.Add(method))
-            return true;
-        var invalid = body.Flow.ContainsThrow || body.Flow.ContainsExceptionRegion || body.Flow.ContainsDefer ||
-            body.Semantics.Values.Any(semantic => semantic.Type.ContainsManagedReferences ||
-                semantic.Symbol is FieldSymbol { IsStatic: true, Initializer: not null });
-        foreach (var operation in body.AllocationEffects)
-        {
-            if (operation.Target is null || operation.Target.ExternName is not null && !operation.Target.IsNoAlloc ||
-                operation.RequiresContract && !operation.Target.IsNoAlloc)
-                invalid = true;
-            else if (operation.Target is { ExternName: null } target && bodies.TryGetValue(target, out var targetBody) &&
-                     !ValidateBootstrapBody(model, target, targetBody, bodies, active))
-                invalid = true;
-        }
-        active.Remove(method);
+        var invalid = (model.Effects.GetBootstrapEffects(method) &
+            (EffectKind.Allocates | EffectKind.Throws | EffectKind.UsesRuntime)) != 0;
         if (invalid)
             model.Diagnostics.Add("CT2211", $"Runtime implementation '{method.ContainingType.FullName}.{method.Name}' is not bootstrap-safe.",
                 method.Syntax!.Source, method.Syntax.Span);

@@ -28,7 +28,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer) || selected.IsUnsafe)
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
-        _emitter.AllocationEffects.RecordCall(_method, selected, syntax, false);
+        _emitter.Effects.RecordCall(_method, selected, syntax, false);
 
         var loweredArguments = LowerOperatorArguments(operands, selected.Parameters, arguments);
         var prelude = new List<string>(loweredArguments.Prelude);

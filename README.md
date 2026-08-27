@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.21 adds a GNU/ELF freestanding target, explicit runtime-service implementations, explicit lifecycle control, validated linker/native inputs, and a narrow naked startup form. It retains Draft 0.20 protocol and native-integration facilities and all earlier language, runtime, interop, and editor features. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.22 adds one transitive effect engine with `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]` contracts. It retains the Draft 0.21 GNU/ELF freestanding target and all earlier language, runtime, interop, and editor features. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -89,7 +89,7 @@ Pass `--compiler clang` instead to use Clang. The example uses GNU AT&T x86 asse
 - Virtual dispatch, boxing, named single-cast delegates, unmanaged function pointers, and user-defined `+`, `-`, `*`, and `/` operators.
 - Typed exceptions, `try`/`catch`/`finally`, deterministic `defer`, and catchable allocation-free runtime faults.
 - Non-moving atomic reference counting with deterministic destruction of acyclic managed values. Reference cycles intentionally leak.
-- Explicit native contracts through attributes such as `[Extern]`, `[Export]`, `[Section]`, `[NoAlloc]`, and ownership annotations.
+- Explicit native and semantic contracts through attributes such as `[Extern]`, `[Export]`, `[Section]`, `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, `[NoRuntime]`, and ownership annotations.
 - Raw GNU inline assembly with typed operands for GCC and Clang builds. Programs containing `asm` are rejected by the MSVC native-build path.
 
 The bundled standard library supplies objects and exceptions, console I/O, single-precision math and vectors, runtime memory operations, hosted binary file I/O, and a small target-specific ESP-IDF surface. See [STDLIB.md](STDLIB.md) for signatures and runtime behavior.
@@ -194,7 +194,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.21 implementation, not a stable production language. Draft 0.21 retains runtime ABI 16 and debug metadata v3. Freestanding semantics, runtime roles, naked startup, manifest validation, and real GCC ELF execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.22 implementation, not a stable production language. Draft 0.22 retains runtime ABI 16 and debug metadata v3. General effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and real GCC ELF execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -211,7 +211,7 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.21 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.22 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

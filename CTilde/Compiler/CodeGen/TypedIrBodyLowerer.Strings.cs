@@ -39,7 +39,7 @@ internal sealed partial class TypedIrBodyLowerer
             }
         }
 
-        _emitter.AllocationEffects.RecordDirect(_method, syntax, "fused string construction");
+        _emitter.Effects.RecordAllocation(_method, syntax, "fused string construction");
         return OwnResult(CType.String,
             $"ct_string_build({name}_parts, {name}_lengths, {segments.Count.ToString(CultureInfo.InvariantCulture)}, {_emitter.SourceArgument(syntax)})",
             prelude);

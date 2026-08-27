@@ -307,9 +307,17 @@ internal sealed partial class TypedIrBodyLowerer
                     return ErrorExpression();
                 }
                 if (syntax.Name == "Profile")
-                    return Constant(_model.Types["System.Runtime.TargetProfile"].Type,
-                        _emitter.Target == CompilationTarget.Hosted ? 0 : 1,
-                        _emitter.Target == CompilationTarget.Hosted ? "0" : "1");
+                {
+                    var profile = _emitter.Target switch
+                    {
+                        CompilationTarget.Hosted => 0,
+                        CompilationTarget.EspIdf => 1,
+                        CompilationTarget.Freestanding => 2,
+                        _ => 0,
+                    };
+                    return Constant(_model.Types["System.Runtime.TargetProfile"].Type, profile,
+                        profile.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                }
                 if (syntax.Name == "Architecture")
                     return Constant(_model.Types["System.Runtime.TargetArchitecture"].Type,
                         (int)_emitter.Architecture - 1, ((int)_emitter.Architecture - 1).ToString(CultureInfo.InvariantCulture));

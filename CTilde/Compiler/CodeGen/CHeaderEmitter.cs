@@ -18,7 +18,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         var linkerFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.LinkerSymbolName is not null && field.Accessibility == Accessibility.Public)
             .OrderBy(field => field.LinkerSymbolName, StringComparer.Ordinal).ToArray();
         var exportedTypes = ExportTypes(exports).Concat(externFields.Concat(linkerFields).SelectMany(field => ExpandType(field.Type))).Distinct().ToArray();
-        var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize)) +
+        var signatureText = $"draft-{CompilerContract.DraftVersion}:{Model.Target}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize + ":naked=" + method.IsNaked)) +
             "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile + ":" + field.Alignment)) +
             "\n" + string.Join("\n", linkerFields.Select(field => field.LinkerSymbolName + ":" + NameMangler.CanonicalType(field.Type))) +
             "\n" + string.Join("\n", exportedTypes.Where(type => type.Symbol is not null).Select(HeaderTypeSignature).OrderBy(value => value, StringComparer.Ordinal));
@@ -40,23 +40,36 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append(line).Append('\n');
         writer.Append("\n#ifdef __cplusplus\nextern \"C\" {\n#endif\n\n");
         writer.Append("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(").Append(CompilerContract.RuntimeAbiVersion).Append(")\n\n");
+        if (Model.Target == CompilationTarget.Freestanding)
+        {
+            writer.Append("#define CTILDE_HAS_RUNTIME ").Append(Model.FreestandingRuntimeRequired ? "1" : "0").Append("\n");
+            if (Model.FreestandingRuntimeRequired)
+                writer.Append("void ct_runtime_initialize(void);\nvoid ct_runtime_shutdown(void);\n");
+            writer.Append('\n');
+        }
         foreach (var method in exports.Where(method => method.TaskStackSize is not null))
             writer.Append("#define CTILDE_TASK_STACK_").Append(TaskMacroIdentifier(method.ExportName!)).Append(" UINT32_C(").Append(method.TaskStackSize!.Value).Append(")\n");
         if (exports.Any(method => method.TaskStackSize is not null))
             writer.Append('\n');
         writer.Append("typedef struct ct_object ct_object;\n");
-        writer.Append("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;\n");
-        writer.Append("typedef void (*ct_panic_handler)(const ct_panic_info* info, void* context);\n");
-        writer.Append("typedef struct ct_runtime_config { uint32_t Size; ct_panic_handler PanicHandler; void* PanicContext; } ct_runtime_config;\n\n");
-        writer.Append("void ct_runtime_initialize(const ct_runtime_config* config);\n");
-        writer.Append("void ct_runtime_shutdown(void);\n");
-        writer.Append("void ct_thread_attach(void);\n");
-        writer.Append("void ct_thread_detach(void);\n");
-        writer.Append("void ct_retain(ct_object* value);\n");
-        writer.Append("void ct_release(ct_object* value);\n\n");
-        writer.Append("#if defined(CTILDE_CONFORMANCE)\n");
-        writer.Append("void ct_runtime_test_fail_allocation_after(int32_t successful_allocations);\n");
-        writer.Append("#endif\n\n");
+        if (Model.Target != CompilationTarget.Freestanding)
+        {
+            writer.Append("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;\n");
+            writer.Append("typedef void (*ct_panic_handler)(const ct_panic_info* info, void* context);\n");
+            writer.Append("typedef struct ct_runtime_config { uint32_t Size; ct_panic_handler PanicHandler; void* PanicContext; } ct_runtime_config;\n\n");
+            writer.Append("void ct_runtime_initialize(const ct_runtime_config* config);\n");
+            writer.Append("void ct_runtime_shutdown(void);\n");
+            writer.Append("void ct_thread_attach(void);\n");
+            writer.Append("void ct_thread_detach(void);\n");
+        }
+        if (Model.Target != CompilationTarget.Freestanding || Model.FreestandingRuntimeRequired)
+        {
+            writer.Append("void ct_retain(ct_object* value);\n");
+            writer.Append("void ct_release(ct_object* value);\n\n");
+            writer.Append("#if defined(CTILDE_CONFORMANCE)\n");
+            writer.Append("void ct_runtime_test_fail_allocation_after(int32_t successful_allocations);\n");
+            writer.Append("#endif\n\n");
+        }
 
         foreach (var type in exportedTypes.Where(type => type.Kind == CTypeKind.Enum).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
@@ -96,6 +109,8 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append("/* ownership: ").Append(ownership).Append(" */\n");
             if (method.SectionName is not null)
                 writer.Append(NativeSection.MacroName(NativeSectionKind.Code, method.SectionName)).Append(' ');
+            if (method.IsNaked)
+                writer.Append("__attribute__((noreturn)) ");
             writer.Append(CTypeName(method.ReturnType)).Append(' ').Append(method.ExportName).Append('(');
             var parameters = method.Parameters.SelectMany(ParameterDeclarations).ToArray();
             writer.Append(parameters.Length == 0 ? "void" : string.Join(", ", parameters));

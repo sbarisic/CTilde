@@ -180,6 +180,8 @@
 
   <member id="T:System.Runtime.TargetProfile"><summary>Identifies the selected compilation profile.</summary></member>
   <member id="T:System.Runtime.TargetArchitecture"><summary>Identifies the resolved native target architecture.</summary></member>
+  <member id="T:System.Runtime.Runtime"><summary>Identifies a user-supplied freestanding runtime implementation role.</summary></member>
+  <member id="T:System.Runtime.RuntimePanicInfo"><summary>Provides the stable code and source location for a freestanding terminal failure.</summary><remarks>The byte pointers refer to compiler-owned zero-terminated ASCII data for the duration of the panic call.</remarks></member>
   <member id="T:System.Runtime.Target"><summary>Provides compile-time constants for target-dependent source selection.</summary><remarks>Target queries emit no runtime storage or calls.</remarks></member>
   <member id="P:System.Runtime.Target.Profile"><summary>Gets the selected compilation profile.</summary></member>
   <member id="P:System.Runtime.Target.Architecture"><summary>Gets the resolved target architecture.</summary></member>

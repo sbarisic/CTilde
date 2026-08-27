@@ -13,7 +13,17 @@ public sealed record CTildeProjectConfiguration(
     CTildeProjectBuildConfiguration Build,
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
     bool NoRecursion,
-    EspIdfPanicPolicy PanicPolicy);
+    EspIdfPanicPolicy PanicPolicy,
+    FreestandingProjectConfiguration? Freestanding);
+
+public sealed record FreestandingProjectConfiguration(
+    string? LinkerScriptPath,
+    string? EntrySymbol,
+    ImmutableArray<string> NativeSources,
+    ImmutableArray<string> ObjectFiles,
+    ImmutableArray<string> Libraries,
+    ImmutableArray<string> CompileOptions,
+    ImmutableArray<string> LinkOptions);
 
 public enum CTildeNativeBuildConfiguration
 {
@@ -78,7 +88,8 @@ public static class CTildeProjectFile
         {
             null or "hosted" => CompilationTarget.Hosted,
             "esp-idf" => CompilationTarget.EspIdf,
-            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted or esp-idf."),
+            "freestanding" => CompilationTarget.Freestanding,
+            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, or freestanding."),
         };
         var architecture = ParseArchitecture(document.Architecture, fullManifestPath);
         var root = Path.GetDirectoryName(fullManifestPath)!;
@@ -107,8 +118,10 @@ public static class CTildeProjectFile
         if (files.IsEmpty)
             throw new CTildeProjectException($"Project manifest '{fullManifestPath}' did not match any .ct source files.");
 
-        if (target == CompilationTarget.Hosted && document.EspIdf is not null)
+        if (target != CompilationTarget.EspIdf && document.EspIdf is not null)
             throw new CTildeProjectException($"Property 'espIdf' in '{fullManifestPath}' is valid only for ESP-IDF projects.");
+        if (target != CompilationTarget.Freestanding && document.Freestanding is not null)
+            throw new CTildeProjectException($"Property 'freestanding' in '{fullManifestPath}' is valid only for freestanding projects.");
         var bindingPaths = document.EspIdf?.Bindings ?? [];
         var bindingManifests = bindingPaths.Select(path => EspIdfBindingManifest.Load(path, root)).OrderBy(binding => binding.ManifestPath, comparer).ToImmutableArray();
         if (bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }).Distinct(comparer).Count() != bindingManifests.Length * 2)
@@ -122,7 +135,11 @@ public static class CTildeProjectFile
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
         var panicPolicy = ParsePanicPolicy(document.PanicPolicy, target, fullManifestPath);
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, document.NoRecursion ?? false, panicPolicy), files);
+        var freestanding = target == CompilationTarget.Freestanding
+            ? CreateFreestandingConfiguration(document.Freestanding, root, fullManifestPath)
+            : null;
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests,
+            document.NoRecursion ?? false, panicPolicy, freestanding), files);
     }
 
     private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
@@ -198,8 +215,12 @@ public static class CTildeProjectFile
         if (target == CompilationTarget.Hosted && document?.EspIdfProjectDirectory is not null)
             throw new CTildeProjectException($"Property 'build.espIdfProjectDirectory' in '{manifestPath}' is valid only for ESP-IDF projects.");
         if (target == CompilationTarget.EspIdf &&
-            (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null || document?.Lto == true))
+            (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null || document?.Image is not null || document?.Lto == true))
             throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', 'build.executable', and 'build.lto' in '{manifestPath}' are valid only for hosted projects.");
+        if (target == CompilationTarget.Hosted && document?.Image is not null)
+            throw new CTildeProjectException($"Property 'build.image' in '{manifestPath}' is valid only for freestanding projects.");
+        if (target == CompilationTarget.Freestanding && (document?.Executable is not null || document?.EspIdfProjectDirectory is not null))
+            throw new CTildeProjectException($"Properties 'build.executable' and 'build.espIdfProjectDirectory' in '{manifestPath}' are invalid for freestanding projects.");
 
         var cLayout = document?.CLayout switch
         {
@@ -251,13 +272,97 @@ public static class CTildeProjectFile
             if (PathsEqual(executable, generatedC) || PathsEqual(executable, generatedHeader) || sourceFiles.Any(path => PathsEqual(path, executable)))
                 throw new CTildeProjectException($"Property 'build.executable' in '{manifestPath}' must name a distinct non-source file.");
         }
-        else
+        else if (target == CompilationTarget.EspIdf)
         {
             espIdfProjectDirectory = ResolveProjectPath(document?.EspIdfProjectDirectory ?? ".", "build.espIdfProjectDirectory", root, manifestPath, isDirectory: true);
+        }
+        else if (document?.Image is not null)
+        {
+            executable = ResolveProjectPath(document.Image, "build.image", root, manifestPath, isDirectory: false);
+            if (PathsEqual(executable, generatedC) || PathsEqual(executable, generatedHeader) || sourceFiles.Any(path => PathsEqual(path, executable)))
+                throw new CTildeProjectException($"Property 'build.image' in '{manifestPath}' must name a distinct non-source file.");
         }
 
         return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, lto,
             configuration, compiler, executable, espIdfProjectDirectory);
+    }
+
+    private static FreestandingProjectConfiguration CreateFreestandingConfiguration(
+        FreestandingDocument? document,
+        string root,
+        string manifestPath)
+    {
+        string? linkerScript = null;
+        if (document?.LinkerScript is not null)
+        {
+            linkerScript = ResolveProjectPath(document.LinkerScript, "freestanding.linkerScript", root, manifestPath, isDirectory: false);
+            if (!File.Exists(linkerScript))
+                throw new CTildeProjectException($"Freestanding linker script '{linkerScript}' in '{manifestPath}' does not exist.");
+        }
+
+        var entrySymbol = document?.EntrySymbol;
+        if (entrySymbol is not null && !IsPortableNativeSymbol(entrySymbol))
+            throw new CTildeProjectException($"Property 'freestanding.entrySymbol' in '{manifestPath}' must be a portable native symbol name.");
+
+        var nativeSources = ResolveExistingFiles(document?.NativeSources ?? [], "freestanding.nativeSources", root, manifestPath,
+            path => Path.GetExtension(path) is ".c" or ".s" or ".S");
+        var objectFiles = ResolveExistingFiles(document?.ObjectFiles ?? [], "freestanding.objectFiles", root, manifestPath,
+            path => Path.GetExtension(path).Equals(".o", StringComparison.OrdinalIgnoreCase));
+        var libraries = ResolveExistingFiles(document?.Libraries ?? [], "freestanding.libraries", root, manifestPath,
+            path => Path.GetExtension(path).Equals(".a", StringComparison.OrdinalIgnoreCase));
+        var compileOptions = ValidateNativeOptions(document?.CompileOptions ?? [], "freestanding.compileOptions", manifestPath);
+        var linkOptions = ValidateNativeOptions(document?.LinkOptions ?? [], "freestanding.linkOptions", manifestPath);
+        return new FreestandingProjectConfiguration(linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
+    }
+
+    private static ImmutableArray<string> ResolveExistingFiles(
+        IEnumerable<string> values,
+        string property,
+        string root,
+        string manifestPath,
+        Func<string, bool> validExtension)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var result = ImmutableArray.CreateBuilder<string>();
+        var unique = new HashSet<string>(comparer);
+        foreach (var value in values)
+        {
+            var path = ResolveProjectPath(value, property, root, manifestPath, isDirectory: false);
+            if (!validExtension(path))
+                throw new CTildeProjectException($"File '{value}' in '{property}' has an unsupported extension.");
+            if (!File.Exists(path))
+                throw new CTildeProjectException($"File '{path}' in '{property}' does not exist.");
+            if (!unique.Add(path))
+                throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' contains duplicate file '{value}'.");
+            result.Add(path);
+        }
+        return result.ToImmutable();
+    }
+
+    private static ImmutableArray<string> ValidateNativeOptions(IEnumerable<string> values, string property, string manifestPath)
+    {
+        var result = ImmutableArray.CreateBuilder<string>();
+        foreach (var value in values)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.StartsWith('@'))
+                throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' cannot contain empty arguments or response files.");
+            if (value is "-c" or "-S" or "-E" or "-o" or "-T" or "--output" or "--entry" or "--script" ||
+                value.StartsWith("-o", StringComparison.Ordinal) || value.StartsWith("-T", StringComparison.Ordinal) ||
+                value.StartsWith("--output=", StringComparison.Ordinal) || value.StartsWith("--entry=", StringComparison.Ordinal) ||
+                value.StartsWith("--script=", StringComparison.Ordinal) || value.StartsWith("-Wl,-e", StringComparison.Ordinal) ||
+                value.StartsWith("-Wl,-T", StringComparison.Ordinal) || value.StartsWith("-Wl,--entry", StringComparison.Ordinal) ||
+                value.StartsWith("-Wl,--script", StringComparison.Ordinal) || value.StartsWith("-Wl,-o", StringComparison.Ordinal))
+                throw new CTildeProjectException($"Option '{value}' in '{property}' overrides a compiler-owned build setting.");
+            result.Add(value);
+        }
+        return result.ToImmutable();
+    }
+
+    private static bool IsPortableNativeSymbol(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || !(char.IsAsciiLetter(value[0]) || value[0] is '_' or '$'))
+            return false;
+        return value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '$');
     }
 
     private static string ResolveProjectPath(string value, string property, string root, string manifestPath, bool isDirectory)
@@ -318,9 +423,19 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("noRecursion")] bool? NoRecursion,
         [property: JsonPropertyName("panicPolicy")] string? PanicPolicy,
         [property: JsonPropertyName("build")] BuildDocument? Build,
-        [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf);
+        [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf,
+        [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding);
 
     private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
+
+    private sealed record FreestandingDocument(
+        [property: JsonPropertyName("linkerScript")] string? LinkerScript,
+        [property: JsonPropertyName("entrySymbol")] string? EntrySymbol,
+        [property: JsonPropertyName("nativeSources")] string[]? NativeSources,
+        [property: JsonPropertyName("objectFiles")] string[]? ObjectFiles,
+        [property: JsonPropertyName("libraries")] string[]? Libraries,
+        [property: JsonPropertyName("compileOptions")] string[]? CompileOptions,
+        [property: JsonPropertyName("linkOptions")] string[]? LinkOptions);
 
     private sealed record BuildDocument(
         [property: JsonPropertyName("generatedC")] string? GeneratedC,
@@ -332,5 +447,6 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("configuration")] string? Configuration,
         [property: JsonPropertyName("compiler")] string? Compiler,
         [property: JsonPropertyName("executable")] string? Executable,
+        [property: JsonPropertyName("image")] string? Image,
         [property: JsonPropertyName("espIdfProjectDirectory")] string? EspIdfProjectDirectory);
 }

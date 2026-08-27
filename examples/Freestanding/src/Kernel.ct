@@ -1,0 +1,50 @@
+using System.Runtime;
+
+public sealed class KernelValue
+{
+    public int Value;
+}
+
+public static class Platform
+{
+    [Extern("platform_allocate")]
+    [NoAlloc]
+    private static unsafe void* PlatformAllocate(nuint size);
+
+    [Extern("platform_free")]
+    [NoAlloc]
+    private static unsafe void PlatformFree(void* value);
+
+    [RuntimeImpl(Runtime.Allocate)]
+    [NoAlloc]
+    private static unsafe void* Allocate(nuint size)
+    {
+        return PlatformAllocate(size);
+    }
+
+    [RuntimeImpl(Runtime.Free)]
+    [NoAlloc]
+    private static unsafe void Free(void* value)
+    {
+        PlatformFree(value);
+    }
+
+    [RuntimeImpl(Runtime.Panic)]
+    [NoAlloc]
+    private static unsafe void Panic(RuntimePanicInfo info)
+    {
+        while (true)
+            Cpu.Pause();
+    }
+}
+
+public static class Kernel
+{
+    [Export("kernel_main")]
+    public static int Main()
+    {
+        KernelValue value = new KernelValue();
+        value.Value = 42;
+        return value.Value;
+    }
+}

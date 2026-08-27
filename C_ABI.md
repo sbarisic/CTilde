@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.20 and runtime ABI 16. Draft 0.20 adds endian typedefs and conversion lowering, linker-address declarations, final-image retention, scalar bitfields and fixed-address registers, source-owned modular partitions, and ESP-IDF panic policies to the Draft 0.19 generated-C contract.
+This document defines the generated C contract for C~ draft 0.21 and runtime ABI 16. Draft 0.21 adds GNU/ELF freestanding emission, role-based runtime hooks, explicit lifecycle control, and narrow naked startup to the Draft 0.20 generated-C contract.
 
-Draft 0.20 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.21 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -26,6 +26,8 @@ The generated file includes only C standard-library headers. Compile-time assert
 References, unsafe pointers, `nint`, and `nuint` use native C pointer width. A 64-bit C target therefore uses 64-bit values for all four. Fixed-width C~ scalar sizes do not change with the target.
 
 The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde_esp_shim.h`. ESP-IDF selects the concrete Xtensa or RISC-V compiler; C~ has no per-chip backend.
+
+The freestanding profile supports GNU-compatible GCC and Clang ELF drivers only. It includes only `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `limits.h`, and `float.h`, uses internal byte loops instead of libc memory/string calls, and emits no CRT, libm, pthread, TLS, console, filesystem, exception, or process dependency. The native build uses `-ffreestanding`, `-fno-builtin`, `-fno-stack-protector`, section splitting, `-nostdlib`, `-nostartfiles`, a caller-selected linker script, and an explicit entry symbol. Compiler predefined macros must match the declared C~ architecture.
 
 Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. The support is absent when those APIs are unused and is never emitted for ESP-IDF.
 
@@ -288,6 +290,19 @@ void app_main(void)
 
 Returning from the C~ entry method returns from `app_main`; it does not stop the FreeRTOS scheduler.
 
+Freestanding rejects `[EntryPoint]` and emits neither wrapper. If ordinary runtime code is reachable, its native header defines `CTILDE_HAS_RUNTIME 1` and declares:
+
+```c
+void ct_runtime_initialize(void);
+void ct_runtime_shutdown(void);
+```
+
+The caller invokes initialization before an ordinary exported wrapper and invokes shutdown after the last call. Initialization establishes one compiler-owned execution state, validates ABI 16, and initializes static fields. Shutdown finalizes statics, drains ARC releases, and validates that cleanup state is empty. There are no attach/detach operations. A naked-only image defines `CTILDE_HAS_RUNTIME 0`, omits these declarations, and emits no managed runtime.
+
+Runtime-role bridges call the unique C~ implementations selected by `[RuntimeImpl(Runtime.Allocate)]`, `[RuntimeImpl(Runtime.Free)]`, and `[RuntimeImpl(Runtime.Panic)]`. Allocation changes zero to one, panics on null, and clears returned storage through an internal loop. Generated deallocation does not pass null. Faults call the panic bridge directly; a returning panic is followed by an infinite compiler barrier loop.
+
+A narrow `[Naked]` export emits one GNU `__attribute__((naked, noreturn))` definition. Its basic assembly is copied without the normal operand or percent transformation. It has no wrapper, prologue, epilogue, runtime-ready check, cleanup, exception barrier, or implicit return. Its section and naked state participate in native-header signature identity.
+
 ## Hosted console and file I/O
 
 Hosted input and file declarations bind to compiler-owned external symbols. The emitter defines those symbols only when a resolved call uses them. Each operation can create and throw `System.IO.IOException`, so using one also enables the ordinary per-thread C~ exception runtime.
@@ -340,7 +355,7 @@ Section placement affects the native object only. Linker scripts remain responsi
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.20.
+Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.21.
 
 ## Portable CPU lowering
 
@@ -373,7 +388,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler, prints and flushes its diagnostic, then applies the selected ESP-IDF policy: `abort` uses the existing abort path, `restart` calls `esp_restart`, and `halt` enters `esp_system_abort` after the build driver verifies `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y`. Hosted output retains process failure. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.20.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.21.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -385,7 +400,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.20.
+This section records constraints that remain after draft 0.21.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 
@@ -423,7 +438,7 @@ Finally lowering stores one pending action: normal completion, return, break, co
 
 ## Runtime faults and panics
 
-Recoverable runtime checks throw immortal, preinitialized standard-library exception objects without allocating. Per-thread origin metadata retains the original diagnostic code, file, and line across calls, cleanup, and rethrow. Unhandled faults print that origin and terminate through the platform policy.
+Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-library exception objects without allocating. Per-thread origin metadata retains the original diagnostic code, file, and line across calls, cleanup, and rethrow. Unhandled faults print that origin and terminate through the platform policy. Freestanding runtime checks instead call the panic role directly and are not catchable.
 
 | Code | Failure |
 | --- | --- |

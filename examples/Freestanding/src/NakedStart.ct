@@ -1,0 +1,22 @@
+public static class Startup
+{
+    [Naked]
+    [NoAlloc]
+    [Export("_start")]
+    [Section(".text.boot")]
+    public static unsafe void Start()
+    {
+        [NoAlloc]
+        asm {
+            call ct_runtime_initialize
+            call kernel_main
+            call ct_runtime_shutdown
+            xorl %edi, %edi
+            movl $60, %eax
+            syscall
+        1:
+            hlt
+            jmp 1b
+        }
+    }
+}

@@ -41,10 +41,13 @@ internal sealed partial class CompilationModel
         ValidateExternalSymbols();
         ValidateNativeSections();
         ValidateEntryPoint();
+        ValidateRuntimeImplementations();
     }
 
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
     public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
+    public CompilationTarget Target => _target;
+    public CompilationArchitecture Architecture => _architecture;
     public DiagnosticBag Diagnostics { get; }
     public List<BoundStaticAssertion> StaticAssertions { get; } = [];
     public HashSet<TypeSymbol> StaticAssertionLayoutTypes { get; } = [];
@@ -52,6 +55,10 @@ internal sealed partial class CompilationModel
     public DocumentationIndex Documentation { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
     public MethodSymbol? EntryPoint { get; private set; }
+    public IReadOnlyDictionary<RuntimeImplementationRole, MethodSymbol> RuntimeImplementations { get; private set; } =
+        ImmutableDictionary<RuntimeImplementationRole, MethodSymbol>.Empty;
+    public bool FreestandingRuntimeRequired { get; set; }
+    public bool FreestandingHeapRequired { get; set; }
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
@@ -382,6 +389,8 @@ internal sealed partial class CompilationModel
             ExportName = method.ExportName,
             SectionName = method.SectionName,
             IsUsed = method.IsUsed,
+            RuntimeImplementation = method.RuntimeImplementation,
+            IsNaked = method.IsNaked,
             TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
@@ -572,6 +581,8 @@ internal sealed partial class CompilationModel
             ExportName = method.ExportName,
             SectionName = method.SectionName,
             IsUsed = method.IsUsed,
+            RuntimeImplementation = method.RuntimeImplementation,
+            IsNaked = method.IsNaked,
             TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
@@ -1486,7 +1497,7 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
@@ -1498,6 +1509,9 @@ internal sealed partial class CompilationModel
                     var sectionAttribute = FindAttribute(method.Attributes, "Section");
                     var usedAttribute = FindAttribute(method.Attributes, "Used");
                     var taskEntryAttribute = FindAttribute(method.Attributes, "TaskEntry");
+                    var runtimeImplAttribute = FindAttribute(method.Attributes, "RuntimeImpl");
+                    var nakedAttribute = FindAttribute(method.Attributes, "Naked");
+                    var runtimeImplementation = ParseRuntimeImplementation(runtimeImplAttribute);
                     uint? taskStackSize = null;
                     if (taskEntryAttribute is not null)
                     {
@@ -1555,6 +1569,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
                     if (usedAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
                         Diagnostics.Add("CT1288", "Used requires a body-bearing static non-extern method.", usedAttribute.Source, usedAttribute.Span);
+                    if (nakedAttribute is not null && nakedAttribute.Arguments.Length != 0)
+                        Diagnostics.Add("CT1302", "Naked does not accept arguments.", nakedAttribute.Source, nakedAttribute.Span);
                     string? externalName = null;
                     string? exportName = null;
                     if (external is not null)
@@ -1570,7 +1586,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1206", "A bodyless method requires Extern or abstract.", method.Source, method.Span);
                     if (export is not null)
                     {
-                        if (export.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
+                        if (export.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] &&
+                            (IsPortableExternalIdentifier(value) || (nakedAttribute is not null && IsLinkerSymbolIdentifier(value))))
                             exportName = value;
                         else
                             Diagnostics.Add("CT1243", "Export requires one string containing a portable C identifier.", export.Source, export.Span);
@@ -1628,6 +1645,8 @@ internal sealed partial class CompilationModel
                         ExportName = exportName,
                         SectionName = sectionName,
                         IsUsed = usedAttribute is not null,
+                        RuntimeImplementation = runtimeImplementation,
+                        IsNaked = nakedAttribute is not null,
                         TaskStackSize = taskStackSize,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
@@ -1644,6 +1663,13 @@ internal sealed partial class CompilationModel
                          external is not null || exportName is null || entry is not null || !method.TypeParameters.IsDefaultOrEmpty || returnType != CType.Void ||
                          methodParameters is not [{ Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
                         Diagnostics.Add("CT1292", "TaskEntry requires an ESP-IDF public static non-generic exported void(void*) method body.", taskEntryAttribute.Source, taskEntryAttribute.Span);
+                    if (runtimeImplAttribute is not null &&
+                        (_target != CompilationTarget.Freestanding || runtimeImplementation is null ||
+                         !isStatic || method.Body is null || isAbstractMethod || external is not null || export is not null || entry is not null ||
+                         taskEntryAttribute is not null || nakedAttribute is not null || !method.TypeParameters.IsDefaultOrEmpty || noAlloc is null))
+                        Diagnostics.Add("CT1299", "RuntimeImpl requires a freestanding non-generic static body-bearing NoAlloc method without native-entry attributes.", runtimeImplAttribute.Source, runtimeImplAttribute.Span);
+                    if (nakedAttribute is not null && !IsValidNakedMethod(symbol))
+                        Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() method containing exactly one operand-free NoAlloc asm statement.", nakedAttribute.Source, nakedAttribute.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);
@@ -1750,9 +1776,75 @@ internal sealed partial class CompilationModel
         });
     }
 
+    private RuntimeImplementationRole? ParseRuntimeImplementation(AttributeSyntax? attribute)
+    {
+        if (attribute is null)
+            return null;
+        if (attribute.Arguments is [MemberAccessExpressionSyntax { Receiver: NameExpressionSyntax receiver } member] &&
+            receiver.Name is "Runtime" or "System.Runtime.Runtime" &&
+            Enum.TryParse<RuntimeImplementationRole>(member.Name, ignoreCase: false, out var role))
+            return role;
+        Diagnostics.Add("CT1299", "RuntimeImpl requires one Runtime.Allocate, Runtime.Free, or Runtime.Panic role.", attribute.Source, attribute.Span);
+        return null;
+    }
+
+    private bool IsValidNakedMethod(MethodSymbol method)
+    {
+        if (_target != CompilationTarget.Freestanding || method.Accessibility != Accessibility.Public || !method.IsStatic || !method.IsUnsafe ||
+            method.ReturnType != CType.Void || method.Parameters.Length != 0 || method.ExportName is null || !method.IsNoAlloc || method.IsGenericDefinition ||
+            method.Body is not { Statements: [InlineAssemblyStatementSyntax assembly] })
+            return false;
+        return assembly.Operands.IsEmpty && assembly.Clobbers.IsEmpty &&
+            assembly.Attributes is [AttributeSyntax { Name: "NoAlloc", Arguments.IsEmpty: true }];
+    }
+
+    private void ValidateRuntimeImplementations()
+    {
+        var groups = UserTypes.SelectMany(type => type.Methods)
+            .Where(method => method.RuntimeImplementation is not null)
+            .GroupBy(method => method.RuntimeImplementation!.Value)
+            .ToArray();
+        var implementations = ImmutableDictionary.CreateBuilder<RuntimeImplementationRole, MethodSymbol>();
+        foreach (var group in groups)
+        {
+            var methods = group.ToArray();
+            if (methods.Length > 1)
+            {
+                foreach (var duplicate in methods.Skip(1))
+                    Diagnostics.Add("CT4114", $"Runtime role '{group.Key}' is implemented more than once.", duplicate.Syntax!.Source, duplicate.Syntax.Span,
+                        methods[0].Syntax!.Source.GetLocation(methods[0].Syntax!.Span));
+            }
+            implementations[group.Key] = methods[0];
+        }
+        RuntimeImplementations = implementations.ToImmutable();
+
+        foreach (var pair in RuntimeImplementations)
+        {
+            var method = pair.Value;
+            var valid = pair.Key switch
+            {
+                RuntimeImplementationRole.Allocate => method.ReturnType is { Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void } &&
+                    method.Parameters is [{ PassingKind: ParameterPassingKind.Value, Type.Kind: CTypeKind.Nuint }],
+                RuntimeImplementationRole.Free => method.ReturnType == CType.Void &&
+                    method.Parameters is [{ PassingKind: ParameterPassingKind.Value, Type: { Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void } }],
+                RuntimeImplementationRole.Panic => method.ReturnType == CType.Void && method.Parameters is [{ PassingKind: ParameterPassingKind.Value } parameter] &&
+                    parameter.Type.Symbol?.FullName == "System.Runtime.RuntimePanicInfo",
+                _ => false,
+            };
+            if (!valid)
+                Diagnostics.Add("CT1299", $"Runtime role '{pair.Key}' has an invalid signature.", method.Syntax!.Source, method.Syntax.Span);
+        }
+    }
+
     private void ValidateEntryPoint()
     {
         var entries = UserTypes.SelectMany(type => type.Methods).Where(method => method.IsEntryPoint).ToArray();
+        if (_target == CompilationTarget.Freestanding)
+        {
+            foreach (var entry in entries)
+                Diagnostics.Add("CT4115", "EntryPoint is unavailable for freestanding compilations; export an explicit native entry symbol instead.", entry.Syntax!.Source, entry.Syntax.Span);
+            return;
+        }
         if (entries.Length == 1)
             EntryPoint = entries[0];
         else if (entries.Length == 0)

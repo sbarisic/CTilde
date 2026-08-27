@@ -6,7 +6,8 @@ internal sealed partial class CEmitter
     {
         var methods = selectedMethods ?? Model.UserTypes.SelectMany(type => type.Methods);
         foreach (var method in methods
-                     .Where(method => method.ExportName is not null)
+            .Where(method => method.ExportName is not null)
+            .Where(method => !method.IsNaked)
                      .OrderBy(method => method.ExportName, StringComparer.Ordinal))
         {
             var declarations = method.Parameters
@@ -17,6 +18,13 @@ internal sealed partial class CEmitter
             if (method.TaskStackSize is not null)
             {
                 EmitTaskEntryBody(writer, method);
+                writer.WriteLine("}");
+                writer.WriteLine();
+                continue;
+            }
+            if (IsFreestanding)
+            {
+                EmitFreestandingExportBody(writer, method);
                 writer.WriteLine("}");
                 writer.WriteLine();
                 continue;
@@ -67,6 +75,31 @@ internal sealed partial class CEmitter
             writer.WriteLine("}");
             writer.WriteLine();
         }
+    }
+
+    private void EmitFreestandingExportBody(CWriter writer, MethodSymbol method)
+    {
+        writer.WriteLine("    ct_runtime_require_ready();");
+        var arguments = new List<string>();
+        foreach (var parameter in method.Parameters)
+        {
+            var name = NameMangler.Identifier(parameter.Name);
+            if (parameter.Type.IsNativeBuffer)
+            {
+                arguments.Add(name + "_data");
+                arguments.Add(name + "_length");
+            }
+            else if (parameter.Type.IsNativeUtf8String)
+            {
+                var local = name + "_view";
+                writer.WriteLine($"    ct_native_utf8_string {local} = {{ NULL, (const uint8_t*)(const void*){name}, {name} == NULL ? 0u : strlen({name}) }};");
+                arguments.Add(local);
+            }
+            else
+                arguments.Add(name);
+        }
+        var call = $"{method.CName}({string.Join(", ", arguments)})";
+        writer.WriteLine(method.ReturnType == CType.Void ? $"    {call};\n    return;" : $"    return {call};");
     }
 
     private void EmitTaskEntryBody(CWriter writer, MethodSymbol method)

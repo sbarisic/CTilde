@@ -1,0 +1,14 @@
+namespace System.Runtime;
+
+public static class Memory
+{
+    [Extern("ct_memory_retain")]
+    [NoAlloc]
+    public static unsafe void Retain(object value);
+
+    [Extern("ct_memory_release")]
+    [NoAlloc]
+    public static unsafe void Release(object value);
+}
+
+// CTILDE_NATIVE_UTF8_DECLARATION

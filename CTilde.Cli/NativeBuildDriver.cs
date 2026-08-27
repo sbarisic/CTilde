@@ -9,9 +9,13 @@ internal sealed record NativeBuildOutcome(int ExitCode, string Backend, string? 
 internal static class NativeBuildDriver
 {
     public static Task<NativeBuildOutcome> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken) =>
-        request.Target == CompilationTarget.Hosted
-            ? HostedBuildDriver.BuildAsync(request, usesInlineAssembly, cancellationToken)
-            : EspIdfBuildDriver.BuildAsync(request, cancellationToken);
+        request.Target switch
+        {
+            CompilationTarget.Hosted => HostedBuildDriver.BuildAsync(request, usesInlineAssembly, cancellationToken),
+            CompilationTarget.EspIdf => EspIdfBuildDriver.BuildAsync(request, cancellationToken),
+            CompilationTarget.Freestanding => FreestandingBuildDriver.BuildAsync(request, cancellationToken),
+            _ => throw new NativeBuildException($"Unsupported native target '{request.Target}'."),
+        };
 }
 
 internal static class HostedBuildDriver
@@ -275,7 +279,7 @@ internal static class HostedBuildDriver
         var cache = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
         Directory.CreateDirectory(cache);
         var identity = new StringBuilder()
-            .Append("draft-0.15\n")
+            .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
             .Append(compiler.Command).Append('\n')
             .Append(compiler.WslCompiler).Append('\n')
             .Append(File.Exists(compiler.Command) ? File.GetLastWriteTimeUtc(compiler.Command).Ticks : 0L).Append('\n')
@@ -318,6 +322,216 @@ internal static class HostedBuildDriver
         IReadOnlyDictionary<string, string>? Environment,
         string? WslCompiler);
     private enum HostedCompilerKind { Msvc, Gnu, WslGnu }
+}
+
+internal static class FreestandingBuildDriver
+{
+    public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
+    {
+        var settings = request.Freestanding ?? throw new NativeBuildException("Freestanding build settings are missing.");
+        var image = request.ExecutablePath ?? throw new NativeBuildException("Freestanding image output is missing.");
+        var compiler = ResolveCompiler(request.Compiler);
+        Directory.CreateDirectory(Path.GetDirectoryName(image)!);
+        await ValidateCompilerAsync(compiler, request, cancellationToken);
+
+        var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
+            ? new[] { "-Og", "-g3", "-fno-omit-frame-pointer" }
+            : ["-O2"];
+        var common = new List<string>
+        {
+            "-std=gnu23", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
+            "-fno-pie", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
+        };
+        common.AddRange(configuration);
+        common.AddRange(ArchitectureFlags(request.Architecture));
+        if (request.Lto)
+            common.Add("-flto");
+        common.AddRange(settings.CompileOptions);
+
+        var sources = request.GeneratedSourcePaths.Concat(settings.NativeSources).ToArray();
+        var objects = new List<string>();
+        var useGnu2x = false;
+        foreach (var source in sources)
+        {
+            var assembly = Path.GetExtension(source) is ".s" or ".S";
+            var flags = assembly ? common.Where(value => value != "-std=gnu23").ToArray() : common.ToArray();
+            if (useGnu2x)
+                for (var index = 0; index < flags.Length; index++)
+                    if (flags[index] == "-std=gnu23")
+                        flags[index] = "-std=gnu2x";
+            var objectPath = CachedObjectPath(request, compiler, source, flags);
+            objects.Add(objectPath);
+            if (File.Exists(objectPath))
+            {
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: reused freestanding object {Path.GetFileName(objectPath)}");
+                continue;
+            }
+            var arguments = new List<string>(compiler.Prefix);
+            arguments.AddRange(flags);
+            arguments.Add("-c");
+            arguments.Add(await ToolPathAsync(compiler, source, request.RootDirectory, cancellationToken));
+            arguments.Add("-o");
+            arguments.Add(await ToolPathAsync(compiler, objectPath, request.RootDirectory, cancellationToken));
+            var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+                request.RootDirectory, ForwardOutput: false), cancellationToken);
+            var standardIndex = arguments.IndexOf("-std=gnu23");
+            if (result.ExitCode != 0 && standardIndex >= 0 && RejectedCStandard(result))
+            {
+                arguments[standardIndex] = "-std=gnu2x";
+                if (request.Trace)
+                    Console.Error.WriteLine("trace: freestanding compiler rejected gnu23; retrying with gnu2x");
+                result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+                    request.RootDirectory, ForwardOutput: false), cancellationToken);
+                useGnu2x = result.ExitCode == 0;
+            }
+            if (result.ExitCode != 0)
+            {
+                Console.Out.Write(result.StandardOutput);
+                Console.Error.Write(result.StandardError);
+                return new NativeBuildOutcome(result.ExitCode, "freestanding", compiler.Command, compiler.WslCompiler);
+            }
+        }
+
+        var link = new List<string>(compiler.Prefix);
+        foreach (var path in objects.Concat(settings.ObjectFiles).Concat(settings.Libraries))
+            link.Add(await ToolPathAsync(compiler, path, request.RootDirectory, cancellationToken));
+        link.AddRange(["-nostdlib", "-nostartfiles", "-no-pie", "-Wl,--gc-sections"]);
+        link.AddRange(ArchitectureFlags(request.Architecture));
+        if (request.Lto)
+            link.Add("-flto");
+        link.Add("-T");
+        link.Add(await ToolPathAsync(compiler, settings.LinkerScriptPath!, request.RootDirectory, cancellationToken));
+        link.Add($"-Wl,-e,{settings.EntrySymbol}");
+        link.AddRange(settings.LinkOptions);
+        link.Add("-o");
+        link.Add(await ToolPathAsync(compiler, image, request.RootDirectory, cancellationToken));
+        var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
+            request.RootDirectory, ForwardOutput: true), cancellationToken);
+        if (linked.ExitCode == 0 && request.Trace)
+            Console.Error.WriteLine($"trace: wrote freestanding image {image}");
+        return new NativeBuildOutcome(linked.ExitCode, "freestanding", compiler.Command, compiler.WslCompiler);
+    }
+
+    private static FreestandingCompiler ResolveCompiler(string configured)
+    {
+        var value = configured.Equals("auto", StringComparison.OrdinalIgnoreCase)
+            ? Environment.GetEnvironmentVariable("CTILDE_CC") ?? "auto"
+            : configured;
+        if (value.Equals("auto", StringComparison.OrdinalIgnoreCase))
+        {
+            foreach (var candidate in new[] { "gcc", "clang" })
+                if (NativeToolDiscovery.FindOnPath(candidate) is { } command)
+                    return new FreestandingCompiler(command, [], null);
+            throw new NativeBuildException("No GNU-compatible ELF compiler was found. Pass --compiler gcc, clang, wsl:gcc, or a cross-compiler path.");
+        }
+        if (OperatingSystem.IsWindows() && value.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase))
+        {
+            var wsl = NativeToolDiscovery.FindOnPath("wsl") ?? throw new NativeBuildException("wsl.exe was not found.");
+            var nested = value[4..];
+            if (string.IsNullOrWhiteSpace(nested))
+                throw new NativeBuildException("A compiler name is required after 'wsl:'.");
+            return new FreestandingCompiler(wsl, ["--exec", nested], nested);
+        }
+        var known = value.ToLowerInvariant() switch
+        {
+            "gcc" => "gcc",
+            "clang" => "clang",
+            _ => value,
+        };
+        if (Path.GetFileNameWithoutExtension(known).Equals("cl", StringComparison.OrdinalIgnoreCase) ||
+            Path.GetFileNameWithoutExtension(known).Equals("clang-cl", StringComparison.OrdinalIgnoreCase))
+            throw new NativeBuildException("CT4116: Freestanding builds require a GNU-compatible ELF GCC or Clang driver; MSVC and clang-cl are unsupported.");
+        var resolved = NativeToolDiscovery.FindOnPath(known) ?? throw new NativeBuildException($"Configured freestanding compiler '{value}' was not found.");
+        return new FreestandingCompiler(resolved, [], null);
+    }
+
+    private static async Task ValidateCompilerAsync(FreestandingCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
+    {
+        var versionArgs = new List<string>(compiler.Prefix) { "--version" };
+        var version = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, versionArgs,
+            request.RootDirectory, ForwardOutput: false), cancellationToken);
+        var versionText = version.StandardOutput + version.StandardError;
+        if (version.ExitCode != 0 || (!versionText.Contains("gcc", StringComparison.OrdinalIgnoreCase) &&
+            !versionText.Contains("clang", StringComparison.OrdinalIgnoreCase)))
+            throw new NativeBuildException("Freestanding builds require a GNU-compatible GCC or Clang compiler driver.");
+
+        var probe = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-architecture-probe.c");
+        File.WriteAllText(probe, string.Empty, Encoding.ASCII);
+        var arguments = new List<string>(compiler.Prefix);
+        arguments.AddRange(ArchitectureFlags(request.Architecture));
+        arguments.AddRange(request.Freestanding?.CompileOptions ?? []);
+        arguments.AddRange(["-dM", "-E", "-x", "c", await ToolPathAsync(compiler, probe, request.RootDirectory, cancellationToken)]);
+        var macros = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+            request.RootDirectory, ForwardOutput: false), cancellationToken);
+        if (macros.ExitCode != 0)
+            throw new NativeBuildException($"Could not inspect freestanding compiler target macros: {macros.StandardError.Trim()}");
+        if (!MatchesArchitecture(macros.StandardOutput, request.Architecture))
+            throw new NativeBuildException($"Freestanding compiler target does not match declared architecture '{request.Architecture}'.");
+    }
+
+    private static bool MatchesArchitecture(string macros, CompilationArchitecture architecture) => architecture switch
+    {
+        CompilationArchitecture.X86 => macros.Contains("#define __i386__", StringComparison.Ordinal),
+        CompilationArchitecture.X64 => macros.Contains("#define __x86_64__", StringComparison.Ordinal),
+        CompilationArchitecture.Arm32 => macros.Contains("#define __arm__", StringComparison.Ordinal),
+        CompilationArchitecture.Arm64 => macros.Contains("#define __aarch64__", StringComparison.Ordinal),
+        CompilationArchitecture.Xtensa => macros.Contains("#define __XTENSA__", StringComparison.Ordinal),
+        CompilationArchitecture.RiscV32 => macros.Contains("#define __riscv_xlen 32", StringComparison.Ordinal),
+        CompilationArchitecture.RiscV64 => macros.Contains("#define __riscv_xlen 64", StringComparison.Ordinal),
+        _ => false,
+    };
+
+    private static bool RejectedCStandard(NativeProcessResult result)
+    {
+        var output = result.StandardOutput + result.StandardError;
+        return output.Contains("gnu23", StringComparison.OrdinalIgnoreCase) &&
+            (output.Contains("unrecognized", StringComparison.OrdinalIgnoreCase) ||
+             output.Contains("unknown", StringComparison.OrdinalIgnoreCase) ||
+             output.Contains("invalid value", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static IEnumerable<string> ArchitectureFlags(CompilationArchitecture architecture) => architecture switch
+    {
+        CompilationArchitecture.X86 => ["-m32"],
+        CompilationArchitecture.X64 => ["-m64"],
+        _ => [],
+    };
+
+    private static string CachedObjectPath(BuildRequest request, FreestandingCompiler compiler, string source, IReadOnlyList<string> flags)
+    {
+        var directory = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
+        Directory.CreateDirectory(directory);
+        var identity = new StringBuilder()
+            .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
+            .Append(compiler.Command).Append('\n').Append(compiler.WslCompiler).Append('\n')
+            .Append(request.Architecture).Append('\n').AppendJoin('\n', flags).Append('\n')
+            .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
+        if (request.CLayout == GeneratedCLayout.Modules)
+        {
+            foreach (var header in new[] { "ctilde_internal.h", "ctilde_runtime.h" })
+            {
+                var path = Path.Combine(request.GeneratedDirectory!, header);
+                identity.Append(header).Append(':')
+                    .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
+            }
+        }
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
+        return Path.Combine(directory, hash + ".o");
+    }
+
+    private static async Task<string> ToolPathAsync(FreestandingCompiler compiler, string path, string workingDirectory, CancellationToken cancellationToken)
+    {
+        if (compiler.WslCompiler is null)
+            return path;
+        var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command,
+            ["--exec", "wslpath", "-a", "-u", path], workingDirectory, ForwardOutput: false), cancellationToken);
+        if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
+            throw new NativeBuildException($"Could not translate '{path}' to a WSL path: {result.StandardError.Trim()}");
+        return result.StandardOutput.Trim();
+    }
+
+    private sealed record FreestandingCompiler(string Command, IReadOnlyList<string> Prefix, string? WslCompiler);
 }
 
 internal static class EspIdfBuildDriver

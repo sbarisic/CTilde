@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using CTilde;
 
 namespace CTilde.Cli;
@@ -36,9 +37,10 @@ internal sealed record BuildRequest(
     bool VerifyBindings = false,
     string? EspClangPath = null,
     bool NoRecursion = false,
-    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort)
+    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
+    FreestandingProjectConfiguration? Freestanding = null)
 {
-    public string LockDirectory => Target == CompilationTarget.Hosted
+    public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding
         ? Path.GetDirectoryName(ExecutablePath!)!
         : Path.Combine(EspIdfProjectDirectory!, "build");
 
@@ -93,8 +95,9 @@ internal static class BuildRequestResolver
                 ? Path.Combine(generatedDirectory!, "ctilde_debug.json")
                 : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_debug.json")))
             : null;
-        var executable = project.Configuration.Target == CompilationTarget.Hosted
-            ? Path.GetFullPath(options.NativeOutput ?? build.ExecutablePath!)
+        var nativeOutput = options.NativeOutput ?? build.ExecutablePath;
+        var executable = project.Configuration.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding && nativeOutput is not null
+            ? Path.GetFullPath(nativeOutput)
             : null;
         var idfProject = project.Configuration.Target == CompilationTarget.EspIdf
             ? Path.GetFullPath(options.EspIdfProject ?? build.EspIdfProjectDirectory!)
@@ -111,6 +114,9 @@ internal static class BuildRequestResolver
         ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
             project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject);
+        var freestanding = project.Configuration.Target == CompilationTarget.Freestanding
+            ? ResolveFreestanding(options, project.Configuration.Freestanding, project.RootDirectory, buildNative, executable)
+            : null;
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, architecture, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? build.Compiler, executable,
@@ -118,7 +124,7 @@ internal static class BuildRequestResolver
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
             build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
             options.NoRecursion || project.Configuration.NoRecursion,
-            options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy);
+            options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -136,6 +142,8 @@ internal static class BuildRequestResolver
         var preparingLaunch = options.PrepareDebug == "launch";
         var preparingAttach = options.PrepareDebug == "attach";
         var buildNative = options.Build || preparingLaunch;
+        if (buildNative && options.Target == CompilationTarget.Freestanding && options.NativeOutput is null)
+            throw new CommandLineException("Direct freestanding builds require --native-output.");
         var layout = options.CLayout ?? GeneratedCLayout.Unity;
         var generatedC = options.CheckOnly || layout == GeneratedCLayout.Modules ? null : Path.GetFullPath(options.Output ?? Path.Combine(root, "build", "generated", "ctilde_program.c"));
         var generatedDirectory = options.CheckOnly || layout == GeneratedCLayout.Unity ? null : Path.GetFullPath(options.OutputDirectory ?? Path.Combine(root, "build", "generated", "modules"));
@@ -145,7 +153,7 @@ internal static class BuildRequestResolver
                 ? Path.Combine(layout == GeneratedCLayout.Unity ? Path.GetDirectoryName(generatedC)! : generatedDirectory!, "ctilde_exports.h")
                 : null;
         var symbolMap = options.CheckOnly ? null : options.SymbolMap is null ? null : Path.GetFullPath(options.SymbolMap);
-        var executable = options.Target == CompilationTarget.Hosted && (buildNative || preparingAttach)
+        var executable = options.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding && (buildNative || preparingAttach)
             ? Path.GetFullPath(options.NativeOutput ?? Path.Combine(root, "build", $"program{(OperatingSystem.IsWindows() ? ".exe" : string.Empty)}"))
             : null;
         var idfProject = options.Target == CompilationTarget.EspIdf && (buildNative || preparingAttach)
@@ -173,19 +181,24 @@ internal static class BuildRequestResolver
                 : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject);
+        var freestanding = options.Target == CompilationTarget.Freestanding
+            ? ResolveFreestanding(options, null, root, buildNative, executable)
+            : null;
         return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, architecture, null, root,
             ResolveSourceRoot(options),
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach,
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null, options.NoRecursion, options.PanicPolicy);
+            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
     {
         var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.Lto ||
             options.NativeOutput is not null || options.EspIdfProject is not null ||
+            options.LinkerScript is not null || options.EntrySymbol is not null || options.NativeSources.Count != 0 ||
+            options.ObjectFiles.Count != 0 || options.Libraries.Count != 0 || options.CompileOptions.Count != 0 || options.LinkOptions.Count != 0 ||
             (options.EspIdfPath is not null && !options.CheckOnly && !options.GenerateBindings && !options.VerifyBindings);
         if (options.GenerateBindings && options.VerifyBindings)
             throw new CommandLineException("--generate-bindings and --verify-bindings cannot be combined.");
@@ -252,9 +265,9 @@ internal static class BuildRequestResolver
     {
         if (target != CompilationTarget.EspIdf && options.PanicPolicySpecified)
             throw new CommandLineException("--panic-policy is valid only for ESP-IDF builds.");
-        if (target == CompilationTarget.Hosted && (options.EspIdfProject is not null || options.EspIdfPath is not null))
+        if (target != CompilationTarget.EspIdf && (options.EspIdfProject is not null || options.EspIdfPath is not null))
             throw new CommandLineException("--idf-project and --idf-path are valid only for ESP-IDF builds.");
-        if (target == CompilationTarget.Hosted && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))
+        if (target != CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))
             throw new CommandLineException("ESP-IDF binding options require an ESP-IDF project.");
         if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null || options.Configuration is not null))
             throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted builds.");
@@ -262,12 +275,95 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--lto is a hosted Release option; configure ESP-IDF LTO through sdkconfig.");
         if (target == CompilationTarget.EspIdf && options.SourceRoot is not null)
             throw new CommandLineException("--source-root is valid only for hosted compilations.");
-        if (target == CompilationTarget.Hosted && options.SerialPort is not null)
+        if (target != CompilationTarget.EspIdf && options.SerialPort is not null)
             throw new CommandLineException("--serial-port is valid only for ESP-IDF debugging.");
         if (target == CompilationTarget.EspIdf && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))
             throw new CommandLineException("ESP-IDF debug preparation requires --serial-port.");
         if (target == CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings) && options.ProjectManifest is null)
             throw new CommandLineException("ESP-IDF binding generation requires --project.");
+        var hasFreestandingOptions = options.LinkerScript is not null || options.EntrySymbol is not null || options.NativeSources.Count != 0 ||
+            options.ObjectFiles.Count != 0 || options.Libraries.Count != 0 || options.CompileOptions.Count != 0 || options.LinkOptions.Count != 0;
+        if (target != CompilationTarget.Freestanding && hasFreestandingOptions)
+            throw new CommandLineException("Freestanding linker and native-input options require --target freestanding.");
+        if (target == CompilationTarget.Freestanding && options.PrepareDebug is not null)
+            throw new CommandLineException("Debug preparation is unavailable for freestanding builds.");
+    }
+
+    private static FreestandingProjectConfiguration ResolveFreestanding(
+        CommandLineOptions options,
+        FreestandingProjectConfiguration? manifest,
+        string root,
+        bool buildNative,
+        string? image)
+    {
+        string? FullPath(string? value) => value is null ? null : Path.GetFullPath(value, root);
+        var linkerScript = FullPath(options.LinkerScript) ?? manifest?.LinkerScriptPath;
+        var entrySymbol = options.EntrySymbol ?? manifest?.EntrySymbol;
+        var nativeSources = ResolveCliFiles(options.NativeSources, manifest?.NativeSources ?? [], root);
+        var objectFiles = ResolveCliFiles(options.ObjectFiles, manifest?.ObjectFiles ?? [], root);
+        var libraries = ResolveCliFiles(options.Libraries, manifest?.Libraries ?? [], root);
+        var compileOptions = options.CompileOptions.Count != 0 ? options.CompileOptions.ToImmutableArray() : manifest?.CompileOptions ?? [];
+        var linkOptions = options.LinkOptions.Count != 0 ? options.LinkOptions.ToImmutableArray() : manifest?.LinkOptions ?? [];
+
+        if (entrySymbol is not null && !IsPortableNativeSymbol(entrySymbol))
+            throw new CommandLineException($"Freestanding entry symbol '{entrySymbol}' is not a portable native symbol name.");
+        ValidateFreestandingFiles(nativeSources, "native source", path => Path.GetExtension(path) is ".c" or ".s" or ".S");
+        ValidateFreestandingFiles(objectFiles, "object", path => Path.GetExtension(path).Equals(".o", StringComparison.OrdinalIgnoreCase));
+        ValidateFreestandingFiles(libraries, "library", path => Path.GetExtension(path).Equals(".a", StringComparison.OrdinalIgnoreCase));
+
+        if (buildNative)
+        {
+            if (image is null)
+                throw new CommandLineException("Freestanding builds require build.image or --native-output.");
+            if (linkerScript is null)
+                throw new CommandLineException("Freestanding builds require freestanding.linkerScript or --linker-script.");
+            if (entrySymbol is null)
+                throw new CommandLineException("Freestanding builds require freestanding.entrySymbol or --entry-symbol.");
+        }
+        if (linkerScript is not null && !File.Exists(linkerScript))
+            throw new CommandLineException($"Freestanding linker script '{linkerScript}' does not exist.");
+        foreach (var path in nativeSources.Concat(objectFiles).Concat(libraries))
+            if (!File.Exists(path))
+                throw new CommandLineException($"Freestanding native input '{path}' does not exist.");
+        ValidateFreestandingOptions(compileOptions, "compile");
+        ValidateFreestandingOptions(linkOptions, "link");
+        return new FreestandingProjectConfiguration(linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
+    }
+
+    private static ImmutableArray<string> ResolveCliFiles(IReadOnlyList<string> cli, ImmutableArray<string> manifest, string root) =>
+        cli.Count == 0 ? manifest : cli.Select(path => Path.GetFullPath(path, root)).ToImmutableArray();
+
+    private static void ValidateFreestandingFiles(ImmutableArray<string> paths, string kind, Func<string, bool> validExtension)
+    {
+        var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        var unique = new HashSet<string>(comparer);
+        foreach (var path in paths)
+        {
+            if (!validExtension(path))
+                throw new CommandLineException($"Freestanding {kind} '{path}' has an unsupported extension.");
+            if (!unique.Add(path))
+                throw new CommandLineException($"Freestanding {kind} input '{path}' is duplicated.");
+        }
+    }
+
+    private static bool IsPortableNativeSymbol(string value) =>
+        !string.IsNullOrWhiteSpace(value) && (char.IsAsciiLetter(value[0]) || value[0] is '_' or '$') &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '$');
+
+    private static void ValidateFreestandingOptions(IEnumerable<string> options, string kind)
+    {
+        foreach (var option in options)
+        {
+            if (string.IsNullOrWhiteSpace(option) || option.StartsWith('@'))
+                throw new CommandLineException($"Freestanding {kind} options cannot contain empty arguments or response files.");
+            if (option is "-c" or "-S" or "-E" or "-o" or "-T" or "--output" or "--entry" or "--script" ||
+                option.StartsWith("-o", StringComparison.Ordinal) || option.StartsWith("-T", StringComparison.Ordinal) ||
+                option.StartsWith("--output=", StringComparison.Ordinal) || option.StartsWith("--entry=", StringComparison.Ordinal) ||
+                option.StartsWith("--script=", StringComparison.Ordinal) || option.StartsWith("-Wl,-e", StringComparison.Ordinal) ||
+                option.StartsWith("-Wl,-T", StringComparison.Ordinal) || option.StartsWith("-Wl,--entry", StringComparison.Ordinal) ||
+                option.StartsWith("-Wl,--script", StringComparison.Ordinal) || option.StartsWith("-Wl,-o", StringComparison.Ordinal))
+                throw new CommandLineException($"Freestanding {kind} option '{option}' overrides a compiler-owned build setting.");
+        }
     }
 
     private static string? ResolveSourceRoot(CommandLineOptions options)

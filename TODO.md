@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.20 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.21 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -36,19 +36,11 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 - [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
 
-## Freestanding targets and runtime
-
-- [ ] Add a `freestanding` target profile with no required `main`, hosted C library, pthreads, filesystem, console, host TLS, default allocator, or process termination. Define the minimum compiler and runtime contract for startup, thread state, allocation, failure, and shutdown.
-- [ ] Design one extensible attribute for user-supplied runtime implementations instead of separate attributes such as `[RuntimeAllocate]` and `[RuntimeFree]`. A candidate form is `[RuntimeImpl(Runtime.Allocate)]`. Define stable roles for allocation, deallocation, panic, and other required services, with exact signatures, uniqueness, target requirements, reachability, and diagnostics for missing or conflicting implementations.
-- [ ] Separate `[EntryPoint]` from freestanding native startup. A freestanding build must not emit `main`, `app_main`, runtime initialization, or runtime shutdown unless the program requests them. Permit exported, naked, and section-placed startup methods such as `_start`, and let the program select and initialize only the required runtime services.
-- [ ] Add validated freestanding native-build settings to `ctilde.json`. Cover linker scripts, entry symbols, object files, libraries, assembly sources, architecture flags, and separate compile and link options. Map these settings to toolchain features such as freestanding mode, omitted standard libraries, and omitted startup files while preserving deterministic command construction.
-
 ## Native interop
 
-- [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC; custom linker scripts and entry-symbol control remain part of the freestanding build-plumbing work.
+- [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC.
 - [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
-- [ ] Add naked functions and first-class interrupt handlers.
-- [ ] Add naked assembly functions: like naked functions, except the body is one complete `asm` block.
+- [ ] Generalize the narrow freestanding naked-startup form to target-specific naked functions with parameters, compiler-bound assembly operands, and first-class interrupt handlers.
 - [ ] Define retained callback registration, unregistration, rooting, and cross-thread lifetime rules separately from the existing synchronous callback profile.
 - [ ] Define `[Interrupt]` as a target-specific effect profile over the general effect system. Enforce no-allocation, no-throw, no-block, IRAM-safe, DRAM-safe, and other target-specific ISR restrictions through transitive reachability.
 

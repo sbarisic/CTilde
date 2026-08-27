@@ -214,6 +214,9 @@ orleans.codegen.cs
 /examples/HostedIo/ctilde-hosted-*.txt
 /examples/HostedIo/image.ppm
 
+# Freestanding example output
+/examples/Freestanding/build/
+
 # RIA/Silverlight projects
 Generated_Code/
 

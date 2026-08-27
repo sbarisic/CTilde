@@ -128,6 +128,16 @@ internal sealed partial class TypedIrBodyLowerer
 
     public string EmitDefinition()
     {
+        if (_method.IsNaked)
+        {
+            if (_analysisOnly)
+            {
+                if (_method.Body is not null)
+                    _ = EmitStatements(NullLoweringWriter.Instance, _method.Body.Statements);
+                return string.Empty;
+            }
+            return EmitNakedDefinition();
+        }
         if (_method.IsConstructor && _method.ContainingType.Kind == DeclaredTypeKind.Class)
             return EmitClassConstructorDefinition();
         var body = CreateWriter();
@@ -184,6 +194,27 @@ internal sealed partial class TypedIrBodyLowerer
         }
         return _analysisOnly ? string.Empty : RenderFunction(_emitter.MethodSignature(_method, _nameOverride), body);
     }
+
+    private string EmitNakedDefinition()
+    {
+        var assembly = (InlineAssemblyStatementSyntax)_method.Body!.Statements[0];
+        var writer = new CWriter();
+        var section = _method.SectionName is null
+            ? string.Empty
+            : NativeSection.MacroName(NativeSectionKind.Code, _method.SectionName) + " ";
+        writer.WriteLine($"{section}__attribute__((naked, noreturn, used)) void {_method.ExportName}(void)");
+        using (writer.Block())
+            writer.WriteLine($"__asm__(\"{EscapeNakedAssembly(assembly.Body)}\");");
+        writer.WriteLine();
+        return writer.ToString();
+    }
+
+    private static string EscapeNakedAssembly(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\"", "\\\"", StringComparison.Ordinal)
+        .Replace("\r\n", "\\n\\t", StringComparison.Ordinal)
+        .Replace("\r", "\\n\\t", StringComparison.Ordinal)
+        .Replace("\n", "\\n\\t", StringComparison.Ordinal);
 
     private string EmitClassConstructorDefinition()
     {

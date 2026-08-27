@@ -11,7 +11,8 @@
       "type": "string",
       "enum": [
         "hosted",
-        "esp-idf"
+        "esp-idf",
+        "freestanding"
       ],
       "default": "hosted",
       "description": "Compiler target and target-specific standard library."
@@ -67,6 +68,29 @@
         }
       }
     },
+    "freestanding": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "GNU/ELF freestanding linker and native inputs.",
+      "properties": {
+        "linkerScript": { "type": "string", "minLength": 1 },
+        "entrySymbol": { "type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$" },
+        "nativeSources": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.(c|s|S)$" }
+        },
+        "objectFiles": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.o$" }
+        },
+        "libraries": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.a$" }
+        },
+        "compileOptions": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "linkOptions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+      }
+    },
     "build": {
       "type": "object",
       "additionalProperties": false,
@@ -119,6 +143,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Hosted executable path relative to the project directory."
+        },
+        "image": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Freestanding ELF image path relative to the project directory."
         },
         "espIdfProjectDirectory": {
           "type": "string",

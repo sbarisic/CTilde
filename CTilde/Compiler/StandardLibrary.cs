@@ -28,7 +28,9 @@ internal static class StandardLibrary
         includeHostedIo &= target == CompilationTarget.Hosted;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
         {
-            var files = new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+            var files = key.Target == CompilationTarget.Freestanding
+                ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
+                : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
             if ((key.Vectors & StandardVectorTypes.Vec2) != 0)
                 files.Add("Vec2.ct");
             if ((key.Vectors & StandardVectorTypes.Vec3) != 0)
@@ -85,9 +87,12 @@ internal static class StandardLibrary
 
     public static ImmutableArray<string> GetDocumentationXml(CompilationTarget target)
     {
-        var names = target == CompilationTarget.EspIdf
-            ? new[] { "System.docs.xml", "EspIdf.docs.xml" }
-            : new[] { "System.docs.xml", "HostedIO.docs.xml" };
+        var names = target switch
+        {
+            CompilationTarget.EspIdf => new[] { "System.docs.xml", "EspIdf.docs.xml" },
+            CompilationTarget.Hosted => new[] { "System.docs.xml", "HostedIO.docs.xml" },
+            _ => new[] { "System.docs.xml" },
+        };
         var assembly = typeof(StandardLibrary).Assembly;
         return [.. names.Select(name =>
         {

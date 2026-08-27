@@ -1,0 +1,20 @@
+{
+  "target": "freestanding",
+  "architecture": "x64",
+  "sources": ["src/Kernel.ct"],
+  "build": {
+    "cLayout": "modules",
+    "compiler": "wsl:gcc",
+    "configuration": "release",
+    "image": "build/kernel-native-start.elf"
+  },
+  "freestanding": {
+    "linkerScript": "native/kernel.ld",
+    "entrySymbol": "_start",
+    "nativeSources": ["native/platform.c", "native/start.S"],
+    "objectFiles": [],
+    "libraries": [],
+    "compileOptions": ["-mno-red-zone"],
+    "linkOptions": ["-Wl,--build-id=none"]
+  }
+}

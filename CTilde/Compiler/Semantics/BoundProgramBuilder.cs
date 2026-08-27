@@ -54,6 +54,7 @@ internal static class BoundProgramBuilder
         CompileTimeEvaluator.EvaluateAssertions(model, services);
         ValidateConstructorCycles(model);
         services.AllocationEffects.Validate(model.Diagnostics);
+        FreestandingValidator.Validate(model, bodies, target);
         RecursionAnalyzer.Validate(model, bodies, noRecursion);
         TargetValidator.Validate(model, services, target);
 

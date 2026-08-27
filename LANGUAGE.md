@@ -1,14 +1,14 @@
 # C~ language specification
 
-Specification version: draft 0.20
+Specification version: draft 0.21
 
 ## Status
 
-This document is the normative specification for C~ draft 0.20.
+This document is the normative specification for C~ draft 0.21.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.20 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.21 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.20 adds endian-domain integers, linker-address symbols, final-image retention, deterministic bitfields and registers, source-owned modular output, and ESP-IDF panic policies. It retains Draft 0.19 compile-time layout and low-level facilities and all earlier language and runtime features. Runtime ABI 16 and debug metadata version 3 are unchanged.
+Draft 0.21 adds a GNU/ELF freestanding profile, role-based runtime implementations, explicit lifecycle control, a narrow naked startup form, and validated native linker inputs. It retains Draft 0.20 protocol and native-integration facilities and all earlier language and runtime features. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -103,7 +103,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.20 has no aliases and no `using static`.
+Draft 0.21 has no aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -175,7 +175,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.20 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.21 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -212,7 +212,7 @@ Every expression has a compile-time type before C emission.
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.20 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
+Draft 0.21 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -234,7 +234,7 @@ Every array has a read-only `Length` property of type `int`. Indexing starts at 
 
 Inline arrays support one dimension, default initialization, checked indexing, by-value copying, parameters, and returns. Constant out-of-range indices are rejected; dynamic failures use `CTA0003`. Elements that contain managed references are retained and dropped element by element. Native ABI exposure requires a recursively complete unmanaged element type. Managed, multidimensional inline, jagged, and nested inline arrays are not part of this draft. Invalid lengths report `CT2204`.
 
-Draft 0.20 has no multidimensional or jagged managed arrays.
+Draft 0.21 has no multidimensional or jagged managed arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
@@ -303,7 +303,7 @@ Enum initializers are integral constants. An omitted initializer is one greater 
 
 `public newtype Name : Underlying;` declares a distinct nominal value type with the representation, layout, calling convention, boxing behavior, and native ABI of its complete unmanaged non-void underlying type. Recursive definitions report `CT1295`.
 
-Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.20.
+Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.21.
 
 The standard library declares `be16`, `be32`, `le16`, and `le32` as nominal newtypes. Their stored bytes use the named wire order. `System.Endian` converts between native numeric values and these types, folds constant operands, and lowers big-endian conversions to byte swaps on the currently little-endian target set. Ordinary explicit newtype casts remain representation-preserving. Invalid intrinsic calls report `CT2208`.
 
@@ -380,7 +380,7 @@ public delegate int Transformer(int value);
 
 A compatible method group converts contextually to that delegate. Overload resolution uses the delegate's exact parameter and return types. Static, instance, inherited, virtual, and `base` method groups are supported. An instance delegate retains its receiver; virtual invocation dispatches against the captured receiver, while `base.Method` remains a direct base call.
 
-Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.20 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
+Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.21 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
 
 ### Classes
 
@@ -574,7 +574,7 @@ Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site
 
 An `out` call treats the caller slot as an uninitialized destination. The caller drops an initialized managed/reference-bearing value, clears the slot to a safe empty state, and marks it uninitialized before entry. The callee's first assignment constructs or moves directly into the destination without reading, retaining, or dropping an old value. Later assignments use ordinary strong-slot replacement. The rule is identical for methods, constructors, delegates, unmanaged function pointers, externs, and exported C declarations. Normal return assigns the caller slot; exceptional control leaves its safe empty value but does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
 
-Draft 0.20 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
+Draft 0.21 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### User-defined arithmetic operators
 
@@ -612,6 +612,24 @@ Exactly one method has `[EntryPoint]`. It must be a body-bearing `static void` m
 
 The C backend generates `int main(void)`, initializes static storage, calls the entry method, and returns `EXIT_SUCCESS`.
 
+`[EntryPoint]` is invalid for the freestanding target. Freestanding compilation emits no `main`, `app_main`, automatic runtime initialization, or automatic shutdown. Public `[Export]` methods are native-callable roots and require explicit runtime initialization before invocation unless the program contains only naked exports.
+
+### Freestanding runtime implementations
+
+The `freestanding` target requires an explicit architecture. `Target.Profile` is the constant `TargetProfile.Freestanding`; `Target.Architecture` and `Target.PointerSize` retain their ordinary compile-time semantics. Architecture `auto` reports `CT4108`.
+
+`[RuntimeImpl(Runtime.Panic)]` selects the one bootstrap-safe `static unsafe void Panic(RuntimePanicInfo)` implementation. Panic is required whenever reachable ordinary freestanding code exists. `[RuntimeImpl(Runtime.Allocate)]` selects `static unsafe void* Allocate(nuint)`, and `[RuntimeImpl(Runtime.Free)]` selects `static unsafe void Free(void*)`; these two roles are required as a pair only when reachable code uses managed heap storage. Every role method is non-generic, body-bearing, `[NoAlloc]`, unique, and a compiler root. `[Section]` is permitted and `[Used]` is redundant. Native-entry attributes, `[Naked]`, and `[Extern]` are incompatible. Malformed declarations report `CT1299`; missing or duplicate required roles report `CT4114`.
+
+A runtime implementation and its transitive C~ call closure cannot use managed values, ARC, allocation, exceptions, `defer`, runtime lifecycle calls, or initialized managed statics. It may use unmanaged fields, registers, linker symbols, MMIO, CPU intrinsics, trusted `[NoAlloc]` externs, and trusted inline assembly. A violation reports `CT2211`.
+
+The compiler changes a zero-byte request to one byte, calls the selected allocator, panics with `CTM0001` on null, and clears the returned storage before object construction. The allocator must return storage aligned to at least 16 bytes. Generated code does not pass null to the free role. Runtime faults call the panic role directly and are not catchable; if panic returns, generated code loops forever.
+
+### Narrow naked startup
+
+`[Naked]` is a freestanding-only startup facility. It requires a public static unsafe non-generic `void()` method with `[Export]`, `[NoAlloc]`, and exactly one operand-free `[NoAlloc] asm` statement. Parameters, locals, expressions, ordinary calls, operands, clobbers, and generated cleanup are forbidden. Invalid declarations or bodies report `CT1302`; a non-GNU/ELF native toolchain reports `CT4116`.
+
+The GNU backend emits one exported `naked,noreturn` definition rather than an export wrapper and internal implementation. It copies the basic assembly body without operand substitution or percent escaping and emits no prologue, epilogue, return, runtime check, ARC, instrumentation, or exception barrier. `[Section]` remains valid. General naked functions and compiler-bound naked assembly operands are deferred.
+
 ### Extern
 
 `[Extern("symbol")]` marks a static bodyless method supplied by native code.
@@ -644,7 +662,7 @@ Ordinary parameters are borrowed for the duration of a call. `[Retained]` accept
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.20 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks and ISR callbacks remain unsupported.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.21 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks and ISR callbacks remain unsupported.
 
 ### NoAlloc
 
@@ -656,9 +674,9 @@ Allocating operations are class and array construction, boxing, delegate creatio
 
 ## Core library
 
-The automatically imported `System` namespace provides `Object`, `Exception`, `Console`, `Environment`, single-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types. Vector arithmetic is allocation-free: multiplication and division between vectors are componentwise, dot products are named methods, and normalizing a zero vector follows native IEEE division behavior. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
+Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Console`, `Environment`, single-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types as applicable to the target. Freestanding imports only the object/storage core, primitive and managed value support, `Memory`, target queries, endian helpers, MMIO, and CPU intrinsics; it does not expose exceptions, console or process services, managed threading, ESP-IDF APIs, or libm-backed math. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-Draft 0.20 does not provide `System.Type`, reflection, or `System.Convert`.
+Draft 0.21 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation
 
@@ -756,7 +774,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.20 has no pattern cases and no `goto case`.
+Draft 0.21 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -819,7 +837,7 @@ Exceptions are unchecked. Every call can complete by throwing. A throw from a ca
 
 A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
-Exception filters, inner exceptions, stack traces, user-defined runtime-fault policies, and automatic disposal are not part of draft 0.20. An exception that escapes a supported synchronous native boundary becomes a panic with `CTE0003`; general exception propagation across native boundaries is unsupported.
+Exception filters, inner exceptions, stack traces, user-defined runtime-fault policies, and automatic disposal are not part of draft 0.21. An exception that escapes a supported synchronous native boundary becomes a panic with `CTE0003`; general exception propagation across native boundaries is unsupported.
 
 ## Unsafe code
 
@@ -889,15 +907,15 @@ An `Atomic<T>` value is non-copyable. It can be directly constructed as a local,
 
 A thread starts at most once. Joining before start, starting twice, or joining itself throws `ThreadStateException`. A worker retains its delegate and control object until completion, so releasing the source `Thread` reference does not cancel it. An exception escaping the delegate is fatal through the existing unhandled-exception path. Workers attach to independent C~ exception, cleanup, ARC-release, and debug state before invoking source code and detach after cleanup.
 
-`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX mutexes, or recursive FreeRTOS mutexes. Cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, and `async` are not part of Draft 0.20.
+`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX mutexes, or recursive FreeRTOS mutexes. Cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, and `async` are not part of Draft 0.21.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.20 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.21 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
 
-Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.20.
+Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.21.
 
-Draft 0.20 uses a data-race-free memory model. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order.
+Draft 0.21 uses a data-race-free memory model for hosted and ESP-IDF programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. Freestanding v1 has one compiler-owned execution state and no managed threading surface.
 
 One C~ runtime exists per process. `ct_runtime_initialize(config)` attaches the calling primary thread, initializes immortal runtime-fault objects and the ABI-versioned module descriptor, then publishes the ready phase. `ct_runtime_shutdown()` requires all secondary threads detached, finalizes modules, drains ARC work, and detaches the primary thread. `main` and `app_main` perform this lifecycle automatically. A native-created thread uses `ct_thread_attach()` and `ct_thread_detach()` between those calls and must detach with no active C~ calls, cleanup records, exception frames, pending exception, or release drain. Export wrappers, callback trampolines, `ct_retain`, and `ct_release` require attachment. Runtime-phase misuse and unattached entry are panics. Modules cannot unload while their descriptors, vtables, delegates, objects, or generated function pointers remain live. Independent DLL loading and runtime registration are deferred.
 
@@ -958,7 +976,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.20 when:
+A compiler conforms to draft 0.21 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -966,7 +984,7 @@ A compiler conforms to draft 0.20 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.20 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.21 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -977,4 +995,4 @@ The canonical backend is GNU C23. Draft 0.20 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.20 defers declaration-level conditional compilation, weak imports and definitions, custom linker scripts, write-only registers, atomic MMIO read-modify-write, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, ISR entry, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.
+Draft 0.21 defers declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, ISR entry, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.

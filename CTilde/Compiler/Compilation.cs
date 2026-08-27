@@ -78,8 +78,12 @@ public sealed class Compilation
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
-            if (target == CompilationTarget.Hosted && Options.PanicPolicy != EspIdfPanicPolicy.Abort)
+            if (target != CompilationTarget.EspIdf && Options.PanicPolicy != EspIdfPanicPolicy.Abort)
                 diagnostics.Add("CT4113", "Restart and halt panic policies are valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (target == CompilationTarget.Freestanding && architecture == CompilationArchitecture.Auto)
+                diagnostics.Add("CT4108", "Freestanding compilations require an explicit target architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (target == CompilationTarget.Freestanding && (Options.DebugInformation != DebugInformationMode.None || Options.DebugMemory != DebugMemoryMode.Off))
+                diagnostics.Add("CT4115", "Debug information and debug-memory instrumentation are unavailable for freestanding compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             ValidateSourceIdentityRoot(diagnostics);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture);
@@ -164,7 +168,7 @@ public sealed class Compilation
     {
         if (architecture != CompilationArchitecture.Auto)
             return architecture;
-        if (target == CompilationTarget.EspIdf)
+        if (target is CompilationTarget.EspIdf or CompilationTarget.Freestanding)
             return CompilationArchitecture.Auto;
         return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
         {

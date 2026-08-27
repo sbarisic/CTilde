@@ -113,6 +113,7 @@ internal enum DeclaredTypeKind { Class, Struct, Interface, TypeParameter, Enum, 
 internal enum AggregateLayoutKind { Sequential, Union, Explicit }
 internal enum Accessibility { Private, Internal, Protected, Public }
 internal enum NativeParameterOwnership { Borrowed, Consumes, Retained, Creates }
+internal enum RuntimeImplementationRole { Allocate, Free, Panic }
 
 internal sealed record GenericConstraintSet(
     bool RequiresClass = false,
@@ -291,6 +292,8 @@ internal sealed class MethodSymbol : MemberSymbol
     public string? ExportName { get; init; }
     public string? SectionName { get; init; }
     public bool IsUsed { get; init; }
+    public RuntimeImplementationRole? RuntimeImplementation { get; init; }
+    public bool IsNaked { get; init; }
     public uint? TaskStackSize { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }

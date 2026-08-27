@@ -37,7 +37,14 @@ internal sealed record CommandLineOptions(
     string? EspClangPath,
     bool NoRecursion,
     EspIdfPanicPolicy PanicPolicy,
-    bool PanicPolicySpecified)
+    bool PanicPolicySpecified,
+    string? LinkerScript,
+    string? EntrySymbol,
+    IReadOnlyList<string> NativeSources,
+    IReadOnlyList<string> ObjectFiles,
+    IReadOnlyList<string> Libraries,
+    IReadOnlyList<string> CompileOptions,
+    IReadOnlyList<string> LinkOptions)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -65,6 +72,13 @@ internal sealed record CommandLineOptions(
         string? debugTarget = null;
         string? serialPort = null;
         string? espClangPath = null;
+        string? linkerScript = null;
+        string? entrySymbol = null;
+        var nativeSources = new List<string>();
+        var objectFiles = new List<string>();
+        var libraries = new List<string>();
+        var compileOptions = new List<string>();
+        var linkOptions = new List<string>();
         var baudRate = 115200;
         var check = false;
         var trace = false;
@@ -107,6 +121,23 @@ internal sealed record CommandLineOptions(
                 case "--idf-project": idfProject = RequireValue(); break;
                 case "--idf-path": idfPath = RequireValue(); break;
                 case "--esp-clang": espClangPath = RequireValue(); break;
+                case "--linker-script": linkerScript = RequireValue(); break;
+                case "--entry-symbol": entrySymbol = RequireValue(); break;
+                case "--native-source":
+                    if (RequireValue() is { } nativeSource) nativeSources.Add(nativeSource);
+                    break;
+                case "--object":
+                    if (RequireValue() is { } objectFile) objectFiles.Add(objectFile);
+                    break;
+                case "--library":
+                    if (RequireValue() is { } library) libraries.Add(library);
+                    break;
+                case "--compile-option":
+                    if (RequireValue() is { } compileOption) compileOptions.Add(compileOption);
+                    break;
+                case "--link-option":
+                    if (RequireValue() is { } linkOption) linkOptions.Add(linkOption);
+                    break;
                 case "--output-directory": outputDirectory = RequireValue(); break;
                 case "--symbol-map": symbolMap = RequireValue(); break;
                 case "--debug-map": debugMap = RequireValue(); break;
@@ -187,10 +218,11 @@ internal sealed record CommandLineOptions(
                     {
                         "hosted" => CompilationTarget.Hosted,
                         "esp-idf" => CompilationTarget.EspIdf,
+                        "freestanding" => CompilationTarget.Freestanding,
                         _ => (CompilationTarget)(-1),
                     };
                     if (targetValue is not null && !Enum.IsDefined(target))
-                        parseError = $"Unknown target '{targetValue}'; expected hosted or esp-idf.";
+                        parseError = $"Unknown target '{targetValue}'; expected hosted, esp-idf, or freestanding.";
                     break;
                 case "--architecture":
                     architectureSpecified = true;
@@ -228,7 +260,7 @@ internal sealed record CommandLineOptions(
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, architecture, architectureSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
-            panicPolicy, panicPolicySpecified);
+            panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
         return true;
     }
 }

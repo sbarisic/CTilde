@@ -3,7 +3,22 @@ namespace System.Runtime;
 public enum TargetProfile
 {
     Hosted,
-    EspIdf
+    EspIdf,
+    Freestanding
+}
+
+public enum Runtime
+{
+    Allocate,
+    Free,
+    Panic
+}
+
+public readonly struct RuntimePanicInfo
+{
+    public unsafe readonly byte* Code;
+    public unsafe readonly byte* File;
+    public readonly int Line;
 }
 
 public enum TargetArchitecture

@@ -89,6 +89,8 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
         }
 
         Add(program.Model.EntryPoint);
+        foreach (var implementation in program.Model.RuntimeImplementations.Values)
+            Add(implementation);
         foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null || function.Method.IsVirtual || function.Method.IsOverride))
             Add(function.Method);
         foreach (var function in ir.Functions.Where(function => function.Method.IsUsed && !function.Method.IsGenericDefinition))

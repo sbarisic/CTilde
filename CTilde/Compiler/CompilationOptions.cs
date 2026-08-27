@@ -4,6 +4,7 @@ public enum CompilationTarget
 {
     Hosted,
     EspIdf,
+    Freestanding,
 }
 
 public enum CompilationArchitecture

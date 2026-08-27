@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.20. Object, standard runtime-fault exceptions, console output, single-precision math, mutable vectors, atomics, threads, mutexes, runtime memory, compile-time target queries, MMIO and CPU intrinsics, endian-domain integers, and address-domain newtypes are available to every target. Console input and `System.IO` are hosted-only. ESP declarations are loaded only for the ESP-IDF target. Draft 0.20 uses runtime ABI 16.
+This document is the canonical standard-library reference for C~ draft 0.21 and runtime ABI 16. Hosted and ESP-IDF retain the Draft 0.20 object, exception, console, math, vector, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
 `System.Runtime.Target` exposes compiler constants for `Profile`, `Architecture`, and byte-sized `PointerSize`. `System.Runtime.Mmio` provides exact-width `Read`, `Write`, `ReadRelaxed`, `WriteRelaxed`, and `Barrier` intrinsics for fixed-width integers and enums. Ordered accesses use a full target I/O barrier before and after the volatile access; relaxed accesses emit only the access.
 
@@ -298,11 +298,28 @@ public static class Memory
 
 `Retain` and `Release` manipulate an additional untracked ARC ownership count. `null` is a no-op. These methods require an unsafe method or block. Unbalanced calls can leak memory, create dangling references, or double-release an object. Normal C~ code does not need them.
 
-Conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFailAllocationAfter(int successfulAllocations)`. It injects managed allocation failure for runtime tests and is not available in production output.
+Hosted and ESP-IDF conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFailAllocationAfter(int successfulAllocations)`. It injects managed allocation failure for runtime tests and is not available in production or the freestanding library.
+
+### Freestanding runtime roles
+
+Freestanding adds these compiler-recognized declarations:
+
+```csharp
+public enum Runtime { Allocate, Free, Panic }
+
+public readonly struct RuntimePanicInfo
+{
+    public unsafe readonly byte* Code;
+    public unsafe readonly byte* File;
+    public readonly int Line;
+}
+```
+
+`[RuntimeImpl(Runtime.Allocate)]`, `[RuntimeImpl(Runtime.Free)]`, and `[RuntimeImpl(Runtime.Panic)]` select the user implementations of managed allocation, deallocation, and terminal failure. They are not ordinary library dispatch APIs and have no runtime storage. Panic is required for reachable ordinary freestanding code; allocation and free are required only when the reachable program needs the managed heap. The exact signatures, bootstrap-safe closure, and allocator contract are normative in [LANGUAGE.md](LANGUAGE.md).
 
 ## Runtime native buffers
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.20 generics.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.21 generics.
 
 ```csharp
 NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);

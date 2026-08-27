@@ -1,18 +1,18 @@
 # Implementation status
 
-Last reviewed: 2026-08-25
+Last reviewed: 2026-08-27
 
 ## Current state
 
-C~ draft 0.20 has one compiler path:
+C~ draft 0.21 has one compiler path:
 
 ```text
-.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF GNU C23
+.ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding GNU C23
 ```
 
 The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
 
-The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang or ESP-IDF toolchain, or prepare verified Launch/Attach descriptors. Hosted modular objects use a content-addressed cache; hosted Release builds can enable LTO.
+The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted and freestanding modular objects use draft-versioned content-addressed caches.
 
 ## Measured baseline
 
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.20 coverage adds exact endian conversions, linker addresses, final-image retention, scalar bitfields, fixed-address registers, source-owned modules, and ESP-IDF panic policies. Draft 0.19 added typed constant specializations, inline-array value layouts and ARC traversal, general alignment, strict newtypes, closed-call recursion checks, and portable CPU intrinsics. Draft 0.18 added architecture inputs and target constants, inactive-branch pruning for `static if`, semantic and native layout assertions, `[Used]`, typed extern data, MMIO lowering, and ESP-IDF task-entry wrappers. Draft 0.17 added controlled method/static-field section placement and object-table probes. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.21 coverage adds target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Draft 0.20 added exact endian conversions, linker addresses, final-image retention, scalar bitfields, fixed-address registers, source-owned modules, and ESP-IDF panic policies. Draft 0.19 added typed constant specializations, inline-array value layouts and ARC traversal, general alignment, strict newtypes, closed-call recursion checks, and portable CPU intrinsics. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -308,9 +308,17 @@ Modular emission groups reachable implementations and export wrappers by normali
 
 Draft 0.18 and Draft 0.19 hosted, cross-build, and connected-board measurements remain historical evidence. Draft 0.20 hardware restart/halt acceptance is performed only by the connected runner and must restore the ordinary Release firmware in `finally`.
 
+## Draft 0.21 freestanding foundation
+
+`CompilationTarget.Freestanding` and `TargetProfile.Freestanding` require an explicit architecture and reject hosted/ESP startup and unavailable standard-library surfaces. `[RuntimeImpl]` selects exact allocation, free, and panic roles. Reachability determines whether an ordinary runtime and managed heap are needed; runtime-role closures are checked for bootstrap-safe operations before typed IR emission.
+
+Freestanding C uses internal byte loops, one static execution state, direct panic routing, and explicit no-argument initialize/shutdown functions. A program containing only narrow `[Naked]` exports omits the managed runtime and reports `CTILDE_HAS_RUNTIME 0`. The symbol map records role requirements and naked status. Runtime ABI 16 and debug metadata v3 remain unchanged; source/debug instrumentation is deliberately unavailable for the first profile.
+
+The project model and CLI accept contained linker scripts, explicit entry symbols, ordered `.c`/`.S`/`.s` sources, ELF objects, archives, and validated compile/link options. The dedicated GCC/Clang driver checks predefined architecture macros, compiles with freestanding/no-builtin/no-startup flags, and links through the selected script without libc. The checked x64 example produces an ELF entry at `_start`, retains the requested text/data/BSS and runtime/export symbols, has no undefined native symbols, executes managed allocation and shutdown, and exits with status zero under WSL GCC.
+
 ## Deliberately deferred
 
-These features are outside draft 0.20:
+These features are outside draft 0.21:
 
 - Generic variance, return-context or partial inference, specialization syntax, and static-abstract generic arithmetic.
 - Default or explicit interface implementations and static abstract interface members.
@@ -328,10 +336,11 @@ These features are outside draft 0.20:
 - String interpolation and raw or verbatim strings.
 - Weak references, cycle collection, finalizers, and automatic disposal.
 - Exact-source compilation of the current C# compiler.
+- General naked functions, naked parameters/operands, first-class interrupt handlers, and privileged target-specific CPU control.
 
 ## Release gate
 
-A draft 0.20 release requires:
+A draft 0.21 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -340,7 +349,8 @@ A draft 0.20 release requires:
 - MSVC latest-C compatibility compilation with warnings as errors for programs without inline assembly, plus a focused rejection check for programs containing `asm`.
 - Documentation synchronized with measured behavior.
 - No C output for invalid programs, including stale generated directory output.
+- GCC and Clang ELF image inspection proving the explicit entry, required sections/symbols, and absence of undefined hosted runtime dependencies.
 
 On 2026-08-25, the solution build completed with zero warnings and errors, all 146 conformance cases passed under MSVC, WSL GCC, and WSL Clang, and the focused final-image retention probe preserved every requested symbol with LTO and dead-section elimination under all three toolchains. The ESP-IDF runner passed its direct Xtensa and RISC-V probes and full ESP32 and ESP32-C3 builds. The connected automated T-CAN485 run passed the Draft 0.20 fixture, restart and halt policy images, debugger gates, and Release-firmware restoration; its report is `artifacts/esp32-hardware/20260825-134136.json`. VS Code tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The visual LED gate remains intentionally pending because the hardware run used `-AutomatedOnly`. Historical Draft 0.19, Draft 0.18, and Draft 0.17 hosted and cross-build evidence remains preserved in Git history.
 
-Draft 0.20 uses GCC or Clang in GNU C23 mode as the canonical native release gate. MSVC latest-C mode remains an independent compatibility check for the portable subset and is not an inline-assembly backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported hosted toolchain. Historical connected-board baselines remain recorded above.
+Draft 0.21 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate. MSVC latest-C mode remains an independent hosted compatibility check and is not an inline-assembly or freestanding backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.20 connected-board baselines remain recorded above.

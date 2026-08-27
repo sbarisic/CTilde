@@ -274,7 +274,11 @@ internal sealed partial class CEmitter
     private void EmitRuntimeFaultSupport(CWriter writer)
     {
         if (!_usesExceptions)
+        {
+            writer.WriteLine("CT_NORETURN static void ct_raise_runtime_fault(ct_runtime_fault_kind kind, const char* code, const char* file, int line) { (void)kind; ct_fail(code, file, line); }");
+            writer.WriteLine();
             return;
+        }
 
         var exceptionType = Model.Types["System.Exception"];
         var messageField = exceptionType.Fields.Single(field => field.Name == "message");
@@ -805,6 +809,8 @@ internal sealed partial class CEmitter
 
     private void EmitMain(CWriter writer)
     {
+        if (IsFreestanding)
+            return;
         if (IsEspIdf)
         {
             writer.WriteLine("void app_main(void)");

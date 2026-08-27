@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#080a0d">
+  <meta name="description" content="C~ is a small, statically typed systems language with familiar C#-style syntax and deterministic GNU C23 output.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="C~ — Familiar syntax. Native systems.">
+  <meta property="og:description" content="A small, statically typed systems language with C#-style syntax and deterministic GNU C23 output.">
+  <meta property="og:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="C~ — Familiar syntax. Native systems.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="C~ — Familiar syntax. Native systems.">
+  <meta name="twitter:description" content="A small, statically typed systems language with C#-style syntax and deterministic GNU C23 output.">
+  <meta name="twitter:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
+  <title>C~ — Familiar syntax. Native systems.</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="site-header" aria-label="Primary navigation">
+    <div class="shell header-inner">
+      <a class="wordmark" href="#top" aria-label="C~ home">
+        <span class="wordmark-mark" aria-hidden="true">C~</span>
+        <span class="wordmark-name">C tilde</span>
+      </a>
+      <nav class="header-links" aria-label="Project links">
+        <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md" target="_blank" rel="noopener noreferrer">Language guide</a>
+        <a class="github-link" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section class="hero" id="top">
+      <div class="hero-lines" aria-hidden="true"></div>
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> Experimental systems language</p>
+          <h1>Familiar syntax.<br><em>Native systems.</em></h1>
+          <p class="hero-lede">C~ is a small, statically typed language with C#-style syntax. It compiles to deterministic GNU C23 and native programs—without the CLR.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a>
+            <a class="button button-secondary" href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md" target="_blank" rel="noopener noreferrer">Read the language guide</a>
+          </div>
+          <ul class="hero-facts" aria-label="C tilde at a glance">
+            <li>Statically typed</li>
+            <li>Native binaries</li>
+            <li>Deterministic output</li>
+          </ul>
+        </div>
+
+        <div class="hero-emblem" aria-hidden="true">
+          <div class="emblem-orbit orbit-one"></div>
+          <div class="emblem-orbit orbit-two"></div>
+          <div class="emblem-core">C~</div>
+          <span class="emblem-caption">SOURCE → C23 → NATIVE</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="highlights" aria-label="C tilde highlights">
+      <div class="shell highlight-grid">
+        <article class="highlight-card">
+          <p class="highlight-index">01</p>
+          <h2>Predictable by design</h2>
+          <p>Left-to-right evaluation, automatic reference counting, and block-scoped <code>defer</code> make ownership and cleanup explicit.</p>
+        </article>
+        <article class="highlight-card">
+          <p class="highlight-index">02</p>
+          <h2>Native at the boundary</h2>
+          <p>Deterministic GNU C23 output and explicit native contracts connect C~ to C libraries without a managed runtime.</p>
+        </article>
+        <article class="highlight-card">
+          <p class="highlight-index">03</p>
+          <h2>Built for real targets</h2>
+          <p>Use the same language for hosted programs, ESP-IDF firmware, and controlled GNU/ELF freestanding images.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="code-tour" id="examples" aria-labelledby="examples-heading">
+      <div class="shell">
+        <div class="section-heading">
+          <p class="eyebrow"><span></span> A taste of C~</p>
+          <h2 id="examples-heading">Small language. Clear intent.</h2>
+        </div>
+
+        <div class="example-browser">
+          <div class="tabs" role="tablist" aria-label="C tilde language examples">
+            <button class="tab is-active" id="tab-intro" type="button" role="tab" aria-selected="true" aria-controls="panel-intro" tabindex="0">Intro</button>
+            <button class="tab" id="tab-objects" type="button" role="tab" aria-selected="false" aria-controls="panel-objects" tabindex="-1">Objects</button>
+            <button class="tab" id="tab-defer" type="button" role="tab" aria-selected="false" aria-controls="panel-defer" tabindex="-1">Defer</button>
+            <button class="tab" id="tab-native" type="button" role="tab" aria-selected="false" aria-controls="panel-native" tabindex="-1">Native</button>
+            <button class="tab" id="tab-generics" type="button" role="tab" aria-selected="false" aria-controls="panel-generics" tabindex="-1">Generics</button>
+            <button class="tab" id="tab-exceptions" type="button" role="tab" aria-selected="false" aria-controls="panel-exceptions" tabindex="-1">Exceptions</button>
+            <button class="tab" id="tab-unsafe" type="button" role="tab" aria-selected="false" aria-controls="panel-unsafe" tabindex="-1">Unsafe</button>
+            <button class="tab" id="tab-assembly" type="button" role="tab" aria-selected="false" aria-controls="panel-assembly" tabindex="-1">Assembly</button>
+          </div>
+          <p class="sr-only" id="example-status" aria-live="polite"></p>
+
+          <div class="example-panel" id="panel-intro" role="tabpanel" aria-labelledby="tab-intro">
+            <div class="example-copy">
+              <p class="example-number">01 / INTRO</p>
+              <h3>Start with types you already know.</h3>
+              <p>C~ keeps familiar C#-style structure while producing a native program through its GNU C23 backend.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/examples/Hello.ct" target="_blank" rel="noopener noreferrer">View the complete example <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>Hello.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde intro example"><code><span class="tok-keyword">using</span> <span class="tok-type">System</span>;
+
+<span class="tok-keyword">namespace</span> <span class="tok-type">Examples</span>;
+
+<span class="tok-keyword">public static class</span> <span class="tok-type">Program</span>
+{
+    <span class="tok-attribute">[EntryPoint]</span>
+    <span class="tok-keyword">public static void</span> Main()
+    {
+        <span class="tok-keyword">uint</span> left = <span class="tok-number">2u</span>;
+        <span class="tok-keyword">uint</span> right = <span class="tok-number">3u</span>;
+        <span class="tok-keyword">uint</span> result = left + right;
+        <span class="tok-type">Console</span>.WriteLine(result);
+    }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-objects" role="tabpanel" aria-labelledby="tab-objects" hidden>
+            <div class="example-copy">
+              <p class="example-number">02 / OBJECTS</p>
+              <h3>Keep the object model familiar.</h3>
+              <p>Classes support constructors, single inheritance, virtual members, overrides, properties, delegates, and explicit casts.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/examples/ObjectModel.ct" target="_blank" rel="noopener noreferrer">Explore the object model <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>ObjectModel.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde object model example"><code><span class="tok-keyword">public class</span> <span class="tok-type">Base</span>
+{
+    <span class="tok-keyword">protected int</span> number;
+
+    <span class="tok-keyword">public</span> Base(<span class="tok-keyword">int</span> number)
+    {
+        <span class="tok-keyword">this</span>.number = number;
+    }
+
+    <span class="tok-keyword">public virtual int</span> Read()
+    {
+        <span class="tok-keyword">return</span> number;
+    }
+}
+
+<span class="tok-keyword">public class</span> <span class="tok-type">Derived</span> : <span class="tok-type">Base</span>
+{
+    <span class="tok-keyword">public</span> Derived() : <span class="tok-keyword">base</span>(<span class="tok-number">4</span>) { }
+
+    <span class="tok-keyword">public override int</span> Read()
+    {
+        <span class="tok-keyword">return base</span>.Read() + <span class="tok-number">1</span>;
+    }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-defer" role="tabpanel" aria-labelledby="tab-defer" hidden>
+            <div class="example-copy">
+              <p class="example-number">03 / DEFER</p>
+              <h3>Put cleanup beside acquisition.</h3>
+              <p>A deferred call captures its arguments immediately and runs on every ordinary exit from the surrounding block, in LIFO order.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/examples/HostedIo/Program.ct" target="_blank" rel="noopener noreferrer">See deterministic cleanup <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>HostedIo/Program.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde defer example"><code><span class="tok-keyword">using</span> <span class="tok-type">System</span>;
+<span class="tok-keyword">using</span> <span class="tok-type">System.IO</span>;
+
+<span class="tok-keyword">public static class</span> <span class="tok-type">Program</span>
+{
+    <span class="tok-attribute">[EntryPoint]</span>
+    <span class="tok-keyword">public static void</span> Main()
+    {
+        <span class="tok-type">FileHandle</span> image = <span class="tok-type">File</span>.Open(
+            <span class="tok-string">"image.ppm"</span>,
+            <span class="tok-type">FileMode</span>.Create,
+            <span class="tok-type">FileAccess</span>.Write);
+
+        <span class="tok-keyword">defer</span> <span class="tok-type">File</span>.Close(image);
+        <span class="tok-type">Console</span>.WriteLine(<span class="tok-string">"Rendering..."</span>);
+    }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-native" role="tabpanel" aria-labelledby="tab-native" hidden>
+            <div class="example-copy">
+              <p class="example-number">04 / NATIVE</p>
+              <h3>Make native boundaries visible.</h3>
+              <p>Attributes describe exact external symbols, allocation effects, and exported entry points instead of hiding ABI contracts.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/examples/Features.ct" target="_blank" rel="noopener noreferrer">Browse native features <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>Features.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde native interop example"><code><span class="tok-keyword">public static class</span> <span class="tok-type">NativeInterop</span>
+{
+    <span class="tok-attribute">[Extern(</span><span class="tok-string">"ct_native_utf8_length"</span><span class="tok-attribute">)]</span>
+    <span class="tok-attribute">[NoAlloc]</span>
+    <span class="tok-keyword">public static uint</span> Utf8Length(
+        <span class="tok-type">NativeUtf8String</span> value);
+}
+
+<span class="tok-keyword">public static class</span> <span class="tok-type">Program</span>
+{
+    <span class="tok-attribute">[Export(</span><span class="tok-string">"ctilde_add"</span><span class="tok-attribute">)]</span>
+    <span class="tok-keyword">public static int</span> Add(<span class="tok-keyword">int</span> left, <span class="tok-keyword">int</span> right)
+    {
+        <span class="tok-keyword">return</span> left + right;
+    }
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-generics" role="tabpanel" aria-labelledby="tab-generics" hidden>
+            <div class="example-copy">
+              <p class="example-number">05 / GENERICS</p>
+              <h3>Specialize without hiding the cost.</h3>
+              <p>Types and methods support type parameters and integral constant parameters. Reachable closed forms are monomorphized.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#generic-declarations" target="_blank" rel="noopener noreferrer">Read about generics <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>LANGUAGE.md</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde generics example"><code><span class="tok-keyword">public class</span> <span class="tok-type">Box</span>&lt;<span class="tok-type">T</span>&gt;
+{
+    <span class="tok-keyword">public</span> <span class="tok-type">T</span> Value;
+}
+
+<span class="tok-keyword">public static</span> <span class="tok-type">T</span> Identity&lt;<span class="tok-type">T</span>&gt;(<span class="tok-type">T</span> value)
+{
+    <span class="tok-keyword">return</span> value;
+}
+
+<span class="tok-keyword">public struct</span> <span class="tok-type">Buffer</span>&lt;<span class="tok-type">T</span>, <span class="tok-keyword">const int</span> Capacity&gt;
+{
+    <span class="tok-keyword">public</span> <span class="tok-type">T</span>[Capacity] Items;
+}
+
+<span class="tok-type">Box</span>&lt;<span class="tok-keyword">int</span>&gt; box = <span class="tok-keyword">new</span> <span class="tok-type">Box</span>&lt;<span class="tok-keyword">int</span>&gt;();
+<span class="tok-type">Buffer</span>&lt;<span class="tok-keyword">byte</span>, <span class="tok-number">64</span>&gt; buffer;</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-exceptions" role="tabpanel" aria-labelledby="tab-exceptions" hidden>
+            <div class="example-copy">
+              <p class="example-number">06 / EXCEPTIONS</p>
+              <h3>Handle failure with ordinary control flow.</h3>
+              <p>Typed catches, catch-all handlers, rethrow, and <code>finally</code> provide structured failure handling and cleanup.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#exceptions" target="_blank" rel="noopener noreferrer">Read about exceptions <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>LANGUAGE.md</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde exceptions example"><code><span class="tok-keyword">try</span>
+{
+    Work();
+}
+<span class="tok-keyword">catch</span> (<span class="tok-type">SpecificException</span> error)
+{
+    <span class="tok-type">Console</span>.WriteLine(error.Message);
+}
+<span class="tok-keyword">catch</span> (<span class="tok-type">Exception</span>)
+{
+    <span class="tok-keyword">throw</span>;
+}
+<span class="tok-keyword">catch</span>
+{
+    <span class="tok-type">Console</span>.WriteLine(<span class="tok-string">"fallback"</span>);
+}
+<span class="tok-keyword">finally</span>
+{
+    <span class="tok-type">Console</span>.WriteLine(<span class="tok-string">"cleanup"</span>);
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-unsafe" role="tabpanel" aria-labelledby="tab-unsafe" hidden>
+            <div class="example-copy">
+              <p class="example-number">07 / UNSAFE</p>
+              <h3>Drop checks, not types.</h3>
+              <p>Unsafe blocks expose pointers, address operations, stack allocation, and unmanaged calls while preserving static type checking.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#unsafe-code" target="_blank" rel="noopener noreferrer">Read about unsafe code <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>LANGUAGE.md</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde unsafe pointer example"><code><span class="tok-keyword">public static unsafe void</span> Clear(
+    <span class="tok-keyword">byte</span>* address,
+    <span class="tok-keyword">int</span> length)
+{
+    <span class="tok-keyword">for</span> (<span class="tok-keyword">int</span> index = <span class="tok-number">0</span>; index &lt; length; index++)
+    {
+        address[index] = <span class="tok-number">0</span>;
+    }
+}
+
+<span class="tok-keyword">unsafe</span>
+{
+    <span class="tok-type">NativeBuffer</span>&lt;<span class="tok-keyword">byte</span>&gt; data =
+        <span class="tok-keyword">stackalloc byte</span>[<span class="tok-number">128</span>];
+    data[<span class="tok-number">0</span>] = <span class="tok-number">42</span>;
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-assembly" role="tabpanel" aria-labelledby="tab-assembly" hidden>
+            <div class="example-copy">
+              <p class="example-number">08 / ASSEMBLY</p>
+              <h3>Bind assembly operands explicitly.</h3>
+              <p>GNU assembly uses declared input, output, read/write, constraint, and clobber clauses instead of implicit native state.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#inline-assembly" target="_blank" rel="noopener noreferrer">Read about inline assembly <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>LANGUAGE.md</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde inline assembly example"><code><span class="tok-attribute">[NoAlloc]</span>
+<span class="tok-keyword">asm</span> (
+    <span class="tok-keyword">in</span> value <span class="tok-keyword">as</span> source,
+    <span class="tok-keyword">out</span>(<span class="tok-string">"&amp;r"</span>) result,
+    <span class="tok-keyword">ref</span> accumulator,
+    <span class="tok-keyword">clobber</span>(<span class="tok-string">"eax"</span>, <span class="tok-string">"cc"</span>, <span class="tok-string">"memory"</span>)
+) {
+    movl source, %eax
+    addl %eax, accumulator
+    movl %eax, result
+}</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="project-cta" aria-labelledby="project-heading">
+      <div class="shell project-cta-inner">
+        <div>
+          <p class="eyebrow"><span></span> Open source</p>
+          <h2 id="project-heading">The compiler, specification, and examples are all in one place.</h2>
+        </div>
+        <div class="project-links">
+          <a class="button button-primary" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">Explore C~ on GitHub <span aria-hidden="true">↗</span></a>
+          <a href="https://github.com/sbarisic/CTilde/tree/master/examples" target="_blank" rel="noopener noreferrer">Browse all examples <span aria-hidden="true">→</span></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-inner">
+      <p><strong>C~</strong> <span>Experimental systems language.</span></p>
+      <p><a href="https://github.com/sbarisic/CTilde/blob/master/LICENSE" target="_blank" rel="noopener noreferrer">Unlicense</a> · <a href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">Source on GitHub</a></p>
+    </div>
+  </footer>
+</body>
+</html>

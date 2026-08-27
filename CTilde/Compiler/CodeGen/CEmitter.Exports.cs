@@ -7,7 +7,7 @@ internal sealed partial class CEmitter
         var methods = selectedMethods ?? Model.UserTypes.SelectMany(type => type.Methods);
         foreach (var method in methods
             .Where(method => method.ExportName is not null)
-            .Where(method => !method.IsNaked)
+            .Where(method => !method.IsNaked && !method.IsInterrupt)
                      .OrderBy(method => method.ExportName, StringComparer.Ordinal))
         {
             var declarations = method.Parameters

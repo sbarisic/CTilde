@@ -42,7 +42,7 @@
       <div class="hero-lines" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span></span> Draft 0.22 experimental systems language</p>
+          <p class="eyebrow"><span></span> Draft 0.23 experimental systems language</p>
           <h1>Familiar syntax.<br><em>Native systems.</em></h1>
           <p class="hero-lede">C~ is a small, statically typed language with C#-style syntax. It compiles to deterministic GNU C23 and native programs—without the CLR.</p>
           <div class="hero-actions">
@@ -210,7 +210,7 @@
             <div class="example-copy">
               <p class="example-number">04 / NATIVE</p>
               <h3>Make native boundaries visible.</h3>
-              <p>Attributes describe exact external symbols, transitive effect contracts, and exported entry points instead of hiding semantic or ABI boundaries.</p>
+              <p>Attributes describe exact external symbols, transitive effect contracts, exported entry points, and interrupt-safe native boundaries instead of hiding semantic or ABI boundaries.</p>
               <a href="https://github.com/sbarisic/CTilde/blob/master/examples/Features.ct" target="_blank" rel="noopener noreferrer">Browse native features <span aria-hidden="true">→</span></a>
             </div>
             <div class="code-window">
@@ -230,6 +230,13 @@
 
 <span class="tok-keyword">public static class</span> <span class="tok-type">Program</span>
 {
+    <span class="tok-attribute">[Interrupt]</span>
+    <span class="tok-attribute">[Export(</span><span class="tok-string">"timer_isr"</span><span class="tok-attribute">)]</span>
+    <span class="tok-keyword">public static unsafe void</span> TimerIsr(<span class="tok-keyword">void</span>* context)
+    {
+        <span class="tok-comment">// Compiler-checked runtime-free IRAM closure.</span>
+    }
+
     <span class="tok-attribute">[Export(</span><span class="tok-string">"ctilde_add"</span><span class="tok-attribute">)]</span>
     <span class="tok-attribute">[NoRuntime]</span>
     <span class="tok-attribute">[NoBlock]</span>

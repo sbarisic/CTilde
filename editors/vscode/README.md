@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.22 syntax and semantic classification, including effect-contract completion and hover, freestanding projects, runtime roles, naked startup, and the retained endian, linker, bitfield/register, source-owned, panic-policy, layout, target, MMIO, and interop surface.
+- Draft 0.23 syntax and semantic classification, including `[Interrupt]` and `[InterruptSafe]` completion and hover, effect contracts, freestanding projects, runtime roles, naked startup, and the retained endian, linker, bitfield/register, source-owned, panic-policy, layout, target, MMIO, and interop surface.
 - Target-aware standard-library completion and documentation: hosted supplies console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.

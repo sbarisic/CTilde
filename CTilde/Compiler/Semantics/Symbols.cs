@@ -233,6 +233,8 @@ internal sealed class FieldSymbol : MemberSymbol
     public string? LinkerSymbolName { get; init; }
     public bool IsNativeVolatile { get; init; }
     public bool IsUsed { get; init; }
+    public bool IsInterruptSafe { get; init; }
+    public bool IsInterruptData { get; set; }
     public int? BitFirst { get; init; }
     public int? BitLast { get; init; }
     public bool IsBitView => BitFirst is not null;
@@ -336,6 +338,9 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsUsed { get; init; }
     public RuntimeImplementationRole? RuntimeImplementation { get; init; }
     public bool IsNaked { get; init; }
+    public bool IsInterrupt { get; init; }
+    public bool IsInterruptSafe { get; init; }
+    public bool IsInterruptCode { get; set; }
     public uint? TaskStackSize { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }

@@ -178,7 +178,7 @@ public sealed partial class LanguageServiceSnapshot
         var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
-        if (token.Kind == SyntaxKind.IdentifierToken && EffectAttributeHover(token.Text) is { } effectHover)
+        if (token.Kind == SyntaxKind.IdentifierToken && ContractAttributeHover(token.Text) is { } effectHover)
             return new LanguageHover(effectHover, token.Span);
         if (token.Kind != SyntaxKind.IdentifierToken && !OperatorFacts.IsSupported(token.Kind))
         {
@@ -358,6 +358,11 @@ public sealed partial class LanguageServiceSnapshot
         }
         foreach (var effect in new[] { "NoAlloc", "NoThrow", "NoBlock", "NoRuntime" })
             Add(effect, LanguageCompletionKind.Keyword, "analysis-only effect contract attribute", "0");
+        if (insideType)
+        {
+            Add("Interrupt", LanguageCompletionKind.Keyword, "ESP-IDF interrupt entry attribute", "0");
+            Add("InterruptSafe", LanguageCompletionKind.Keyword, "trusted interrupt-safe native boundary attribute", "0");
+        }
         foreach (var builtIn in BuiltInTypes)
             Add(builtIn, LanguageCompletionKind.Keyword, "built-in type", "1");
         Add("NativeBuffer", LanguageCompletionKind.Struct, "System.Runtime.NativeBuffer<T>", "1", documentationId: "T:System.Runtime.NativeBuffer<T>");
@@ -403,12 +408,14 @@ public sealed partial class LanguageServiceSnapshot
             results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label, documentationId ?? (symbol is null ? null : _model.Documentation.GetId(symbol))));
     }
 
-    private static string? EffectAttributeHover(string name) => name switch
+    private static string? ContractAttributeHover(string name) => name switch
     {
         "NoAlloc" => "[NoAlloc] - the callable and its transitive calls do not allocate managed storage.",
         "NoThrow" => "[NoThrow] - the callable uses no exception machinery or potentially failing runtime checks; implies NoAlloc.",
         "NoBlock" => "[NoBlock] - the callable does not wait for time, I/O, synchronization, another thread, or external progress.",
         "NoRuntime" => "[NoRuntime] - the callable is bootstrap-safe and uses no managed runtime; implies NoThrow and NoAlloc.",
+        "Interrupt" => "[Interrupt] - an ESP-IDF native-only void(void*) entry whose transitive C~ closure is NoRuntime, NoBlock, and IRAM/DRAM safe.",
+        "InterruptSafe" => "[InterruptSafe] - a trusted cache-disabled-safe extern, extern-data, or inline-assembly boundary; effect contracts remain explicit.",
         _ => null,
     };
 

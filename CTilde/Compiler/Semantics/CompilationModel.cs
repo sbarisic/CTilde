@@ -392,6 +392,9 @@ internal sealed partial class CompilationModel
             IsUsed = method.IsUsed,
             RuntimeImplementation = method.RuntimeImplementation,
             IsNaked = method.IsNaked,
+            IsInterrupt = method.IsInterrupt,
+            IsInterruptSafe = method.IsInterruptSafe,
+            IsInterruptCode = method.IsInterruptCode,
             TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
@@ -478,6 +481,8 @@ internal sealed partial class CompilationModel
                 LinkerSymbolName = field.LinkerSymbolName,
                 IsNativeVolatile = field.IsNativeVolatile,
                 IsUsed = field.IsUsed,
+                IsInterruptSafe = field.IsInterruptSafe,
+                IsInterruptData = field.IsInterruptData,
                 BitFirst = field.BitFirst,
                 BitLast = field.BitLast,
                 RegisterAddress = registerAddress,
@@ -596,6 +601,9 @@ internal sealed partial class CompilationModel
             IsUsed = method.IsUsed,
             RuntimeImplementation = method.RuntimeImplementation,
             IsNaked = method.IsNaked,
+            IsInterrupt = method.IsInterrupt,
+            IsInterruptSafe = method.IsInterruptSafe,
+            IsInterruptCode = method.IsInterruptCode,
             TaskStackSize = method.TaskStackSize,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
@@ -1238,7 +1246,7 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits", "InterruptSafe"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
@@ -1254,6 +1262,7 @@ internal sealed partial class CompilationModel
                     var bitAttribute = FindAttribute(field.Attributes, "Bit");
                     var bitsAttribute = FindAttribute(field.Attributes, "Bits");
                     var registerAttribute = FindAttribute(field.Attributes, "Register");
+                    var interruptSafeAttribute = FindAttribute(field.Attributes, "InterruptSafe");
                     string? externName = null;
                     string? linkerSymbolName = null;
                     int? bitFirst = null;
@@ -1296,6 +1305,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
                     if (nativeVolatileAttribute is not null && nativeVolatileAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1290", "NativeVolatile does not accept arguments.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
+                    if (interruptSafeAttribute is not null && !interruptSafeAttribute.Arguments.IsEmpty)
+                        Diagnostics.Add("CT1306", "InterruptSafe does not accept arguments.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
                     var fieldOffsetAttribute = FindAttribute(field.Attributes, "FieldOffset");
                     if (fieldOffsetAttribute is not null)
                     {
@@ -1328,6 +1339,7 @@ internal sealed partial class CompilationModel
                         LinkerSymbolName = linkerSymbolName,
                         IsNativeVolatile = nativeVolatileAttribute is not null,
                         IsUsed = usedAttribute is not null,
+                        IsInterruptSafe = interruptSafeAttribute is not null,
                         BitFirst = bitFirst,
                         BitLast = bitLast,
                         RegisterAddress = registerAddress,
@@ -1355,6 +1367,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1289", "Extern data requires a non-generic static unmanaged field without an initializer, Section, Used, const, or C~ volatile.", externAttribute.Source, externAttribute.Span);
                     if (nativeVolatileAttribute is not null && externAttribute is null)
                         Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
+                    if (interruptSafeAttribute is not null && externAttribute is null)
+                        Diagnostics.Add("CT1306", "InterruptSafe data requires an extern static field.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
                     if (linkerSymbolAttribute is not null && (!symbol.IsStatic || !symbol.IsReadonly || !symbol.IsUnsafe || symbol.IsConst || symbol.IsVolatile || symbol.Initializer is not null || !IsLinkerAddressType(symbol.Type) || externAttribute is not null || sectionAttribute is not null || usedAttribute is not null || nativeVolatileAttribute is not null || fieldAlignment is not null))
                         Diagnostics.Add("CT1296", "LinkerSymbol requires a static unsafe readonly pointer, nuint, or nuint-backed newtype field without storage, initialization, volatility, or conflicting native attributes.", linkerSymbolAttribute.Source, linkerSymbolAttribute.Span);
                     if (fieldAlignment is not null && (symbol.IsConst || symbol.ExternName is not null || !symbol.IsStatic && type.Kind != DeclaredTypeKind.Struct))
@@ -1525,7 +1539,7 @@ internal sealed partial class CompilationModel
             case MethodDeclarationSyntax method:
                 {
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var export = FindAttribute(method.Attributes, "Export");
@@ -1540,6 +1554,8 @@ internal sealed partial class CompilationModel
                     var taskEntryAttribute = FindAttribute(method.Attributes, "TaskEntry");
                     var runtimeImplAttribute = FindAttribute(method.Attributes, "RuntimeImpl");
                     var nakedAttribute = FindAttribute(method.Attributes, "Naked");
+                    var interruptAttribute = FindAttribute(method.Attributes, "Interrupt");
+                    var interruptSafeAttribute = FindAttribute(method.Attributes, "InterruptSafe");
                     var runtimeImplementation = ParseRuntimeImplementation(runtimeImplAttribute);
                     uint? taskStackSize = null;
                     if (taskEntryAttribute is not null)
@@ -1598,6 +1614,10 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1288", "Used requires a body-bearing static non-extern method.", usedAttribute.Source, usedAttribute.Span);
                     if (nakedAttribute is not null && nakedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1302", "Naked does not accept arguments.", nakedAttribute.Source, nakedAttribute.Span);
+                    if (interruptAttribute is not null && !interruptAttribute.Arguments.IsEmpty)
+                        Diagnostics.Add("CT1306", "Interrupt does not accept arguments.", interruptAttribute.Source, interruptAttribute.Span);
+                    if (interruptSafeAttribute is not null && !interruptSafeAttribute.Arguments.IsEmpty)
+                        Diagnostics.Add("CT1306", "InterruptSafe does not accept arguments.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
                     string? externalName = null;
                     string? exportName = null;
                     if (external is not null)
@@ -1674,6 +1694,8 @@ internal sealed partial class CompilationModel
                         IsUsed = usedAttribute is not null,
                         RuntimeImplementation = runtimeImplementation,
                         IsNaked = nakedAttribute is not null,
+                        IsInterrupt = interruptAttribute is not null,
+                        IsInterruptSafe = interruptSafeAttribute is not null,
                         TaskStackSize = taskStackSize,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
@@ -1697,6 +1719,16 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1299", "RuntimeImpl requires a freestanding non-generic static body-bearing NoAlloc method without native-entry attributes.", runtimeImplAttribute.Source, runtimeImplAttribute.Span);
                     if (nakedAttribute is not null && !IsValidNakedMethod(symbol))
                         Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() method containing exactly one operand-free NoAlloc asm statement.", nakedAttribute.Source, nakedAttribute.Span);
+                    if (interruptSafeAttribute is not null && external is null)
+                        Diagnostics.Add("CT1306", "InterruptSafe methods must be extern native boundaries.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
+                    if (interruptAttribute is not null && _target != CompilationTarget.EspIdf)
+                        Diagnostics.Add("CT4117", "Interrupt entry points require the ESP-IDF target.", interruptAttribute.Source, interruptAttribute.Span);
+                    if (interruptAttribute is not null &&
+                        (accessibility != Accessibility.Public || !isStatic || !symbol.IsUnsafe || method.Body is null || isAbstractMethod ||
+                         external is not null || exportName is null || entry is not null || taskEntryAttribute is not null || runtimeImplAttribute is not null ||
+                         nakedAttribute is not null || sectionAttribute is not null || symbol.IsVirtual || !method.TypeParameters.IsDefaultOrEmpty ||
+                         returnType != CType.Void || methodParameters is not [{ PassingKind: ParameterPassingKind.Value, Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
+                        Diagnostics.Add("CT1306", "Interrupt requires an ESP-IDF public static unsafe non-generic exported void(void*) method body without conflicting entry or placement attributes.", interruptAttribute.Source, interruptAttribute.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
                     if (symbol.IsNoRuntime && (returnType.ContainsManagedReferences || methodParameters.Any(parameter => parameter.Type.ContainsManagedReferences)))
@@ -2251,13 +2283,15 @@ internal sealed partial class CompilationModel
                     "NoThrow" => "CT1303",
                     "NoBlock" => "CT1304",
                     "NoRuntime" => "CT1305",
+                    "Interrupt" or "InterruptSafe" => "CT1306",
                     _ => "CT1213",
                 };
                 Diagnostics.Add(code, $"Unknown or invalid attribute '{attribute.Name}' on this declaration.", attribute.Source, attribute.Span);
             }
         }
         foreach (var duplicate in attributes.GroupBy(attribute => attribute.Name, StringComparer.Ordinal).Where(group => group.Count() > 1))
-            Diagnostics.Add("CT1214", $"Attribute '{duplicate.Key}' cannot be applied more than once.", syntax.Source, syntax.Span);
+            Diagnostics.Add(duplicate.Key is "Interrupt" or "InterruptSafe" ? "CT1306" : "CT1214",
+                $"Attribute '{duplicate.Key}' cannot be applied more than once.", syntax.Source, syntax.Span);
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);

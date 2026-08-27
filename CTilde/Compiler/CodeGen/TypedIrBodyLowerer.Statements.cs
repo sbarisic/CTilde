@@ -31,7 +31,7 @@ internal sealed partial class TypedIrBodyLowerer
                 }
                 if (!_analysisOnly)
                 {
-                    if (_emitter.EmitDebugInstrumentation)
+                    if (EmitDebugInstrumentation)
                         writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, defer, "defer-capture")}));");
                     var deferId = _deferId;
                     _capturingDirectDefer = true;
@@ -42,7 +42,7 @@ internal sealed partial class TypedIrBodyLowerer
                     var action = directLowered.Type.ContainsManagedReferences
                         ? $"{_emitter.CDeclaration(directLowered.Type, "ignored")} = {directLowered.Code}; {CEmitter.ValueDropName(directLowered.Type)}((void*)&ignored);"
                         : $"(void)({directLowered.Code});";
-                    if (_emitter.EmitDebugInstrumentation)
+                    if (EmitDebugInstrumentation)
                         action = $"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, defer, "defer")})); {action}";
                     _directDefers.Add(new DirectDeferThunk(thunkName, action));
                     RegisterDurableSlot("ct_defer_marker", CType.Byte);
@@ -90,11 +90,11 @@ internal sealed partial class TypedIrBodyLowerer
         // A braced block is a structural container, not an executable source site.
         // Emitting a probe before it would place statements between an if/while and
         // its body, changing the generated C control flow (and orphaning else).
-        if (!_emitter.EmitDebugInformation || statement is BlockStatementSyntax)
+        if (!EmitDebugInformation || statement is BlockStatementSyntax)
             return EmitStatementCore(writer, statement);
         _emitter.RegisterDebugExecutable(_method, statement);
         writer.WriteLine(_emitter.DebugSourceDirective(statement));
-        if (_emitter.EmitDebugInstrumentation)
+        if (EmitDebugInstrumentation)
         {
             foreach (var local in ActiveLocals().Where(local => local.IsAssigned).OrderBy(local => local.Id))
                 writer.WriteLine($"ct_debug_keep((void*)&{local.CName});");
@@ -264,8 +264,12 @@ internal sealed partial class TypedIrBodyLowerer
             ["NoBlock"] = (EffectContract.NoBlock, "CT1304"),
             ["NoRuntime"] = (EffectContract.NoRuntime, "CT1305"),
         };
-        foreach (var attribute in syntax.Attributes.Where(attribute => !allowedEffectAttributes.ContainsKey(attribute.Name)))
+        foreach (var attribute in syntax.Attributes.Where(attribute => !allowedEffectAttributes.ContainsKey(attribute.Name) && attribute.Name != "InterruptSafe"))
             Report("CT2191", $"Attribute '{attribute.Name}' is not valid on an asm statement.", attribute);
+        foreach (var attribute in syntax.Attributes.Where(attribute => attribute.Name == "InterruptSafe" && !attribute.Arguments.IsEmpty))
+            Report("CT1306", "InterruptSafe does not accept arguments.", attribute);
+        if (syntax.Attributes.Count(attribute => attribute.Name == "InterruptSafe") > 1)
+            Report("CT1306", "An asm statement cannot repeat the InterruptSafe attribute.", syntax.Attributes.Last(attribute => attribute.Name == "InterruptSafe"));
         var trustedContracts = EffectContract.None;
         foreach (var pair in allowedEffectAttributes)
         {
@@ -516,7 +520,7 @@ internal sealed partial class TypedIrBodyLowerer
                 writer.WriteLine($"{symbol.CName} = {initializer.Code};");
         }
         writer.WriteLine($"(void){symbol.CName};");
-        if (_emitter.EmitDebugInstrumentation)
+        if (EmitDebugInstrumentation)
             writer.WriteLine($"ct_debug_keep((void*)&{symbol.CName});");
     }
 
@@ -524,7 +528,7 @@ internal sealed partial class TypedIrBodyLowerer
     {
         var condition = RequireBoolean(LowerExpression(syntax.Condition), syntax.Condition);
         EmitPrelude(writer, condition.Prelude);
-        if (!_emitter.EmitDebugInstrumentation && condition.IsConstant && condition.ConstantValue is bool constantCondition)
+        if (!EmitDebugInstrumentation && condition.IsConstant && condition.ConstantValue is bool constantCondition)
         {
             if (constantCondition)
                 return EmitEmbedded(writer, syntax.Then);

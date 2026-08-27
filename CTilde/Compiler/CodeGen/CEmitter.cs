@@ -429,6 +429,11 @@ internal sealed partial class CEmitter : ILoweringServices
         foreach (var sourceLine in prefix.Split('\n'))
         {
             var line = sourceLine.TrimEnd('\r');
+            // ESP-IDF expands IRAM_ATTR with __COUNTER__. Repeating it on an
+            // internal prototype and the later definition selects two different
+            // subsections and GCC rejects the conflict. Residency belongs to the
+            // definition; public native prototypes retain the attribute.
+            line = line.Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal);
             if (skipFunction)
             {
                 skipFunctionDepth += line.Count(character => character == '{') - line.Count(character => character == '}');
@@ -467,6 +472,8 @@ internal sealed partial class CEmitter : ILoweringServices
             var declaration = RemoveInternalLinkage(line);
             if (declaration is not null)
             {
+                declaration = declaration.Replace("DRAM_ATTR ", string.Empty, StringComparison.Ordinal);
+                declaration = declaration.Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal);
                 declaration = NativeSection.StripDataDefinitionMacro(declaration);
                 if (LooksLikeFunctionDeclaration(declaration))
                 {
@@ -505,6 +512,7 @@ internal sealed partial class CEmitter : ILoweringServices
             {
                 var openBrace = line.IndexOf('{');
                 var signature = openBrace >= 0 ? line[..openBrace].TrimEnd() : line.TrimEnd();
+                signature = signature.Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal);
                 writer.Append("extern ").Append(signature.TrimEnd(';')).Append(";\n");
                 var opens = line.Count(character => character == '{');
                 var closes = line.Count(character => character == '}');
@@ -615,6 +623,8 @@ internal sealed partial class CEmitter : ILoweringServices
             entry["linkerRetained"] = field.IsUsed;
             entry["linkerSymbol"] = field.LinkerSymbolName;
             entry["registerAddress"] = field.RegisterAddress?.ToString(CultureInfo.InvariantCulture);
+            entry["interruptSafe"] = field.IsInterruptSafe;
+            entry["dataResidency"] = field.IsInterruptData ? "dram" : null;
             symbols.Add(entry);
         }
         foreach (var function in program.Functions.OrderBy(function => function.Method.CName, StringComparer.Ordinal))
@@ -622,7 +632,7 @@ internal sealed partial class CEmitter : ILoweringServices
             var method = function.Method;
             if (method.ExternName is not null)
                 continue;
-            var cName = function.Property is null ? method.IsNaked ? method.ExportName! : method.CName : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+            var cName = function.Property is null ? method is { IsNaked: true } or { IsInterrupt: true } ? method.ExportName! : method.CName : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
             var identity = function.Property is null ? NameMangler.MethodIdentity(method) : NameMangler.PropertyIdentity(function.Property, function.IsGetter);
             var entry = SymbolMapEntry(cName, identity, function.Property is null ? "method" : function.IsGetter ? "getter" : "setter",
                 NameMangler.CanonicalType(method.ReturnType), method.Syntax);
@@ -636,6 +646,9 @@ internal sealed partial class CEmitter : ILoweringServices
                 _ => false,
             };
             entry["naked"] = method.IsNaked;
+            entry["interrupt"] = method.IsInterrupt;
+            entry["interruptSafe"] = method.IsInterruptSafe;
+            entry["codeResidency"] = method.IsInterruptCode ? "iram" : null;
             entry["declaredEffects"] = EffectFacts.IndividualContracts(method.DeclaredEffects)
                 .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             entry["inferredEffects"] = EffectAnalyzer.IndividualEffects(Model.Effects.GetEffects(method))
@@ -666,7 +679,7 @@ internal sealed partial class CEmitter : ILoweringServices
             {
                 var method = function.Method;
                 var cName = function.Property is null
-                    ? method.CName
+                    ? method is { IsNaked: true } or { IsInterrupt: true } ? method.ExportName! : method.CName
                     : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
                 var scopeSource = method.Body ?? method.Syntax;
                 SyntaxNode[] scopeNodes = scopeSource is null
@@ -1466,8 +1479,10 @@ internal sealed partial class CEmitter : ILoweringServices
             if (parameter.IsSynchronousCallback)
                 parameters.Add($"void* {parameterName}_context");
         }
-        var storage = method.ExternName is not null ? "extern " : method.IsUsed ? string.Empty : "static ";
-        var signature = storage + UsedAnnotation(method.IsUsed) + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
+        var storage = method.ExternName is not null ? "extern " : method.IsInterrupt || method.IsUsed ? string.Empty : "static ";
+        var placement = method.IsInterruptCode ? "IRAM_ATTR " : SectionAnnotation(NativeSectionKind.Code, method.SectionName);
+        var effectiveName = method.IsInterrupt ? method.ExportName! : name ?? method.CName;
+        var signature = storage + placement + UsedAnnotation(method.IsUsed) + CFunctionDeclaration(returnType, effectiveName, parameters);
         return prototype ? signature + ";" : signature;
     }
 

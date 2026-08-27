@@ -4,6 +4,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include "driver/gpio.h"
+#if defined(CTILDE_DRAFT023_VALIDATION)
+#include "driver/gptimer.h"
+#endif
 #include "esp_system.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -21,6 +24,78 @@ static int32_t ct_esp_ws2812_pin = -1;
 static uint32_t ct_esp_ws2812_led_count;
 volatile uint32_t ct_draft018_native_data;
 static volatile uint32_t ct_draft018_mmio_word;
+
+#if defined(CTILDE_DRAFT023_VALIDATION)
+static gptimer_handle_t ct_draft023_timer;
+static DRAM_ATTR volatile uint32_t ct_draft023_native_ack_count;
+
+static bool IRAM_ATTR ct_draft023_on_alarm(
+    gptimer_handle_t timer,
+    const gptimer_alarm_event_data_t* event_data,
+    void* user_context)
+{
+    (void)timer;
+    (void)event_data;
+    ctilde_draft023_timer_isr(user_context);
+    return false;
+}
+
+void IRAM_ATTR ct_draft023_ack(void* context)
+{
+    (void)context;
+    ++ct_draft023_native_ack_count;
+}
+
+int32_t ct_draft023_start_timer(void)
+{
+    ct_draft023_native_ack_count = 0u;
+    gptimer_config_t config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = UINT32_C(1000000),
+    };
+    esp_err_t result = gptimer_new_timer(&config, &ct_draft023_timer);
+    if (result != ESP_OK)
+        return (int32_t)result;
+    gptimer_event_callbacks_t callbacks = { .on_alarm = ct_draft023_on_alarm };
+    result = gptimer_register_event_callbacks(ct_draft023_timer, &callbacks, NULL);
+    if (result == ESP_OK)
+        result = gptimer_enable(ct_draft023_timer);
+    gptimer_alarm_config_t alarm = {
+        .alarm_count = UINT64_C(1000),
+        .reload_count = UINT64_C(0),
+        .flags.auto_reload_on_alarm = true,
+    };
+    if (result == ESP_OK)
+        result = gptimer_set_alarm_action(ct_draft023_timer, &alarm);
+    if (result == ESP_OK)
+        result = gptimer_start(ct_draft023_timer);
+    if (result == ESP_OK)
+        return 0;
+    (void)gptimer_disable(ct_draft023_timer);
+    (void)gptimer_del_timer(ct_draft023_timer);
+    ct_draft023_timer = NULL;
+    return (int32_t)result;
+}
+
+int32_t ct_draft023_stop_timer(void)
+{
+    if (ct_draft023_timer == NULL)
+        return (int32_t)ESP_ERR_INVALID_STATE;
+    esp_err_t result = gptimer_stop(ct_draft023_timer);
+    if (result == ESP_OK)
+        result = gptimer_disable(ct_draft023_timer);
+    if (result == ESP_OK)
+        result = gptimer_del_timer(ct_draft023_timer);
+    ct_draft023_timer = NULL;
+    return (int32_t)result;
+}
+
+uint32_t ct_draft023_ack_count(void)
+{
+    return ct_draft023_native_ack_count;
+}
+#endif
 
 #ifndef CTILDE_FREERTOS_TLS_INDEX
 #define CTILDE_FREERTOS_TLS_INDEX 1

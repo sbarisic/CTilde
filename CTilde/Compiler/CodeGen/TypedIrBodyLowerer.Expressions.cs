@@ -31,7 +31,7 @@ internal sealed partial class TypedIrBodyLowerer
             OffsetOfExpressionSyntax offsetOf => LowerOffsetOf(offsetOf),
             _ => ErrorExpression(),
         };
-        if (syntax is CallExpressionSyntax && _emitter.EmitDebugInstrumentation && !_analysisOnly)
+        if (syntax is CallExpressionSyntax && EmitDebugInstrumentation && !_analysisOnly)
             result.Prelude.Insert(0, $"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, syntax, "call")}));");
         if (_optimizationFacts.KnownNonNullExpressions.Contains(syntax))
             result.IsKnownNonNull = true;

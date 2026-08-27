@@ -18,7 +18,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         var linkerFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.LinkerSymbolName is not null && field.Accessibility == Accessibility.Public)
             .OrderBy(field => field.LinkerSymbolName, StringComparer.Ordinal).ToArray();
         var exportedTypes = ExportTypes(exports).Concat(externFields.Concat(linkerFields).SelectMany(field => ExpandType(field.Type))).Distinct().ToArray();
-        var signatureText = $"draft-{CompilerContract.DraftVersion}:{Model.Target}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize + ":naked=" + method.IsNaked)) +
+        var signatureText = $"draft-{CompilerContract.DraftVersion}:{Model.Target}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize + ":naked=" + method.IsNaked + ":interrupt=" + method.IsInterrupt)) +
             "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile + ":" + field.Alignment)) +
             "\n" + string.Join("\n", linkerFields.Select(field => field.LinkerSymbolName + ":" + NameMangler.CanonicalType(field.Type))) +
             "\n" + string.Join("\n", exportedTypes.Where(type => type.Symbol is not null).Select(HeaderTypeSignature).OrderBy(value => value, StringComparer.Ordinal));
@@ -27,6 +27,8 @@ internal sealed class CHeaderEmitter(BoundProgram program)
         writer.Append("#ifndef ").Append(guard).Append('\n');
         writer.Append("#define ").Append(guard).Append("\n\n");
         writer.Append("#include <stdbool.h>\n#include <stddef.h>\n#include <stdint.h>\n");
+        if (exports.Any(method => method.IsInterrupt))
+            writer.Append("#include <esp_attr.h>\n");
         foreach (var header in exportedTypes.Where(type => type.Kind == CTypeKind.Opaque).Select(type => type.Symbol!.NativeHeader!).Distinct(StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal))
             writer.Append("#include <").Append(header).Append(">\n");
         if (exportedTypes.Any(type => type.Kind == CTypeKind.EspError))
@@ -109,6 +111,8 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append("/* ownership: ").Append(ownership).Append(" */\n");
             if (method.SectionName is not null)
                 writer.Append(NativeSection.MacroName(NativeSectionKind.Code, method.SectionName)).Append(' ');
+            if (method.IsInterrupt)
+                writer.Append("IRAM_ATTR ");
             if (method.IsNaked)
                 writer.Append("__attribute__((noreturn)) ");
             writer.Append(CTypeName(method.ReturnType)).Append(' ').Append(method.ExportName).Append('(');

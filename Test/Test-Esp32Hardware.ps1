@@ -24,6 +24,7 @@ $consoleValidationSource = Join-Path $ProjectDirectory "ConsoleValidation.ct"
 $draft018ValidationSource = Join-Path $ProjectDirectory "Draft018Validation.ct"
 $draft019ValidationSource = Join-Path $ProjectDirectory "Draft019Validation.ct"
 $draft020ValidationSource = Join-Path $ProjectDirectory "Draft020Validation.ct"
+$draft023ValidationSource = Join-Path $ProjectDirectory "Draft023Validation.ct"
 $buildScript = Join-Path $ProjectDirectory "Build.ps1"
 $artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
 $timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
@@ -67,6 +68,7 @@ $report = [ordered]@{
     draft018Validation = $null
     draft019Validation = $null
     draft020Validation = $null
+    draft023Validation = $null
     debugger = $null
     postDetach = $null
     startupTimeout = $null
@@ -478,6 +480,21 @@ try {
     $draft020TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft020.txt"
     Write-Utf8NoBom $draft020TranscriptPath $draft020Transcript
     $report.draft020Validation = [ordered]@{ elapsedSeconds = $draft020Capture.ElapsedSeconds; transcript = $draft020TranscriptPath }
+
+    Write-Host "`n=== Draft 0.23 interrupt-safe entry points ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $draft023ValidationSource -Flash
+    if ($LASTEXITCODE -ne 0) { throw "Draft 0.23 validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    $draft023Capture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTILDE_DRAFT_023_OK") -or $text.Contains("CTILDE_DRAFT_023_FAILED") -or $text.Contains("CTILDE_DRAFT_023_START_FAILED")
+    } 45
+    $draft023Transcript = Select-FirmwareTranscript $draft023Capture.Transcript
+    if (-not $draft023Transcript.Contains("CTILDE_DRAFT_023_OK")) {
+        throw "Draft 0.23 validation did not emit its success marker.`n$draft023Transcript"
+    }
+    $draft023TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft023.txt"
+    Write-Utf8NoBom $draft023TranscriptPath $draft023Transcript
+    $report.draft023Validation = [ordered]@{ elapsedSeconds = $draft023Capture.ElapsedSeconds; transcript = $draft023TranscriptPath }
 
     Write-Host "`n=== Managed layout and allocation failure ==="
     $previousMemoryBuild = $env:CTILDE_MEMORY_VALIDATION_BUILD

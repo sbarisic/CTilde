@@ -127,6 +127,7 @@ function Get-BuildEnvironmentSignature {
     return ([ordered]@{
         fatalRuntime = [string]$env:CTILDE_FATAL_RUNTIME_BUILD
         memoryValidation = [string]$env:CTILDE_MEMORY_VALIDATION_BUILD
+        draft023Validation = [string]$env:CTILDE_DRAFT023_VALIDATION_BUILD
     } | ConvertTo-Json -Compress)
 }
 
@@ -142,6 +143,14 @@ function Write-BuildEnvironmentSignature([string]$Path, [string]$Value) {
     finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force }
     }
+}
+
+$previousDraft023Validation = $env:CTILDE_DRAFT023_VALIDATION_BUILD
+if ([IO.Path]::GetFileName($sourcePath) -eq "Draft023Validation.ct") {
+    $env:CTILDE_DRAFT023_VALIDATION_BUILD = "1"
+}
+else {
+    Remove-Item Env:CTILDE_DRAFT023_VALIDATION_BUILD -ErrorAction SilentlyContinue
 }
 
 Push-Location $projectDirectory
@@ -205,4 +214,6 @@ try {
 }
 finally {
     Pop-Location
+    if ($null -eq $previousDraft023Validation) { Remove-Item Env:CTILDE_DRAFT023_VALIDATION_BUILD -ErrorAction SilentlyContinue }
+    else { $env:CTILDE_DRAFT023_VALIDATION_BUILD = $previousDraft023Validation }
 }

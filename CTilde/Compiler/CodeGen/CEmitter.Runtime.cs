@@ -62,6 +62,11 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <signal.h>");
         if (IsEspIdf)
         {
+            if (Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.IsInterruptCode) ||
+                Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsInterruptData))
+            {
+                writer.WriteLine("#include <esp_attr.h>");
+            }
             writer.WriteLine("#include \"ctilde_esp_shim.h\"");
             writer.WriteLine("extern void esp_restart(void) __attribute__((noreturn));");
             writer.WriteLine("extern void esp_system_abort(const char* details) __attribute__((noreturn));");
@@ -1151,7 +1156,8 @@ internal sealed partial class CEmitter
             var value = field.Type.Kind is CTypeKind.Struct or CTypeKind.InlineArray ? "{0}" : DefaultValue(field.Type);
             var retention = field.IsUsed ? "CT_USED " : field.Alignment is not null ? "CT_UNUSED " : string.Empty;
             var storage = field.IsUsed ? string.Empty : "static ";
-            writer.WriteLine($"{(field.Alignment is int alignment ? $"CT_ALIGN({alignment}) " : string.Empty)}{storage}{retention}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
+            var interruptData = IsEspIdf && field.IsInterruptData ? "DRAM_ATTR " : string.Empty;
+            writer.WriteLine($"{(field.Alignment is int alignment ? $"CT_ALIGN({alignment}) " : string.Empty)}{storage}{interruptData}{retention}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
         }
         if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();

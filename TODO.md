@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.22 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.23 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -39,9 +39,8 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 - [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC.
 - [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
-- [ ] Generalize the narrow freestanding naked-startup form to target-specific naked functions with parameters, compiler-bound assembly operands, and first-class interrupt handlers.
+- [ ] Generalize the narrow freestanding naked-startup and ESP-IDF interrupt forms to target-specific naked functions with parameters, compiler-bound assembly operands, and additional interrupt signatures.
 - [ ] Define retained callback registration, unregistration, rooting, and cross-thread lifetime rules separately from the existing synchronous callback profile.
-- [ ] Define `[Interrupt]` as a target-specific effect profile over the general effect system. Enforce no-allocation, no-throw, no-block, IRAM-safe, DRAM-safe, and other target-specific ISR restrictions through transitive reachability.
 
 ## Deferred research
 

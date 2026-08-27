@@ -1,10 +1,10 @@
 # Implementation status
 
-Last reviewed: 2026-08-27
+Last reviewed: 2026-08-28
 
 ## Current state
 
-C~ draft 0.22 has one compiler path:
+C~ draft 0.23 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding GNU C23
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.22 coverage adds direct, recursive, transitive, inherited, generic, extern, assembly, runtime-check, blocking, bootstrap, symbol-map, completion, and hover effect cases. Draft 0.21 added target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Draft 0.20 added exact endian conversions, linker addresses, final-image retention, scalar bitfields, fixed-address registers, source-owned modules, and ESP-IDF panic policies. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.23 coverage adds direct ISR export emission, transitive IRAM/DRAM placement, implicit effect validation, explicit interrupt-safe native boundaries, deterministic residency diagnostics, symbol metadata, and language services. Draft 0.22 added direct, recursive, transitive, inherited, generic, extern, assembly, runtime-check, blocking, bootstrap, symbol-map, completion, and hover effect cases. Draft 0.21 added target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -156,6 +156,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | ESP-IDF panic policies | Implemented | Manifest/CLI/editor state, abort/restart/halt terminal paths, hosted rejection, and halt `sdkconfig` validation |
 | Synchronous delegate/context callbacks | Implemented | ARC lifetime, virtual dispatch, ABI placement, attachment guards, and exception barriers |
 | General effect contracts | Implemented | `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]`; direct, recursive, transitive, inherited, extern, assembly, runtime-check, and symbol-map tests |
+| ESP-IDF interrupt entries | Implemented | Native-only `[Interrupt]` roots, implicit runtime/blocking profile, `[InterruptSafe]` boundaries, IRAM call closure, DRAM statics, direct exports, headers, maps, and GPTimer build fixture |
 | Bundled `System.Object`, `System.Console`, `System.Environment`, `System.Math`, and `System.Runtime.Memory` sources | Implemented | Embedded-source, documentation, native math, and output tests |
 | Hosted console input and `System.IO` | Implemented | UTF-8 line/EOF behavior, Unicode paths, opaque ownership, binary round trip, exceptions, target filtering, and editor documentation |
 | Scalar `ToString()` | Implemented | Boundary formatting, identity, diagnostic, and null-failure tests |
@@ -163,7 +164,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 
 ## Conformance coverage
 
-The executable test project registers 156 checks. The release gate below records their current managed and native result. Coverage includes:
+The executable test project registers 160 checks. The release gate below records their current managed and native result. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -316,6 +317,14 @@ Freestanding C uses internal byte loops, one static execution state, direct pani
 
 The project model and CLI accept contained linker scripts, explicit entry symbols, ordered `.c`/`.S`/`.s` sources, ELF objects, archives, and validated compile/link options. The dedicated GCC/Clang driver checks predefined architecture macros, compiles with freestanding/no-builtin/no-startup flags, and links through the selected script without libc. The checked x64 example produces an ELF entry at `_start`, retains the requested text/data/BSS and runtime/export symbols, has no undefined native symbols, executes managed allocation and shutdown, and exits with status zero under WSL GCC.
 
+## Draft 0.23 interrupt-safe entry points
+
+`[Interrupt]` defines one ESP-IDF-native `void(void*)` root with a required export name. `InterruptValidator` closes its reachable C~ graph after effect inference, rejects runtime/blocking behavior and open dispatch, validates every extern/data/assembly boundary, and marks accepted methods and static fields for IRAM/DRAM placement. `[InterruptSafe]` provides explicit native residency trust without silently adding semantic effect contracts.
+
+The emitter writes the ISR under its exported symbol directly, with no ordinary wrapper, runtime-ready check, thread attachment, exception frame, ARC cleanup, or debug probe. ESP-IDF definitions and public prototypes carry `IRAM_ATTR`; compiler-owned interrupt statics carry `DRAM_ATTR`. Modular internal declarations omit these definition-only attributes because ESP-IDF's counter-based IRAM macro cannot safely be repeated before a definition. Symbol-map version 1 additively records interrupt and residency facts. Runtime ABI 16 and debug metadata v3 remain unchanged.
+
+The T-CAN485 acceptance fixture registers the generated C~ entry as a GPTimer ISR, updates volatile DRAM state, crosses one independently effect-contracted `[InterruptSafe]` native acknowledgement, and checks the counts from ordinary task context. ESP32 and ESP32-C3 builds use the real ESP-IDF driver and warning-as-error configuration. Connected execution emits `CTILDE_DRAFT_023_OK`; the hardware runner restores the ordinary Release firmware in its existing `finally` path.
+
 ## Deliberately deferred
 
 ## Draft 0.22 general effect contracts
@@ -346,7 +355,7 @@ These features are outside draft 0.22:
 
 ## Release gate
 
-A draft 0.22 release requires:
+A draft 0.23 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -357,6 +366,6 @@ A draft 0.22 release requires:
 - No C output for invalid programs, including stale generated directory output.
 - GCC and Clang ELF image inspection proving the explicit entry, required sections/symbols, and absence of undefined hosted runtime dependencies.
 
-On 2026-08-25, the solution build completed with zero warnings and errors, all 146 conformance cases passed under MSVC, WSL GCC, and WSL Clang, and the focused final-image retention probe preserved every requested symbol with LTO and dead-section elimination under all three toolchains. The ESP-IDF runner passed its direct Xtensa and RISC-V probes and full ESP32 and ESP32-C3 builds. The connected automated T-CAN485 run passed the Draft 0.20 fixture, restart and halt policy images, debugger gates, and Release-firmware restoration; its report is `artifacts/esp32-hardware/20260825-134136.json`. VS Code tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The visual LED gate remains intentionally pending because the hardware run used `-AutomatedOnly`. Historical Draft 0.19, Draft 0.18, and Draft 0.17 hosted and cross-build evidence remains preserved in Git history.
+On 2026-08-28, the solution build completed with zero warnings and errors and all 160 conformance cases passed under MSVC, WSL GCC, and WSL Clang. The ESP-IDF runner passed its direct Xtensa and RISC-V compiler probes, ordinary ESP32 and ESP32-C3 builds, and the Draft 0.23 interrupt fixture for both architectures. Xtensa ELF inspection placed `ctilde_draft023_timer_isr` and `ct_draft023_ack` in `.iram0.text` and the C~-owned counter in `.dram0.data`. VS Code 0.8.0 tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The connected automated T-CAN485 run exercised the GPTimer ISR, observed matching C~ and native acknowledgement counters, and emitted `CTILDE_DRAFT_023_OK`; the same run passed the earlier Draft 0.18 through 0.20 fixtures, panic-policy images, memory, console, debugger, detach, and startup-timeout gates before restoring the ordinary Release firmware. Its ignored report is `artifacts/esp32-hardware/20260828-000319.json`. After restoration, the operator confirmed that the ordinary firmware visibly alternated the onboard LED between blue and purple, closing the visual gate. Historical Draft 0.22 and earlier hosted, cross-build, and hardware evidence remains preserved above and in Git history.
 
-Draft 0.22 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate. MSVC latest-C mode remains an independent hosted compatibility check and is not an inline-assembly or freestanding backend. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.21 freestanding and Draft 0.20 connected-board baselines remain recorded above.
+Draft 0.23 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate. MSVC latest-C mode remains an independent hosted compatibility check and is not an inline-assembly or freestanding backend. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.

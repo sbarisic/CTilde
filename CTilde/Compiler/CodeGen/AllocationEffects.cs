@@ -305,7 +305,7 @@ internal static class EffectAnalyzer
         }
     }
 
-    private static EffectKind OperationEffects(
+    internal static EffectKind OperationEffects(
         EffectOperation operation,
         IReadOnlyDictionary<MethodSymbol, EffectKind> inferred,
         IReadOnlyDictionary<MethodSymbol, ImmutableArray<EffectOperation>> operations)
@@ -366,7 +366,7 @@ internal static class EffectAnalyzer
         }
     }
 
-    private static string Explain(EffectOperation operation, EffectKind effect, EffectAnalysis analysis, HashSet<MethodSymbol> visited)
+    internal static string Explain(EffectOperation operation, EffectKind effect, EffectAnalysis analysis, HashSet<MethodSymbol> visited)
     {
         if (operation.Target is null)
             return operation.Reason;

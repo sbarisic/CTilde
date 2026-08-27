@@ -9,6 +9,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_bindings.cmake" OPTIONAL)
 
 set(CTILDE_PRIVATE_REQUIRES
     esp_driver_gpio
+    esp_driver_gptimer
     esp_system
     esp_timer
     freertos
@@ -29,4 +30,8 @@ if(DEFINED ENV{CTILDE_MEMORY_VALIDATION_BUILD})
         CTILDE_CONFORMANCE=1
         CT_MEMORY_DIAGNOSTICS=1
         CT_MEMORY_LAYOUT_DIAGNOSTICS=1)
+endif()
+
+if(DEFINED ENV{CTILDE_DRAFT023_VALIDATION_BUILD})
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE CTILDE_DRAFT023_VALIDATION=1)
 endif()

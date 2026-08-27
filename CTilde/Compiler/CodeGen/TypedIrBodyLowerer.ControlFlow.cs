@@ -135,7 +135,7 @@ internal sealed partial class TypedIrBodyLowerer
         _finallyContexts.Pop();
 
         writer.WriteLine($"{cleanup}:;");
-        if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+        if (EmitDebugInstrumentation && !_analysisOnly)
             writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, syntax.Finally!, "finally")}));");
         var protectedAssignments = SnapshotAssignments();
         RestoreAssignments(before);
@@ -239,7 +239,7 @@ internal sealed partial class TypedIrBodyLowerer
                     RestoreAssignments(before);
                     BeginScope(writer, boundCatch.Syntax, boundCatch.Syntax.Body.Span.End);
                     DeclareCatchLocal(writer, boundCatch, $"ct_caught_{id}");
-                    if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+                    if (EmitDebugInstrumentation && !_analysisOnly)
                         writer.WriteLine($"ct_debug_site(UINT32_C({_emitter.RegisterDebugSite(_method, boundCatch.Syntax, "catch")}));");
                     _catchExceptions.Push($"ct_caught_{id}");
                     var catchFlow = EmitStatements(writer, boundCatch.Syntax.Body.Statements);

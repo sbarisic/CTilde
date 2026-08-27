@@ -91,6 +91,8 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
     private readonly IrOptimizationFacts _optimizationFacts;
     private bool _capturingDirectDefer;
+    private bool EmitDebugInformation => _emitter.EmitDebugInformation && !_method.IsInterruptCode;
+    private bool EmitDebugInstrumentation => _emitter.EmitDebugInstrumentation && !_method.IsInterruptCode;
 
     private CType ResolveType(TypeSyntax syntax) => _model.ResolveType(syntax, TreeFor(syntax), _method.TypeSubstitutions);
 
@@ -114,7 +116,7 @@ internal sealed partial class TypedIrBodyLowerer
         _cleanupBoundaries.Push("ct_cleanup_method");
         _externUseStart = _emitter.ExternUses.Count();
         _tryCount = CountTryStatements(method.Body) + (_analysisOnly ? CountDeferStatements(method.Body) : 0);
-        if (_emitter.EmitDebugInstrumentation && !_analysisOnly)
+        if (EmitDebugInstrumentation && !_analysisOnly)
             _cleanupRecords.Add("ct_cleanup_debug_frame");
         if (_tryCount != 0)
         {
@@ -221,12 +223,12 @@ internal sealed partial class TypedIrBodyLowerer
         var writer = CreateWriter();
         var typeName = NameMangler.Type(_method.ContainingType);
         var parameterNames = _method.Parameters.Select(parameter => NameMangler.Identifier(parameter.Name)).ToArray();
-        if (_emitter.EmitDebugInformation && _method.Syntax is not null)
+        if (EmitDebugInformation && _method.Syntax is not null)
             writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
         writer.WriteLine(_emitter.MethodSignature(_method, _nameOverride));
         using (writer.Block())
         {
-            if (_emitter.EmitDebugInformation)
+            if (EmitDebugInformation)
                 writer.WriteLine(_emitter.DebugGeneratedDirective());
             var source = _method.Syntax ?? _method.ContainingType.Syntax!;
             writer.WriteLine("ct_cleanup_record* ct_cleanup_method = ct_cleanup_top;");
@@ -281,12 +283,12 @@ internal sealed partial class TypedIrBodyLowerer
         var writer = CreateWriter();
         if (_directDefers.Count != 0)
             _emitter.RegisterDirectDeferState(_method, _durableSlots, _directDefers);
-        if (_emitter.EmitDebugInformation && _method.Syntax is not null)
+        if (EmitDebugInformation && _method.Syntax is not null)
             writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
-        writer.WriteLine($"{(_emitter.EmitDebugInstrumentation ? "CT_DEBUG_USER_NOINLINE " : string.Empty)}{signature}");
+        writer.WriteLine($"{(EmitDebugInstrumentation ? "CT_DEBUG_USER_NOINLINE " : string.Empty)}{signature}");
         using (writer.Block())
         {
-            if (_emitter.EmitDebugInformation)
+            if (EmitDebugInformation)
                 writer.WriteLine(_emitter.DebugGeneratedDirective());
             if (_durableSlots.Count != 0)
             {
@@ -315,7 +317,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void EmitDebugMethodEnter(ILoweringWriter writer)
     {
-        if (!_emitter.EmitDebugInstrumentation || _analysisOnly)
+        if (!EmitDebugInstrumentation || _analysisOnly)
             return;
         writer.WriteLine("ct_debug_method_frame ct_debug_frame = {0};");
         writer.WriteLine("ct_debug_method_enter(&ct_debug_frame);");

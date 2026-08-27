@@ -41,6 +41,13 @@ extern volatile uint32_t ct_draft018_native_data;
 uintptr_t ct_draft018_mmio_address(void);
 int32_t ct_draft018_start_task(void);
 
+#if defined(CTILDE_DRAFT023_VALIDATION)
+void ct_draft023_ack(void* context);
+int32_t ct_draft023_start_timer(void);
+int32_t ct_draft023_stop_timer(void);
+uint32_t ct_draft023_ack_count(void);
+#endif
+
 esp_err_t ct_esp_gpio_configure_input(int32_t pin);
 esp_err_t ct_esp_gpio_configure_output(int32_t pin);
 esp_err_t ct_esp_gpio_write(int32_t pin, bool high);

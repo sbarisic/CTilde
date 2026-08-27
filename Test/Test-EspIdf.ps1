@@ -153,6 +153,10 @@ try {
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for inline assembly on esp32 with exit code $LASTEXITCODE." }
             & $buildScript -IdfPath $IdfPath -Target esp32c3 -Source $assemblySource
             if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for inline assembly on esp32c3 with exit code $LASTEXITCODE." }
+            & $buildScript -IdfPath $IdfPath -Target esp32 -Source (Join-Path $exampleDirectory "Draft023Validation.ct")
+            if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for Draft 0.23 interrupts on esp32 with exit code $LASTEXITCODE." }
+            & $buildScript -IdfPath $IdfPath -Target esp32c3 -Source (Join-Path $exampleDirectory "Draft023Validation.ct")
+            if ($LASTEXITCODE -ne 0) { throw "$buildScript failed for Draft 0.23 interrupts on esp32c3 with exit code $LASTEXITCODE." }
             Push-Location $exampleDirectory
             try {
                 Invoke-Checked "idf.py" @("set-target", "esp32")

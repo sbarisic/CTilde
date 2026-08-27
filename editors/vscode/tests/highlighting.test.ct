@@ -51,6 +51,10 @@ public sealed class Demo
 //   ^^^^^^ entity.name.type.attribute.ctilde
 //          ^^^^^^^^^^^^^ string.quoted.double.ctilde
 
+    [InterruptSafe]
+//  ^ punctuation.definition.attribute.begin.ctilde
+//   ^^^^^^^^^^^^^ entity.name.type.attribute.ctilde
+
     public static void Invoke();
 //  ^^^^^^^^^^^^^ storage.modifier.ctilde
 //                ^^^^ storage.type.ctilde

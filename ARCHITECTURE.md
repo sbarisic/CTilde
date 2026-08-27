@@ -254,10 +254,12 @@ A new language feature must define syntax, binding, conversions, ordered lowerin
 
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
 
+Future fixed-width SIMD follows the same rule. Binding resolves portable lane and mask semantics; typed IR carries a target-neutral SIMD operation, shape, inputs, and constant immediates; C emission selects compiler-owned helpers from a validated architecture and CPU-feature set. GCC vector attributes, MSVC intrinsic names, Neon types, and scalar fallback details must not leak into syntax, symbols, effects, or ordinary call binding. Stable 16-byte source storage remains distinct from temporary native register representation. See [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+
 ESP-IDF is a target profile, not a separate language backend. It reuses the parser, bound program, typed IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. Native GPIO and the singleton WS2812/RMT handle stay behind that shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
 
 Cosmopolitan must likewise remain a target profile rather than a backend fork. Unlike ESP-IDF, it uses hosted process/runtime semantics. Unlike ordinary hosted builds, it produces an APE plus an ELF debug carrier through supported Cosmopolitan wrappers. The initial x64 profile uses one semantic architecture. A true x64/AArch64 image requires two independently bound and lowered programs followed by cross-slice ABI validation and `apelink`; compiling one architecture-pruned C program twice is invalid.
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 
-See the [ESP-IDF and native-interop roadmap](TODO.md#esp-idf-and-native-interop) for the remaining callback, ISR, weak-linkage, custom-linker-script, and hardware-validation work.
+See the [ESP-IDF](TODO.md#esp-idf) and [native-interop](TODO.md#native-interop) roadmap sections for the remaining callback, ISR, weak-linkage, custom-linker-script, and hardware-validation work.

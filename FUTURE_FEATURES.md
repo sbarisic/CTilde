@@ -2,9 +2,9 @@
 
 ## Status
 
-This document proposes four future C~ feature groups. It does not describe the current language.
+This document proposes six future C~ feature groups. It does not describe the current language.
 
-The proposals cover embedded resources, lambdas, Unicode runes, binary64 numbers, and source modules from repositories.
+The proposals cover embedded resources, lambdas, Unicode runes, binary64 numbers, fixed-width SIMD, and source modules from repositories.
 
 Each feature must satisfy the extension rules in [ARCHITECTURE.md](ARCHITECTURE.md). A complete revision includes syntax, binding, lowering, diagnostics, generated C, tools, documentation, and tests.
 
@@ -547,6 +547,199 @@ Test:
 7. Add closure types, ARC ownership, capture diagnostics, and debug scopes.
 8. Complete captured-lambda cross-target acceptance.
 
+## Fixed-width 128-bit SIMD
+
+### Goal and boundary
+
+Add explicit portable SIMD values without changing the meaning, layout, or public API of the existing geometry types. Keep `Vec2`, `Vec3`, and `Vec4` as ordinary scalar structures. Native C auto-vectorization remains useful, but it is an optimization bonus rather than the C~ SIMD contract.
+
+The first revision is exactly 128 bits wide and adds these working types in `System.Simd`:
+
+```csharp
+public struct F32x4;
+public struct I32x4;
+public struct U32x4;
+public struct Mask32x4;
+```
+
+Do not begin with AVX-sized, native-width, SVE, or RISC-V V values. Scalable vectors need a later predicate-oriented API and must not be forced into a fixed four-lane abstraction.
+
+### Source surface
+
+The initial surface provides:
+
+- `Zero`, `Splat`, and four-lane `Create` construction.
+- `+`, `-`, `*`, and `/` for `F32x4`.
+- wrapping `+`, `-`, and `*` for `I32x4` and `U32x4`.
+- named `And`, `Or`, `Xor`, and `AndNot` operations.
+- named comparisons that return `Mask32x4`.
+- `Select(mask, whenTrue, whenFalse)`.
+- lane extraction and replacement.
+- one- and two-input compile-time shuffles.
+- checked and unchecked loads and stores.
+- explicit bit reinterpretation between the three data-vector types.
+
+Use constant generic arguments for lane and shuffle immediates:
+
+```csharp
+float z = value.GetLane<2>();
+F32x4 changed = value.WithLane<1>(42.0f);
+F32x4 reversed = value.Shuffle<3, 2, 1, 0>();
+```
+
+Validate every lane during closed specialization. Invalid indices are compile-time diagnostics and do not become runtime checks. SIMD values expose lanes, not geometry components, so they do not provide mutable `X`, `Y`, `Z`, or `W` fields.
+
+### Stable storage and layout
+
+Each type has deterministic 16-byte value layout. Its source-level representation is conceptually stable storage rather than a promise that every value occupies a native SIMD register:
+
+```c
+typedef struct ct_f32x4 {
+    float Lane[4];
+} ct_f32x4;
+```
+
+Do not require native-register alignment for ordinary fields, arrays, boxes, or managed objects. Loads and stores must accept unaligned storage. Generated helpers move between stable storage and target vector values through intrinsic loads/stores or alias-safe byte copies; they must not use strict-aliasing-violating pointer casts.
+
+This split preserves deterministic boxing and debugger layout, works with current allocators, and lets the native optimizer retain temporary values in registers.
+
+### Target-neutral IR and C emission
+
+Represent SIMD semantically in typed IR instead of lowering standard-library calls directly to backend spelling:
+
+```csharp
+IrSimdOperation(
+    SimdOperation Operation,
+    SimdShape Shape,
+    ImmutableArray<IrValue> Inputs,
+    ImmutableArray<int> Immediates)
+```
+
+`SimdShape` records lane type, lane count, total width, and signedness where relevant. Names such as `_mm_add_ps`, `vaddq_f32`, and compiler builtins never enter binding or target-neutral IR.
+
+Initial C mappings are:
+
+- GCC and Clang fixed-size vector helpers through `__attribute__((vector_size(16)))`, following the [GCC vector-extension contract](https://gcc.gnu.org/onlinedocs/gcc/Vector-Extensions.html) and Clang's [vector extensions](https://clang.llvm.org/docs/LanguageExtensions.html).
+- MSVC x86-64 helpers through the documented [`__m128` and x86 intrinsic surface](https://learn.microsoft.com/en-us/cpp/intrinsics/x86-intrinsics-list?view=msvc-170).
+- AArch64 helpers through Neon only after the Arm64 target and its [ACLE](https://arm-software.github.io/acle/main/acle.html) mapping pass acceptance.
+- deterministic scalar helpers on targets without an accepted SIMD mapping.
+- a future WebAssembly backend may map the same IR to `v128`; this does not add WebAssembly to the current backend or target list.
+
+The compiler continues to emit deterministic C. Build drivers own architecture flags and may not silently enable a wider or less portable instruction set.
+
+### CPU-feature model
+
+Architecture and optional CPU capability are different compile-time facts. Add a target-independent feature model such as:
+
+```csharp
+public enum CpuFeature
+{
+    Simd128,
+    Sse4_1,
+    Avx2,
+    Neon,
+    Rvv
+}
+
+static if (Target.HasFeature(CpuFeature.Simd128))
+{
+    UseAcceleratedPath();
+}
+else
+{
+    UseScalarPath();
+}
+```
+
+Add a canonical `cpuFeatures` manifest/CLI option with deterministic precedence and toolchain probing. `Simd128` controls whether the compiler may use the accepted hardware mapping; the four SIMD types and their scalar semantics remain available without it.
+
+The proposed first policy enables portable 128-bit acceleration for verified x64 and Arm64 toolchains, requires explicit enablement for x86 and Arm32, and retains scalar lowering for current Xtensa and RISC-V targets. Do not claim a default until every affected build driver verifies its compiler macros and flags. More specific capabilities such as SSE4.1 and AVX2 are later opt-ins, not aliases for `Simd128`.
+
+### Effects and memory access
+
+Pure construction, arithmetic, comparison, mask, lane, shuffle, selection, and reinterpretation operations are trusted low-level intrinsics with `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]`.
+
+Memory access has two contracts:
+
+```csharp
+public static F32x4 Load(ReadOnlyNativeBuffer<float> source, nuint index);
+
+[NoAlloc]
+[NoThrow]
+[NoBlock]
+[NoRuntime]
+public static unsafe F32x4 LoadUnchecked(float* source);
+```
+
+Checked buffer operations require four accessible lanes and participate in the existing bounds-check throw/runtime effects. Unchecked pointer operations make readable/writable extent and lifetime caller preconditions and are valid inside freestanding bootstrap and interrupt-safe closures. Feature requirements are capabilities, not a fifth effect category.
+
+### Floating-point semantics
+
+SIMD must not implicitly enable fast math. Specify before implementation:
+
+- the exact order of horizontal sums and dot products.
+- NaN and signed-zero behavior for minimum and maximum.
+- whether multiply followed by add may contract.
+- exact and approximate reciprocal and square-root operations.
+- conversion behavior for NaN and out-of-range values.
+
+Ordinary arithmetic stays precise under the existing scalar floating-point contract. Expose fused multiply-add, approximate reciprocal, and approximate square root only as explicitly named operations. Native optimization settings must not silently change these rules; Clang documents the relevant [floating-point controls](https://clang.llvm.org/docs/UsersManual.html).
+
+### Native ABI boundary
+
+The first revision prohibits SIMD types in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public extern/linker data, and generated public headers. Internal generated functions may pass SIMD values because all translation units share one compiler-owned target and feature configuration.
+
+Later native interop may expose an explicit flattened 16-byte storage ABI. It must be specified independently for MSVC, System V, AArch64, Cosmopolitan slices, and any future WebAssembly host boundary rather than inheriting register calling conventions accidentally.
+
+### Application-backed optimization
+
+After explicit SIMD is complete, investigate recognizing scalar `Vec4` arithmetic and lowering it through `F32x4` without changing `Vec4` source or storage semantics. Treat this as an optimization that must preserve floating-point ordering and Debug behavior.
+
+Do not assume that one `Vec3` maps efficiently to four lanes. Benchmark structure-of-arrays workloads such as:
+
+```csharp
+public struct Vec3x4
+{
+    public F32x4 X;
+    public F32x4 Y;
+    public F32x4 Z;
+}
+```
+
+Use four-ray path-tracer traversal as the first application-backed workload. Record current scalar `Vec4` and buffer-loop vectorization reports before changing lowering so improvements are measurable.
+
+### Diagnostics and acceptance
+
+Test:
+
+- exact size, layout, copying, boxing, arrays, inline arrays, fields, parameters, and returns.
+- arithmetic, wrapping integer operations, comparison masks, selection, reinterpretation, lanes, and shuffles.
+- invalid constant lanes and specialization identity.
+- checked bounds effects and unchecked pointer contracts.
+- strict floating-point results, including NaN and signed zero.
+- scalar fallback equivalence on every current architecture.
+- accepted SSE and Neon instruction selection without requiring optional extensions.
+- CPU-feature manifest/CLI precedence, compiler probing, and `static if` pruning.
+- deterministic unity and modular output, LTO, Debug, Release, symbol maps, and debug lane presentation.
+- rejection at every native ABI boundary.
+- MSVC, GCC, Clang, Cosmopolitan, freestanding, and ESP-IDF builds as applicable.
+- native vectorization reports and the `Vec3x4` path-tracer benchmark.
+
+### Implementation order
+
+1. Capture current scalar `Vec4` and contiguous-buffer benchmarks plus native vectorization reports.
+2. Specify exact 128-bit lane, mask, integer-wrapping, and floating-point semantics.
+3. Add the four standard-library value types with deterministic scalar implementations.
+4. Add constant lane and shuffle binding and validation.
+5. Add `SimdShape` and `IrSimdOperation` to typed IR.
+6. Add alias-safe GCC/Clang vector and MSVC intrinsic helpers while retaining scalar fallback.
+7. Add `CpuFeature`, `Target.HasFeature`, manifest/CLI configuration, compiler probing, and build flags.
+8. Validate every current layout, configuration, and supported native toolchain.
+9. Add symbol-map/debug metadata, debugger lane display, completion, hover, and semantic services.
+10. Experiment with transparent `Vec4` lowering and the `Vec3x4` path-tracer workload.
+
+The first useful milestone is `F32x4` plus construction, loads/stores, arithmetic, comparisons, masks, selection, lanes, shuffles, scalar fallback, and verified SSE/Neon emission. Auto-vectorization remains enabled where native Release compilers provide it, but it never substitutes for these language semantics.
+
 ## Repository source modules
 
 ### Goal
@@ -776,12 +969,13 @@ Implement the work in this order:
 
 1. Add source-owner identity without changing current behavior.
 2. Add `double` and complete its primitive audit.
-3. Add `rune` with UTF-8 decode and encode APIs.
-4. Add embedded resources through immutable compilation inputs.
-5. Add captureless lambdas.
-6. Add explicit value captures and closure objects.
-7. Add exact-pinned source modules and lock files.
-8. Add module aliases, vendoring, local replacements, and richer update policies.
+3. Add fixed-width SIMD scalar semantics, target-neutral IR, and accepted 128-bit mappings.
+4. Add `rune` with UTF-8 decode and encode APIs.
+5. Add embedded resources through immutable compilation inputs.
+6. Add captureless lambdas.
+7. Add explicit value captures and closure objects.
+8. Add exact-pinned source modules and lock files.
+9. Add module aliases, vendoring, local replacements, and richer update policies.
 
 Do not combine all features into one draft. Each completed stage needs its own specification, implementation-status update, and acceptance evidence.
 
@@ -795,6 +989,10 @@ Do not combine all features into one draft. Each completed stage needs its own s
 - **Treat `rune` as an unrestricted integer:** arithmetic can create invalid scalar values.
 - **Implicit lambda captures:** they hide ARC retention, capture time, and cycle risks.
 - **Mutable captured-variable cells in the first revision:** they add escape analysis and another hidden heap object.
+- **Rely only on native auto-vectorization:** optimization heuristics, translation-unit boundaries, and compiler flags do not define portable source semantics.
+- **Change `Vec4` into a native register type:** this mixes geometry with lane operations and destabilizes layout, alignment, ABI, boxing, and floating-point behavior.
+- **Expose raw SSE, Neon, or AVX APIs as the portable surface:** this fragments ordinary source by architecture and leaks backend names into semantic lowering.
+- **Use native-width or scalable vectors first:** AVX width varies by configuration, while SVE and RISC-V V require a predicate-oriented design rather than fixed `F32x4` semantics.
 - **Append dependency files to the root project without module identity:** this exposes `internal` declarations and creates ambiguous names.
 - **Put versions in source imports:** routine dependency updates would rewrite source files.
 - **Compile each source module with its own runtime:** this breaks whole-program generics, effects, ARC, and lifecycle.

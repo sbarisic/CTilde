@@ -414,6 +414,8 @@ Draft 0.24 has verified ordinary generated runtime symbols through the ELF carri
 
 This section records constraints that remain after draft 0.24.
 
+The proposed fixed-width SIMD revision initially treats SIMD values as internal C~ value types only. It rejects them in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use GCC/Clang vector values, MSVC intrinsics, Neon, or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI. See [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 
 Native-sized integers, scoped pointer-plus-length buffers, and `NativeUtf8String` cover synchronous byte and NUL-terminated UTF-8 input. A UTF-8 view lowers to `{ ct_string* Owner; const uint8_t* Data; size_t ByteLength; }` inside C~ and flattens to `const char*` at an extern or export boundary. It retains its managed owner and is dropped lexically. Managed C~ strings and arrays never convert implicitly to `char*` or flat C arrays.

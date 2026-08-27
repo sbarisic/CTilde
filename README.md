@@ -222,6 +222,7 @@ The documentation is split by purpose:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — measured feature and validation status.
 - [TODO.md](TODO.md) — concise outstanding roadmap and release blockers.
+- [FUTURE_FEATURES.md](FUTURE_FEATURES.md) — staged designs for future language, SIMD, resource, and project facilities; none are current Draft 0.24 claims.
 - [COSMOPOLITAN.md](COSMOPOLITAN.md) — staged APE target design, constraints, and acceptance plan.
 
 ## Validation

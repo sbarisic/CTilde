@@ -692,6 +692,8 @@ The compiler places every C~ method in the interrupt call closure in ESP-IDF IRA
 
 Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Console`, `Environment`, single-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types as applicable to the target. Freestanding imports only the object/storage core, primitive and managed value support, `Memory`, target queries, endian helpers, MMIO, and CPU intrinsics; it does not expose exceptions, console or process services, managed threading, ESP-IDF APIs, or libm-backed math. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
+`Vec2`, `Vec3`, and `Vec4` are scalar geometry structures in Draft 0.24. The language has no fixed-width SIMD types, SIMD lane or shuffle operations, `CpuFeature`, `Target.HasFeature`, or `cpuFeatures` project option. The separate future proposal preserves geometry semantics while adding explicit 128-bit lane values and scalar fallback; see [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+
 Draft 0.24 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation

@@ -174,6 +174,8 @@ public struct Vec3
 
 `Vec2` provides `UnitX` and `UnitY`; `Vec4` additionally provides `UnitZ` and `UnitW`. Vector-vector multiplication and division operate component by component. Dot products remain explicit. Normalization divides by the native square-root result without a special zero check, so normalizing a zero vector produces NaN components according to target floating-point behavior. Vector declarations are loaded into compilation only when the corresponding exact type name appears in source; editor services load all three for completion and embedded-source navigation.
 
+Draft 0.24 does not provide hardware SIMD types and does not give `Vec4` native-register semantics. The future standard-library proposal adds explicit `System.Simd.F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with deterministic 16-byte storage, scalar fallback, compile-time lanes and shuffles, checked and unchecked memory operations, and a separate compiler-verified CPU-feature query. Pure SIMD operations will use the existing four low-level effect contracts; checked buffer access retains its ordinary bounds-check effects. The staged surface and floating-point rules are documented in [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+
 ## Threading
 
 `System.Threading` is available on hosted and ESP-IDF targets:

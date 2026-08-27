@@ -4,6 +4,8 @@ C~ is a small, statically typed systems language with familiar C#-style syntax. 
 
 Draft 0.23 adds compiler-checked ESP-IDF `[Interrupt]` entry points, transitive IRAM/DRAM residency, and explicit `[InterruptSafe]` native boundaries. It builds on the Draft 0.22 effect engine and retains the Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
+An x86-64 [Cosmopolitan target](COSMOPOLITAN.md) is planned as the next native profile. The design uses hosted C~ semantics but a dedicated Actually Portable Executable build pipeline. It does not treat `cosmocc` as an ordinary hosted compiler alias, and it defers x86-64/AArch64 fat output until C~ can perform one semantic compilation per architecture.
+
 ## A taste of C~
 
 This complete program uses standard-library vectors, operator overloads, a managed array, `foreach`, string construction, and deterministic deferred cleanup:
@@ -49,6 +51,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to
 - MSVC, GCC, or Clang for hosted programs.
 - ESP-IDF 6 for ESP32-family projects.
 - GNU-compatible ELF GCC or Clang for freestanding images.
+- The planned Cosmopolitan target will require an external official `cosmocc` toolchain and a Unix shell; it is not implemented in Draft 0.23.
 
 Build the solution and compile the checked hello-world example:
 
@@ -217,6 +220,7 @@ The documentation is split by purpose:
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — measured feature and validation status.
 - [TODO.md](TODO.md) — concise outstanding roadmap and release blockers.
+- [COSMOPOLITAN.md](COSMOPOLITAN.md) — staged APE target design, constraints, and acceptance plan.
 
 ## Validation
 

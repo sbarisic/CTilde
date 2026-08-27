@@ -10,6 +10,8 @@ C~ is a statically typed language with C#-style syntax and a small managed runti
 
 Draft 0.23 adds compiler-checked ESP-IDF interrupt entry points and interrupt-safe native boundaries on top of the Draft 0.22 effect engine. It retains the Draft 0.21 GNU/ELF freestanding profile, role-based runtime implementations, explicit lifecycle control, narrow naked startup, and validated native linker inputs. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
+Cosmopolitan is not a Draft 0.23 target. Its proposed profile uses hosted language semantics and a distinct compile-time `TargetProfile.Cosmopolitan`, initially with one explicit x64 semantic architecture. The non-normative staged contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
 ## Design goals
@@ -1009,4 +1011,4 @@ The canonical backend is GNU C23. Draft 0.23 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.23 defers project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.
+Draft 0.23 defers the Cosmopolitan target, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.

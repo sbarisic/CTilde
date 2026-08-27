@@ -12,6 +12,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Unicode identifiers and keyword identifiers escaped with `@`.
 - Draft 0.23 syntax and semantic classification, including `[Interrupt]` and `[InterruptSafe]` completion and hover, effect contracts, freestanding projects, runtime roles, naked startup, and the retained endian, linker, bitfield/register, source-owned, panic-policy, layout, target, MMIO, and interop surface.
 - Target-aware standard-library completion and documentation: hosted supplies console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
+- The proposed Cosmopolitan profile is documented in the repository roadmap but is not accepted by the Draft 0.23 schema, language server, or build task yet.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.

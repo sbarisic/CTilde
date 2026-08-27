@@ -18,6 +18,8 @@ Alternatively, pass `--idf-path`. On Windows, the compiler detects a matching Es
 
 Use `ctilde --help` for generated-C, project, toolchain, and ESP-IDF options. ESP-IDF and hosted C toolchains are external dependencies and are not included in this archive.
 
+The proposed Cosmopolitan target will also use an external official `cosmocc` toolchain. CTilde will not bundle or download its roughly 421 MiB release archive during compilation, install a systemwide APE loader, or call unsupported physical `*-linux-cosmo-gcc` executables directly. See [the repository design](../COSMOPOLITAN.md).
+
 Prepare a hosted executable and machine-local debugger descriptor:
 
 ```text

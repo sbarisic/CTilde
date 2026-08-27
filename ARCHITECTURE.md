@@ -4,6 +4,8 @@
 
 The C~ compiler is a .NET 10 library with one backend, deterministic GNU C23, two artifact layouts, and three target profiles: hosted, ESP-IDF, and GNU/ELF freestanding.
 
+Cosmopolitan is the next planned profile. It will reuse the same parser, semantic graph, typed IR, C emitter, hosted runtime semantics, and artifact layouts, but it requires a dedicated APE driver and explicit target policy. The full staged design is [COSMOPOLITAN.md](COSMOPOLITAN.md).
+
 ```text
 UTF-8 source files
     -> SourceText and locations
@@ -253,6 +255,8 @@ A new language feature must define syntax, binding, conversions, ordered lowerin
 Do not add backend-specific decisions to syntax nodes. New output targets must consume resolved or lowered forms and must not recreate name or type resolution inside an emitter.
 
 ESP-IDF is a target profile, not a separate language backend. It reuses the parser, bound program, typed IR, and C emitter. The profile supplies `app_main`, compact runtime locations, abort behavior, ESP-only declarations, and a fixed-width native shim. Native GPIO and the singleton WS2812/RMT handle stay behind that shim. ESP-IDF retains responsibility for chip selection, component resolution, linking, flashing, and monitoring.
+
+Cosmopolitan must likewise remain a target profile rather than a backend fork. Unlike ESP-IDF, it uses hosted process/runtime semantics. Unlike ordinary hosted builds, it produces an APE plus an ELF debug carrier through supported Cosmopolitan wrappers. The initial x64 profile uses one semantic architecture. A true x64/AArch64 image requires two independently bound and lowered programs followed by cross-slice ABI validation and `apelink`; compiling one architecture-pruned C program twice is invalid.
 
 ESP-IDF selects each ESP32 chip toolchain. The C~ compiler must not duplicate chip selection or create one emitter for each ESP32 chip.
 

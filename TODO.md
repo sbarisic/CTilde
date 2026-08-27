@@ -35,6 +35,19 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 - [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
 
+## Cosmopolitan target
+
+The staged target contract and rejected shortcuts are documented in [COSMOPOLITAN.md](COSMOPOLITAN.md). Implement it in this order:
+
+- [ ] Add `CompilationTarget.Cosmopolitan`, `TargetProfile.Cosmopolitan`, manifest/CLI/schema/editor parsing, explicit x64 architecture requirements, and target-feature diagnostics.
+- [ ] Reuse the hosted runtime and standard-library surface through explicit target predicates; audit startup, ARC, exceptions, console, environment, math, file I/O, pthreads, TLS, exports, and callbacks under Cosmopolitan's POSIX facade.
+- [ ] Add a dedicated WSL-aware x64 Cosmopolitan build driver that probes supported wrapper macros, caches objects, links an ELF debug carrier, unwraps the APE with matching `objcopy`, and uses deterministic environment values.
+- [ ] Add a substantial x64 acceptance example and execute the same portable image on Linux/WSL and Windows. Inspect symbols and unresolved dependencies before claiming portability.
+- [ ] Verify `[Used]`, `[Section]`, public headers, callbacks, and source-debug metadata against the final APE and carrier before enabling each contract.
+- [ ] Add the AArch64 single-architecture target through `aarch64-unknown-cosmo-cc`, retaining Cosmopolitan-owned ABI/TLS flags.
+- [ ] Implement true x64/AArch64 fat output as two independent C~ semantic compilations with cross-slice public-ABI verification followed by `apelink`.
+- [ ] Add optional deterministic `/zip` assets, Cosmopolitan-built native inputs, runtime modes, bundled Clang mode, and ELF-carrier debugger integration only after the core target passes.
+
 ## Native interop
 
 - [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC.

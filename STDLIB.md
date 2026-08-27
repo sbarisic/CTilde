@@ -4,6 +4,8 @@
 
 This document is the canonical standard-library reference for C~ draft 0.23 and runtime ABI 16. Hosted and ESP-IDF retain the object, exception, console, math, vector, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
+The planned Cosmopolitan profile will reuse the hosted object, exception, console, environment, math, file-I/O, threading, and TLS surface through Cosmopolitan's portable POSIX facade. It will not expose ESP-IDF, MMIO/register, freestanding runtime-role, or dynamic-library APIs. This is a design statement only; Draft 0.23 does not load a Cosmopolitan profile.
+
 `System.Runtime.Target` exposes compiler constants for `Profile`, `Architecture`, and byte-sized `PointerSize`. `System.Runtime.Mmio` provides exact-width `Read`, `Write`, `ReadRelaxed`, `WriteRelaxed`, and `Barrier` intrinsics for fixed-width integers and enums. Ordered accesses use a full target I/O barrier before and after the volatile access; relaxed accesses emit only the access.
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
@@ -463,6 +465,8 @@ Null, bounds, divide-by-zero, cast/unbox, size-overflow, embedded-NUL, and attac
 Standard-library declarations use native `[Extern]` bindings internally. Known C~-heap-free console, process, object, and ESP-IDF shims also carry `[NoAlloc]`; allocation-producing configuration and formatting paths remain uncontracted. `[NoAlloc]` on any extern is a trusted native contract, not an inspection of its implementation. Those symbol names are an implementation detail; user native interop remains governed by [C_ABI.md](C_ABI.md).
 
 ## Non-normative roadmap
+
+The next target-library audit is Cosmopolitan x64. Every hosted API above must pass against one portable APE on Linux/WSL and Windows before this document marks it available. AArch64 and fat-image claims remain later gates; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 Future library work can add `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
 

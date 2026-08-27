@@ -327,6 +327,8 @@ The T-CAN485 acceptance fixture registers the generated C~ entry as a GPTimer IS
 
 ## Deliberately deferred
 
+Cosmopolitan APE output is designed but not implemented in Draft 0.23. [COSMOPOLITAN.md](COSMOPOLITAN.md) defines the target semantics, x64-first driver, ELF-carrier and APE artifacts, hosted-library audit, later AArch64 slice, and true dual-compilation fat-image path. No current release claim includes Cosmopolitan execution.
+
 ## Draft 0.22 general effect contracts
 
 `EffectRegistry` replaces the allocation-only registry with flag-based direct operations and call edges. `EffectAnalyzer` computes recursive effects after target pruning and closed generic construction. `[NoThrow]` and `[NoRuntime]` apply their documented implications without creating implied diagnostics; `[NoBlock]` remains independent. Constructors, operators, properties/accessors, abstract/interface declarations, virtual implementations, externs, and inline assembly all preserve their contracts.

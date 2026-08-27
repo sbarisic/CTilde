@@ -29,6 +29,8 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 
 The freestanding profile supports GNU-compatible GCC and Clang ELF drivers only. It includes only `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `limits.h`, and `float.h`, uses internal byte loops instead of libc memory/string calls, and emits no CRT, libm, pthread, TLS, console, filesystem, exception, or process dependency. The native build uses `-ffreestanding`, `-fno-builtin`, `-fno-stack-protector`, section splitting, `-nostdlib`, `-nostartfiles`, a caller-selected linker script, and an explicit entry symbol. Compiler predefined macros must match the declared C~ architecture.
 
+Cosmopolitan is a planned target, not part of the Draft 0.23 ABI. Its design retains ABI 16 hosted object/runtime semantics while linking through supported `*-unknown-cosmo-cc` wrappers. The portable APE is the distribution artifact and an ELF/DWARF carrier is retained for symbols. C~ will not reconstruct Cosmopolitan startup objects, linker scripts, register reservations, or TLS flags. See [COSMOPOLITAN.md](COSMOPOLITAN.md).
+
 Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. The support is absent when those APIs are unused and is never emitted for ESP-IDF.
 
 ## Scalar mapping
@@ -407,6 +409,8 @@ ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked 
 Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 16.
 
 ## Future native interop constraints
+
+The planned Cosmopolitan profile must verify final-image retention and custom sections through both its ELF carrier and unwrapped APE before extending the ordinary `[Used]` or `[Section]` guarantees to that target. Arbitrary native objects must be built for the Cosmopolitan ABI; host ABI objects and general shared libraries are not compatible inputs.
 
 This section records constraints that remain after draft 0.23.
 

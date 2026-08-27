@@ -83,6 +83,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["switch"] = SyntaxKind.SwitchKeyword,
         ["this"] = SyntaxKind.ThisKeyword,
         ["throw"] = SyntaxKind.ThrowKeyword,
+        ["typeof"] = SyntaxKind.TypeofKeyword,
         ["true"] = SyntaxKind.TrueKeyword,
         ["try"] = SyntaxKind.TryKeyword,
         ["uint"] = SyntaxKind.UintKeyword,

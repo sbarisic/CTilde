@@ -218,7 +218,10 @@ internal sealed partial class TypedIrBodyLowerer
                     Report("CT2190", "A field in a packed or explicit-layout aggregate cannot be passed by reference.", argumentSyntax);
                 if (argument.LValue?.Address is not { } address || argument.Type != parameter.Type)
                 {
-                    Report("CT2171", $"A '{parameter.PassingKind.ToString().ToLowerInvariant()}' argument must be an addressable variable of exact type '{parameter.Type.DisplayName}'.", argumentSyntax);
+                    if (argument.Symbol is FieldSymbol { IsRegister: true })
+                        Report("CT2210", "A fixed-address register cannot be passed by reference.", argumentSyntax);
+                    else
+                        Report("CT2171", $"A '{parameter.PassingKind.ToString().ToLowerInvariant()}' argument must be an addressable variable of exact type '{parameter.Type.DisplayName}'.", argumentSyntax);
                     codes.Add("NULL");
                     continue;
                 }

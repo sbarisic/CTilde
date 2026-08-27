@@ -35,7 +35,9 @@ internal sealed record CommandLineOptions(
     bool GenerateBindings,
     bool VerifyBindings,
     string? EspClangPath,
-    bool NoRecursion)
+    bool NoRecursion,
+    EspIdfPanicPolicy PanicPolicy,
+    bool PanicPolicySpecified)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -76,6 +78,8 @@ internal sealed record CommandLineOptions(
         var generateBindings = false;
         var verifyBindings = false;
         var noRecursion = false;
+        var panicPolicy = EspIdfPanicPolicy.Abort;
+        var panicPolicySpecified = false;
         DebugMemoryMode? debugMemory = null;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
@@ -151,6 +155,19 @@ internal sealed record CommandLineOptions(
                 case "--generate-bindings": generateBindings = true; break;
                 case "--verify-bindings": verifyBindings = true; break;
                 case "--no-recursion": noRecursion = true; break;
+                case "--panic-policy":
+                    panicPolicySpecified = true;
+                    var panicValue = RequireValue();
+                    panicPolicy = panicValue switch
+                    {
+                        "abort" => EspIdfPanicPolicy.Abort,
+                        "restart" => EspIdfPanicPolicy.Restart,
+                        "halt" => EspIdfPanicPolicy.Halt,
+                        _ => (EspIdfPanicPolicy)(-1),
+                    };
+                    if (panicValue is not null && !Enum.IsDefined(panicPolicy))
+                        parseError = $"Unknown panic policy '{panicValue}'; expected abort, restart, or halt.";
+                    break;
                 case "--configuration":
                     var value = RequireValue();
                     configuration = value switch
@@ -210,7 +227,8 @@ internal sealed record CommandLineOptions(
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, architecture, architectureSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
-            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion);
+            debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
+            panicPolicy, panicPolicySpecified);
         return true;
     }
 }

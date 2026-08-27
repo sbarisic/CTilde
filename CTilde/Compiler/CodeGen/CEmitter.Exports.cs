@@ -2,9 +2,10 @@ namespace CTilde;
 
 internal sealed partial class CEmitter
 {
-    private void EmitExports(CWriter writer)
+    private void EmitExports(CWriter writer, IEnumerable<MethodSymbol>? selectedMethods = null)
     {
-        foreach (var method in Model.UserTypes.SelectMany(type => type.Methods)
+        var methods = selectedMethods ?? Model.UserTypes.SelectMany(type => type.Methods);
+        foreach (var method in methods
                      .Where(method => method.ExportName is not null)
                      .OrderBy(method => method.ExportName, StringComparer.Ordinal))
         {

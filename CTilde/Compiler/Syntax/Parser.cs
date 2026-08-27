@@ -909,6 +909,8 @@ internal sealed partial class Parser
                 return ParseTypeLayoutOperator();
             case SyntaxKind.OffsetofKeyword:
                 return ParseOffsetOf();
+            case SyntaxKind.TypeofKeyword:
+                return ParseTypeOf();
             case SyntaxKind.ThisKeyword:
                 NextToken();
                 return new ThisExpressionSyntax(_source, token.Span);
@@ -999,6 +1001,15 @@ internal sealed partial class Parser
         }
         Match(SyntaxKind.GreaterToken);
         return arguments.ToImmutable();
+    }
+
+    private TypeOfExpressionSyntax ParseTypeOf()
+    {
+        var start = NextToken().Span.Start;
+        Match(SyntaxKind.OpenParenToken);
+        var type = ParseType();
+        var close = Match(SyntaxKind.CloseParenToken);
+        return new TypeOfExpressionSyntax(_source, TextSpan.FromBounds(start, close.Span.End), type);
     }
 
     private TypeSyntax ParseGenericArgument()

@@ -240,11 +240,14 @@ internal sealed partial class CEmitter
             writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
             writer.WriteLine($"    ct_string* message = {NameMangler.Getter(message)}(({NameMangler.Type(exceptionType)}*)(void*)exception);");
             writer.WriteLine("    const char* code = state->ExceptionCode == NULL ? \"CTE0001\" : state->ExceptionCode;");
+            writer.WriteLine("    ct_panic_info info = { code, state->ExceptionFile, state->ExceptionLine };");
+            writer.WriteLine("    if (ct_installed_panic_handler != NULL) ct_installed_panic_handler(&info, ct_installed_panic_context);");
             writer.WriteLine("    (void)fprintf(stderr, \"C~ unhandled exception %s: %s\", code, exception->Type->Name);");
             writer.WriteLine("    if (message != NULL && message->Length != 0) (void)fprintf(stderr, \": %.*s\", (int)message->Length, (const char*)message->Data);");
             writer.WriteLine("    if (state->ExceptionFile != NULL) (void)fprintf(stderr, \" at %s:%d\", state->ExceptionFile, (int)state->ExceptionLine);");
             writer.WriteLine("    (void)fputc('\\n', stderr);");
-            writer.WriteLine(IsEspIdf ? "    abort();" : "    exit(EXIT_FAILURE);");
+            writer.WriteLine("    (void)fflush(stderr);");
+            writer.WriteLine(PanicTerminationStatement());
             writer.WriteLine("}");
         }
         writer.WriteLine();

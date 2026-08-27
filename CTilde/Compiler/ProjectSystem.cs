@@ -12,7 +12,8 @@ public sealed record CTildeProjectConfiguration(
     ImmutableArray<string> Exclude,
     CTildeProjectBuildConfiguration Build,
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
-    bool NoRecursion);
+    bool NoRecursion,
+    EspIdfPanicPolicy PanicPolicy);
 
 public enum CTildeNativeBuildConfiguration
 {
@@ -120,7 +121,8 @@ public static class CTildeProjectFile
         foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, document.NoRecursion ?? false), files);
+        var panicPolicy = ParsePanicPolicy(document.PanicPolicy, target, fullManifestPath);
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, document.NoRecursion ?? false, panicPolicy), files);
     }
 
     private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
@@ -135,6 +137,19 @@ public static class CTildeProjectFile
         "riscv64" => CompilationArchitecture.RiscV64,
         _ => throw new CTildeProjectException($"Unknown architecture '{value}' in '{manifestPath}'; expected auto, x86, x64, arm32, arm64, xtensa, riscv32, or riscv64."),
     };
+
+    private static EspIdfPanicPolicy ParsePanicPolicy(string? value, CompilationTarget target, string manifestPath)
+    {
+        if (target != CompilationTarget.EspIdf && value is not null)
+            throw new CTildeProjectException($"Property 'panicPolicy' in '{manifestPath}' is valid only for ESP-IDF projects.");
+        return value switch
+        {
+            null or "abort" => EspIdfPanicPolicy.Abort,
+            "restart" => EspIdfPanicPolicy.Restart,
+            "halt" => EspIdfPanicPolicy.Halt,
+            _ => throw new CTildeProjectException($"Unknown panic policy '{value}' in '{manifestPath}'; expected abort, restart, or halt."),
+        };
+    }
 
     private static bool IsInsideDirectory(string path, string directory)
     {
@@ -301,6 +316,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,
         [property: JsonPropertyName("noRecursion")] bool? NoRecursion,
+        [property: JsonPropertyName("panicPolicy")] string? PanicPolicy,
         [property: JsonPropertyName("build")] BuildDocument? Build,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf);
 

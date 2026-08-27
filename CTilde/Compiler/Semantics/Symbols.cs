@@ -144,6 +144,9 @@ internal sealed class TypeSymbol
     public int? Alignment { get; set; }
     public string? AlignmentParameter { get; init; }
     public CType? UnderlyingType { get; set; }
+    public TypeSyntax? BitFieldBackingSyntax { get; init; }
+    public CType? BitFieldBackingType { get; set; }
+    public bool IsBitField => BitFieldBackingSyntax is not null || BitFieldBackingType is not null;
     public bool IsConstantParameter { get; init; }
     public CType? ConstantParameterType { get; set; }
     public bool HasNonNaturalLayout => AggregateLayout == AggregateLayoutKind.Explicit || Pack is not null;
@@ -219,15 +222,23 @@ internal sealed class FieldSymbol : MemberSymbol
     public required bool IsReadonly { get; init; }
     public required bool IsConst { get; init; }
     public bool IsVolatile { get; init; }
+    public bool IsUnsafe { get; init; }
     public ExpressionSyntax? Initializer { get; init; }
     public int? Offset { get; init; }
     public int? Alignment { get; init; }
     public string? AlignmentParameter { get; init; }
     public string? SectionName { get; init; }
     public string? ExternName { get; init; }
+    public string? LinkerSymbolName { get; init; }
     public bool IsNativeVolatile { get; init; }
     public bool IsUsed { get; init; }
-    public string CName => IsStatic ? ExternName ?? NameMangler.Member(this) : NameMangler.Identifier(Name);
+    public int? BitFirst { get; init; }
+    public int? BitLast { get; init; }
+    public bool IsBitView => BitFirst is not null;
+    public BigInteger? RegisterAddress { get; init; }
+    public string? RegisterAddressParameter { get; init; }
+    public bool IsRegister => RegisterAddress is not null || RegisterAddressParameter is not null;
+    public string CName => IsStatic ? ExternName ?? LinkerSymbolName ?? NameMangler.Member(this) : NameMangler.Identifier(Name);
     public string CAccessPath => !IsStatic && ContainingType.AggregateLayout == AggregateLayoutKind.Explicit
         ? $"ct_layout.ct_slot_{CName}.{CName}"
         : CName;
@@ -505,6 +516,8 @@ internal static class TypeFacts
         CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
         from.Kind == CTypeKind.Newtype && from.Symbol?.UnderlyingType == to ||
         to.Kind == CTypeKind.Newtype && to.Symbol?.UnderlyingType == from ||
+        from.Symbol?.IsBitField == true && from.Symbol.BitFieldBackingType == to ||
+        to.Symbol?.IsBitField == true && to.Symbol.BitFieldBackingType == from ||
         from.Kind == CTypeKind.Enum && to.IsIntegral || from.IsIntegral && to.Kind == CTypeKind.Enum ||
         from.Kind == CTypeKind.Pointer && to.Kind == CTypeKind.Pointer ||
         from.Kind == CTypeKind.FunctionPointer && to.Kind == CTypeKind.FunctionPointer && from == to ||

@@ -15,10 +15,13 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             .ToArray();
         var externFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.ExternName is not null && field.Accessibility == Accessibility.Public)
             .OrderBy(field => field.ExternName, StringComparer.Ordinal).ToArray();
-        var exportedTypes = ExportTypes(exports).Concat(externFields.SelectMany(field => ExpandType(field.Type))).Distinct().ToArray();
+        var linkerFields = Model.UserTypes.SelectMany(type => type.Fields).Where(field => field.LinkerSymbolName is not null && field.Accessibility == Accessibility.Public)
+            .OrderBy(field => field.LinkerSymbolName, StringComparer.Ordinal).ToArray();
+        var exportedTypes = ExportTypes(exports).Concat(externFields.Concat(linkerFields).SelectMany(field => ExpandType(field.Type))).Distinct().ToArray();
         var signatureText = $"draft-{CompilerContract.DraftVersion}\n" + string.Join("\n", exports.Select(method => method.ExportName + ":" + NameMangler.Method(method) + ":" + method.SectionName + ":" + method.TaskStackSize)) +
             "\n" + string.Join("\n", externFields.Select(field => field.ExternName + ":" + NameMangler.CanonicalType(field.Type) + ":" + field.IsReadonly + ":" + field.IsNativeVolatile + ":" + field.Alignment)) +
-            "\n" + string.Join("\n", exportedTypes.Where(type => type.Symbol is not null).Select(type => NameMangler.CanonicalType(type) + ":align=" + type.Symbol!.Alignment).OrderBy(value => value, StringComparer.Ordinal));
+            "\n" + string.Join("\n", linkerFields.Select(field => field.LinkerSymbolName + ":" + NameMangler.CanonicalType(field.Type))) +
+            "\n" + string.Join("\n", exportedTypes.Where(type => type.Symbol is not null).Select(HeaderTypeSignature).OrderBy(value => value, StringComparer.Ordinal));
         var guard = "CTILDE_EXPORTS_" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(signatureText)))[..16] + "_H";
         var writer = new StringBuilder();
         writer.Append("#ifndef ").Append(guard).Append('\n');
@@ -60,7 +63,7 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             var underlying = type.Fields.Single(field => field.Name == "<underlying>").Type;
             writer.Append("typedef ").Append(CTypeName(underlying)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
         }
-        var exportedStructs = exportedTypes.Where(type => type.Kind == CTypeKind.Struct).Select(type => type.Symbol!).Distinct().ToArray();
+        var exportedStructs = exportedTypes.Where(type => type.Kind == CTypeKind.Struct && type.Symbol?.IsBitField != true).Select(type => type.Symbol!).Distinct().ToArray();
         var exportedInlineArrays = exportedTypes.Where(type => type.Kind == CTypeKind.InlineArray && type.InlineArrayLength > 0).Distinct().ToArray();
         foreach (var type in exportedStructs.OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
@@ -76,6 +79,8 @@ internal sealed class CHeaderEmitter(BoundProgram program)
             else
                 writer.Append("typedef ").Append(CTypeName(type.UnderlyingType!)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
         }
+        foreach (var type in exportedTypes.Where(type => type.Symbol?.IsBitField == true).Select(type => type.Symbol!).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal))
+            writer.Append("typedef ").Append(CTypeName(type.BitFieldBackingType!)).Append(' ').Append(NameMangler.Type(type)).Append(";\n");
         var emittedLayouts = new HashSet<CType>();
         foreach (var type in exportedStructs.OrderBy(type => type.FullName, StringComparer.Ordinal))
             EmitLayout(type.Type);
@@ -105,11 +110,23 @@ internal sealed class CHeaderEmitter(BoundProgram program)
                 writer.Append("volatile ");
             writer.Append(CTypeName(field.Type)).Append(' ').Append(field.ExternName).Append(";\n");
         }
+        foreach (var field in linkerFields)
+            writer.Append("extern unsigned char ").Append(field.LinkerSymbolName).Append("[]; /* C~ address type: ").Append(field.Type.DisplayName).Append(" */\n");
         writer.Append("\n#undef CT_ALIGNED_TYPEDEF\n#undef CT_ALIGN\n#undef CT_ALIGNOF\n");
         foreach (var section in codeSections)
             writer.Append("#undef ").Append(NativeSection.MacroName(NativeSectionKind.Code, section)).Append('\n');
         writer.Append("#ifdef __cplusplus\n}\n#endif\n\n#endif\n");
         return writer.ToString();
+
+        static string HeaderTypeSignature(CType type)
+        {
+            var symbol = type.Symbol!;
+            var views = symbol.IsBitField
+                ? string.Join(",", symbol.Fields.Where(field => field.IsBitView).OrderBy(field => field.Name, StringComparer.Ordinal)
+                    .Select(field => $"{field.Name}:{NameMangler.CanonicalType(field.Type)}:{field.BitFirst}:{field.BitLast}:{field.IsReadonly}"))
+                : string.Empty;
+            return $"{NameMangler.CanonicalType(type)}:align={symbol.Alignment}:bitfield={symbol.BitFieldBackingType?.DisplayName}:views={views}";
+        }
 
         void EmitLayout(CType type)
         {

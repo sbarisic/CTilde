@@ -23,6 +23,7 @@ $memoryValidationSource = Join-Path $ProjectDirectory "MemoryValidation.ct"
 $consoleValidationSource = Join-Path $ProjectDirectory "ConsoleValidation.ct"
 $draft018ValidationSource = Join-Path $ProjectDirectory "Draft018Validation.ct"
 $draft019ValidationSource = Join-Path $ProjectDirectory "Draft019Validation.ct"
+$draft020ValidationSource = Join-Path $ProjectDirectory "Draft020Validation.ct"
 $buildScript = Join-Path $ProjectDirectory "Build.ps1"
 $artifactDirectory = Join-Path $repositoryDirectory "artifacts\esp32-hardware"
 $timestamp = [DateTimeOffset]::Now.ToString("yyyyMMdd-HHmmss")
@@ -36,6 +37,12 @@ $workDirectory = Join-Path $artifactDirectory "work-$timestamp"
 $fatalBuildDirectory = Join-Path $workDirectory "fatal-build"
 $fatalSdkconfig = Join-Path $workDirectory "sdkconfig.fatal"
 $fatalDefaults = Join-Path $workDirectory "sdkconfig.fatal.defaults"
+$restartBuildDirectory = Join-Path $workDirectory "restart-build"
+$restartSdkconfig = Join-Path $workDirectory "sdkconfig.restart"
+$restartDefaults = Join-Path $workDirectory "sdkconfig.restart.defaults"
+$haltBuildDirectory = Join-Path $workDirectory "halt-build"
+$haltSdkconfig = Join-Path $workDirectory "sdkconfig.halt"
+$haltDefaults = Join-Path $workDirectory "sdkconfig.halt.defaults"
 $memoryBaselinePath = Join-Path $PSScriptRoot "Baselines\esp-idf-memory.json"
 
 $report = [ordered]@{
@@ -54,10 +61,12 @@ $report = [ordered]@{
     tools = [ordered]@{}
     firmware = $null
     runtimeFailure = $null
+    panicPolicies = [ordered]@{ restart = $null; halt = $null }
     memoryValidation = $null
     consoleValidation = $null
     draft018Validation = $null
     draft019Validation = $null
+    draft020Validation = $null
     debugger = $null
     postDetach = $null
     startupTimeout = $null
@@ -455,6 +464,21 @@ try {
     Write-Utf8NoBom $draft019TranscriptPath $draft019Transcript
     $report.draft019Validation = [ordered]@{ elapsedSeconds = $draft019Capture.ElapsedSeconds; transcript = $draft019TranscriptPath }
 
+    Write-Host "`n=== Draft 0.20 protocol and native-integration facilities ==="
+    & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $draft020ValidationSource -Flash
+    if ($LASTEXITCODE -ne 0) { throw "Draft 0.20 validation firmware failed to build and flash with exit code $LASTEXITCODE." }
+    $draft020Capture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTILDE_DRAFT_020_OK") -or $text.Contains("CTILDE_DRAFT_020_FAILED")
+    } 45
+    $draft020Transcript = Select-FirmwareTranscript $draft020Capture.Transcript
+    if (-not $draft020Transcript.Contains("CTILDE_DRAFT_020_OK")) {
+        throw "Draft 0.20 validation did not emit its success marker.`n$draft020Transcript"
+    }
+    $draft020TranscriptPath = Join-Path $artifactDirectory "$timestamp-draft020.txt"
+    Write-Utf8NoBom $draft020TranscriptPath $draft020Transcript
+    $report.draft020Validation = [ordered]@{ elapsedSeconds = $draft020Capture.ElapsedSeconds; transcript = $draft020TranscriptPath }
+
     Write-Host "`n=== Managed layout and allocation failure ==="
     $previousMemoryBuild = $env:CTILDE_MEMORY_VALIDATION_BUILD
     try {
@@ -556,6 +580,78 @@ try {
     $parseFailure = "Promise.all([import('node:url'),import('node:fs')]).then(([u,fs])=>import(u.pathToFileURL(process.argv[1]).href).then(m=>console.log(JSON.stringify(m.parseRuntimeFailureTranscript(fs.readFileSync(process.argv[2],'utf8'))))))"
     $failure = Invoke-NodeJson @("-e", $parseFailure, (Join-Path $PSScriptRoot "Esp32HardwareSupport.mjs"), $failureTranscriptPath)
     $report.runtimeFailure = [ordered]@{ result = $failure; elapsedSeconds = $failureCapture.ElapsedSeconds; transcript = $failureTranscriptPath }
+
+    Write-Host "`n=== ESP-IDF restart panic policy ==="
+    Invoke-Checked "dotnet" @(
+        "run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--",
+        $runtimeFailureSource, "--c-layout", "modules", "--output-directory", (Join-Path $ProjectDirectory "main\generated"),
+        "--header", (Join-Path $ProjectDirectory "main\generated\ctilde_exports.h"), "--target", "esp-idf",
+        "--panic-policy", "restart", "--trace"
+    )
+    Write-Utf8NoBom $restartDefaults $fatalDefaultsText
+    try {
+        $env:CTILDE_FATAL_RUNTIME_BUILD = "1"
+        Invoke-Checked "idf.py" @("-B", $restartBuildDirectory, "-D", "SDKCONFIG=$restartSdkconfig", "-D", "SDKCONFIG_DEFAULTS=$restartDefaults", "set-target", "esp32") $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $restartBuildDirectory, "build") $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $restartBuildDirectory, "-p", $Port, "flash") $ProjectDirectory
+    }
+    finally {
+        if ($null -eq $previousFatalBuild) { Remove-Item Env:CTILDE_FATAL_RUNTIME_BUILD -ErrorAction SilentlyContinue }
+        else { $env:CTILDE_FATAL_RUNTIME_BUILD = $previousFatalBuild }
+    }
+    $restartCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTN0001") -and (
+            $text.Contains("SW_CPU_RESET") -or
+            $text.Contains("rst:") -or
+            ([regex]::Matches($text, "CTILDE_ESP_FAILURE_TEST").Count -ge 2) -or
+            ([regex]::Matches($text, "2nd stage bootloader").Count -ge 2))
+    } 45
+    $restartTranscript = Select-FirmwareTranscript $restartCapture.Transcript
+    $restartObserved = $restartTranscript.Contains("SW_CPU_RESET") -or
+        $restartTranscript.Contains("rst:") -or
+        ([regex]::Matches($restartTranscript, "CTILDE_ESP_FAILURE_TEST").Count -ge 2) -or
+        ([regex]::Matches($restartTranscript, "2nd stage bootloader").Count -ge 2)
+    if (-not $restartTranscript.Contains("CTN0001") -or
+        -not $restartObserved) {
+        throw "The restart panic policy did not emit its diagnostic and reset the target.`n$restartTranscript"
+    }
+    $restartTranscriptPath = Join-Path $artifactDirectory "$timestamp-panic-restart.txt"
+    Write-Utf8NoBom $restartTranscriptPath $restartTranscript
+    $report.panicPolicies.restart = [ordered]@{ elapsedSeconds = $restartCapture.ElapsedSeconds; transcript = $restartTranscriptPath }
+
+    Write-Host "`n=== ESP-IDF halt panic policy ==="
+    Invoke-Checked "dotnet" @(
+        "run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--",
+        $runtimeFailureSource, "--c-layout", "modules", "--output-directory", (Join-Path $ProjectDirectory "main\generated"),
+        "--header", (Join-Path $ProjectDirectory "main\generated\ctilde_exports.h"), "--target", "esp-idf",
+        "--panic-policy", "halt", "--trace"
+    )
+    $haltDefaultsText = $fatalDefaultsText.Replace("CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y", "CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y")
+    Write-Utf8NoBom $haltDefaults $haltDefaultsText
+    try {
+        $env:CTILDE_FATAL_RUNTIME_BUILD = "1"
+        Invoke-Checked "idf.py" @("-B", $haltBuildDirectory, "-D", "SDKCONFIG=$haltSdkconfig", "-D", "SDKCONFIG_DEFAULTS=$haltDefaults", "set-target", "esp32") $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $haltBuildDirectory, "build") $ProjectDirectory
+        Invoke-Checked "idf.py" @("-B", $haltBuildDirectory, "-p", $Port, "flash") $ProjectDirectory
+    }
+    finally {
+        if ($null -eq $previousFatalBuild) { Remove-Item Env:CTILDE_FATAL_RUNTIME_BUILD -ErrorAction SilentlyContinue }
+        else { $env:CTILDE_FATAL_RUNTIME_BUILD = $previousFatalBuild }
+    }
+    $haltCapture = Invoke-IdfMonitor @("-p", $Port, "monitor") {
+        param($text)
+        $text.Contains("CTN0001") -and ($text.Contains("CPU halted") -or $text.Contains("System halted"))
+    } 45
+    $haltTranscript = Select-FirmwareTranscript $haltCapture.Transcript
+    if (-not $haltTranscript.Contains("CTN0001") -or
+        (-not $haltTranscript.Contains("CPU halted") -and -not $haltTranscript.Contains("System halted")) -or
+        $haltTranscript.Contains("Rebooting...")) {
+        throw "The halt panic policy did not enter the configured ESP-IDF halt path.`n$haltTranscript"
+    }
+    $haltTranscriptPath = Join-Path $artifactDirectory "$timestamp-panic-halt.txt"
+    Write-Utf8NoBom $haltTranscriptPath $haltTranscript
+    $report.panicPolicies.halt = [ordered]@{ elapsedSeconds = $haltCapture.ElapsedSeconds; transcript = $haltTranscriptPath }
 
     Write-Host "`n=== Instrumented debugger v3 ==="
     Invoke-Checked "dotnet" @(

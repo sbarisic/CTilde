@@ -35,7 +35,8 @@ internal sealed record BuildRequest(
     bool GenerateBindingsOnly = false,
     bool VerifyBindings = false,
     string? EspClangPath = null,
-    bool NoRecursion = false)
+    bool NoRecursion = false,
+    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort)
 {
     public string LockDirectory => Target == CompilationTarget.Hosted
         ? Path.GetDirectoryName(ExecutablePath!)!
@@ -46,7 +47,7 @@ internal sealed record BuildRequest(
         : Directory.EnumerateFiles(GeneratedDirectory!, "*.c", SearchOption.TopDirectoryOnly)
             .Where(path => Path.GetFileName(path).Equals("ctilde_runtime.c", StringComparison.Ordinal) ||
                            Path.GetFileName(path).Equals("ctilde_entry.c", StringComparison.Ordinal) ||
-                           Path.GetFileName(path).StartsWith("namespace_", StringComparison.Ordinal))
+                           Path.GetFileName(path).StartsWith("source_", StringComparison.Ordinal))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
 }
@@ -116,7 +117,8 @@ internal static class BuildRequestResolver
             idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
             build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
-            options.NoRecursion || project.Configuration.NoRecursion);
+            options.NoRecursion || project.Configuration.NoRecursion,
+            options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -177,7 +179,7 @@ internal static class BuildRequestResolver
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null, options.NoRecursion);
+            null, null, false, false, null, options.NoRecursion, options.PanicPolicy);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
@@ -248,6 +250,8 @@ internal static class BuildRequestResolver
 
     private static void ValidateTargetOptions(CommandLineOptions options, CompilationTarget target)
     {
+        if (target != CompilationTarget.EspIdf && options.PanicPolicySpecified)
+            throw new CommandLineException("--panic-policy is valid only for ESP-IDF builds.");
         if (target == CompilationTarget.Hosted && (options.EspIdfProject is not null || options.EspIdfPath is not null))
             throw new CommandLineException("--idf-project and --idf-path are valid only for ESP-IDF builds.");
         if (target == CompilationTarget.Hosted && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))

@@ -134,6 +134,76 @@ internal static partial class ConformanceTests
         }
     }
 
+    static NativeObjectInspection CompileAndInspectRetainedImage(string source)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ctilde-retention-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var cPath = Path.Combine(directory, "program.c");
+            var executablePath = Path.Combine(directory, "program.exe");
+            var mapPath = Path.Combine(directory, "program.map");
+            File.WriteAllText(cPath, Emit(source), new UTF8Encoding(false));
+            var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+            if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var compiler = configured[4..];
+                var linuxSource = WslPath(cPath);
+                var linuxExecutable = WslPath(executablePath);
+                var prefix = compiler.Contains("clang", StringComparison.OrdinalIgnoreCase) ? new[] { "-fuse-ld=lld" } : [];
+                var compile = RunProcess("wsl", ["--exec", compiler, "-std=gnu23", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", .. prefix, "-o", linuxExecutable, linuxSource, "-lm"]);
+                if (RejectedCStandard(compile))
+                    compile = RunProcess("wsl", ["--exec", compiler, "-std=gnu2x", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", .. prefix, "-o", linuxExecutable, linuxSource, "-lm"]);
+                Assert(compile.ExitCode == 0, $"Retained-image compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("wsl", ["--exec", "nm", "-a", linuxExecutable]);
+                Assert(inspect.ExitCode == 0, $"Retained-image inspection failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            if (!string.IsNullOrWhiteSpace(configured) && !Path.GetFileNameWithoutExtension(configured).Equals("cl", StringComparison.OrdinalIgnoreCase))
+            {
+                var compilerName = Path.GetFileNameWithoutExtension(configured);
+                var prefix = compilerName.Contains("clang", StringComparison.OrdinalIgnoreCase) ? new[] { "-fuse-ld=lld" } : [];
+                var compile = RunProcess(configured, ["-std=gnu23", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", .. prefix, "-o", executablePath, cPath, "-lm"]);
+                if (RejectedCStandard(compile))
+                    compile = RunProcess(configured, ["-std=gnu2x", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", .. prefix, "-o", executablePath, cPath, "-lm"]);
+                Assert(compile.ExitCode == 0, $"Retained-image compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("nm", ["-a", executablePath]);
+                Assert(inspect.ExitCode == 0, $"Retained-image inspection failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            if (!OperatingSystem.IsWindows())
+            {
+                var compile = RunProcess("cc", ["-std=gnu23", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-o", executablePath, cPath, "-lm"]);
+                if (RejectedCStandard(compile))
+                    compile = RunProcess("cc", ["-std=gnu2x", "-O2", "-flto", "-ffunction-sections", "-fdata-sections", "-Wl,--gc-sections", "-o", executablePath, cPath, "-lm"]);
+                Assert(compile.ExitCode == 0, $"Retained-image compiler failed:{Environment.NewLine}{compile.StandardOutput}{compile.StandardError}");
+                var inspect = RunProcess("nm", ["-a", executablePath]);
+                Assert(inspect.ExitCode == 0, $"Retained-image inspection failed:{Environment.NewLine}{inspect.StandardOutput}{inspect.StandardError}");
+                return new NativeObjectInspection("gnu", inspect.StandardOutput + inspect.StandardError);
+            }
+
+            var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
+            Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
+            var discovery = RunProcess(vsWhere, ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"]);
+            Assert(discovery.ExitCode == 0 && !string.IsNullOrWhiteSpace(discovery.StandardOutput), "Visual Studio C tools were not found.");
+            var vcVars = Path.Combine(discovery.StandardOutput.Trim(), "VC", "Auxiliary", "Build", "vcvars64.bat");
+            var commandFile = Path.Combine(directory, "retain.cmd");
+            File.WriteAllText(commandFile,
+                $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /O2 /GL /Gy /Gw /W4 /WX /wd4702 /Fo:\"{Path.Combine(directory, "program.obj")}\" /Fe:\"{executablePath}\" \"{cPath}\" /link /LTCG /OPT:REF /MAP:\"{mapPath}\" || exit /b{Environment.NewLine}type \"{mapPath}\"{Environment.NewLine}",
+                Encoding.ASCII);
+            var result = RunProcess("cmd.exe", ["/d", "/c", commandFile]);
+            Assert(result.ExitCode == 0, $"MSVC retained-image inspection failed:{Environment.NewLine}{result.StandardOutput}{result.StandardError}");
+            return new NativeObjectInspection("msvc", result.StandardOutput + result.StandardError);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, true);
+        }
+    }
+
     static ProcessResult RunGnuObjectCompiler(string command, IReadOnlyList<string> prefix, string cPath, string objectPath)
     {
         var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");

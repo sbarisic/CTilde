@@ -32,10 +32,19 @@ public enum DebugMemoryMode
     Guarded,
 }
 
+public enum EspIdfPanicPolicy
+{
+    Abort,
+    Restart,
+    Halt,
+}
+
 public sealed record CompilationOptions(
     CompilationTarget Target = CompilationTarget.Hosted,
     string? SourceRoot = null,
     DebugInformationMode DebugInformation = DebugInformationMode.None,
     DebugMemoryMode DebugMemory = DebugMemoryMode.Off,
     CompilationArchitecture Architecture = CompilationArchitecture.Auto,
-    bool NoRecursion = false);
+    bool NoRecursion = false,
+    string? SourceIdentityRoot = null,
+    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort);

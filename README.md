@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.19 adds typed constant generic parameters, inline `T[N]` values, `[Align]`, strict nominal `newtype`, `[NoRecursion]` and project-wide recursion enforcement, and portable `System.Runtime.Cpu` intrinsics. It retains Draft 0.18 target selection, assertions, native object/data controls, MMIO, task entries, deterministic ARC, exceptions, concurrency, native interop, modular C output, and hosted and ESP-IDF profiles. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.20 adds endian-domain integers, linker-address symbols, final-image `[Used]` retention, deterministic bitfields and registers, source-owned modular C, and ESP-IDF panic policies. It retains Draft 0.19 constant layouts, alignment, newtypes, recursion analysis, CPU intrinsics, and all earlier target, runtime, interop, and editor facilities. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 ## A taste of C~
 
@@ -123,7 +123,7 @@ dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --check
 dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --build
 ```
 
-Project globs and generated paths are deterministic and confined to the manifest directory. Unity output is one self-contained C file. Modular output contains shared headers, a runtime source, reachable namespace sources, an entry source, a versioned symbol map, and a CMake source fragment.
+Project globs and generated paths are deterministic and confined to the manifest directory. Unity output is one self-contained C file. Modular output contains shared headers, a runtime source, stable source-owned modules, an entry/lifecycle source, a versioned symbol map, and a CMake source fragment. ESP-IDF manifests can select `panicPolicy` as `abort`, `restart`, or `halt`; CLI `--panic-policy` overrides it.
 
 Useful CLI workflows include:
 
@@ -191,7 +191,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.19 implementation, not a stable production language. Draft 0.19 retains runtime ABI 16 and debug metadata v3. Constant layouts, nominal ABI types, recursion restrictions, and CPU intrinsics are covered by hosted conformance; ESP-IDF cross-build and connected-board evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.20 implementation, not a stable production language. Draft 0.20 retains runtime ABI 16 and debug metadata v3. Endian, linker, retention, bitfield/register, source-module, and panic-policy facilities are covered by conformance; ESP-IDF cross-build and connected-board evidence is recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -208,7 +208,7 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.19 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.20 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

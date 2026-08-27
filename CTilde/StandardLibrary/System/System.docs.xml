@@ -164,6 +164,20 @@
   <member id="M:System.Threading.Mutex.TryEnter()"><summary>Attempts to acquire the mutex without waiting.</summary><returns>True when the mutex was acquired.</returns></member>
   <member id="M:System.Threading.Mutex.Exit()"><summary>Releases one recursive acquisition.</summary></member>
 
+  <member id="T:System.be16"><summary>Stores an unsigned 16-bit value in big-endian byte order.</summary></member>
+  <member id="T:System.be32"><summary>Stores an unsigned 32-bit value in big-endian byte order.</summary></member>
+  <member id="T:System.le16"><summary>Stores an unsigned 16-bit value in little-endian byte order.</summary></member>
+  <member id="T:System.le32"><summary>Stores an unsigned 32-bit value in little-endian byte order.</summary></member>
+  <member id="T:System.Endian"><summary>Converts between native numeric values and explicit wire byte order.</summary></member>
+  <member id="M:System.Endian.ToBigEndian(ushort)"><summary>Converts a 16-bit native numeric value to big-endian storage.</summary><param name="value">The native numeric value.</param><returns>The big-endian representation.</returns></member>
+  <member id="M:System.Endian.ToBigEndian(uint)"><summary>Converts a 32-bit native numeric value to big-endian storage.</summary><param name="value">The native numeric value.</param><returns>The big-endian representation.</returns></member>
+  <member id="M:System.Endian.FromBigEndian(be16)"><summary>Converts a 16-bit big-endian representation to a native numeric value.</summary><param name="value">The big-endian representation.</param><returns>The native numeric value.</returns></member>
+  <member id="M:System.Endian.FromBigEndian(be32)"><summary>Converts a 32-bit big-endian representation to a native numeric value.</summary><param name="value">The big-endian representation.</param><returns>The native numeric value.</returns></member>
+  <member id="M:System.Endian.ToLittleEndian(ushort)"><summary>Converts a 16-bit native numeric value to little-endian storage.</summary><param name="value">The native numeric value.</param><returns>The little-endian representation.</returns></member>
+  <member id="M:System.Endian.ToLittleEndian(uint)"><summary>Converts a 32-bit native numeric value to little-endian storage.</summary><param name="value">The native numeric value.</param><returns>The little-endian representation.</returns></member>
+  <member id="M:System.Endian.FromLittleEndian(le16)"><summary>Converts a 16-bit little-endian representation to a native numeric value.</summary><param name="value">The little-endian representation.</param><returns>The native numeric value.</returns></member>
+  <member id="M:System.Endian.FromLittleEndian(le32)"><summary>Converts a 32-bit little-endian representation to a native numeric value.</summary><param name="value">The little-endian representation.</param><returns>The native numeric value.</returns></member>
+
   <member id="T:System.Runtime.TargetProfile"><summary>Identifies the selected compilation profile.</summary></member>
   <member id="T:System.Runtime.TargetArchitecture"><summary>Identifies the resolved native target architecture.</summary></member>
   <member id="T:System.Runtime.Target"><summary>Provides compile-time constants for target-dependent source selection.</summary><remarks>Target queries emit no runtime storage or calls.</remarks></member>

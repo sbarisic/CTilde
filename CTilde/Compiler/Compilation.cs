@@ -78,6 +78,9 @@ public sealed class Compilation
                 diagnostics.AddRange(tree.Diagnostics);
             if (SyntaxTrees.Length == 0)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (target == CompilationTarget.Hosted && Options.PanicPolicy != EspIdfPanicPolicy.Abort)
+                diagnostics.Add("CT4113", "Restart and halt panic policies are valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            ValidateSourceIdentityRoot(diagnostics);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
@@ -149,7 +152,8 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
-        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory);
+        var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory,
+            Options.SourceIdentityRoot, Options.PanicPolicy);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);
@@ -225,6 +229,47 @@ public sealed class Compilation
         catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
         {
             return null;
+        }
+    }
+
+    private void ValidateSourceIdentityRoot(DiagnosticBag diagnostics)
+    {
+        if (Options.SourceIdentityRoot is not null && !Path.IsPathFullyQualified(Options.SourceIdentityRoot))
+        {
+            diagnostics.Add("CT4112", "The source identity root must be an absolute path.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            return;
+        }
+        string? root = null;
+        try
+        {
+            if (Options.SourceIdentityRoot is not null)
+                root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(Options.SourceIdentityRoot));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            diagnostics.Add("CT4112", $"The source identity root is invalid: {exception.Message}", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            return;
+        }
+        foreach (var tree in SyntaxTrees.Where(tree => root is not null && Path.IsPathFullyQualified(tree.Text.FilePath)))
+        {
+            var relative = Path.GetRelativePath(root!, Path.GetFullPath(tree.Text.FilePath));
+            if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
+                diagnostics.Add("CT4112", $"Source file '{tree.Text.FilePath}' is outside source identity root '{root}'.", tree.Text, new TextSpan(0, 0));
+        }
+        var identities = new Dictionary<string, SyntaxTree>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tree in SyntaxTrees)
+        {
+            string identity;
+            if (string.IsNullOrWhiteSpace(tree.Text.FilePath) || tree.Text.FilePath == "<memory>")
+                identity = "<memory>/" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(tree.Text.Text)));
+            else if (root is not null && Path.IsPathFullyQualified(tree.Text.FilePath))
+                identity = Path.GetRelativePath(root, Path.GetFullPath(tree.Text.FilePath)).Replace('\\', '/');
+            else
+                identity = tree.Text.FilePath.Replace('\\', '/');
+            if (identities.TryGetValue(identity, out var previous) && !ReferenceEquals(previous, tree))
+                diagnostics.Add("CT4112", $"Source identity '{identity}' is declared more than once.", tree.Text, new TextSpan(0, 0), previous.Text.GetLocation(new TextSpan(0, 0)));
+            else
+                identities[identity] = tree;
         }
     }
 }

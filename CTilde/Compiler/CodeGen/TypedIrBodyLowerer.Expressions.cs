@@ -399,9 +399,80 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerField(FieldSymbol field, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
-        if (field.Type.ContainsPointer || field.ExternName is not null)
+        if (field.Type.ContainsPointer || field.ExternName is not null || field.LinkerSymbolName is not null)
             RequireUnsafe(syntax);
         CheckAccess(field, syntax);
+        if (field.LinkerSymbolName is not null)
+        {
+            if (forWrite)
+            {
+                Report("CT1296", $"Linker symbol '{field.Name}' is address-valued and cannot be assigned.", syntax);
+                return ErrorExpression();
+            }
+            var address = $"(uintptr_t)(void*){field.LinkerSymbolName}";
+            var linkerCode = field.Type.Kind == CTypeKind.Pointer
+                ? $"({_emitter.CTypeName(field.Type)})(void*){field.LinkerSymbolName}"
+                : $"({_emitter.CTypeName(field.Type)})({address})";
+            return new IrExpressionValue { Type = field.Type, Code = linkerCode, Symbol = field };
+        }
+        if (field.IsRegister)
+        {
+            RequireUnsafe(syntax);
+            if (field.RegisterAddress is null)
+            {
+                Report("CT2210", $"Register address for '{field.Name}' is unresolved.", syntax);
+                return ErrorExpression();
+            }
+            var address = $"((uintptr_t)UINT64_C(0x{field.RegisterAddress.Value:X}))";
+            var ctype = _emitter.CTypeName(field.Type);
+            IrValueStorage? storage = field.IsReadonly ? null : new IrValueStorage
+            {
+                Field = field,
+                Store = value => $"ct_mmio_barrier(); *(volatile {ctype}*)(uintptr_t){address} = ({ctype})({value}); ct_mmio_barrier()",
+            };
+            if (forWrite)
+                return new IrExpressionValue { Type = field.Type, Code = $"*(volatile {ctype}*)(uintptr_t){address}", LValue = storage, Symbol = field };
+            var registerPrelude = new List<string> { "ct_mmio_barrier();" };
+            var temporary = NewTemp();
+            registerPrelude.Add($"{ctype} {temporary} = *(volatile {ctype}*)(uintptr_t){address};");
+            registerPrelude.Add("ct_mmio_barrier();");
+            return new IrExpressionValue { Type = field.Type, Code = temporary, Prelude = registerPrelude, LValue = storage, Symbol = field };
+        }
+        if (field.IsBitView)
+        {
+            if (receiver is null)
+            {
+                Report("CT2209", $"Bit view '{field.Name}' requires a bitfield value.", syntax);
+                return ErrorExpression();
+            }
+            var bitPrelude = new List<string>(receiver.Prelude);
+            var first = field.BitFirst!.Value;
+            var width = field.BitLast!.Value - first + 1;
+            var mask = width == 64 ? "UINT64_MAX" : $"UINT64_C(0x{((BigInteger.One << width) - BigInteger.One):X})";
+            var backing = field.ContainingType.BitFieldBackingType!;
+            var raw = $"((uint64_t)({_emitter.CTypeName(backing)})({receiver.Code}))";
+            var extracted = $"(({raw} >> {first}) & {mask})";
+            var read = field.Type == CType.Bool ? $"({extracted} != UINT64_C(0))" : $"({_emitter.CTypeName(field.Type)})({extracted})";
+            IrValueStorage? storage = null;
+            if (!field.IsReadonly && receiver.LValue is not null)
+            {
+                var registerField = receiver.Symbol as FieldSymbol;
+                if (forWrite && registerField?.IsRegister == true && bitPrelude.LastOrDefault() == "ct_mmio_barrier();")
+                    bitPrelude.RemoveAt(bitPrelude.Count - 1);
+                storage = new IrValueStorage
+                {
+                    Field = field,
+                    Store = value =>
+                    {
+                        var updated = $"({_emitter.CTypeName(receiver.Type)})(({raw} & ~({mask} << {first})) | ((((uint64_t)({value})) & {mask}) << {first}))";
+                        if (registerField?.RegisterAddress is { } registerAddress)
+                            return $"*(volatile {_emitter.CTypeName(receiver.Type)}*)(uintptr_t)((uintptr_t)UINT64_C(0x{registerAddress:X})) = {updated}; ct_mmio_barrier()";
+                        return receiver.LValue.Store(updated);
+                    },
+                };
+            }
+            return new IrExpressionValue { Type = field.Type, Code = read, Prelude = bitPrelude, LValue = storage, Symbol = field };
+        }
         if (!forWrite && field.IsConst && field.Initializer is not null)
         {
             if (!_constantFieldsBeingEvaluated.Add(field))
@@ -913,6 +984,8 @@ internal sealed partial class TypedIrBodyLowerer
             return mmioResult;
         if (!captureForDefer && TryLowerCpuCall(selected, loweredArguments.Codes, prelude, syntax, out var cpuResult))
             return cpuResult;
+        if (!captureForDefer && TryLowerEndianCall(selected, loweredArguments.Codes, arguments, prelude, syntax, out var endianResult))
+            return endianResult;
         if (TryLowerManagedThreadingCall(selected, receiverCode, loweredArguments.Codes, prelude, captureForDefer, out var threadingResult))
             return threadingResult;
 
@@ -991,19 +1064,12 @@ internal sealed partial class TypedIrBodyLowerer
             return true;
         }
         var element = selected.TypeArguments.Length == 1 ? selected.TypeArguments[0] : CType.Error;
-        var valid = element.Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Enum;
+        var width = MmioWidth(element);
+        var valid = width != 0;
         if (!valid)
             Report("CT2203", $"MMIO element type '{element.DisplayName}' must be a fixed-width integer or enum.", syntax);
-        var width = element.Kind switch
-        {
-            CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1,
-            CTypeKind.Short or CTypeKind.Ushort => 2,
-            CTypeKind.Long or CTypeKind.Ulong => 8,
-            CTypeKind.Enum => element.Symbol!.Fields.Single(field => field.Name == "<underlying>").Type.Kind is CTypeKind.Long or CTypeKind.Ulong ? 8 :
-                element.Symbol.Fields.Single(field => field.Name == "<underlying>").Type.Kind is CTypeKind.Short or CTypeKind.Ushort ? 2 : 4,
-            _ => 4,
-        };
+        if (width == 0)
+            width = 1;
         if (syntax.Arguments[0].Expression is LiteralExpressionSyntax { Value: NumericLiteralValue literal } && literal.FloatingPoint is null && literal.Integer % width != 0)
             Report("CT2203", $"MMIO address must be naturally aligned to {width} byte(s).", syntax.Arguments[0].Expression);
         var ctype = _emitter.CTypeName(element);
@@ -1024,6 +1090,24 @@ internal sealed partial class TypedIrBodyLowerer
             prelude.Add("ct_mmio_barrier();");
         result = new IrExpressionValue { Type = element, Code = temporary, Prelude = prelude, Symbol = selected };
         return true;
+
+        static int MmioWidth(CType type)
+        {
+            if (type.Symbol?.IsBitField == true)
+                return MmioWidth(type.Symbol.BitFieldBackingType!);
+            if (type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying)
+                return MmioWidth(underlying);
+            if (type.Kind == CTypeKind.Enum && type.Symbol?.Fields.SingleOrDefault(field => field.Name == "<underlying>") is { } enumUnderlying)
+                return MmioWidth(enumUnderlying.Type);
+            return type.Kind switch
+            {
+                CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1,
+                CTypeKind.Short or CTypeKind.Ushort => 2,
+                CTypeKind.Int or CTypeKind.Uint => 4,
+                CTypeKind.Long or CTypeKind.Ulong => 8,
+                _ => 0,
+            };
+        }
     }
 
     private bool TryLowerCpuCall(MethodSymbol selected, IReadOnlyList<string> arguments, List<string> prelude,
@@ -1072,6 +1156,86 @@ internal sealed partial class TypedIrBodyLowerer
         }
         result = new IrExpressionValue { Type = selected.ReturnType, Code = $"{helper}({arguments[0]})", Prelude = prelude, Symbol = selected };
         return true;
+    }
+
+    private bool TryLowerEndianCall(MethodSymbol selected, IReadOnlyList<string> arguments, IReadOnlyList<IrExpressionValue> argumentValues, List<string> prelude,
+        CallExpressionSyntax syntax, out IrExpressionValue result)
+    {
+        result = null!;
+        if (selected.ContainingType.FullName != "System.Endian")
+            return false;
+        if (arguments.Count != 1 || selected.Name is not ("ToBigEndian" or "FromBigEndian" or "ToLittleEndian" or "FromLittleEndian"))
+        {
+            Report("CT2208", $"Malformed Endian intrinsic '{selected.Name}'.", syntax);
+            result = ErrorExpression(prelude);
+            return true;
+        }
+        var storage = selected.Name.StartsWith("To", StringComparison.Ordinal)
+            ? selected.Parameters[0].Type
+            : selected.ReturnType;
+        var helper = storage.Kind switch
+        {
+            CTypeKind.Ushort => "ct_cpu_bswap16",
+            CTypeKind.Uint => "ct_cpu_bswap32",
+            _ => string.Empty,
+        };
+        if (helper.Length == 0)
+        {
+            Report("CT2208", "Endian conversions require ushort/be16/le16 or uint/be32/le32.", syntax);
+            result = ErrorExpression(prelude);
+            return true;
+        }
+        if (argumentValues.Count == 1 && argumentValues[0].IsConstant && argumentValues[0].Prelude.Count == 0 &&
+            TryUnsignedConstant(argumentValues[0].ConstantValue, out var constant))
+        {
+            var converted = selected.Name.Contains("BigEndian", StringComparison.Ordinal)
+                ? storage.Kind == CTypeKind.Ushort
+                    ? (ulong)(ushort)(((constant & 0xffu) << 8) | ((constant >> 8) & 0xffu))
+                    : ((constant & 0x000000ffu) << 24) | ((constant & 0x0000ff00u) << 8) | ((constant & 0x00ff0000u) >> 8) | ((constant & 0xff000000u) >> 24)
+                : constant;
+            var literal = storage.Kind == CTypeKind.Ushort
+                ? converted.ToString(CultureInfo.InvariantCulture)
+                : $"UINT32_C({converted.ToString(CultureInfo.InvariantCulture)})";
+            result = Constant(selected.ReturnType, new BigInteger(converted), $"({_emitter.CTypeName(selected.ReturnType)})({literal})", selected);
+            return true;
+        }
+        var value = selected.Name.Contains("BigEndian", StringComparison.Ordinal)
+            ? $"{helper}({arguments[0]})"
+            : arguments[0];
+        result = new IrExpressionValue
+        {
+            Type = selected.ReturnType,
+            Code = $"({_emitter.CTypeName(selected.ReturnType)})({value})",
+            Prelude = prelude,
+            Symbol = selected,
+        };
+        return true;
+
+        static bool TryUnsignedConstant(object? value, out ulong result)
+        {
+            try
+            {
+                result = value switch
+                {
+                    BigInteger number when number >= 0 && number <= ulong.MaxValue => (ulong)number,
+                    byte number => number,
+                    ushort number => number,
+                    uint number => number,
+                    ulong number => number,
+                    sbyte number when number >= 0 => (ulong)number,
+                    short number when number >= 0 => (ulong)number,
+                    int number when number >= 0 => (ulong)number,
+                    long number when number >= 0 => (ulong)number,
+                    _ => throw new InvalidCastException(),
+                };
+                return true;
+            }
+            catch (InvalidCastException)
+            {
+                result = 0;
+                return false;
+            }
+        }
     }
 
     private bool TryLowerAtomicCall(MethodSymbol selected, string? receiverCode, IReadOnlyList<string> arguments, List<string> prelude, SyntaxNode syntax, out IrExpressionValue result)
@@ -1234,7 +1398,10 @@ internal sealed partial class TypedIrBodyLowerer
                     Report("CT2190", "A field in a packed or explicit-layout aggregate cannot be passed by reference.", syntax.Arguments[index]);
                 if (argument.LValue?.Address is not { } address)
                 {
-                    Report("CT2171", "A by-reference function-pointer argument must be addressable.", syntax.Arguments[index]);
+                    if (argument.Symbol is FieldSymbol { IsRegister: true })
+                        Report("CT2210", "A fixed-address register cannot be passed by reference.", syntax.Arguments[index]);
+                    else
+                        Report("CT2171", "A by-reference function-pointer argument must be addressable.", syntax.Arguments[index]);
                     codes.Add("NULL");
                 }
                 else

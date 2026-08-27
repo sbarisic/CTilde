@@ -79,7 +79,7 @@ internal sealed partial class CompilationModel
                 generatedSymbols.Add(CEmitter.DelegateFactoryName(type));
                 generatedSymbols.Add(CEmitter.DelegateDropName(type));
             }
-            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>" && field.ExternName is null))
+            foreach (var field in type.Fields.Where(field => field.IsStatic && field.Name != "<underlying>" && field.ExternName is null && field.LinkerSymbolName is null && !field.IsRegister))
                 generatedSymbols.Add(field.CName);
             foreach (var value in type.EnumValues)
                 generatedSymbols.Add(NameMangler.Identifier(type.FullName + "." + value.Name));
@@ -120,6 +120,8 @@ internal sealed partial class CompilationModel
             .ToArray();
         var externFields = Types.Values.SelectMany(type => type.Fields).Where(field => field.ExternName is not null)
             .OrderBy(field => field.ExternName, StringComparer.Ordinal).ThenBy(field => field.ContainingType.FullName, StringComparer.Ordinal).ToArray();
+        var linkerFields = Types.Values.SelectMany(type => type.Fields).Where(field => field.LinkerSymbolName is not null)
+            .OrderBy(field => field.LinkerSymbolName, StringComparer.Ordinal).ThenBy(field => field.ContainingType.FullName, StringComparer.Ordinal).ToArray();
         var nativeTypeNames = Types.Values.Where(type => type.Kind == DeclaredTypeKind.Opaque && type.NativeTypeName is not null)
             .Select(type => type.NativeTypeName!).ToHashSet(StringComparer.Ordinal);
         foreach (var method in externs.Where(method => !method.IsTrustedExtern))
@@ -130,6 +132,9 @@ internal sealed partial class CompilationModel
         foreach (var field in externFields)
             if (runtimeSymbols.Contains(field.ExternName!) || generatedSymbols.Contains(field.ExternName!) || nativeTypeNames.Contains(field.ExternName!))
                 Diagnostics.Add("CT4101", $"External data symbol '{field.ExternName}' conflicts with a compiler-owned or generated C symbol.", field.Syntax!.Source, field.Syntax.Span);
+        foreach (var field in linkerFields)
+            if (runtimeSymbols.Contains(field.LinkerSymbolName!) || generatedSymbols.Contains(field.LinkerSymbolName!) || nativeTypeNames.Contains(field.LinkerSymbolName!))
+                Diagnostics.Add("CT4101", $"Linker symbol '{field.LinkerSymbolName}' conflicts with a compiler-owned or generated C symbol.", field.Syntax!.Source, field.Syntax.Span);
 
         foreach (var group in externs.GroupBy(method => method.ExternName!, StringComparer.Ordinal))
         {
@@ -150,12 +155,22 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT4102", $"External data symbol '{group.Key}' has incompatible ABI declarations.", field.Syntax!.Source, field.Syntax.Span,
                         first.Syntax!.Source.GetLocation(first.Syntax.Span));
         }
+        foreach (var group in linkerFields.GroupBy(field => field.LinkerSymbolName!, StringComparer.Ordinal))
+        {
+            var first = group.First();
+            foreach (var field in group.Skip(1))
+                if (field.Type != first.Type)
+                    Diagnostics.Add("CT4102", $"Linker symbol '{group.Key}' has incompatible address declarations.", field.Syntax!.Source, field.Syntax.Span,
+                        first.Syntax!.Source.GetLocation(first.Syntax.Span));
+        }
         var functionSymbols = externs.Select(method => method.ExternName!).ToHashSet(StringComparer.Ordinal);
         foreach (var field in externFields.Where(field => functionSymbols.Contains(field.ExternName!)))
             Diagnostics.Add("CT4102", $"External symbol '{field.ExternName}' cannot be declared as both function and data.", field.Syntax!.Source, field.Syntax.Span);
+        foreach (var field in linkerFields.Where(field => functionSymbols.Contains(field.LinkerSymbolName!) || externFields.Any(external => external.ExternName == field.LinkerSymbolName)))
+            Diagnostics.Add("CT4102", $"Native symbol '{field.LinkerSymbolName}' cannot be declared with incompatible linker, function, or data contracts.", field.Syntax!.Source, field.Syntax.Span);
 
         var exports = Types.Values.SelectMany(type => type.Methods).Where(method => method.ExportName is not null).ToArray();
-        var nativeSymbols = externs.Select(method => method.ExternName!).Concat(externFields.Select(field => field.ExternName!)).ToHashSet(StringComparer.Ordinal);
+        var nativeSymbols = externs.Select(method => method.ExternName!).Concat(externFields.Select(field => field.ExternName!)).Concat(linkerFields.Select(field => field.LinkerSymbolName!)).ToHashSet(StringComparer.Ordinal);
         foreach (var method in exports)
         {
             if (runtimeSymbols.Contains(method.ExportName!) || generatedSymbols.Contains(method.ExportName!) || nativeSymbols.Contains(method.ExportName!) || nativeTypeNames.Contains(method.ExportName!) || IsExceptionLoweringName(method.ExportName!) || IsOwnershipLoweringName(method.ExportName!))

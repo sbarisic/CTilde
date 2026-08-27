@@ -341,6 +341,8 @@ internal static class EspIdfBuildDriver
         var componentFile = Path.Combine(componentDirectory, "CMakeLists.txt");
         if (!File.Exists(componentFile))
             throw new NativeBuildException($"ESP-IDF project '{project}' must contain main/CMakeLists.txt.");
+        if (request.PanicPolicy == EspIdfPanicPolicy.Halt)
+            ValidateHaltPanicConfiguration(project);
         var componentContents = File.ReadAllText(componentFile);
         if (request.CLayout == GeneratedCLayout.Modules)
         {
@@ -396,6 +398,14 @@ internal static class EspIdfBuildDriver
         })
             if (!settings.Contains(required))
                 throw new NativeBuildException($"ESP-IDF runtime debugging requires '{required}' in sdkconfig.");
+    }
+
+    private static void ValidateHaltPanicConfiguration(string project)
+    {
+        var sdkconfig = Path.Combine(project, "sdkconfig");
+        var configuration = File.Exists(sdkconfig) ? sdkconfig : Path.Combine(project, "sdkconfig.defaults");
+        if (!File.Exists(configuration) || !File.ReadLines(configuration).Any(line => line.Equals("CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y", StringComparison.Ordinal)))
+            throw new NativeBuildException("ESP-IDF panic policy 'halt' requires CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y in the effective sdkconfig.");
     }
 
     private static NativeProcessRequest CreateIdfRequest(BuildRequest request, IReadOnlyList<string> arguments)

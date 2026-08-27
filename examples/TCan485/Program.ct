@@ -152,9 +152,9 @@ public static class Program
         second.Join();
 
         bool succeeded = value.Read() == 42 && owner.Read().Text == "generic ARC" &&
-            ManagedCounter.Load(MemoryOrder.Acquire) == 500 &&
-            ManagedProtected == 2 && ManagedPublished == 1 &&
-            first.Id != 0u && second.Id != 0u && !first.IsAlive && !second.IsAlive;
+            ManagedCounter.Load(MemoryOrder.Acquire) == 500 && ManagedProtected == 2 &&
+            ManagedPublished == 1 && first.Id != 0u && second.Id != 0u && !first.IsAlive && !second.IsAlive;
+
         ManagedMutex = null;
         return succeeded;
     }
@@ -358,9 +358,24 @@ public static class Program
         WifiDemo.Run();
 
         Console.WriteLine("Demo completed! Entering loop");
+        uint count = 0u;
+        bool ledOn = false;
         while (true)
         {
+            ledOn = !ledOn;
+            if (ledOn)
+            {
+                Ws2812.SetPixel(0u, 8u, 0u, 16u);
+                Console.WriteLine("ws2812: on");
+            }
+            else
+            {
+                Ws2812.SetPixel(0u, 0u, 0u, 8u);
+                Console.WriteLine("ws2812: off");
+            }
+            Ws2812.Refresh();
             FreeRtos.DelayMilliseconds(500u);
+            count++;
         }
     }
 }

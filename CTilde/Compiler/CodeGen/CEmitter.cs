@@ -55,6 +55,8 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
     private readonly string? _sourceRoot;
+    private readonly string? _sourceIdentityRoot;
+    private readonly EspIdfPanicPolicy _panicPolicy;
     private readonly DebugInformationMode _debugInformation;
     private readonly DebugMemoryMode _debugMemory;
     private readonly List<DebugLocalEntry> _debugLocals = [];
@@ -71,13 +73,17 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public CEmitter(CompilationModel model, CompilationTarget target, CompilationArchitecture architecture, string? sourceRoot = null,
         DebugInformationMode debugInformation = DebugInformationMode.None,
-        DebugMemoryMode debugMemory = DebugMemoryMode.Off)
+        DebugMemoryMode debugMemory = DebugMemoryMode.Off,
+        string? sourceIdentityRoot = null,
+        EspIdfPanicPolicy panicPolicy = EspIdfPanicPolicy.Abort)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
         _architecture = architecture;
         _sourceRoot = sourceRoot;
+        _sourceIdentityRoot = sourceIdentityRoot;
+        _panicPolicy = panicPolicy;
         _debugInformation = debugInformation;
         _debugMemory = debugMemory;
         foreach (var type in model.Types.Values)
@@ -123,6 +129,29 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool EmitDebugObjects => EmitDebugInstrumentation && _debugMemory != DebugMemoryMode.Off;
     private bool EmitDebugGuards => EmitDebugInstrumentation && _debugMemory == DebugMemoryMode.Guarded;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
+
+    private string SourceIdentity(MethodSymbol method)
+    {
+        var path = method.Syntax?.Source.FilePath;
+        if (method.Syntax is null)
+            return "<generated>/" + Hash96(NameMangler.MethodIdentity(method));
+        if (string.IsNullOrWhiteSpace(path) || path == "<memory>")
+            return "<memory>/" + Hash96(method.Syntax.Source.Text);
+        try
+        {
+            if (_sourceIdentityRoot is not null && Path.IsPathFullyQualified(path))
+            {
+                var relative = Path.GetRelativePath(_sourceIdentityRoot, path);
+                if (relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathFullyQualified(relative))
+                    path = relative;
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            // Invalid roots are diagnosed before emission; retain the logical path here.
+        }
+        return path.Replace('\\', '/');
+    }
     private bool HasExports => _reachableMethods.Any(method => method.ExportName is not null);
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
@@ -250,6 +279,11 @@ internal sealed partial class CEmitter : ILoweringServices
             suffix.WriteLine();
         EmitMain(suffix);
 
+        var modularEntry = new CWriter();
+        modularEntry.WriteBlock(moduleLifecycle.TrimEnd().Split('\n'));
+        modularEntry.WriteLine();
+        EmitMain(modularEntry);
+
         var externalRoots = new StringBuilder(suffix.ToString());
         foreach (var definition in definitions)
             externalRoots.Append('\n').Append(definition.Text);
@@ -267,7 +301,7 @@ internal sealed partial class CEmitter : ILoweringServices
         var unity = writer.ToString();
         var symbolMap = EmitSymbolMapJson(program);
         var debugMap = EmitDebugInformation ? EmitDebugMapJson(program) : string.Empty;
-        var artifacts = BuildModularArtifacts(prunedPrefix, suffix.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
+        var artifacts = BuildModularArtifacts(prunedPrefix, modularEntry.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
         return new CEmitterOutput(unity, artifacts, symbolMap, debugMap);
     }
 
@@ -278,10 +312,20 @@ internal sealed partial class CEmitter : ILoweringServices
         if (methods.Length == 0 && fields.Length == 0)
             return;
         writer.WriteLine("#if defined(_MSC_VER)");
+        writer.WriteLine("#if defined(_M_IX86)");
+        writer.WriteLine("#define CT_FORCE_INCLUDE(name) __pragma(comment(linker, \"/include:_\" #name))");
+        writer.WriteLine("#else");
+        writer.WriteLine("#define CT_FORCE_INCLUDE(name) __pragma(comment(linker, \"/include:\" #name))");
+        writer.WriteLine("#endif");
         foreach (var method in methods)
-            writer.WriteLine($"static void (* volatile {NameMangler.Artifact("ct_ua_", NameMangler.MethodIdentity(method))})(void) = (void (*)(void)){method.CName};");
+        {
+            writer.WriteLine($"CT_FORCE_INCLUDE({method.CName})");
+            if (method.ExportName is not null)
+                writer.WriteLine($"CT_FORCE_INCLUDE({method.ExportName})");
+        }
         foreach (var field in fields)
-            writer.WriteLine($"static void* volatile {NameMangler.Artifact("ct_ua_", NameMangler.MemberIdentity(field))} = (void*)&{field.CName};");
+            writer.WriteLine($"CT_FORCE_INCLUDE({field.CName})");
+        writer.WriteLine("#undef CT_FORCE_INCLUDE");
         writer.WriteLine("#endif");
         writer.WriteLine();
     }
@@ -312,14 +356,21 @@ internal sealed partial class CEmitter : ILoweringServices
         artifacts.Add(new GeneratedCArtifact("ctilde_internal.h", internalHeader, GeneratedCArtifactKind.InternalHeader));
         artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", ExternalizeDefinitions(prefix, runtimeUnit: true), GeneratedCArtifactKind.RuntimeSource));
 
-        foreach (var group in definitions.GroupBy(definition => definition.Function.Method.ContainingType.Namespace, StringComparer.Ordinal)
+        foreach (var group in definitions.GroupBy(definition => SourceIdentity(definition.Function.Method), StringComparer.Ordinal)
                      .OrderBy(group => group.Key, StringComparer.Ordinal))
         {
-            var name = "namespace_" + Hash96(group.Key.Length == 0 ? "<global>" : group.Key) + ".c";
+            var name = "source_" + Hash96(group.Key) + ".c";
             var contents = new StringBuilder();
             contents.Append($"/* Generated by C~ draft {CompilerContract.DraftVersion}. Do not edit. */\n#include \"ctilde_internal.h\"\n\n");
             foreach (var definition in group.OrderBy(item => item.Function.Method.CName, StringComparer.Ordinal))
                 contents.Append(ExternalizeDefinitions(MarkUnusedDefinitions(definition.Text), runtimeUnit: false)).Append('\n');
+            foreach (var export in _reachableMethods.Where(method => method.ExportName is not null && SourceIdentity(method) == group.Key)
+                         .OrderBy(method => method.ExportName, StringComparer.Ordinal))
+            {
+                var exportWriter = new CWriter();
+                EmitExports(exportWriter, [export]);
+                contents.Append(ExternalizeDefinitions(MarkUnusedDefinitions(exportWriter.ToString()), runtimeUnit: false)).Append('\n');
+            }
             artifacts.Add(new GeneratedCArtifact(name, contents.ToString(), GeneratedCArtifactKind.NamespaceSource));
         }
 
@@ -516,9 +567,30 @@ internal sealed partial class CEmitter : ILoweringServices
     {
         var symbols = new List<object>();
         foreach (var type in EmittedTypes.OrderBy(type => type.FullName, StringComparer.Ordinal))
-            symbols.Add(SymbolMapEntry(NameMangler.Type(type), NameMangler.TypeIdentity(type), "type", type.FullName, type.Syntax));
+        {
+            var entry = SymbolMapEntry(NameMangler.Type(type), NameMangler.TypeIdentity(type), "type", type.FullName, type.Syntax);
+            entry["bitFieldBackingType"] = type.BitFieldBackingType?.DisplayName;
+            entry["bitViews"] = type.Fields.Where(field => field.IsBitView)
+                .OrderBy(field => field.Name, StringComparer.Ordinal)
+                .Select(field => new Dictionary<string, object?>
+                {
+                    ["name"] = field.Name,
+                    ["type"] = field.Type.DisplayName,
+                    ["first"] = field.BitFirst,
+                    ["last"] = field.BitLast,
+                    ["readonly"] = field.IsReadonly,
+                }).ToArray();
+            symbols.Add(entry);
+        }
         foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic).OrderBy(field => NameMangler.Member(field), StringComparer.Ordinal))
-            symbols.Add(SymbolMapEntry(NameMangler.Member(field), NameMangler.MemberIdentity(field), "field", field.Type.DisplayName, field.Syntax));
+        {
+            var entry = SymbolMapEntry(NameMangler.Member(field), NameMangler.MemberIdentity(field), "field", field.Type.DisplayName, field.Syntax);
+            entry["used"] = field.IsUsed;
+            entry["linkerRetained"] = field.IsUsed;
+            entry["linkerSymbol"] = field.LinkerSymbolName;
+            entry["registerAddress"] = field.RegisterAddress?.ToString(CultureInfo.InvariantCulture);
+            symbols.Add(entry);
+        }
         foreach (var function in program.Functions.OrderBy(function => function.Method.CName, StringComparer.Ordinal))
         {
             var method = function.Method;
@@ -526,8 +598,11 @@ internal sealed partial class CEmitter : ILoweringServices
                 continue;
             var cName = function.Property is null ? method.CName : function.IsGetter ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
             var identity = function.Property is null ? NameMangler.MethodIdentity(method) : NameMangler.PropertyIdentity(function.Property, function.IsGetter);
-            symbols.Add(SymbolMapEntry(cName, identity, function.Property is null ? "method" : function.IsGetter ? "getter" : "setter",
-                NameMangler.CanonicalType(method.ReturnType), method.Syntax));
+            var entry = SymbolMapEntry(cName, identity, function.Property is null ? "method" : function.IsGetter ? "getter" : "setter",
+                NameMangler.CanonicalType(method.ReturnType), method.Syntax);
+            entry["used"] = method.IsUsed;
+            entry["linkerRetained"] = method.IsUsed;
+            symbols.Add(entry);
         }
 
         var ordered = symbols.Cast<Dictionary<string, object?>>().OrderBy(entry => (string)entry["name"]!, StringComparer.Ordinal).ToArray();
@@ -617,6 +692,7 @@ internal sealed partial class CEmitter : ILoweringServices
                     ["receiver"] = method.IsStatic || method.IsConstructor ? null : "ct_self",
                     ["receiverType"] = method.IsStatic || method.IsConstructor ? null : method.ContainingType.FullName,
                     ["used"] = method.IsUsed,
+                    ["linkerRetained"] = method.IsUsed,
                     ["genericDefinition"] = method.GenericDefinition is null ? null : NameMangler.MethodIdentity(method.GenericDefinition),
                     ["typeArguments"] = method.TypeArguments.Select(argument => argument.DisplayName).ToArray(),
                     ["parameters"] = method.Parameters.Select(parameter => new Dictionary<string, object?>
@@ -645,6 +721,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["pack"] = type.Pack,
                 ["alignment"] = type.Alignment,
                 ["underlyingType"] = type.UnderlyingType?.DisplayName,
+                ["bitFieldBackingType"] = type.BitFieldBackingType?.DisplayName,
                 ["base"] = type.BaseType?.FullName,
                 ["interfaces"] = type.Interfaces.Select(@interface => @interface.FullName).OrderBy(name => name, StringComparer.Ordinal).ToArray(),
                 ["genericDefinition"] = type.GenericDefinition?.FullName,
@@ -670,6 +747,11 @@ internal sealed partial class CEmitter : ILoweringServices
                         ["nativeVolatile"] = field.IsNativeVolatile,
                         ["extern"] = field.ExternName,
                         ["used"] = field.IsUsed,
+                        ["linkerRetained"] = field.IsUsed,
+                        ["linkerSymbol"] = field.LinkerSymbolName,
+                        ["registerAddress"] = field.RegisterAddress?.ToString(CultureInfo.InvariantCulture),
+                        ["bitFirst"] = field.BitFirst,
+                        ["bitLast"] = field.BitLast,
                         ["offset"] = field.Offset,
                         ["alignment"] = field.Alignment,
                     }).ToArray(),
@@ -1035,6 +1117,7 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.EspError => "ESP_OK",
         CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer => $"({CTypeName(type)}){{ NULL, (size_t)0 }}",
         CTypeKind.NativeUtf8String => "(ct_native_utf8_string){ NULL, NULL, (size_t)0 }",
+        CTypeKind.Struct when type.Symbol?.IsBitField == true => $"({CTypeName(type)})0",
         CTypeKind.Struct => $"({CTypeName(type)}){{0}}",
         CTypeKind.InlineArray => $"({CTypeName(type)}){{0}}",
         CTypeKind.Newtype => $"({CTypeName(type)})0",
@@ -1345,7 +1428,7 @@ internal sealed partial class CEmitter : ILoweringServices
             if (parameter.IsSynchronousCallback)
                 parameters.Add($"void* {parameterName}_context");
         }
-        var storage = method.ExternName is not null ? "extern " : "static ";
+        var storage = method.ExternName is not null ? "extern " : method.IsUsed ? string.Empty : "static ";
         var signature = storage + UsedAnnotation(method.IsUsed) + SectionAnnotation(NativeSectionKind.Code, method.SectionName) + CFunctionDeclaration(returnType, name ?? method.CName, parameters);
         return prototype ? signature + ";" : signature;
     }

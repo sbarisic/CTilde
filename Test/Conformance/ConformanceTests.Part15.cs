@@ -144,12 +144,13 @@ internal static partial class ConformanceTests
             var runtimeSource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             var namespaceSources = string.Join("\n", bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content));
             var entrySource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.EntrySource).Content;
-            Assert(internalHeader.Contains("CTILDE_INTERNAL_DRAFT_019_H", StringComparison.Ordinal), "The modular internal-header guard was not derived from Draft 0.19.");
+            Assert(internalHeader.Contains("CTILDE_INTERNAL_DRAFT_020_H", StringComparison.Ordinal), "The modular internal-header guard was not derived from the current draft version.");
             Assert(internalHeader.Contains(codeMacro, StringComparison.Ordinal), "The internal code prototype lost its section annotation.");
             Assert(!internalHeader.Split('\n').Any(line => line.Contains("extern", StringComparison.Ordinal) && line.Contains(dataMacro, StringComparison.Ordinal)), "An extern data declaration retained a definition-only placement annotation.");
             Assert(runtimeSource.Contains(dataMacro, StringComparison.Ordinal), "The modular data definition lost its section annotation.");
             Assert(namespaceSources.Contains(codeMacro, StringComparison.Ordinal), "A modular method definition lost its section annotation.");
-            Assert(entrySource.Contains(exportMacro, StringComparison.Ordinal), "The modular export wrapper lost its section annotation.");
+            Assert(namespaceSources.Contains(exportMacro, StringComparison.Ordinal) && !entrySource.Contains(exportMacro, StringComparison.Ordinal),
+                "The modular export wrapper was not assigned to its defining source with its section annotation.");
 
             using var header = new StringWriter(CultureInfo.InvariantCulture);
             Assert(compilation.EmitCHeader(header).Success, string.Join(Environment.NewLine, compilation.GetDiagnostics()));
@@ -164,7 +165,7 @@ internal static partial class ConformanceTests
             using var mapWriter = new StringWriter(CultureInfo.InvariantCulture);
             Assert(compilation.EmitSymbolMap(mapWriter).Success, "Section symbol-map emission failed.");
             using var map = JsonDocument.Parse(mapWriter.ToString());
-            Assert(map.RootElement.GetProperty("generator").GetString() == "C~ draft 0.19", "The symbol map did not advance to Draft 0.19.");
+            Assert(map.RootElement.GetProperty("generator").GetString() == "C~ draft 0.20", "The symbol map did not advance to Draft 0.20.");
 
             var alpha = SyntaxTree.ParseText("namespace Alpha; public static class A { [Section(\".zdata\")] public static int Value = 1; [Section(\".zcode\")] public static int Read() { return Value; } }", "alpha-section.ct");
             var beta = SyntaxTree.ParseText("using Alpha; public static class P { [Section(\".acode\")][EntryPoint] public static void Main() { A.Read(); } }", "beta-section.ct");

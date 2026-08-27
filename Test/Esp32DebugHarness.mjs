@@ -240,6 +240,7 @@ try {
   assert(client.targetStdout.includes('C~ ESP-IDF hardware test'), 'C~ Console output was not forwarded through DAP target output.');
   result.checks.consoleForwarding = true;
 
+  await client.request('setDataBreakpoints', { breakpoints: [] });
   await timed('disconnect', () => client.request('disconnect', { terminateDebuggee: false }, 15000));
   result.checks.cleanDetach = true;
   result.output = client.targetOutput;

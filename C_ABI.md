@@ -2,13 +2,13 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.19 and runtime ABI 16. Draft 0.19 adds constant-specialization identities, inline-array wrappers, general alignment declarations, nominal newtype typedefs, recursion analysis, and portable CPU intrinsic lowering to the Draft 0.18 generated-C contract.
+This document defines the generated C contract for C~ draft 0.20 and runtime ABI 16. Draft 0.20 adds endian typedefs and conversion lowering, linker-address declarations, final-image retention, scalar bitfields and fixed-address registers, source-owned modular partitions, and ESP-IDF panic policies to the Draft 0.19 generated-C contract.
 
-Draft 0.19 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees presence in the native object, not final linked-image retention. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.20 retains runtime ABI 16 and debug metadata version 3. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
-The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `.c` file per reachable namespace, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
+The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `source_<stable-hash>.c` file per reachable source identity, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. Export wrappers share their defining source partition. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
 
 ## Target requirements
 
@@ -49,7 +49,7 @@ Hosted programs that use console input or `System.IO` additionally include the C
 | `void*` | `void*` |
 | `delegate* unmanaged<P..., R>` | exact `R (*)(P...)` function pointer |
 
-A nominal `newtype N : T` emits a named `typedef` with the representation and ABI of `T`. An inline `T[N]` value emits a deterministic named wrapper `struct` containing exactly `T Data[N]`; it is passed, returned, assigned, and stored by value. Generated retain/drop helpers traverse every element when `T` contains managed references. Public headers expose an inline wrapper only when its element is recursively complete and unmanaged.
+A nominal `newtype N : T` emits a named `typedef` with the representation and ABI of `T`. The standard `be16`, `be32`, `le16`, and `le32` types are such typedefs; `Endian` calls fold constants and lower to identity or `ct_cpu_bswap16`/`ct_cpu_bswap32`. A `[BitField(typeof(T))]` structure also emits a scalar typedef of `T`; its views emit masks and shifts rather than C bitfields. An inline `T[N]` value emits a deterministic named wrapper `struct` containing exactly `T Data[N]`; it is passed, returned, assigned, and stored by value. Generated retain/drop helpers traverse every element when `T` contains managed references. Public headers expose complete unmanaged nominal and bitfield types.
 
 Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.10 defines two's-complement wrapping for fixed and native-width signed integers. Native shifts derive their mask from `sizeof(uintptr_t) * CHAR_BIT`.
 
@@ -332,6 +332,16 @@ An exported method places both its internal implementation and native wrapper, a
 
 Section placement affects the native object only. Linker scripts remain responsible for section ordering, retention, memory-region mapping, and final addresses. Alignment and weak-symbol behavior are separate contracts.
 
+## Linker addresses, retention, and registers
+
+`[LinkerSymbol("name")]` emits a sorted `extern unsigned char name[]` declaration and no definition. A read casts that array address to the declared pointer, `uintptr_t`, or `uintptr_t`-backed newtype. Public declarations appear in the native header and participate in its signature hash. Compatible duplicates coalesce through the native-symbol validator.
+
+`[Used]` emits `__attribute__((used, retain))` for GNU or Clang ELF definitions. MSVC and clang-cl give retained definitions external compact names and emit architecture-correct `/INCLUDE` directives; an exported wrapper receives its own directive. Unsupported object formats fail with `CT4111`. Symbol maps distinguish `used` and `linkerRetained`. Weak linkage remains deferred.
+
+`[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
+
+Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.20.
+
 ## Portable CPU lowering
 
 `Cpu.MemoryBarrier` emits a full compiler and ordinary-memory barrier appropriate to x86/x64, ARM32/ARM64, Xtensa, or RISC-V. It remains distinct from the MMIO I/O barrier. `Cpu.Pause` emits the baseline target hint or a conservative compiler-safe no-op. Byte swap, population count, and leading-zero count use deterministic inline helpers and do not require optional instruction-set extensions. These helpers allocate no C~ storage, call no C~ runtime service, and do not change runtime ABI 16.
@@ -361,9 +371,9 @@ void ct_retain(ct_object* value);
 void ct_release(ct_object* value);
 ```
 
-Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler with the diagnostic and context; returning from the handler continues to the platform's default fatal termination. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
+Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler, prints and flushes its diagnostic, then applies the selected ESP-IDF policy: `abort` uses the existing abort path, `restart` calls `esp_restart`, and `halt` enters `esp_system_abort` after the build driver verifies `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y`. Hosted output retains process failure. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.19.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.20.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -375,7 +385,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 ## Future native interop constraints
 
-This section records constraints that remain after draft 0.19.
+This section records constraints that remain after draft 0.20.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

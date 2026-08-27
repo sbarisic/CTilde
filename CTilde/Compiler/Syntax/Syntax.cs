@@ -115,6 +115,7 @@ public enum SyntaxKind
     SwitchKeyword,
     ThisKeyword,
     ThrowKeyword,
+    TypeofKeyword,
     TrueKeyword,
     TryKeyword,
     UintKeyword,
@@ -517,3 +518,4 @@ public sealed record StackAllocExpressionSyntax(SourceText Source, TextSpan Span
 public sealed record SizeOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record AlignOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record OffsetOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type, string FieldName) : ExpressionSyntax(Source, Span);
+public sealed record TypeOfExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);

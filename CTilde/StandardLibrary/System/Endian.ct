@@ -1,0 +1,33 @@
+namespace System;
+
+public newtype be16 : ushort;
+public newtype be32 : uint;
+public newtype le16 : ushort;
+public newtype le32 : uint;
+
+public static class Endian
+{
+    [NoAlloc]
+    public static be16 ToBigEndian(ushort value) { return (be16)value; }
+
+    [NoAlloc]
+    public static be32 ToBigEndian(uint value) { return (be32)value; }
+
+    [NoAlloc]
+    public static ushort FromBigEndian(be16 value) { return (ushort)value; }
+
+    [NoAlloc]
+    public static uint FromBigEndian(be32 value) { return (uint)value; }
+
+    [NoAlloc]
+    public static le16 ToLittleEndian(ushort value) { return (le16)value; }
+
+    [NoAlloc]
+    public static le32 ToLittleEndian(uint value) { return (le32)value; }
+
+    [NoAlloc]
+    public static ushort FromLittleEndian(le16 value) { return (ushort)value; }
+
+    [NoAlloc]
+    public static uint FromLittleEndian(le32 value) { return (uint)value; }
+}

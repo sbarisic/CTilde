@@ -1,0 +1,41 @@
+using System;
+using System.Runtime;
+
+namespace Examples.TCan485.Draft020;
+
+static assert(Target.Profile == TargetProfile.EspIdf, "Draft 0.20 hardware validation requires ESP-IDF");
+static assert(Target.PointerSize == 4, "ESP32 pointers must be 32 bits");
+
+[BitField(typeof(uint))]
+public struct ProtocolFlags
+{
+    [Bit(0)] public bool Enabled;
+    [Bits(8, 15)] public byte Mode;
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        be16 network16 = Endian.ToBigEndian((ushort)0x1234);
+        be32 network32 = Endian.ToBigEndian((uint)0x12345678);
+        le32 little32 = Endian.ToLittleEndian((uint)0x89abcdef);
+
+        ProtocolFlags flags = (ProtocolFlags)(uint)0;
+        flags.Enabled = true;
+        flags.Mode = (byte)0x5a;
+
+        if (Endian.FromBigEndian(network16) == (ushort)0x1234 &&
+            Endian.FromBigEndian(network32) == (uint)0x12345678 &&
+            Endian.FromLittleEndian(little32) == (uint)0x89abcdef &&
+            flags.Enabled && flags.Mode == (byte)0x5a &&
+            (uint)flags == (uint)0x00005a01)
+            Console.WriteLine("CTILDE_DRAFT_020_OK");
+        else
+            Console.WriteLine("CTILDE_DRAFT_020_FAILED");
+
+        while (true)
+            Esp.Idf.FreeRtos.DelayMilliseconds(1000u);
+    }
+}

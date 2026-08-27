@@ -72,7 +72,10 @@ internal sealed partial class TypedIrBodyLowerer
             }
             if (operand.LValue?.Address is null)
             {
-                Report("CT2124", "The address-of operator requires an addressable value.", syntax.Operand);
+                if (operand.Symbol is FieldSymbol { IsRegister: true })
+                    Report("CT2210", "A fixed-address register cannot have its address taken.", syntax.Operand);
+                else
+                    Report("CT2124", "The address-of operator requires an addressable value.", syntax.Operand);
                 return ErrorExpression(operand.Prelude);
             }
             return new IrExpressionValue { Type = new CType(CTypeKind.Pointer, ElementType: operand.Type), Code = operand.LValue.Address, Prelude = operand.Prelude };
@@ -216,9 +219,10 @@ internal sealed partial class TypedIrBodyLowerer
         if (syntax.OperatorKind is SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken)
         {
             var sameNewtype = left.Type.Kind == CTypeKind.Newtype && left.Type == right.Type && left.Type.Symbol?.UnderlyingType?.IsNumeric == true;
-            if (!(left.Type.IsNumeric && right.Type.IsNumeric) && !(left.Type.Kind == CTypeKind.Enum && left.Type == right.Type) && !sameNewtype)
+            var sameBitField = left.Type == right.Type && left.Type.Symbol?.IsBitField == true;
+            if (!(left.Type.IsNumeric && right.Type.IsNumeric) && !(left.Type.Kind == CTypeKind.Enum && left.Type == right.Type) && !sameNewtype && !sameBitField)
                 Report("CT2128", "Ordered comparison requires numeric operands or the same enum type.", syntax);
-            var common = left.Type.Kind is CTypeKind.Enum or CTypeKind.Newtype ? left.Type : TypeFacts.PromoteNumeric(left.Type, right.Type);
+            var common = left.Type.Kind is CTypeKind.Enum or CTypeKind.Newtype || sameBitField ? left.Type : TypeFacts.PromoteNumeric(left.Type, right.Type);
             if (common.IsError && !left.Type.IsError && !right.Type.IsError)
             {
                 Report("CT2128", "Ordered comparison has no valid common numeric type.", syntax);
@@ -429,7 +433,10 @@ internal sealed partial class TypedIrBodyLowerer
         var target = LowerAssignable(syntax.Left);
         if (target.LValue is null)
         {
-            Report("CT2132", "The left side of an assignment must be assignable.", syntax.Left);
+            if (target.Symbol is FieldSymbol { IsRegister: true })
+                Report("CT2210", "This fixed-address register is not writable.", syntax.Left);
+            else
+                Report("CT2132", "The left side of an assignment must be assignable.", syntax.Left);
             return ErrorExpression(target.Prelude);
         }
         if (target.Type.ContainsAtomic)

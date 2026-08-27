@@ -27,6 +27,12 @@
       "default": false,
       "description": "Reject recursion and calls whose possible targets cannot be closed statically in every reachable method."
     },
+    "panicPolicy": {
+      "type": "string",
+      "enum": ["abort", "restart", "halt"],
+      "default": "abort",
+      "description": "ESP-IDF fatal-panic terminal policy. The halt policy requires CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y."
+    },
     "sources": {
       "type": "array",
       "minItems": 1,
@@ -80,7 +86,7 @@
           "type": "string",
           "enum": ["unity", "modules"],
           "default": "unity",
-          "description": "Generated C layout. Modular output partitions reachable namespaces after whole-program optimization."
+          "description": "Generated C layout. Modular output partitions reachable definitions by stable source identity after whole-program optimization."
         },
         "generatedDirectory": {
           "type": "string",

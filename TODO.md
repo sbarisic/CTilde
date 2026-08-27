@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.19 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and ESP-IDF milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.20 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -9,13 +9,11 @@ This document tracks outstanding work only. Completed language, compiler, runtim
 - [ ] Extend vectors only with application-backed requirements such as interpolation, clamping, distance, swizzles, conversions, or SIMD-aware lowering.
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
-- [ ] Add zero-cost explicit-endianness integer types such as `be16`, `be32`, `le16`, and `le32`, with deterministic conversion to and from native-endian values for protocols and hardware registers.
 
 ## Compiler optimization
 
 The first typed-IR size tranche now removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
 
-- [ ] Replace namespace-only modular partitioning with stable per-source or finer dependency buckets so one edited source recompiles less native C.
 - [ ] Split the broad generated internal header into narrow dependency headers without duplicating declarations or changing public ABI output.
 - [ ] Add an optional readable-C mode with source-oriented names and annotations while preserving compact deterministic Release output by default.
 - [ ] Investigate aggregating compatible `defer` capture records when it reduces durable state without changing immediate capture, LIFO order, or exception replacement.
@@ -36,7 +34,6 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 ## ESP-IDF
 
 - [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
-- [ ] Consider configurable panic policies such as abort, restart, and halt after the initial ABI 14 hardware release.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
 
 ## Freestanding targets and runtime
@@ -48,9 +45,7 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 ## Native interop
 
-- [ ] Add native linker-symbol declarations, weak imports and definitions, and final-image retention controls. Draft 0.18 `[Used]` guarantees object emission only; linker `KEEP`, weak resolution, entry symbols, and linker-script declarations remain separate work.
-- [ ] Add compile-time register definitions such as `[Register(0x60004000)]`, with `[Bit(n)]` and `[Bits(first, last)]` members lowered to deterministic mask-and-shift operations rather than C bitfields.
-- [ ] Add deterministic compiler-defined bitfields such as `[BitField(typeof(uint))]`, `[Bit(n)]`, and `[Bits(first, last)]` for peripheral registers, protocol headers, page-table entries, and CPU control registers.
+- [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC; custom linker scripts and entry-symbol control remain part of the freestanding build-plumbing work.
 - [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
 - [ ] Add naked functions and first-class interrupt handlers.
 - [ ] Add naked assembly functions: like naked functions, except the body is one complete `asm` block.

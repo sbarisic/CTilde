@@ -113,8 +113,12 @@ internal static class CTildeCommand
             var sourceRoot = request.DebugInformation != DebugInformationMode.None
                 ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
                 : request.SourceRoot;
+            var sourceIdentityRoot = request.ManifestPath is null
+                ? CommonSourceIdentityRoot(request.Inputs)
+                : request.RootDirectory;
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
-                request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion));
+                request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
+                sourceIdentityRoot, request.PanicPolicy));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -296,6 +300,19 @@ internal static class CTildeCommand
             text.Contains("\"generator\": \"C~ draft 0.", StringComparison.Ordinal);
     }
 
+    private static string CommonSourceIdentityRoot(IEnumerable<string> inputs)
+    {
+        var paths = inputs.Select(Path.GetFullPath).ToArray();
+        var candidate = Path.GetDirectoryName(paths[0])!;
+        while (!paths.All(path =>
+        {
+            var relative = Path.GetRelativePath(candidate, path);
+            return relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathFullyQualified(relative);
+        }))
+            candidate = Directory.GetParent(candidate)?.FullName ?? Path.GetPathRoot(candidate)!;
+        return candidate;
+    }
+
     private static void RemoveStaleGeneratedOutput(params string?[] paths)
     {
         foreach (var path in paths.Where(path => path is not null).Cast<string>())
@@ -316,7 +333,7 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");

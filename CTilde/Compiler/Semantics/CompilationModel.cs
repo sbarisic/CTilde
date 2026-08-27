@@ -283,6 +283,8 @@ internal sealed partial class CompilationModel
             Alignment = ResolveAlignment(definition.Alignment, definition.AlignmentParameter,
                 definition.TypeParameters.Select((parameter, index) => (parameter.Name, arguments[index])).ToImmutableDictionary(pair => pair.Name, pair => pair.Item2, StringComparer.Ordinal), syntax),
             AlignmentParameter = definition.AlignmentParameter,
+            BitFieldBackingSyntax = definition.BitFieldBackingSyntax,
+            BitFieldBackingType = definition.BitFieldBackingType,
             IsSealed = definition.IsSealed,
             IsAbstract = definition.IsAbstract,
             TypeArguments = arguments,
@@ -423,6 +425,8 @@ internal sealed partial class CompilationModel
             .ToImmutableDictionary(pair => pair.Name, pair => pair.Type, StringComparer.Ordinal);
         if (definition.UnderlyingType is not null)
             type.UnderlyingType = SubstituteType(definition.UnderlyingType, substitutions);
+        if (definition.BitFieldBackingType is not null)
+            type.BitFieldBackingType = SubstituteType(definition.BitFieldBackingType, substitutions);
         if (definition.BaseType is not null)
             type.BaseType = SubstituteType(definition.BaseType.Type, substitutions).Symbol;
         foreach (var contract in definition.Interfaces)
@@ -432,6 +436,17 @@ internal sealed partial class CompilationModel
                 type.Interfaces.Add(substituted);
         }
         foreach (var field in definition.Fields)
+        {
+            var substitutedType = SubstituteType(field.Type, substitutions);
+            var registerAddress = ResolveRegisterAddress(field.RegisterAddress, field.RegisterAddressParameter, substitutions, field.Syntax ?? type.Syntax!);
+            if (field.IsRegister && registerAddress is { } address)
+            {
+                var width = MmioStorageWidth(substitutedType);
+                var pointerBits = _architecture is CompilationArchitecture.X64 or CompilationArchitecture.Arm64 or CompilationArchitecture.RiscV64 ? 64 : 32;
+                if (width == 0 || address < 0 || address >= (BigInteger.One << pointerBits) || address % width != 0)
+                    Diagnostics.Add("CT2210", $"Register address for '{field.Name}' must fit the selected pointer width and satisfy its natural alignment.",
+                        field.Syntax!.Source, field.Syntax.Span);
+            }
             type.Fields.Add(new FieldSymbol
             {
                 Name = field.Name,
@@ -439,19 +454,26 @@ internal sealed partial class CompilationModel
                 Accessibility = field.Accessibility,
                 IsStatic = field.IsStatic,
                 Syntax = field.Syntax,
-                Type = SubstituteType(field.Type, substitutions),
+                Type = substitutedType,
                 IsReadonly = field.IsReadonly,
                 IsConst = field.IsConst,
                 IsVolatile = field.IsVolatile,
+                IsUnsafe = field.IsUnsafe,
                 Initializer = field.Initializer,
                 Offset = field.Offset,
                 Alignment = ResolveAlignment(field.Alignment, field.AlignmentParameter, substitutions, field.Syntax ?? type.Syntax!),
                 AlignmentParameter = field.AlignmentParameter,
                 SectionName = field.SectionName,
                 ExternName = field.ExternName,
+                LinkerSymbolName = field.LinkerSymbolName,
                 IsNativeVolatile = field.IsNativeVolatile,
                 IsUsed = field.IsUsed,
+                BitFirst = field.BitFirst,
+                BitLast = field.BitLast,
+                RegisterAddress = registerAddress,
+                RegisterAddressParameter = field.RegisterAddressParameter,
             });
+        }
         foreach (var property in definition.Properties)
         {
             var cloned = new PropertySymbol
@@ -700,7 +722,7 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT1270", "abstract applies only to classes and their members.", declaration.Source, declaration.Span);
                 foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind is not TypeDeclarationKind.Struct and not TypeDeclarationKind.Union))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
-                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed", "Align"] : declaration.Kind == TypeDeclarationKind.Newtype ? ["Align"] : []);
+                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed", "Align", "BitField"] : declaration.Kind == TypeDeclarationKind.Newtype ? ["Align"] : []);
                 string? nativeTypeName = null;
                 string? nativeHeader = null;
                 int? pack = null;
@@ -708,6 +730,17 @@ internal sealed partial class CompilationModel
                 var alignment = ParseAlignment(FindAttribute(declaration.Attributes, "Align"),
                     declaredTypeParameters.Where(parameter => parameter.IsConstant).Select(parameter => parameter.Name).ToHashSet(StringComparer.Ordinal), out var alignmentParameter);
                 var packed = FindAttribute(declaration.Attributes, "Packed");
+                var bitField = FindAttribute(declaration.Attributes, "BitField");
+                TypeSyntax? bitFieldBackingSyntax = null;
+                if (bitField is not null)
+                {
+                    if (declaration.Kind == TypeDeclarationKind.Struct && bitField.Arguments is [TypeOfExpressionSyntax typeOf])
+                        bitFieldBackingSyntax = typeOf.Type;
+                    else
+                        Diagnostics.Add("CT1297", "BitField requires one typeof(byte), typeof(ushort), typeof(uint), or typeof(ulong) argument on a struct.", bitField.Source, bitField.Span);
+                    if (packed is not null || alignment is not null || declaration.Kind == TypeDeclarationKind.Union)
+                        Diagnostics.Add("CT1297", "BitField types cannot use Packed, Align, union, or explicit-layout facilities.", bitField.Source, bitField.Span);
+                }
                 if (packed is not null)
                 {
                     if (packed.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue numeric, LiteralKind: SyntaxKind.NumberToken }] &&
@@ -753,6 +786,7 @@ internal sealed partial class CompilationModel
                     Pack = pack,
                     Alignment = alignment,
                     AlignmentParameter = alignmentParameter,
+                    BitFieldBackingSyntax = bitFieldBackingSyntax,
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                     IsAbstract = declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) || kind == DeclaredTypeKind.Interface,
                     TypeParameters = typeParameters,
@@ -867,6 +901,12 @@ internal sealed partial class CompilationModel
                     if (!IsValidNewtypeUnderlying(underlying, type, []))
                         Diagnostics.Add("CT1295", $"Newtype '{type.FullName}' requires a complete unmanaged non-void non-recursive underlying type.", declaration.Source, declaration.Span);
                     continue;
+                }
+                if (type.IsBitField)
+                {
+                    type.BitFieldBackingType = ResolveType(type.BitFieldBackingSyntax!, tree);
+                    if (type.BitFieldBackingType.Kind is not (CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint or CTypeKind.Ulong))
+                        Diagnostics.Add("CT1297", $"BitField backing type '{type.BitFieldBackingType.DisplayName}' must be byte, ushort, uint, or ulong.", declaration.Source, declaration.Span);
                 }
                 foreach (var member in declaration.Members)
                     DeclareMember(type, member, tree);
@@ -1174,7 +1214,7 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
@@ -1186,13 +1226,47 @@ internal sealed partial class CompilationModel
                     var usedAttribute = FindAttribute(field.Attributes, "Used");
                     var externAttribute = FindAttribute(field.Attributes, "Extern");
                     var nativeVolatileAttribute = FindAttribute(field.Attributes, "NativeVolatile");
+                    var linkerSymbolAttribute = FindAttribute(field.Attributes, "LinkerSymbol");
+                    var bitAttribute = FindAttribute(field.Attributes, "Bit");
+                    var bitsAttribute = FindAttribute(field.Attributes, "Bits");
+                    var registerAttribute = FindAttribute(field.Attributes, "Register");
                     string? externName = null;
+                    string? linkerSymbolName = null;
+                    int? bitFirst = null;
+                    int? bitLast = null;
+                    var registerAddress = ParseRegisterAddress(registerAttribute,
+                        _activeTypeParameters.Where(pair => pair.Value.Kind == CTypeKind.Constant).Select(pair => pair.Key).ToHashSet(StringComparer.Ordinal), out var registerAddressParameter);
                     if (externAttribute is not null)
                     {
                         if (externAttribute.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsPortableExternalIdentifier(value))
                             externName = value;
                         else
                             Diagnostics.Add("CT1289", "Extern data requires one string containing a portable C identifier.", externAttribute.Source, externAttribute.Span);
+                    }
+                    if (linkerSymbolAttribute is not null)
+                    {
+                        if (linkerSymbolAttribute.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] && IsLinkerSymbolIdentifier(value))
+                            linkerSymbolName = value;
+                        else
+                            Diagnostics.Add("CT1296", "LinkerSymbol requires one string containing a native linker identifier.", linkerSymbolAttribute.Source, linkerSymbolAttribute.Span);
+                    }
+                    if (bitAttribute is not null)
+                    {
+                        if (TryParseNonnegativeInt(bitAttribute.Arguments, out var bit))
+                            bitFirst = bitLast = bit;
+                        else
+                            Diagnostics.Add("CT2209", "Bit requires one nonnegative integral bit index.", bitAttribute.Source, bitAttribute.Span);
+                    }
+                    if (bitsAttribute is not null)
+                    {
+                        if (bitsAttribute.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue first }, LiteralExpressionSyntax { Value: NumericLiteralValue last }] &&
+                            first.FloatingPoint is null && last.FloatingPoint is null && first.Integer >= 0 && last.Integer >= first.Integer && last.Integer <= int.MaxValue)
+                        {
+                            bitFirst = (int)first.Integer;
+                            bitLast = (int)last.Integer;
+                        }
+                        else
+                            Diagnostics.Add("CT2209", "Bits requires two nonnegative inclusive integral endpoints in ascending order.", bitsAttribute.Source, bitsAttribute.Span);
                     }
                     if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
@@ -1220,14 +1294,20 @@ internal sealed partial class CompilationModel
                         IsReadonly = field.Modifiers.Contains("readonly", StringComparer.Ordinal),
                         IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
                         IsVolatile = isVolatile,
+                        IsUnsafe = field.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         Initializer = field.Initializer,
                         Offset = fieldOffset,
                         Alignment = fieldAlignment,
                         AlignmentParameter = fieldAlignmentParameter,
                         SectionName = sectionName,
                         ExternName = externName,
+                        LinkerSymbolName = linkerSymbolName,
                         IsNativeVolatile = nativeVolatileAttribute is not null,
                         IsUsed = usedAttribute is not null,
+                        BitFirst = bitFirst,
+                        BitLast = bitLast,
+                        RegisterAddress = registerAddress,
+                        RegisterAddressParameter = registerAddressParameter,
                     };
                     if (symbol.Type.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
@@ -1251,12 +1331,35 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1289", "Extern data requires a non-generic static unmanaged field without an initializer, Section, Used, const, or C~ volatile.", externAttribute.Source, externAttribute.Span);
                     if (nativeVolatileAttribute is not null && externAttribute is null)
                         Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
+                    if (linkerSymbolAttribute is not null && (!symbol.IsStatic || !symbol.IsReadonly || !symbol.IsUnsafe || symbol.IsConst || symbol.IsVolatile || symbol.Initializer is not null || !IsLinkerAddressType(symbol.Type) || externAttribute is not null || sectionAttribute is not null || usedAttribute is not null || nativeVolatileAttribute is not null || fieldAlignment is not null))
+                        Diagnostics.Add("CT1296", "LinkerSymbol requires a static unsafe readonly pointer, nuint, or nuint-backed newtype field without storage, initialization, volatility, or conflicting native attributes.", linkerSymbolAttribute.Source, linkerSymbolAttribute.Span);
                     if (fieldAlignment is not null && (symbol.IsConst || symbol.ExternName is not null || !symbol.IsStatic && type.Kind != DeclaredTypeKind.Struct))
                         Diagnostics.Add("CT1293", "Align is valid only on owned non-const static storage or instance fields of value aggregates.", field.Source, field.Span);
                     if (fieldAlignment is int requested && type.Pack is int packValue && !symbol.IsStatic && requested > packValue)
                         Diagnostics.Add("CT1293", $"Field alignment {requested} exceeds containing pack {packValue}.", field.Source, field.Span);
                     if (fieldAlignment is int explicitAlignment && fieldOffset is int explicitOffset && explicitOffset % explicitAlignment != 0)
                         Diagnostics.Add("CT1293", $"Explicit field offset {explicitOffset} is not divisible by alignment {explicitAlignment}.", field.Source, field.Span);
+                    if (type.IsBitField)
+                    {
+                        var backingBits = FixedUnsignedWidth(type.BitFieldBackingType!);
+                        var width = bitFirst is int first && bitLast is int last ? last - first + 1 : 0;
+                        var validViewType = bitAttribute is not null ? symbol.Type == CType.Bool : IsUnsignedBitViewType(symbol.Type) && FixedUnsignedWidth(symbol.Type) >= width;
+                        if (symbol.IsStatic || symbol.Initializer is not null || bitFirst is null || bitLast is null || bitLast >= backingBits || !validViewType ||
+                            field.Attributes.Any(attribute => attribute.Name is not ("Bit" or "Bits")) || symbol.IsConst || symbol.IsVolatile || fieldOffset is not null || fieldAlignment is not null)
+                            Diagnostics.Add("CT1297", "BitField members must be non-static Bit/Bits views without storage, initialization, volatility, or layout attributes and must use a compatible view type.", field.Source, field.Span);
+                    }
+                    else if (bitAttribute is not null || bitsAttribute is not null)
+                        Diagnostics.Add("CT1297", "Bit and Bits are valid only on fields declared inside a BitField type.", field.Source, field.Span);
+                    if (registerAttribute is not null)
+                    {
+                        var width = MmioStorageWidth(symbol.Type);
+                        var pointerBits = _architecture is CompilationArchitecture.X64 or CompilationArchitecture.Arm64 or CompilationArchitecture.RiscV64 ? 64 : 32;
+                        var fitsPointer = registerAddress is null || registerAddress >= 0 && registerAddress < (BigInteger.One << pointerBits);
+                        var aligned = registerAddress is null || width > 0 && registerAddress % width == 0;
+                        if (!symbol.IsStatic || !symbol.IsUnsafe || symbol.IsConst || symbol.IsVolatile || symbol.Initializer is not null || width == 0 || !fitsPointer || !aligned ||
+                            externAttribute is not null || sectionAttribute is not null || usedAttribute is not null || nativeVolatileAttribute is not null || linkerSymbolAttribute is not null || fieldAlignment is not null)
+                            Diagnostics.Add(width == 0 || !fitsPointer || !aligned ? "CT2210" : "CT1298", "Register requires a naturally aligned compile-time address and a static unsafe fixed-width scalar, enum, or BitField field without storage or conflicting native attributes.", registerAttribute.Source, registerAttribute.Span);
+                    }
                     AddUnique(type, symbol);
                     break;
                 }
@@ -1643,6 +1746,7 @@ internal sealed partial class CompilationModel
             Type = underlying,
             IsReadonly = true,
             IsConst = true,
+            IsUnsafe = false,
         });
     }
 
@@ -1666,7 +1770,7 @@ internal sealed partial class CompilationModel
 
     private void ValidateAggregateLayouts()
     {
-        var definitions = Types.Values.Where(type => type is { Kind: DeclaredTypeKind.Struct, Syntax: not null, GenericDefinition: null }).Distinct().ToArray();
+        var definitions = Types.Values.Where(type => type is { Kind: DeclaredTypeKind.Struct, Syntax: not null, GenericDefinition: null } && !type.IsBitField).Distinct().ToArray();
         foreach (var type in definitions)
         {
             var declaration = type.Syntax!;
@@ -2053,6 +2157,89 @@ internal sealed partial class CompilationModel
 
     private static bool IsPortableExternalIdentifier(string value) =>
         CIdentifier.IsMatch(value) && !value.StartsWith('_') && !CKeywords.Contains(value);
+
+    private static bool IsLinkerSymbolIdentifier(string value) =>
+        CIdentifier.IsMatch(value) && !CKeywords.Contains(value);
+
+    private static bool IsLinkerAddressType(CType type)
+    {
+        if (type.Kind is CTypeKind.Pointer or CTypeKind.Nuint)
+            return true;
+        var visited = new HashSet<TypeSymbol>();
+        while (type.Kind == CTypeKind.Newtype && type.Symbol is { UnderlyingType: { } underlying } symbol && visited.Add(symbol))
+            type = underlying;
+        return type.Kind == CTypeKind.Nuint;
+    }
+
+    private static bool TryParseNonnegativeInt(ImmutableArray<ExpressionSyntax> arguments, out int value)
+    {
+        if (arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue numeric }] && numeric.FloatingPoint is null && numeric.Integer >= 0 && numeric.Integer <= int.MaxValue)
+        {
+            value = (int)numeric.Integer;
+            return true;
+        }
+        value = 0;
+        return false;
+    }
+
+    private static bool IsUnsignedBitViewType(CType type) => type.Kind is CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint or CTypeKind.Ulong ||
+        type.Kind == CTypeKind.Enum && type.Symbol?.Fields.SingleOrDefault(field => field.Name == "<underlying>") is { Type.Kind: CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint or CTypeKind.Ulong } ||
+        type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying && IsUnsignedBitViewType(underlying);
+
+    private static int FixedUnsignedWidth(CType type) => type.Kind switch
+    {
+        CTypeKind.Byte => 8,
+        CTypeKind.Ushort => 16,
+        CTypeKind.Uint => 32,
+        CTypeKind.Ulong => 64,
+        CTypeKind.Enum when type.Symbol?.Fields.SingleOrDefault(field => field.Name == "<underlying>") is { } underlying => FixedUnsignedWidth(underlying.Type),
+        CTypeKind.Newtype when type.Symbol?.UnderlyingType is { } underlying => FixedUnsignedWidth(underlying),
+        _ => 0,
+    };
+
+    private BigInteger? ParseRegisterAddress(AttributeSyntax? attribute, IReadOnlySet<string> symbolicNames, out string? parameterName)
+    {
+        parameterName = null;
+        if (attribute is null)
+            return null;
+        if (attribute.Arguments is [LiteralExpressionSyntax { Value: NumericLiteralValue numeric }] && numeric.FloatingPoint is null && numeric.Integer >= 0)
+            return numeric.Integer;
+        if (attribute.Arguments is [NameExpressionSyntax name] && symbolicNames.Contains(name.Name))
+        {
+            parameterName = name.Name;
+            return null;
+        }
+        Diagnostics.Add("CT2210", "Register requires one nonnegative compile-time integral address.", attribute.Source, attribute.Span);
+        return null;
+    }
+
+    private BigInteger? ResolveRegisterAddress(BigInteger? address, string? parameterName, IReadOnlyDictionary<string, CType> substitutions, SyntaxNode syntax)
+    {
+        if (address is not null || parameterName is null)
+            return address;
+        if (substitutions.TryGetValue(parameterName, out var argument) && argument.ConstantValue is { } value)
+            return value;
+        Diagnostics.Add("CT2210", $"Register address parameter '{parameterName}' did not resolve to a compile-time value.", syntax.Source, syntax.Span);
+        return null;
+    }
+
+    private static int MmioStorageWidth(CType type)
+    {
+        if (type.Symbol?.IsBitField == true)
+            return MmioStorageWidth(type.Symbol.BitFieldBackingType!);
+        if (type.Kind == CTypeKind.Newtype && type.Symbol?.UnderlyingType is { } underlying)
+            return MmioStorageWidth(underlying);
+        if (type.Kind == CTypeKind.Enum && type.Symbol?.Fields.SingleOrDefault(field => field.Name == "<underlying>") is { } enumUnderlying)
+            return MmioStorageWidth(enumUnderlying.Type);
+        return type.Kind switch
+        {
+            CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1,
+            CTypeKind.Short or CTypeKind.Ushort => 2,
+            CTypeKind.Int or CTypeKind.Uint => 4,
+            CTypeKind.Long or CTypeKind.Ulong => 8,
+            _ => 0,
+        };
+    }
 
     private static bool IsPortableHeaderName(string value) =>
         !string.IsNullOrWhiteSpace(value) &&

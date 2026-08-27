@@ -4,10 +4,20 @@ internal sealed partial class CEmitter
 {
     private void EmitSectionSupport(CWriter writer)
     {
+        var hasUsed = _reachableMethods.Any(method => method.IsUsed) ||
+            EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsUsed);
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("#define CT_USED");
+        writer.WriteLine($"#elif (defined(__GNUC__) || defined(__clang__)) && defined(__ELF__)");
+        writer.WriteLine("#define CT_USED __attribute__((used, retain))");
+        writer.WriteLine("#elif defined(__GNUC__) || defined(__clang__)");
+        writer.WriteLine(hasUsed
+            ? "#error CT4111: [Used] final-image retention requires an ELF GNU-compatible toolchain"
+            : "#define CT_USED");
         writer.WriteLine("#else");
-        writer.WriteLine("#define CT_USED __attribute__((used))");
+        writer.WriteLine(hasUsed
+            ? "#error CT4111: [Used] final-image retention is unsupported by this toolchain"
+            : "#define CT_USED");
         writer.WriteLine("#endif");
         writer.WriteLine();
         var sections = _reachableMethods.Where(method => method.SectionName is not null)

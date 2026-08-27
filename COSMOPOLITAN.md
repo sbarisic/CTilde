@@ -2,9 +2,9 @@
 
 ## Status
 
-This document proposes the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). It is a roadmap contract, not a claim that Draft 0.23 can already build Actually Portable Executables.
+This document defines the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). Draft 0.24 implements Stage 1: explicit x86-64 semantics, project/CLI/schema/editor support, a dedicated WSL-aware driver, retained ELF/DWARF and APE artifacts, and a managed-runtime acceptance example executed from the same APE on WSL/Linux and Windows.
 
-The design deliberately starts with a multi-operating-system x86-64 executable. AArch64 and a combined x86-64/AArch64 image follow only after each architecture has an independent semantic compilation. This avoids producing a nominally fat binary from C~ source whose `static if`, target queries, CPU intrinsics, or inline assembly were already resolved for one architecture.
+The implementation deliberately starts with a multi-operating-system x86-64 executable. AArch64 and a combined x86-64/AArch64 image follow only after each architecture has an independent semantic compilation. This avoids producing a nominally fat binary from C~ source whose `static if`, target queries, CPU intrinsics, or inline assembly were already resolved for one architecture.
 
 ## Why this is a distinct target
 
@@ -114,7 +114,7 @@ The first project form is intentionally small:
 - `tiny`: pass `-mtiny`, normally with `-Os`;
 - `debug`: pass `-mdbg` and retain the full debug runtime.
 
-The build configuration still controls C~ optimization and debug information. `mode` controls which Cosmopolitan runtime library variant is linked. Debug configuration defaults to `debug`; Release defaults to `default`. An explicit mode wins.
+The build configuration controls C~ optimization and debug information. `mode` independently controls which Cosmopolitan runtime library variant is linked and defaults to `default`.
 
 Direct builds use `--target cosmopolitan --architecture x64 --native-output app.com`. `--compiler` accepts an exact wrapper path or `wsl:<command>`. `auto` checks `CTILDE_COSMOCC`, then the architecture-specific wrapper on `PATH`, then the same wrapper in WSL on Windows. The environment variable names the supported wrapper, not the physical `*-linux-cosmo-gcc` executable.
 
@@ -136,8 +136,7 @@ For each generated C source:
 3. cache the object by Draft version, generated content, shared headers, compiler identity, target, architecture, mode, and effective flags;
 4. link all generated objects through the supported `*-unknown-cosmo-cc` wrapper into `<image>.dbg`;
 5. unwrap the APE with matching `objcopy -SO binary <image>.dbg <image>`;
-6. mark the portable image executable where the host filesystem supports that bit;
-7. inspect the carrier and portable image before reporting success.
+6. retain the carrier and report both outputs. The acceptance runner inspects the carrier and executes the portable image on both supported test hosts.
 
 The driver must not add `-nostdlib`, a C~ linker script, or custom CRT objects. Those are freestanding responsibilities and would bypass Cosmopolitan's supported ABI contract.
 
@@ -200,7 +199,7 @@ Toolchain diagnostics should name the failed wrapper and preserve its native std
 
 ## Acceptance plan
 
-The x64 milestone is complete only when all of the following pass:
+The core x64 milestone is implemented. The full x64 audit remains complete only when all of the following pass:
 
 1. Manifest, CLI, schema, and language-server target parsing.
 2. `Target.Profile == Cosmopolitan`, x64 architecture, and pointer-size conformance.
@@ -216,11 +215,11 @@ AArch64 and fat-image milestones repeat the semantic/runtime suite per slice. ma
 
 ## Dependency-ordered implementation plan
 
-1. Add the target/profile enums, parser/schema/editor state, target queries, availability rules, and x64-only diagnostics.
-2. Reuse the hosted standard-library surface while adding explicit `IsHostedRuntime`/`IsCosmopolitan` predicates so target policy never falls through an `else` branch accidentally.
-3. Add a dedicated x64 `CosmopolitanBuildDriver` with WSL-aware wrapper discovery, macro probing, deterministic environment, object caching, ELF-carrier linking, and APE unwrapping.
-4. Add conformance and one substantial multi-function example covering managed runtime, failures, file I/O, and concurrency.
-5. Install a pinned official toolchain in the acceptance environment and verify Linux plus Windows execution of the same image.
+1. **Implemented in Draft 0.24:** add the target/profile enums, parser/schema/editor state, target queries, availability rules, and x64-only diagnostics.
+2. **Implemented in Draft 0.24:** reuse the hosted standard-library and runtime surface through explicit target selection.
+3. **Implemented in Draft 0.24:** add a dedicated x64 `CosmopolitanBuildDriver` with WSL-aware wrapper discovery, macro probing, deterministic environment, object caching, ELF-carrier linking, and APE unwrapping.
+4. **Implemented in Draft 0.24:** add conformance and one substantial multi-function example covering managed runtime, exceptions, file I/O, and concurrency.
+5. **Measured with official 4.0.2:** verify WSL/Linux plus Windows execution of the same image and inspect its x86-64 ELF carrier.
 6. Audit and enable `[Used]`, `[Section]`, exports, callbacks, public headers, and source debugging one feature at a time.
 7. Add the Arm64 single-architecture wrapper and acceptance.
 8. Add dual semantic compilation, cross-slice ABI verification, and `apelink` for true fat output.

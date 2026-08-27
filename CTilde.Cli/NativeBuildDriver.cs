@@ -14,6 +14,7 @@ internal static class NativeBuildDriver
             CompilationTarget.Hosted => HostedBuildDriver.BuildAsync(request, usesInlineAssembly, cancellationToken),
             CompilationTarget.EspIdf => EspIdfBuildDriver.BuildAsync(request, cancellationToken),
             CompilationTarget.Freestanding => FreestandingBuildDriver.BuildAsync(request, cancellationToken),
+            CompilationTarget.Cosmopolitan => CosmopolitanBuildDriver.BuildAsync(request, cancellationToken),
             _ => throw new NativeBuildException($"Unsupported native target '{request.Target}'."),
         };
 }

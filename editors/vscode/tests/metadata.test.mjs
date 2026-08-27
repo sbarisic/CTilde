@@ -16,7 +16,7 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.8.0");
+  assert.equal(manifest.version, "0.9.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "Unlicense");
   assert.equal(manifest.repository.directory, "editors/vscode");
@@ -111,6 +111,8 @@ test("project schema includes native build configuration", async () => {
   assert.equal(build.properties.compiler.default, "auto");
   assert.equal(build.properties.espIdfProjectDirectory.default, ".");
   assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
+  assert.ok(schema.properties.target.enum.includes("cosmopolitan"));
+  assert.deepEqual(schema.properties.cosmopolitan.properties.mode.enum, ["default", "tiny", "debug"]);
   const bindings = await readJson("schemas/esp-idf-bindings.schema.json");
   assert.equal(bindings.properties.schemaVersion.const, 1);
   assert.equal(bindings.$defs.import.additionalProperties, false);

@@ -100,7 +100,7 @@ internal static class CTildeCommand
         {
             if (request.Trace)
             {
-                Console.Error.WriteLine($"trace: target {request.Target switch { CompilationTarget.EspIdf => "esp-idf", CompilationTarget.Freestanding => "freestanding", _ => "hosted" }}");
+                Console.Error.WriteLine($"trace: target {request.Target switch { CompilationTarget.EspIdf => "esp-idf", CompilationTarget.Freestanding => "freestanding", CompilationTarget.Cosmopolitan => "cosmopolitan", _ => "hosted" }}");
                 Console.Error.WriteLine($"trace: reading {request.Inputs.Count} source file(s)");
                 if (request.ManifestPath is not null)
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
@@ -334,15 +334,16 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|freestanding] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
-        Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|freestanding] [native build options] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|freestanding|cosmopolitan] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");
-        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|freestanding] [--source-root <directory>] [--trace]");
+        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");
         Console.Error.WriteLine("                    --compile-option <value> --link-option <value> --native-output <image>");
+        Console.Error.WriteLine("Cosmopolitan build: --architecture x64 [--cosmopolitan-mode default|tiny|debug] [--compiler wsl:<cosmocc>] [--native-output <program.com>]");
         Console.Error.WriteLine("ESP-IDF bindings: --generate-bindings --verify-bindings --esp-clang <path>");
         Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--debug-memory off|objects|guarded] [--serial-port <port>] [--baud-rate <rate>]");
     }

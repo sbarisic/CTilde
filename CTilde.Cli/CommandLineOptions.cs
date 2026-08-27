@@ -18,6 +18,8 @@ internal sealed record CommandLineOptions(
     bool Build,
     CTildeNativeBuildConfiguration? Configuration,
     string? Compiler,
+    CosmopolitanRuntimeMode CosmopolitanMode,
+    bool CosmopolitanModeSpecified,
     string? NativeOutput,
     string? EspIdfProject,
     string? EspIdfPath,
@@ -62,6 +64,8 @@ internal sealed record CommandLineOptions(
         string? project = null;
         string? sourceRoot = null;
         string? compiler = null;
+        var cosmopolitanMode = CosmopolitanRuntimeMode.Default;
+        var cosmopolitanModeSpecified = false;
         string? nativeOutput = null;
         string? idfProject = null;
         string? idfPath = null;
@@ -117,6 +121,19 @@ internal sealed record CommandLineOptions(
                 case "--project": project = RequireValue(); break;
                 case "--source-root": sourceRoot = RequireValue(); break;
                 case "--compiler": compiler = RequireValue(); break;
+                case "--cosmopolitan-mode":
+                    cosmopolitanModeSpecified = true;
+                    var cosmopolitanModeValue = RequireValue();
+                    cosmopolitanMode = cosmopolitanModeValue switch
+                    {
+                        "default" => CosmopolitanRuntimeMode.Default,
+                        "tiny" => CosmopolitanRuntimeMode.Tiny,
+                        "debug" => CosmopolitanRuntimeMode.Debug,
+                        _ => (CosmopolitanRuntimeMode)(-1),
+                    };
+                    if (cosmopolitanModeValue is not null && !Enum.IsDefined(cosmopolitanMode))
+                        parseError = $"Unknown Cosmopolitan mode '{cosmopolitanModeValue}'; expected default, tiny, or debug.";
+                    break;
                 case "--native-output": nativeOutput = RequireValue(); break;
                 case "--idf-project": idfProject = RequireValue(); break;
                 case "--idf-path": idfPath = RequireValue(); break;
@@ -219,10 +236,11 @@ internal sealed record CommandLineOptions(
                         "hosted" => CompilationTarget.Hosted,
                         "esp-idf" => CompilationTarget.EspIdf,
                         "freestanding" => CompilationTarget.Freestanding,
+                        "cosmopolitan" => CompilationTarget.Cosmopolitan,
                         _ => (CompilationTarget)(-1),
                     };
                     if (targetValue is not null && !Enum.IsDefined(target))
-                        parseError = $"Unknown target '{targetValue}'; expected hosted, esp-idf, or freestanding.";
+                        parseError = $"Unknown target '{targetValue}'; expected hosted, esp-idf, freestanding, or cosmopolitan.";
                     break;
                 case "--architecture":
                     architectureSpecified = true;
@@ -258,7 +276,7 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, architecture, architectureSpecified, build, configuration, compiler, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
+            targetSpecified, architecture, architectureSpecified, build, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
             panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
         return true;

@@ -38,9 +38,10 @@ internal sealed record BuildRequest(
     string? EspClangPath = null,
     bool NoRecursion = false,
     EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
-    FreestandingProjectConfiguration? Freestanding = null)
+    FreestandingProjectConfiguration? Freestanding = null,
+    CosmopolitanRuntimeMode CosmopolitanMode = CosmopolitanRuntimeMode.Default)
 {
-    public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding
+    public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan
         ? Path.GetDirectoryName(ExecutablePath!)!
         : Path.Combine(EspIdfProjectDirectory!, "build");
 
@@ -83,7 +84,7 @@ internal static class BuildRequestResolver
             ? CTildeNativeBuildConfiguration.Debug
             : options.Configuration ?? build.Configuration;
         var debugInformation = preparingLaunch ? DebugInformationMode.Instrumented : options.DebugInfo || preparingAttach ||
-            (buildNative && project.Configuration.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug)
+            (buildNative && (project.Configuration.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && configuration == CTildeNativeBuildConfiguration.Debug)
                 ? DebugInformationMode.Source : DebugInformationMode.None;
         var debugMemory = preparingLaunch ? options.DebugMemory ?? DebugMemoryMode.Objects : DebugMemoryMode.Off;
         var generatedC = checkOnly || layout == GeneratedCLayout.Modules ? null : Path.GetFullPath(options.Output ?? build.GeneratedCPath);
@@ -96,7 +97,7 @@ internal static class BuildRequestResolver
                 : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_debug.json")))
             : null;
         var nativeOutput = options.NativeOutput ?? build.ExecutablePath;
-        var executable = project.Configuration.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding && nativeOutput is not null
+        var executable = project.Configuration.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan && nativeOutput is not null
             ? Path.GetFullPath(nativeOutput)
             : null;
         var idfProject = project.Configuration.Target == CompilationTarget.EspIdf
@@ -111,9 +112,13 @@ internal static class BuildRequestResolver
             (project.Configuration.Target == CompilationTarget.Hosted
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
                 : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
-        ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
+        ValidateDistinctOutputs(generatedC, generatedHeader, executable,
+            project.Configuration.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
+            symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
             project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject);
+        if (project.Configuration.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
+            throw new CommandLineException("Draft 0.24 Cosmopolitan projects require architecture 'x64'.");
         var freestanding = project.Configuration.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, project.Configuration.Freestanding, project.RootDirectory, buildNative, executable)
             : null;
@@ -124,7 +129,8 @@ internal static class BuildRequestResolver
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
             build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
             options.NoRecursion || project.Configuration.NoRecursion,
-            options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding);
+            options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding,
+            options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -153,8 +159,10 @@ internal static class BuildRequestResolver
                 ? Path.Combine(layout == GeneratedCLayout.Unity ? Path.GetDirectoryName(generatedC)! : generatedDirectory!, "ctilde_exports.h")
                 : null;
         var symbolMap = options.CheckOnly ? null : options.SymbolMap is null ? null : Path.GetFullPath(options.SymbolMap);
-        var executable = options.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding && (buildNative || preparingAttach)
-            ? Path.GetFullPath(options.NativeOutput ?? Path.Combine(root, "build", $"program{(OperatingSystem.IsWindows() ? ".exe" : string.Empty)}"))
+        var executable = options.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan && (buildNative || preparingAttach)
+            ? Path.GetFullPath(options.NativeOutput ?? Path.Combine(root, "build", options.Target == CompilationTarget.Cosmopolitan
+                ? "program.com"
+                : $"program{(OperatingSystem.IsWindows() ? ".exe" : string.Empty)}"))
             : null;
         var idfProject = options.Target == CompilationTarget.EspIdf && (buildNative || preparingAttach)
             ? Path.GetFullPath(options.EspIdfProject!)
@@ -167,7 +175,7 @@ internal static class BuildRequestResolver
         if (idfProject is not null)
             ValidateEspOutputs(idfProject, generatedC, generatedHeader, generatedDirectory);
         var debugInformation = preparingLaunch ? DebugInformationMode.Instrumented : options.DebugInfo || preparingAttach ||
-            (buildNative && options.Target == CompilationTarget.Hosted && configuration == CTildeNativeBuildConfiguration.Debug)
+            (buildNative && (options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && configuration == CTildeNativeBuildConfiguration.Debug)
                 ? DebugInformationMode.Source : DebugInformationMode.None;
         var debugMemory = preparingLaunch ? options.DebugMemory ?? DebugMemoryMode.Objects : DebugMemoryMode.Off;
         var debugMap = debugInformation != DebugInformationMode.None
@@ -179,8 +187,12 @@ internal static class BuildRequestResolver
             (options.Target == CompilationTarget.Hosted
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
                 : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
-        ValidateDistinctOutputs(generatedC, generatedHeader, executable, symbolMap, debugMap, debugTarget);
+        ValidateDistinctOutputs(generatedC, generatedHeader, executable,
+            options.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
+            symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject);
+        if (options.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
+            throw new CommandLineException("Draft 0.24 Cosmopolitan builds require --architecture x64.");
         var freestanding = options.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, null, root, buildNative, executable)
             : null;
@@ -190,12 +202,12 @@ internal static class BuildRequestResolver
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding);
+            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
     {
-        var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.Lto ||
+        var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.CosmopolitanModeSpecified || options.Lto ||
             options.NativeOutput is not null || options.EspIdfProject is not null ||
             options.LinkerScript is not null || options.EntrySymbol is not null || options.NativeSources.Count != 0 ||
             options.ObjectFiles.Count != 0 || options.Libraries.Count != 0 || options.CompileOptions.Count != 0 || options.LinkOptions.Count != 0 ||
@@ -270,11 +282,17 @@ internal static class BuildRequestResolver
         if (target != CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))
             throw new CommandLineException("ESP-IDF binding options require an ESP-IDF project.");
         if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null || options.Configuration is not null))
-            throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted builds.");
+            throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted or Cosmopolitan builds.");
         if (target == CompilationTarget.EspIdf && options.Lto)
-            throw new CommandLineException("--lto is a hosted Release option; configure ESP-IDF LTO through sdkconfig.");
+            throw new CommandLineException("--lto is a hosted or Cosmopolitan Release option; configure ESP-IDF LTO through sdkconfig.");
         if (target == CompilationTarget.EspIdf && options.SourceRoot is not null)
-            throw new CommandLineException("--source-root is valid only for hosted compilations.");
+            throw new CommandLineException("--source-root is valid only for hosted or Cosmopolitan compilations.");
+        if (target != CompilationTarget.Cosmopolitan && options.CosmopolitanModeSpecified)
+            throw new CommandLineException("--cosmopolitan-mode is valid only for Cosmopolitan builds.");
+        if (target == CompilationTarget.Cosmopolitan && options.ArchitectureSpecified && options.Architecture != CompilationArchitecture.X64)
+            throw new CommandLineException("Draft 0.24 Cosmopolitan builds require --architecture x64.");
+        if (target == CompilationTarget.Cosmopolitan && options.PrepareDebug is not null)
+            throw new CommandLineException("Debug preparation is not available for Cosmopolitan builds in Draft 0.24; use the retained .dbg carrier with a native debugger.");
         if (target != CompilationTarget.EspIdf && options.SerialPort is not null)
             throw new CommandLineException("--serial-port is valid only for ESP-IDF debugging.");
         if (target == CompilationTarget.EspIdf && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))

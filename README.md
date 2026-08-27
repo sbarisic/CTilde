@@ -1,10 +1,10 @@
 # C~
 
-C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, or ESP-IDF to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
+C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, Cosmopolitan, or ESP-IDF tooling to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.23 adds compiler-checked ESP-IDF `[Interrupt]` entry points, transitive IRAM/DRAM residency, and explicit `[InterruptSafe]` native boundaries. It builds on the Draft 0.22 effect engine and retains the Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.24 adds a measured x86-64 Cosmopolitan APE target to the Draft 0.23 interrupt-safe ESP-IDF surface. It retains the Draft 0.22 effect engine and Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
-An x86-64 [Cosmopolitan target](COSMOPOLITAN.md) is planned as the next native profile. The design uses hosted C~ semantics but a dedicated Actually Portable Executable build pipeline. It does not treat `cosmocc` as an ordinary hosted compiler alias, and it defers x86-64/AArch64 fat output until C~ can perform one semantic compilation per architecture.
+The x86-64 [Cosmopolitan target](COSMOPOLITAN.md) uses hosted C~ semantics and a dedicated Actually Portable Executable build pipeline. The same measured APE runs under WSL/Linux and Windows. It does not treat `cosmocc` as an ordinary hosted compiler alias, and it defers Arm64 and x86-64/Arm64 fat output until C~ can perform one semantic compilation per architecture.
 
 ## A taste of C~
 
@@ -51,7 +51,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to
 - MSVC, GCC, or Clang for hosted programs.
 - ESP-IDF 6 for ESP32-family projects.
 - GNU-compatible ELF GCC or Clang for freestanding images.
-- The planned Cosmopolitan target will require an external official `cosmocc` toolchain and a Unix shell; it is not implemented in Draft 0.23.
+- Cosmopolitan builds require an external official `cosmocc` toolchain and a Unix shell. Draft 0.24 accepts only the `x86_64-unknown-cosmo-cc` wrapper and explicit `architecture: "x64"`.
 
 Build the solution and compile the checked hello-world example:
 
@@ -131,6 +131,8 @@ Project globs and generated paths are deterministic and confined to the manifest
 
 Freestanding manifests select `target: "freestanding"`, require an explicit architecture, and provide an image path, linker script, and entry symbol for `--build`. They may also list native `.c`/`.S`/`.s` sources, ELF objects, archives, and controlled compile/link options. See [the freestanding example](examples/Freestanding/README.md) for a complete runtime-hook and naked `_start` image.
 
+Cosmopolitan manifests select `target: "cosmopolitan"`, require `architecture: "x64"`, and may select `cosmopolitan.mode` as `default`, `tiny`, or `debug`. Set `CTILDE_COSMOCC` to the supported wrapper, for example `wsl:/opt/cosmocc/bin/x86_64-unknown-cosmo-cc`, then build [the managed APE example](examples/Cosmopolitan/README.md). The requested `.com` file is the portable distribution image; the adjacent `.com.dbg` file is its retained ELF/DWARF carrier.
+
 Useful CLI workflows include:
 
 ```text
@@ -197,7 +199,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.23 implementation, not a stable production language. Draft 0.23 retains runtime ABI 16 and debug metadata v3. Interrupt entry, general effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and real GCC ELF execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.24 implementation, not a stable production language. Draft 0.24 retains runtime ABI 16 and debug metadata v3. The x86-64 APE driver, interrupt entry, general effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and native execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -209,12 +211,12 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 | `CTilde.Cli` | Command-line emission and native-build driver |
 | `CTilde.LanguageServer` | LSP 3.17 language server |
 | `Test` | Managed, native, ABI, artifact, and language-service conformance checks |
-| `examples` | Focused language programs and hosted/ESP-IDF projects |
+| `examples` | Focused language programs and hosted, Cosmopolitan, freestanding, and ESP-IDF projects |
 | `editors/vscode` | VS Code client, grammar, project schema, and editor tests |
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.23 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.24 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.

@@ -1,0 +1,17 @@
+{
+  "target": "cosmopolitan",
+  "architecture": "x64",
+  "sources": ["*.ct"],
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "build/generated/modules",
+    "generatedHeader": "build/generated/ctilde_exports.h",
+    "symbolMap": "build/generated/ctilde_symbols.json",
+    "configuration": "release",
+    "compiler": "auto",
+    "executable": "build/Cosmopolitan.com"
+  },
+  "cosmopolitan": {
+    "mode": "default"
+  }
+}

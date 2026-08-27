@@ -5,6 +5,7 @@ public enum CompilationTarget
     Hosted,
     EspIdf,
     Freestanding,
+    Cosmopolitan,
 }
 
 public enum CompilationArchitecture

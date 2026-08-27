@@ -12,7 +12,8 @@
       "enum": [
         "hosted",
         "esp-idf",
-        "freestanding"
+        "freestanding",
+        "cosmopolitan"
       ],
       "default": "hosted",
       "description": "Compiler target and target-specific standard library."
@@ -91,6 +92,18 @@
         "linkOptions": { "type": "array", "items": { "type": "string", "minLength": 1 } }
       }
     },
+    "cosmopolitan": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Cosmopolitan Libc runtime selection for x86-64 APE builds.",
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["default", "tiny", "debug"],
+          "default": "default"
+        }
+      }
+    },
     "build": {
       "type": "object",
       "additionalProperties": false,
@@ -125,24 +138,24 @@
         "lto": {
           "type": "boolean",
           "default": false,
-          "description": "Enable hosted link-time optimization. Requires Release configuration."
+          "description": "Enable hosted or Cosmopolitan link-time optimization. Requires Release configuration."
         },
         "configuration": {
           "type": "string",
           "enum": ["debug", "release"],
           "default": "debug",
-          "description": "Hosted native build configuration."
+          "description": "Hosted or Cosmopolitan native build configuration."
         },
         "compiler": {
           "type": "string",
           "minLength": 1,
           "default": "auto",
-          "description": "Hosted C compiler name or path."
+          "description": "Hosted compiler, or the x86_64-unknown-cosmo-cc wrapper for Cosmopolitan projects."
         },
         "executable": {
           "type": "string",
           "minLength": 1,
-          "description": "Hosted executable path relative to the project directory."
+          "description": "Hosted executable or Cosmopolitan APE path relative to the project directory."
         },
         "image": {
           "type": "string",

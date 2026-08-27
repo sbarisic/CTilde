@@ -1,0 +1,60 @@
+using System;
+using System.IO;
+using System.Runtime;
+using System.Threading;
+
+namespace CosmopolitanExample;
+
+public static class Program
+{
+    private static Mutex Gate = new Mutex();
+    private static volatile int WorkerValue;
+
+    private static void Worker()
+    {
+        lock (Gate)
+        {
+            string[] words = new string[3];
+            words[0] = "one";
+            words[1] = "portable";
+            words[2] = "program";
+            WorkerValue = words.Length * 14;
+        }
+    }
+
+    private static void WriteReport()
+    {
+        FileHandle report = File.Open("cosmopolitan-output.txt", FileMode.Create, FileAccess.Write);
+        defer File.Close(report);
+        File.Write(report, "C~ Cosmopolitan x86-64 APE OK\n");
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        static if (Target.Profile == TargetProfile.Cosmopolitan)
+        {
+            Console.WriteLine("C~ is running as a Cosmopolitan APE.");
+        }
+        else
+        {
+            Console.WriteLine("Unexpected target profile.");
+        }
+
+        Thread worker = new Thread(Worker);
+        worker.Start();
+        worker.Join();
+
+        try
+        {
+            WriteReport();
+            Console.Write("Worker value: ");
+            Console.WriteLine(WorkerValue);
+        }
+        catch (IOException error)
+        {
+            Console.Write("Could not write report, native error: ");
+            Console.WriteLine(error.ErrorCode);
+        }
+    }
+}

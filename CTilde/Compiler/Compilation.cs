@@ -71,7 +71,7 @@ public sealed class Compilation
             var architecture = ResolveArchitecture(target, Options.Architecture);
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
-            var hostedIo = target == CompilationTarget.Hosted && StandardLibrary.RequiresHostedIo(SyntaxTrees);
+            var hostedIo = (target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && StandardLibrary.RequiresHostedIo(SyntaxTrees);
             var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);
             var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
@@ -82,6 +82,8 @@ public sealed class Compilation
                 diagnostics.Add("CT4113", "Restart and halt panic policies are valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Freestanding && architecture == CompilationArchitecture.Auto)
                 diagnostics.Add("CT4108", "Freestanding compilations require an explicit target architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
+                diagnostics.Add("CT4118", "Draft 0.24 Cosmopolitan compilations require the explicit x64 architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Freestanding && (Options.DebugInformation != DebugInformationMode.None || Options.DebugMemory != DebugMemoryMode.Off))
                 diagnostics.Add("CT4115", "Debug information and debug-memory instrumentation are unavailable for freestanding compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             ValidateSourceIdentityRoot(diagnostics);
@@ -168,7 +170,7 @@ public sealed class Compilation
     {
         if (architecture != CompilationArchitecture.Auto)
             return architecture;
-        if (target is CompilationTarget.EspIdf or CompilationTarget.Freestanding)
+        if (target is CompilationTarget.EspIdf or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan)
             return CompilationArchitecture.Auto;
         return System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
         {
@@ -186,9 +188,9 @@ public sealed class Compilation
             return null;
 
         var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
-        if (target != CompilationTarget.Hosted && Options.DebugInformation == DebugInformationMode.None)
+        if (target is not CompilationTarget.Hosted and not CompilationTarget.Cosmopolitan && Options.DebugInformation == DebugInformationMode.None)
         {
-            diagnostics.Add("CT4106", "A source root is supported only for the hosted target.", source, new TextSpan(0, 0));
+            diagnostics.Add("CT4106", "A source root is supported only for hosted or Cosmopolitan targets.", source, new TextSpan(0, 0));
             return null;
         }
         if (!Path.IsPathFullyQualified(Options.SourceRoot))
@@ -223,7 +225,7 @@ public sealed class Compilation
     private string? ValidatedSourceRoot()
     {
         if (Options.SourceRoot is null ||
-            (Options.Target != CompilationTarget.Hosted && Options.DebugInformation == DebugInformationMode.None) ||
+            (Options.Target is not CompilationTarget.Hosted and not CompilationTarget.Cosmopolitan && Options.DebugInformation == DebugInformationMode.None) ||
             !Path.IsPathFullyQualified(Options.SourceRoot))
             return null;
         try

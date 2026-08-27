@@ -137,7 +137,9 @@ class CTildeTaskProvider implements vscode.TaskProvider {
     public readProjectTarget(project: string): CTildeProjectTarget {
         try {
             const document = JSON.parse(readFileSync(project, 'utf8')) as { target?: unknown };
-            return document.target === 'esp-idf' ? 'esp-idf' : document.target === undefined || document.target === 'hosted' ? 'hosted' : 'unknown';
+            if (document.target === undefined || document.target === 'hosted') return 'hosted';
+            if (document.target === 'esp-idf' || document.target === 'freestanding' || document.target === 'cosmopolitan') return document.target;
+            return 'unknown';
         } catch {
             return 'unknown';
         }

@@ -315,6 +315,7 @@ internal sealed partial class TypedIrBodyLowerer
                         CompilationTarget.Hosted => 0,
                         CompilationTarget.EspIdf => 1,
                         CompilationTarget.Freestanding => 2,
+                        CompilationTarget.Cosmopolitan => 3,
                         _ => 0,
                     };
                     return Constant(_model.Types["System.Runtime.TargetProfile"].Type, profile,

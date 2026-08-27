@@ -25,7 +25,7 @@ internal static class StandardLibrary
         bool includeHostedIo = false,
         StandardVectorTypes vectors = StandardVectorTypes.None)
     {
-        includeHostedIo &= target == CompilationTarget.Hosted;
+        includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
         {
             var files = key.Target == CompilationTarget.Freestanding
@@ -90,7 +90,7 @@ internal static class StandardLibrary
         var names = target switch
         {
             CompilationTarget.EspIdf => new[] { "System.docs.xml", "EspIdf.docs.xml" },
-            CompilationTarget.Hosted => new[] { "System.docs.xml", "HostedIO.docs.xml" },
+            CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "HostedIO.docs.xml" },
             _ => new[] { "System.docs.xml" },
         };
         var assembly = typeof(StandardLibrary).Assembly;

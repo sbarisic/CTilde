@@ -83,12 +83,12 @@ public sealed partial class LanguageServiceSnapshot
             options.Target,
             nativeIntegers,
             nativeUtf8,
-            options.Target == CompilationTarget.Hosted,
+            options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan,
             StandardVectorTypes.All).AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
-        var sourceRoot = options.Target == CompilationTarget.Hosted && options.SourceRoot is not null && Path.IsPathFullyQualified(options.SourceRoot)
+        var sourceRoot = (options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && options.SourceRoot is not null && Path.IsPathFullyQualified(options.SourceRoot)
             ? Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.SourceRoot))
             : null;
         var architecture = options.Architecture == CompilationArchitecture.Auto && options.Target == CompilationTarget.Hosted

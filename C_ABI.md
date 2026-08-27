@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.23 and runtime ABI 16. Draft 0.23 adds ESP-IDF interrupt entry and residency metadata to the Draft 0.22 generated-C contract.
+This document defines the generated C contract for C~ draft 0.24 and runtime ABI 16. Draft 0.24 adds the x86-64 Cosmopolitan artifact pipeline while retaining Draft 0.23 ESP-IDF interrupt entry and residency metadata.
 
-Draft 0.23 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.24 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -29,7 +29,7 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 
 The freestanding profile supports GNU-compatible GCC and Clang ELF drivers only. It includes only `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `limits.h`, and `float.h`, uses internal byte loops instead of libc memory/string calls, and emits no CRT, libm, pthread, TLS, console, filesystem, exception, or process dependency. The native build uses `-ffreestanding`, `-fno-builtin`, `-fno-stack-protector`, section splitting, `-nostdlib`, `-nostartfiles`, a caller-selected linker script, and an explicit entry symbol. Compiler predefined macros must match the declared C~ architecture.
 
-Cosmopolitan is a planned target, not part of the Draft 0.23 ABI. Its design retains ABI 16 hosted object/runtime semantics while linking through supported `*-unknown-cosmo-cc` wrappers. The portable APE is the distribution artifact and an ELF/DWARF carrier is retained for symbols. C~ will not reconstruct Cosmopolitan startup objects, linker scripts, register reservations, or TLS flags. See [COSMOPOLITAN.md](COSMOPOLITAN.md).
+Cosmopolitan x86-64 is a Draft 0.24 target. It retains ABI 16 hosted object/runtime semantics while linking through `x86_64-unknown-cosmo-cc`. The unwrapped APE is the distribution artifact and `<image>.dbg` is the retained ELF/DWARF carrier. C~ does not reconstruct Cosmopolitan startup objects, linker scripts, register reservations, or TLS flags. Arm64 and fat-image contracts remain deferred; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. The support is absent when those APIs are unused and is never emitted for ESP-IDF.
 
@@ -365,7 +365,7 @@ An extern method, extern data symbol, or inline assembly block reached from inte
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.23.
+Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.24.
 
 ## Portable CPU lowering
 
@@ -398,7 +398,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler, prints and flushes its diagnostic, then applies the selected ESP-IDF policy: `abort` uses the existing abort path, `restart` calls `esp_restart`, and `halt` enters `esp_system_abort` after the build driver verifies `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y`. Hosted output retains process failure. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.23.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.24.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -410,9 +410,9 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 ## Future native interop constraints
 
-The planned Cosmopolitan profile must verify final-image retention and custom sections through both its ELF carrier and unwrapped APE before extending the ordinary `[Used]` or `[Section]` guarantees to that target. Arbitrary native objects must be built for the Cosmopolitan ABI; host ABI objects and general shared libraries are not compatible inputs.
+Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.23.
+This section records constraints that remain after draft 0.24.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

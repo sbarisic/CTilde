@@ -14,7 +14,17 @@ public sealed record CTildeProjectConfiguration(
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
     bool NoRecursion,
     EspIdfPanicPolicy PanicPolicy,
-    FreestandingProjectConfiguration? Freestanding);
+    FreestandingProjectConfiguration? Freestanding,
+    CosmopolitanProjectConfiguration? Cosmopolitan);
+
+public enum CosmopolitanRuntimeMode
+{
+    Default,
+    Tiny,
+    Debug,
+}
+
+public sealed record CosmopolitanProjectConfiguration(CosmopolitanRuntimeMode Mode);
 
 public sealed record FreestandingProjectConfiguration(
     string? LinkerScriptPath,
@@ -89,7 +99,8 @@ public static class CTildeProjectFile
             null or "hosted" => CompilationTarget.Hosted,
             "esp-idf" => CompilationTarget.EspIdf,
             "freestanding" => CompilationTarget.Freestanding,
-            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, or freestanding."),
+            "cosmopolitan" => CompilationTarget.Cosmopolitan,
+            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, freestanding, or cosmopolitan."),
         };
         var architecture = ParseArchitecture(document.Architecture, fullManifestPath);
         var root = Path.GetDirectoryName(fullManifestPath)!;
@@ -122,6 +133,8 @@ public static class CTildeProjectFile
             throw new CTildeProjectException($"Property 'espIdf' in '{fullManifestPath}' is valid only for ESP-IDF projects.");
         if (target != CompilationTarget.Freestanding && document.Freestanding is not null)
             throw new CTildeProjectException($"Property 'freestanding' in '{fullManifestPath}' is valid only for freestanding projects.");
+        if (target != CompilationTarget.Cosmopolitan && document.Cosmopolitan is not null)
+            throw new CTildeProjectException($"Property 'cosmopolitan' in '{fullManifestPath}' is valid only for Cosmopolitan projects.");
         var bindingPaths = document.EspIdf?.Bindings ?? [];
         var bindingManifests = bindingPaths.Select(path => EspIdfBindingManifest.Load(path, root)).OrderBy(binding => binding.ManifestPath, comparer).ToImmutableArray();
         if (bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }).Distinct(comparer).Count() != bindingManifests.Length * 2)
@@ -138,8 +151,11 @@ public static class CTildeProjectFile
         var freestanding = target == CompilationTarget.Freestanding
             ? CreateFreestandingConfiguration(document.Freestanding, root, fullManifestPath)
             : null;
+        var cosmopolitan = target == CompilationTarget.Cosmopolitan
+            ? CreateCosmopolitanConfiguration(document.Cosmopolitan, fullManifestPath)
+            : null;
         return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests,
-            document.NoRecursion ?? false, panicPolicy, freestanding), files);
+            document.NoRecursion ?? false, panicPolicy, freestanding, cosmopolitan), files);
     }
 
     private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
@@ -212,12 +228,12 @@ public static class CTildeProjectFile
         string manifestPath,
         ImmutableArray<string> sourceFiles)
     {
-        if (target == CompilationTarget.Hosted && document?.EspIdfProjectDirectory is not null)
+        if ((target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && document?.EspIdfProjectDirectory is not null)
             throw new CTildeProjectException($"Property 'build.espIdfProjectDirectory' in '{manifestPath}' is valid only for ESP-IDF projects.");
         if (target == CompilationTarget.EspIdf &&
             (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null || document?.Image is not null || document?.Lto == true))
-            throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', 'build.executable', and 'build.lto' in '{manifestPath}' are valid only for hosted projects.");
-        if (target == CompilationTarget.Hosted && document?.Image is not null)
+            throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', 'build.executable', and 'build.lto' in '{manifestPath}' are valid only for hosted or Cosmopolitan projects.");
+        if ((target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && document?.Image is not null)
             throw new CTildeProjectException($"Property 'build.image' in '{manifestPath}' is valid only for freestanding projects.");
         if (target == CompilationTarget.Freestanding && (document?.Executable is not null || document?.EspIdfProjectDirectory is not null))
             throw new CTildeProjectException($"Properties 'build.executable' and 'build.espIdfProjectDirectory' in '{manifestPath}' are invalid for freestanding projects.");
@@ -257,17 +273,19 @@ public static class CTildeProjectFile
         var compiler = document?.Compiler ?? "auto";
         if (string.IsNullOrWhiteSpace(compiler))
             throw new CTildeProjectException($"Property 'build.compiler' in '{manifestPath}' cannot be empty.");
-        if (compiler.Contains(Path.DirectorySeparatorChar) || compiler.Contains(Path.AltDirectorySeparatorChar))
+        if (!compiler.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) &&
+            (compiler.Contains(Path.DirectorySeparatorChar) || compiler.Contains(Path.AltDirectorySeparatorChar)))
             compiler = ResolveProjectPath(compiler, "build.compiler", root, manifestPath, isDirectory: false);
 
         string? executable = null;
         string? espIdfProjectDirectory = null;
-        if (target == CompilationTarget.Hosted)
+        if (target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan)
         {
             var projectName = Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
             if (string.IsNullOrWhiteSpace(projectName))
                 projectName = "program";
-            var defaultExecutable = $"build/{projectName}{(OperatingSystem.IsWindows() ? ".exe" : string.Empty)}";
+            var extension = target == CompilationTarget.Cosmopolitan ? ".com" : OperatingSystem.IsWindows() ? ".exe" : string.Empty;
+            var defaultExecutable = $"build/{projectName}{extension}";
             executable = ResolveProjectPath(document?.Executable ?? defaultExecutable, "build.executable", root, manifestPath, isDirectory: false);
             if (PathsEqual(executable, generatedC) || PathsEqual(executable, generatedHeader) || sourceFiles.Any(path => PathsEqual(path, executable)))
                 throw new CTildeProjectException($"Property 'build.executable' in '{manifestPath}' must name a distinct non-source file.");
@@ -313,6 +331,20 @@ public static class CTildeProjectFile
         var compileOptions = ValidateNativeOptions(document?.CompileOptions ?? [], "freestanding.compileOptions", manifestPath);
         var linkOptions = ValidateNativeOptions(document?.LinkOptions ?? [], "freestanding.linkOptions", manifestPath);
         return new FreestandingProjectConfiguration(linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
+    }
+
+    private static CosmopolitanProjectConfiguration CreateCosmopolitanConfiguration(
+        CosmopolitanDocument? document,
+        string manifestPath)
+    {
+        var mode = document?.Mode switch
+        {
+            null or "default" => CosmopolitanRuntimeMode.Default,
+            "tiny" => CosmopolitanRuntimeMode.Tiny,
+            "debug" => CosmopolitanRuntimeMode.Debug,
+            _ => throw new CTildeProjectException($"Unknown Cosmopolitan mode '{document.Mode}' in '{manifestPath}'; expected default, tiny, or debug."),
+        };
+        return new CosmopolitanProjectConfiguration(mode);
     }
 
     private static ImmutableArray<string> ResolveExistingFiles(
@@ -424,7 +456,8 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("panicPolicy")] string? PanicPolicy,
         [property: JsonPropertyName("build")] BuildDocument? Build,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf,
-        [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding);
+        [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding,
+        [property: JsonPropertyName("cosmopolitan")] CosmopolitanDocument? Cosmopolitan);
 
     private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
 
@@ -436,6 +469,8 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("libraries")] string[]? Libraries,
         [property: JsonPropertyName("compileOptions")] string[]? CompileOptions,
         [property: JsonPropertyName("linkOptions")] string[]? LinkOptions);
+
+    private sealed record CosmopolitanDocument([property: JsonPropertyName("mode")] string? Mode);
 
     private sealed record BuildDocument(
         [property: JsonPropertyName("generatedC")] string? GeneratedC,

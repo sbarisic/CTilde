@@ -12,8 +12,10 @@ dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --projec
 .\build\Cosmopolitan.com
 ```
 
+Use `--run` instead of `--build` to rebuild and launch the APE through the manifest-driven runner.
+
 The archive contains symbolic links and must be extracted by a ZIP tool that preserves them. Cosmopolitan's compiler subprocesses are APE programs themselves. On WSL/Linux, follow the upstream toolchain instructions to install `bin/ape-x86_64.elf` as `/usr/bin/ape` and register the APE binfmt handlers, or provide an equivalent working APE execution environment. C~ validates the wrapper but does not download the toolchain or change system loader policy.
 
 The build retains `build/Cosmopolitan.com.dbg`, the ELF/DWARF carrier used for symbol inspection and native debugging. `build/Cosmopolitan.com` is the unwrapped APE payload. Successful execution prints the worker result and creates `cosmopolitan-output.txt` in the current directory.
 
-Draft 0.25 accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.
+Draft 0.34 accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.

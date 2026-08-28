@@ -16,8 +16,9 @@ Use these commands before reporting a problem:
 
 1. Run **C~: Show Language Server Output**.
 2. Run **C~: Restart Language Server**.
-3. Check the **C~** task output for compiler and native-toolchain diagnostics.
-4. Set `ctilde.trace.server` to `messages` or `verbose` when an LSP request fails.
+3. Confirm that the installed **C~ Compiler and Debugger** version matches the bundled compiler version.
+4. Check the **C~** task terminal for check, build, run, or native-toolchain diagnostics.
+5. Set `ctilde.trace.server` to `messages` or `verbose` when an LSP request fails.
 
 Do not attach credentials, Wi-Fi configuration, private source code, or complete ESP-IDF environment dumps to a public issue.
 

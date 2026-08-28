@@ -1,4 +1,4 @@
-# Future language and project features
+# Draft 0.26-0.34 feature design record
 
 ## Status
 
@@ -6,9 +6,9 @@ This document is the historical design record for feature groups implemented acr
 
 The record covers source-owner identity, embedded resources, lambdas, Unicode runes, binary64 numbers, fixed-width SIMD, and source modules from repositories.
 
-Each feature must satisfy the extension rules in [ARCHITECTURE.md](ARCHITECTURE.md). A complete revision includes syntax, binding, lowering, diagnostics, generated C, tools, documentation, and tests.
+Each feature had to satisfy the extension rules in [ARCHITECTURE.md](ARCHITECTURE.md). A complete revision included syntax, binding, lowering, diagnostics, generated C, tools, documentation, and tests.
 
-The implementation must preserve these current contracts:
+The implementation preserves these current contracts:
 
 - one shared parser, semantic model, typed IR, and C emitter for all targets.
 - deterministic output that does not depend on input-file order.
@@ -36,7 +36,7 @@ Attach the source owner to each user syntax tree. Keep bundled standard-library 
 Use the source owner for these operations:
 
 - resolve embedded-resource paths.
-- enforce `internal` access.
+- provide the owner boundary required by a future module-local `internal` design.
 - build canonical symbol identities.
 - build source and resource artifact names.
 - show dependency locations in diagnostics and editor navigation.

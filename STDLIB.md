@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.34 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF retain the object, exception, console, math, vector, SIMD, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, SIMD, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
+This document is the canonical standard-library reference for C~ Draft 0.34 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF load the APIs for their target profile. Freestanding loads only the object and storage core, `Memory`, target queries, SIMD, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, process services, managed threads, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
 The Cosmopolitan profile reuses the hosted object, exception, console, environment, math, file-I/O, threading, and TLS surface through Cosmopolitan's portable POSIX facade. It does not expose ESP-IDF, MMIO/register, freestanding runtime-role, or dynamic-library APIs. Draft 0.24 has measured managed strings/arrays, ARC, exceptions, `defer`, console, file output, threads, mutexes, initialization, and shutdown on WSL/Linux and Windows.
 
@@ -77,6 +77,7 @@ public static class Console
 
     public static void Write(string value);
     public static void Write(char value);
+    public static void Write(rune value);
     public static void Write(int value);
     public static void Write(uint value);
     public static void Write(long value);
@@ -84,12 +85,14 @@ public static class Console
     public static void Write(nint value);
     public static void Write(nuint value);
     public static void Write(float value);
+    public static void Write(double value);
     public static void Write(bool value);
     public static void Write(object value);
 
     public static void WriteLine();
     public static void WriteLine(string value);
     public static void WriteLine(char value);
+    public static void WriteLine(rune value);
     public static void WriteLine(int value);
     public static void WriteLine(uint value);
     public static void WriteLine(long value);
@@ -97,12 +100,13 @@ public static class Console
     public static void WriteLine(nint value);
     public static void WriteLine(nuint value);
     public static void WriteLine(float value);
+    public static void WriteLine(double value);
     public static void WriteLine(bool value);
     public static void WriteLine(object value);
 }
 ```
 
-Smaller integer types use the language overload rules. A signed widening target is better when other rules do not decide. Strings write their exact UTF-8 bytes. A null string writes no bytes. `char` writes one UTF-8 code unit. Booleans write `True` or `False`. Floats use nine significant digits.
+Smaller integer types use the language overload rules. A signed widening target is better when other rules do not decide. Strings write their exact UTF-8 bytes. A null string writes no bytes. A `char` writes one UTF-8 code unit. A `rune` writes one Unicode scalar as UTF-8. Booleans write `True` or `False`. A `float` uses nine significant digits. A `double` uses 17 significant digits.
 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
 
@@ -110,12 +114,13 @@ On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at E
 
 ## Math
 
-`System.Math` provides allocation-free single-precision functions on every target:
+`System.Math` provides allocation-free single- and double-precision functions on hosted, Cosmopolitan, and ESP-IDF targets:
 
 ```csharp
 public static class Math
 {
     public const float Pi = 3.14159265358979323846f;
+    public const double Pi64 = 3.14159265358979323846264338327950288d;
 
     [NoAlloc] public static float Sqrt(float value);
     [NoAlloc] public static float Abs(float value);
@@ -126,10 +131,22 @@ public static class Math
     [NoAlloc] public static float Cos(float value);
     [NoAlloc] public static float Floor(float value);
     [NoAlloc] public static float Ceiling(float value);
+
+    [NoAlloc] public static double Sqrt(double value);
+    [NoAlloc] public static double Abs(double value);
+    [NoAlloc] public static double Tan(double value);
+    [NoAlloc] public static double Min(double left, double right);
+    [NoAlloc] public static double Max(double left, double right);
+    [NoAlloc] public static double Sin(double value);
+    [NoAlloc] public static double Cos(double value);
+    [NoAlloc] public static double Floor(double value);
+    [NoAlloc] public static double Ceiling(double value);
 }
 ```
 
-`Pi` is the nearest representable C~ `float` to pi. Angles use radians. Functions map to the target C library's `sqrtf`, `fabsf`, `tanf`, `fminf`, `fmaxf`, `sinf`, `cosf`, `floorf`, and `ceilf` operations. Their NaN, infinity, signed-zero, rounding, and domain behavior follows that implementation. In particular, `Min` and `Max` return the numeric operand when exactly one operand is NaN, as specified for C `fminf` and `fmaxf`. C~ does not expose `errno` or floating-point exception state, and these functions do not throw C~ exceptions. The C~ native-build driver links `libm` on Unix and WSL; manual GNU links of math-using generated C must place `-lm` after the generated translation unit.
+`Pi` is the nearest C~ `float` to pi. `Pi64` is the nearest C~ `double`. Angles use radians. Float overloads map to the target C library functions with an `f` suffix. Double overloads map to `sqrt`, `fabs`, `tan`, `fmin`, `fmax`, `sin`, `cos`, `floor`, and `ceil`.
+
+NaN, infinity, signed-zero, rounding, and domain behavior follow the target C library. `Min` and `Max` return the numeric operand when exactly one operand is NaN. C~ does not expose `errno` or floating-point exception state. These functions do not throw C~ exceptions. The native-build driver links `libm` on Unix and WSL. Manual GNU links must place `-lm` after the generated translation unit.
 
 ## Vectors
 
@@ -327,7 +344,7 @@ public readonly struct RuntimePanicInfo
 
 ## Runtime native buffers
 
-`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary Draft 0.25 generics.
+`System.Runtime.NativeBuffer<T>` and `ReadOnlyNativeBuffer<T>` are compiler-intrinsic stack-only views. They are available to every target and retain stricter escape and unmanaged-element rules than ordinary generics.
 
 ```csharp
 NativeBuffer<byte> writable = new NativeBuffer<byte>(pointer, length);
@@ -426,8 +443,10 @@ The following built-in values provide an intrinsic, zero-argument `ToString()` m
 | `byte`, `ushort`, `uint`, `ulong`, `nuint` | Unsigned decimal text |
 | `sbyte`, `short`, `int`, `long`, `nint` | Signed decimal text |
 | `float` | Nine-significant-digit binary32 text |
+| `double` | 17-significant-digit binary64 text |
 | `bool` | `True` or `False` |
 | `char` | A one-code-unit string |
+| `rune` | One Unicode scalar encoded as UTF-8 |
 | `string` | The same string reference |
 
 ```csharp
@@ -470,6 +489,6 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 The initial Cosmopolitan x64 audit has passed one portable managed-runtime APE on Linux/WSL and Windows. Broader math, environment, exports/callbacks, Unicode-path, custom-section, and final-retention cases remain explicit acceptance work. Arm64 and fat-image claims remain later gates; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
-Future library work can add `System.Convert`, parsing, richer strings, collections, higher-level streams and text files, directories, clocks, and date/time APIs.
+The checked library roadmap includes rune encode/decode helpers, richer hosted I/O, SIMD buffer operations, and safe long-lived native-resource storage. Later work can add `System.Convert`, parsing, richer strings, collections, streams, directories, clocks, and date/time APIs. [TODO.md](TODO.md) contains the active list.
 
 Project binding manifests can add generated source-compatible ESP-IDF APIs alongside this handwritten surface. Their tracked C~ declarations use ordinary extern and ownership contracts, while project-private adapters consume the installed public headers, native constants, validated initializer macros, nested configuration fields, bounded fixed UTF-8 arrays, and selected output structures. Generated APIs are project declarations, not additions to the embedded standard library. `[NoAlloc]` describes only C~-heap behavior; a generated ESP-IDF call may allocate native memory. Long-lived owned-resource fields and retained callback lifetime rules remain deferred. Generated bindings do not infer `[InterruptSafe]`.

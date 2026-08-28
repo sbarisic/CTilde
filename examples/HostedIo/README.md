@@ -10,10 +10,11 @@ Run from the example directory so the image is written beside this README:
 
 ```powershell
 Push-Location .\examples\HostedIo
-dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --project .\ctilde.json --build
-.\build\HostedIo.exe
+dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --project .\ctilde.json --run
 Pop-Location
 ```
+
+`--run` rebuilds before it launches the renderer. Use `--build` when you only want to produce `build/HostedIo.exe`.
 
 The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The executable reports every newly reached whole percentage without printing duplicate percentages:
 

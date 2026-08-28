@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). Draft 0.24 implements Stage 1: explicit x86-64 semantics, project/CLI/schema/editor support, a dedicated WSL-aware driver, retained ELF/DWARF and APE artifacts, and a managed-runtime acceptance example executed from the same APE on WSL/Linux and Windows.
+This document defines the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). Draft 0.24 implemented Stage 1: explicit x86-64 semantics, project/CLI/schema/editor support, a dedicated WSL-aware driver, retained ELF/DWARF and APE artifacts, and a managed-runtime acceptance example executed from the same APE on WSL/Linux and Windows. Draft 0.34 retains that target contract and supports manifest-driven rebuild-and-run. Later stages remain outstanding in [TODO.md](TODO.md).
 
 The implementation deliberately starts with a multi-operating-system x86-64 executable. AArch64 and a combined x86-64/AArch64 image follow only after each architecture has an independent semantic compilation. This avoids producing a nominally fat binary from C~ source whose `static if`, target queries, CPU intrinsics, or inline assembly were already resolved for one architecture.
 
@@ -154,7 +154,7 @@ Expected mappings are:
 | exceptions | `setjmp`/`longjmp` within C~ frames |
 | console | `stdin`, `stdout`, `stderr`, and UTF-8 bytes |
 | file I/O | portable POSIX/C file operations supplied by Cosmo Libc |
-| math | Cosmo Libc single-precision math |
+| math | Cosmo Libc single- and double-precision math |
 | threads/TLS | Cosmopolitan pthreads and `_Thread_local` |
 | process exit | `exit`/`abort` |
 | CPU intrinsics | existing architecture-specific C~ lowering |

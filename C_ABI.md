@@ -64,7 +64,7 @@ The emitter writes finite float constants with a decimal point and an `f` suffix
 
 ## Generated names and symbol map
 
-The compiler first constructs canonical identities for types, fields, methods, constructors, operators, accessors, descriptors, vtables, and generated thunks. A method identity includes its fully qualified containing type, semantic member name, parameter passing kinds, canonical parameter types, and result type. Composite types use recursive canonical forms, so future generic instantiations can extend the identity grammar without changing the mangling scheme.
+The compiler first constructs canonical identities for types, fields, methods, constructors, operators, accessors, descriptors, vtables, and generated thunks. A method identity includes its fully qualified containing type, semantic member name, parameter passing kinds, canonical parameter types, and result type. Composite types use recursive canonical forms. Closed generic instantiations extend the identity grammar without changing the mangling scheme.
 
 Except for `[Export]`, `[Extern]`, entry, and runtime ABI names, a globally visible generated name is a category prefix followed by the lowercase first 96 bits of SHA-256 over its canonical identity. The compiler diagnoses any collision before writing output. Names are compact and deterministic under input reordering.
 

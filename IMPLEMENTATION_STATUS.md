@@ -14,6 +14,8 @@ The compiler library, CLI, and conformance runner target .NET 10. Drafts 0.26 th
 
 The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. Cosmopolitan output uses hosted runtime semantics and produces an x86-64 APE plus a retained ELF/DWARF carrier. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, Cosmopolitan, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted, Cosmopolitan, and freestanding modular objects use draft-versioned content-addressed caches.
 
+`ctilde --run` rebuilds a project, releases the build lock, and launches its immutable host or WSL run configuration only after a successful build. The VS Code 0.11.0 **Run Project** command uses the same path.
+
 ## Measured baseline
 
 The current workspace builds with:
@@ -40,34 +42,7 @@ Native checks discover Visual Studio 2022 C tools. The reviewed run used MSVC `1
 cl /std:clatest /O2 /W4 /WX /wd4702
 ```
 
-The checked feature example prints:
-
-```text
-14
-4
-12
-6
-east
-2
-A
-Text.Length < 10!
-10
-42
--9223372036854775808
-18446744073709551615
-42
-42
-42
-42
-6
-42
-42
-42
-Before deferred, i hope?
-deferred
-```
-
-The checked exception example prints:
+The conformance suite checks the feature example's exact output, exception cleanup order, integer limits, and `defer` behavior. The checked exception example prints:
 
 ```text
 handled
@@ -253,7 +228,7 @@ ESP-IDF projects can declare schema-versioned binding manifests. The CLI resolve
 
 ESP-IDF project builds are incremental by default. All generated text artifacts use one compare-before-replace writer, and a versioned ignored binding cache fingerprints manifests, imported headers, target/compiler context, `sdkconfig`, CMake inputs, tool versions, and tracked outputs. The TCan485 wrapper invokes the compiler once, preserves an initialized target, and reserves `-Clean` for explicit clean builds. On the accepted local ESP32 tree, a warm no-op build took 9.6 seconds end to end: the binding cache check took 69 ms, C~ analysis and emission took 1.1 seconds with zero changed outputs, and the no-native-compilation Ninja phase took 2.5 seconds. A scalar `Program.ct` edit changed one generated namespace module; Ninja compiled that one C object and relinked. The measured source-edit build took 24.8 seconds, including 1.2 seconds in C~ and 17.5 seconds in the native build/link phase. A warm build plus 1,009,888-byte firmware upload took 30.2 seconds at 921600 baud without using the fallback. The flashed image completed its ABI markers, Wi-Fi association, certificate validation, HTTP 200 fetch, ARC recovery, and permanent WS2812 loop without a panic. These timings include PowerShell ESP-IDF environment activation and are measurements, not regression budgets.
 
-The VS Code extension and its bundled .NET 10 language server are version 0.10.1. The package includes its JavaScript client, framework-dependent compiler, language server, and Node GDB/MI debug adapter. The user supplies the .NET 10 runtime and native debugger. Debug Project creates an instrumented version-3 image; Attach validates its source hashes and metadata and rejects stale v2 images. GCC/Clang, WSL, and ESP-IDF receive logical breakpoints, adapter-owned conditions/hit counts/logpoints, C~-level stepping, lexical locals, hardware data watchpoints, and ARC/runtime presentation including closed generics, interface views, atomics, Thread IDs, and Mutex state. MSVC uses `cppvsdbg`. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
+The VS Code extension and its bundled .NET 10 language server are version 0.11.0. The package includes its JavaScript client, framework-dependent compiler, language server, and Node GDB/MI debug adapter. The user supplies the .NET 10 runtime and native debugger. Run Project rebuilds and launches the manifest run configuration. Debug Project creates an instrumented version-3 image; Attach validates its source hashes and metadata and rejects stale v2 images. GCC/Clang, WSL, and ESP-IDF receive logical breakpoints, adapter-owned conditions/hit counts/logpoints, C~-level stepping, lexical locals, hardware data watchpoints, and ARC/runtime presentation including closed generics, interface views, atomics, Thread IDs, and Mutex state. MSVC uses `cppvsdbg`. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 
@@ -322,7 +297,7 @@ Freestanding C uses internal byte loops, one static execution state, direct pani
 
 The project model and CLI accept contained linker scripts, explicit entry symbols, ordered `.c`/`.S`/`.s` sources, ELF objects, archives, and validated compile/link options. The dedicated GCC/Clang driver checks predefined architecture macros, compiles with freestanding/no-builtin/no-startup flags, and links through the selected script without libc. The checked x64 example produces an ELF entry at `_start`, retains the requested text/data/BSS and runtime/export symbols, has no undefined native symbols, executes managed allocation and shutdown, and exits with status zero under WSL GCC.
 
-The repository also contains an optional 32-bit x86 Multiboot example for `qemu-system-x86_64`. Its C~ kernel uses the panic role without a managed heap, writes `CTILDE_QEMU_OK` through QEMU's debug console, and terminates through `isa-debug-exit` after explicit runtime initialization and shutdown. Draft 0.25 moved the exact Multiboot header, port I/O, and `_start` body into C~ `[ConstInit]`, assembly functions, and a naked assembly function; the example has no `.S` source or `nativeSources` manifest entry. `Test-QemuFreestanding.ps1` checks the WSL GCC multilib and QEMU prerequisites, ELF32/i386 identity, first-8-KiB `.multiboot` placement, exact header bytes, lifecycle and entry symbols, undefined symbols, output marker, and encoded exit status. The earlier native-bootstrap form passed WSL GCC 13.3.0 and QEMU 8.2.2 on 2026-08-28; the migrated Draft 0.25 image requires a fresh smoke run on a host with `gcc-multilib` installed. The test remains standalone and is not part of the ordinary release gate.
+The repository also contains an optional 32-bit x86 Multiboot example for `qemu-system-x86_64`. Its C~ kernel uses the panic role without a managed heap, writes `CTILDE_QEMU_OK` through QEMU's debug console, and terminates through `isa-debug-exit` after explicit runtime initialization and shutdown. Draft 0.25 moved the exact Multiboot header, port I/O, and `_start` body into C~ `[ConstInit]`, assembly functions, and a naked assembly function; the example has no `.S` source or `nativeSources` manifest entry. `Test-QemuFreestanding.ps1` checks the WSL GCC multilib and QEMU prerequisites, ELF32/i386 identity, first-8-KiB `.multiboot` placement, exact header bytes, lifecycle and entry symbols, undefined symbols, output marker, and encoded exit status. The current manifest-driven `--run` path passed end to end with WSL GCC 13.3.0 and QEMU 8.2.2 on 2026-08-28, including exact output and raw debug-exit status. The test remains standalone and is not part of the ordinary release gate.
 
 ## Draft 0.25 assembly functions and constant image data
 

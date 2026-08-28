@@ -24,7 +24,7 @@ internal sealed partial class CEmitter
             .Select(method => (Name: method.SectionName!, Kind: NativeSectionKind.Code))
             .Concat(EmittedTypes.SelectMany(type => type.Fields)
                 .Where(field => field.IsStatic && field.Name != "<underlying>" && field.SectionName is not null)
-                .Select(field => (Name: field.SectionName!, Kind: NativeSectionKind.Data)))
+                .Select(field => (Name: field.SectionName!, Kind: field.IsConstInit ? NativeSectionKind.ReadOnlyData : NativeSectionKind.Data)))
             .Distinct()
             .OrderBy(section => section.Name, StringComparer.Ordinal)
             .ThenBy(section => section.Kind)

@@ -379,18 +379,21 @@ internal sealed partial class TypedIrBodyLowerer
 
     private static string Role(InlineAssemblyOperandKind kind) => kind == InlineAssemblyOperandKind.Output ? "out" : "ref";
 
-    private static string BuildInlineAssemblyTemplate(InlineAssemblyStatementSyntax syntax)
+    private static string BuildInlineAssemblyTemplate(InlineAssemblyStatementSyntax syntax) =>
+        BuildAssemblyTemplate(syntax.Body, syntax.BodySpan, syntax.References);
+
+    private static string BuildAssemblyTemplate(string body, TextSpan bodySpan, IEnumerable<InlineAssemblyReferenceSyntax> referenceSequence)
     {
         var result = new System.Text.StringBuilder();
         var position = 0;
-        foreach (var reference in syntax.References.OrderBy(reference => reference.Span.Start))
+        foreach (var reference in referenceSequence.OrderBy(reference => reference.Span.Start))
         {
-            var relative = reference.Span.Start - syntax.BodySpan.Start;
-            AppendInlineAssemblyRaw(result, syntax.Body.AsSpan(position, relative - position));
+            var relative = reference.Span.Start - bodySpan.Start;
+            AppendInlineAssemblyRaw(result, body.AsSpan(position, relative - position));
             result.Append("%[ct_asm_").Append(reference.OperandIndex).Append(']');
             position = relative + reference.Span.Length;
         }
-        AppendInlineAssemblyRaw(result, syntax.Body.AsSpan(position));
+        AppendInlineAssemblyRaw(result, body.AsSpan(position));
         return result.ToString();
     }
 

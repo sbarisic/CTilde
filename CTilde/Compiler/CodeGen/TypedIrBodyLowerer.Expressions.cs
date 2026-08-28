@@ -416,6 +416,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerField(FieldSymbol field, IrExpressionValue? receiver, SyntaxNode syntax, bool forWrite)
     {
+        var isConstInitStorage = field.IsConstInit || receiver?.IsConstInitStorage == true;
         if (field.Type.ContainsPointer || field.ExternName is not null || field.LinkerSymbolName is not null)
             RequireUnsafe(syntax);
         CheckAccess(field, syntax);
@@ -479,6 +480,7 @@ internal sealed partial class TypedIrBodyLowerer
                 storage = new IrValueStorage
                 {
                     Field = field,
+                    IsConstInitStorage = receiver.IsConstInitStorage,
                     Store = value =>
                     {
                         var updated = $"({_emitter.CTypeName(receiver.Type)})(({raw} & ~({mask} << {first})) | ((((uint64_t)({value})) & {mask}) << {first}))";
@@ -488,7 +490,7 @@ internal sealed partial class TypedIrBodyLowerer
                     },
                 };
             }
-            return new IrExpressionValue { Type = field.Type, Code = read, Prelude = bitPrelude, LValue = storage, Symbol = field };
+            return new IrExpressionValue { Type = field.Type, Code = read, Prelude = bitPrelude, LValue = storage, Symbol = field, IsConstInitStorage = receiver.IsConstInitStorage };
         }
         if (!forWrite && field.IsConst && field.Initializer is not null)
         {
@@ -535,7 +537,9 @@ internal sealed partial class TypedIrBodyLowerer
                 {
                     Store = value => $"ct_atomic_scalar_store({address}, sizeof({code}), {AtomicToBits(field.Type, value)}, 2)",
                     Field = field,
+                    IsConstInitStorage = isConstInitStorage,
                 },
+                IsConstInitStorage = isConstInitStorage,
             };
         }
         return new IrExpressionValue
@@ -544,8 +548,9 @@ internal sealed partial class TypedIrBodyLowerer
             Code = code,
             Prelude = prelude,
             IsConstant = field.IsConst,
-            LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = field.ContainingType.HasNonNaturalLayout ? null : $"&({code})", Field = field },
+            LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = field.ContainingType.HasNonNaturalLayout ? null : $"&({code})", Field = field, IsConstInitStorage = isConstInitStorage },
             Symbol = field,
+            IsConstInitStorage = isConstInitStorage,
         };
     }
 
@@ -620,7 +625,9 @@ internal sealed partial class TypedIrBodyLowerer
                 Field = property.BackingField,
                 Property = property,
                 IsBaseReceiver = baseReceiver,
+                IsConstInitStorage = receiver?.IsConstInitStorage == true,
             },
+            IsConstInitStorage = receiver?.IsConstInitStorage == true,
         };
         return !forWrite && property.Type.ContainsManagedReferences
             ? OwnResult(property.Type, getterCode, prelude)
@@ -657,7 +664,8 @@ internal sealed partial class TypedIrBodyLowerer
                 Type = receiver.Type.ElementType!,
                 Code = code,
                 Prelude = prelude,
-                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" },
+                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})", IsConstInitStorage = receiver.IsConstInitStorage },
+                IsConstInitStorage = receiver.IsConstInitStorage,
             };
         }
         if (receiver.Type.Kind == CTypeKind.InlineArray)
@@ -682,7 +690,8 @@ internal sealed partial class TypedIrBodyLowerer
                 Type = receiver.Type.ElementType!,
                 Code = code,
                 Prelude = prelude,
-                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" },
+                LValue = new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})", IsConstInitStorage = receiver.IsConstInitStorage },
+                IsConstInitStorage = receiver.IsConstInitStorage,
             };
         }
         if (receiver.Type.Kind == CTypeKind.String)
@@ -710,7 +719,8 @@ internal sealed partial class TypedIrBodyLowerer
                 Type = receiver.Type.ElementType!,
                 Code = code,
                 Prelude = prelude,
-                LValue = writable ? new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})" } : null,
+                LValue = writable ? new IrValueStorage { Store = value => $"{code} = {value}", Address = $"&({code})", IsConstInitStorage = receiver.IsConstInitStorage } : null,
+                IsConstInitStorage = receiver.IsConstInitStorage,
             };
         }
         if (receiver.Type.Kind == CTypeKind.Pointer)
@@ -965,6 +975,11 @@ internal sealed partial class TypedIrBodyLowerer
         var selected = SelectOverload(candidates, methodName, arguments, syntax.Arguments, syntax);
         if (selected is null)
             return ErrorExpression((receiver?.Prelude ?? []).Concat(arguments.SelectMany(argument => argument.Prelude)));
+        if (!selected.IsStatic && receiver?.IsConstInitStorage == true)
+        {
+            Report("CT2219", "Instance methods cannot be called directly on ConstInit storage; copy the value to a local first.", syntax.Target);
+            return ErrorExpression(receiver.Prelude.Concat(arguments.SelectMany(argument => argument.Prelude)));
+        }
         if (selected.ReturnType.ContainsPointer || selected.Parameters.Any(parameter => parameter.Type.ContainsPointer))
             RequireUnsafe(syntax);
         if (selected.IsUnsafe)

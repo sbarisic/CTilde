@@ -9,6 +9,15 @@ $repository = Split-Path -Parent $PSScriptRoot
 $example = Join-Path $repository 'examples\QemuFreestanding'
 $manifest = Join-Path $example 'ctilde.json'
 $image = Join-Path $example 'build\kernel.elf'
+$nativeAssembly = Join-Path $example 'native\start.S'
+
+if (Test-Path -LiteralPath $nativeAssembly) {
+    throw "The QEMU example must not contain the native assembly source '$nativeAssembly'."
+}
+$manifestText = Get-Content -LiteralPath $manifest -Raw
+if ($manifestText -match '"nativeSources"') {
+    throw 'The QEMU manifest must not declare native assembly sources.'
+}
 
 if (-not (Get-Command wsl -ErrorAction SilentlyContinue)) {
     throw 'The QEMU freestanding smoke test requires WSL.'
@@ -44,6 +53,28 @@ if ($LASTEXITCODE -ne 0) {
 $headerText = $header -join "`n"
 if ($headerText -notmatch 'Class:\s+ELF32' -or $headerText -notmatch 'Machine:\s+Intel 80386') {
     throw 'The QEMU kernel is not an ELF32 Intel 80386 image.'
+}
+
+$sections = & wsl --exec readelf -SW $linuxImage
+if ($LASTEXITCODE -ne 0) {
+    throw 'readelf could not inspect the QEMU kernel sections.'
+}
+$sectionText = $sections -join "`n"
+$multibootMatch = [Regex]::Match($sectionText, '(?m)^\s*\[\s*\d+\]\s+\.multiboot\s+PROGBITS\s+[0-9a-fA-F]+\s+([0-9a-fA-F]+)\s+([0-9a-fA-F]+)')
+if (-not $multibootMatch.Success) {
+    throw 'The QEMU kernel does not contain a PROGBITS .multiboot section.'
+}
+$multibootOffset = [Convert]::ToUInt64($multibootMatch.Groups[1].Value, 16)
+if ($multibootOffset -ge 0x2000) {
+    throw "The .multiboot section begins at file offset 0x$($multibootOffset.ToString('X')), outside the first 8 KiB."
+}
+$multibootHex = & wsl --exec readelf -x .multiboot $linuxImage
+if ($LASTEXITCODE -ne 0) {
+    throw 'readelf could not inspect the Multiboot header bytes.'
+}
+$multibootHexText = (($multibootHex -join ' ') -replace '\s+', '').ToLowerInvariant()
+if ($multibootHexText -notmatch '02b0ad1b03000000fb4f52e4') {
+    throw "The .multiboot section does not contain the expected magic, flags, and checksum bytes.`n$($multibootHex -join "`n")"
 }
 
 $symbols = & wsl --exec nm -g $linuxImage
@@ -89,8 +120,8 @@ if ($qemuExitCode -eq 124) {
 if ($qemuExitCode -ne 1) {
     throw "QEMU returned exit code $qemuExitCode instead of the expected debug-exit status 1. Output:`n$qemuText"
 }
-if ($qemuText -notmatch '(?m)^CTILDE_QEMU_OK\r?$') {
-    throw "QEMU output did not contain the exact CTILDE_QEMU_OK marker. Output:`n$qemuText"
+if ($qemuText.Trim() -ne 'CTILDE_QEMU_OK') {
+    throw "QEMU output was not exactly the CTILDE_QEMU_OK marker. Output:`n$qemuText"
 }
 
 Write-Output 'QEMU freestanding smoke test passed.'

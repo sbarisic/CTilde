@@ -65,6 +65,11 @@ internal sealed partial class TypedIrBodyLowerer
             if (methodGroup.MethodGroup is not null)
                 return new IrExpressionValue { Type = CType.Error, Code = string.Empty, Prelude = methodGroup.Prelude, MethodGroup = methodGroup.MethodGroup, IsFunctionAddress = true };
             var operand = LowerAssignable(syntax.Operand);
+            if (operand.LValue?.IsConstInitStorage == true)
+            {
+                Report("CT2219", "ConstInit storage cannot have its address taken.", syntax.Operand);
+                return ErrorExpression(operand.Prelude);
+            }
             if (operand.LValue?.Field is { ContainingType.HasNonNaturalLayout: true })
             {
                 Report("CT2190", "A field in a packed or explicit-layout aggregate cannot have its address taken.", syntax.Operand);
@@ -570,6 +575,11 @@ internal sealed partial class TypedIrBodyLowerer
 
     private void ValidateAssignmentTarget(IrValueStorage lvalue, SyntaxNode syntax)
     {
+        if (lvalue.IsConstInitStorage)
+        {
+            Report("CT2219", "ConstInit storage is immutable.", syntax);
+            return;
+        }
         if (lvalue.Parameter?.PassingKind == ParameterPassingKind.In)
             Report("CT2173", $"In parameter '{lvalue.Parameter.Name}' is read-only.", syntax);
         if (lvalue.Local is { IsConst: true })
@@ -807,6 +817,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsKnownNonNull = expression.IsKnownNonNull,
             KnownLength = target.Kind == CTypeKind.Array ? expression.KnownLength : null,
             OwnedCleanupRecord = expression.OwnedCleanupRecord,
+            IsConstInitStorage = expression.IsConstInitStorage,
         };
     }
 
@@ -934,12 +945,12 @@ internal sealed partial class TypedIrBodyLowerer
                 RecordRuntimeFault(syntax, "dynamic null check");
                 prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(syntax)});");
             }
-            return new IrExpressionValue { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver, IsKnownNonNull = true, KnownLength = receiver.KnownLength };
+            return new IrExpressionValue { Type = receiver.Type, Code = temp, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver, IsKnownNonNull = true, KnownLength = receiver.KnownLength, IsConstInitStorage = receiver.IsConstInitStorage };
         }
         if (receiver.Type.Kind == CTypeKind.Struct)
         {
             if (receiver.LValue?.Address is string address)
-                return new IrExpressionValue { Type = receiver.Type, Code = address, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };
+                return new IrExpressionValue { Type = receiver.Type, Code = address, Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver, IsConstInitStorage = receiver.IsConstInitStorage };
             var temp = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(receiver.Type, temp)} = {receiver.Code};");
             return new IrExpressionValue { Type = receiver.Type, Code = $"&{temp}", Prelude = prelude, IsBaseReceiver = receiver.IsBaseReceiver };

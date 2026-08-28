@@ -406,7 +406,8 @@ public sealed record MethodDeclarationSyntax(
     ImmutableArray<ParameterSyntax> Parameters,
     BlockStatementSyntax? Body,
     ImmutableArray<TypeParameterSyntax> TypeParameters = default,
-    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+    ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default,
+    AssemblyFunctionBodySyntax? AssemblyBody = null) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 
 public sealed record OperatorDeclarationSyntax(
     SourceText Source,
@@ -485,6 +486,14 @@ public sealed record InlineAssemblyOperandSyntax(
     NameExpressionSyntax Variable,
     string Name) : SyntaxNode(Source, Span);
 public sealed record InlineAssemblyReferenceSyntax(SourceText Source, TextSpan Span, string Name, int OperandIndex) : SyntaxNode(Source, Span);
+public sealed record AssemblyFunctionBodySyntax(
+    SourceText Source,
+    TextSpan Span,
+    ImmutableArray<InlineAssemblyOperandSyntax> Operands,
+    ImmutableArray<string> Clobbers,
+    TextSpan BodySpan,
+    string Body,
+    ImmutableArray<InlineAssemblyReferenceSyntax> References) : SyntaxNode(Source, Span);
 public sealed record InlineAssemblyStatementSyntax(
     SourceText Source,
     TextSpan Span,

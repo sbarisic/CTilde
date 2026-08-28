@@ -8,7 +8,7 @@ internal sealed partial class CompilationModel
             .SelectMany(type => type.Methods.Where(method => method.SectionName is not null)
                 .Select(method => (Name: method.SectionName!, Kind: NativeSectionKind.Code, Syntax: method.Syntax!))
                 .Concat(type.Fields.Where(field => field.SectionName is not null)
-                    .Select(field => (Name: field.SectionName!, Kind: NativeSectionKind.Data, Syntax: field.Syntax!))))
+                    .Select(field => (Name: field.SectionName!, Kind: field.IsConstInit ? NativeSectionKind.ReadOnlyData : NativeSectionKind.Data, Syntax: field.Syntax!))))
             .GroupBy(item => item.Syntax)
             .Select(group => group.First())
             .OrderBy(item => item.Syntax.Source.FilePath, StringComparer.Ordinal)
@@ -23,7 +23,7 @@ internal sealed partial class CompilationModel
                 continue;
             }
             if (previous.Kind != declaration.Kind)
-                Diagnostics.Add("CT4107", $"Native section '{declaration.Name}' cannot contain both code and data definitions.", declaration.Syntax.Source, declaration.Syntax.Span,
+                Diagnostics.Add("CT4107", $"Native section '{declaration.Name}' cannot mix code, writable data, and read-only data definitions.", declaration.Syntax.Source, declaration.Syntax.Span,
                     previous.Syntax.Source.GetLocation(previous.Syntax.Span));
         }
     }

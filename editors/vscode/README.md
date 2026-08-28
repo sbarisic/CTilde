@@ -10,7 +10,7 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.24 syntax and semantic classification, including the Cosmopolitan profile, `[Interrupt]` and `[InterruptSafe]`, effect contracts, freestanding projects, runtime roles, naked startup, and the retained endian, linker, bitfield/register, source-owned, panic-policy, layout, target, MMIO, and interop surface.
+- Draft 0.25 syntax and semantic classification, including assembly functions, `[ConstInit]`, the Cosmopolitan profile, `[Interrupt]` and `[InterruptSafe]`, effect contracts, freestanding projects, runtime roles, naked startup, and the retained endian, linker, bitfield/register, source-owned, panic-policy, layout, target, MMIO, and interop surface.
 - Target-aware standard-library completion and documentation: hosted and Cosmopolitan supply console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
 - Cosmopolitan manifests are schema-validated and participate in check/build tasks. Draft 0.24 intentionally leaves APE debugger preparation to the retained ELF carrier workflow.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.

@@ -285,6 +285,10 @@ internal sealed partial class Parser
         var modifiers = ParseModifiers();
         var start = attributes.Length > 0 ? attributes[0].Span.Start : Current.Span.Start;
 
+        var isAssemblyFunction = Current.Kind == SyntaxKind.AsmKeyword;
+        if (isAssemblyFunction)
+            NextToken();
+
         if (Current.Kind == SyntaxKind.IdentifierToken && Current.Text == containingTypeName && Peek(1).Kind == SyntaxKind.OpenParenToken)
         {
             var name = NextToken();
@@ -344,6 +348,12 @@ internal sealed partial class Parser
         {
             var parameters = ParseParameters();
             var constraints = ParseConstraintClauses();
+            if (isAssemblyFunction)
+            {
+                var assemblyBody = ParseAssemblyFunctionBody();
+                return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, assemblyBody.Span.End), modifiers, attributes, type, memberName.Text,
+                    parameters, null, typeParameters, constraints, assemblyBody);
+            }
             BlockStatementSyntax? body;
             int end;
             if (Current.Kind == SyntaxKind.SemicolonToken)
@@ -358,6 +368,9 @@ internal sealed partial class Parser
             }
             return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, memberName.Text, parameters, body, typeParameters, constraints);
         }
+
+        if (isAssemblyFunction)
+            Report("CT0112", "An asm function requires a method parameter list and assembly body.", Current);
 
         if (!typeParameters.IsDefaultOrEmpty)
             Report("CT0111", "Only methods can declare member type parameters.", memberName);

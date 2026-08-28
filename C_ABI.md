@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.24 and runtime ABI 16. Draft 0.24 adds the x86-64 Cosmopolitan artifact pipeline while retaining Draft 0.23 ESP-IDF interrupt entry and residency metadata.
+This document defines the generated C contract for C~ draft 0.25 and runtime ABI 16. Draft 0.25 adds assembly-function and constant-image-data metadata while retaining the Draft 0.24 x86-64 Cosmopolitan artifact pipeline and Draft 0.23 ESP-IDF interrupt entry and residency metadata.
 
-Draft 0.24 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.25 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -355,7 +355,7 @@ An `[Interrupt]` export emits one external `IRAM_ATTR void symbol(void* context)
 
 Every reachable C~ helper in the interrupt call closure is also emitted with `IRAM_ATTR`. Because ESP-IDF expands that macro with `__COUNTER__`, modular internal prototypes deliberately omit the placement macro; repeating it on a prototype and definition would select conflicting `.iram1.*` subsections. The definition remains authoritative for residency. Referenced compiler-owned unmanaged static definitions use `DRAM_ATTR`; generated modular `extern` declarations omit that definition-only annotation.
 
-An extern method, extern data symbol, or inline assembly block reached from interrupt code requires `[InterruptSafe]`. The attribute is trusted residency and execution-context metadata only. `[NoRuntime]`, `[NoBlock]`, `[NoThrow]`, and `[NoAlloc]` remain independent semantic assertions. Symbol-map version 1 additively records `interrupt`, `interruptSafe`, `codeResidency`, and `dataResidency`; runtime ABI and debug metadata versions do not change.
+An extern method, extern data symbol, inline assembly block, or assembly function reached from interrupt code requires `[InterruptSafe]`. The attribute is trusted residency and execution-context metadata only. `[NoRuntime]`, `[NoBlock]`, `[NoThrow]`, and `[NoAlloc]` remain independent semantic assertions. Symbol-map version 1 additively records `interrupt`, `interruptSafe`, `codeResidency`, `dataResidency`, `assemblyFunction`, and `constInit`; runtime ABI and debug metadata versions do not change.
 
 ## Linker addresses, retention, and registers
 
@@ -365,7 +365,7 @@ An extern method, extern data symbol, or inline assembly block reached from inte
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.24.
+Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.25.
 
 ## Portable CPU lowering
 
@@ -398,7 +398,7 @@ void ct_release(ct_object* value);
 
 Initialization attaches the calling primary thread, creates immortal fault singletons, initializes the module descriptor, and publishes the ready phase. Shutdown requires every secondary thread to be detached, finalizes modules, drains ARC work, and detaches the primary thread. A panic invokes the configured handler, prints and flushes its diagnostic, then applies the selected ESP-IDF policy: `abort` uses the existing abort path, `restart` calls `esp_restart`, and `halt` enters `esp_system_abort` after the build driver verifies `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y`. Hosted output retains process failure. Runtime phase misuse, unattached entry, refcount or cleanup corruption, ABI mismatch, pre-attachment allocation failure, and exceptions escaping callbacks or exports are panics.
 
-Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.24.
+Modules cannot unload while any descriptor, vtable, delegate, object, interface view, closed-generic instantiation, or generated function pointer from the module remains live. Independent DLL loading and dynamic module registration are not part of draft 0.25.
 
 Value parameters are borrowed by default. `[Retained]` on a direct managed-reference extern parameter causes C~ to retain immediately before the call and transfer that count to native code. Managed-reference returns are owned by default. `[ReturnsBorrowed]` on a direct managed-reference extern result causes C~ to retain the returned value immediately. Structures containing references remain borrowed as extern arguments and owned as returns. Managed or reference-bearing extern by-reference parameters are rejected.
 
@@ -412,7 +412,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.24.
+This section records constraints that remain after draft 0.25.
 
 The proposed fixed-width SIMD revision initially treats SIMD values as internal C~ value types only. It rejects them in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use GCC/Clang vector values, MSVC intrinsics, Neon, or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI. See [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
 

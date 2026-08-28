@@ -225,8 +225,13 @@ internal sealed partial class TypedIrBodyLowerer
                     codes.Add("NULL");
                     continue;
                 }
-                if (parameter.PassingKind is ParameterPassingKind.Ref or ParameterPassingKind.Out && IsReadonly(argument.LValue))
-                    Report("CT2172", "Readonly storage can be passed only with 'in'.", argumentSyntax);
+                if (parameter.PassingKind is ParameterPassingKind.Ref or ParameterPassingKind.Out)
+                {
+                    if (argument.LValue.IsConstInitStorage)
+                        Report("CT2219", "ConstInit storage can be passed only with 'in'.", argumentSyntax);
+                    else if (IsReadonly(argument.LValue))
+                        Report("CT2172", "Readonly storage can be passed only with 'in'.", argumentSyntax);
+                }
                 if (parameter.PassingKind == ParameterPassingKind.Out)
                 {
                     if (argument.Type.ContainsManagedReferences && !IsUninitializedOut(argument.LValue))
@@ -341,7 +346,7 @@ internal sealed partial class TypedIrBodyLowerer
         return (prelude, codes);
     }
 
-    private static bool IsReadonly(IrValueStorage lvalue) => lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
+    private static bool IsReadonly(IrValueStorage lvalue) => lvalue.IsConstInitStorage || lvalue.Local?.IsReadonly == true || lvalue.Local?.IsConst == true || lvalue.Field?.IsReadonly == true;
 
     private void ConsumeOwnedExpression(IrExpressionValue expression, SyntaxNode syntax)
     {

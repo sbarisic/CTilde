@@ -50,6 +50,7 @@ internal static class BoundProgramBuilder
             return changed;
         }
 
+        ConstDataEvaluator.Evaluate(model, services, bodies);
         AnalyzeModuleInitializers(model, services, bodies);
         CompileTimeEvaluator.EvaluateAssertions(model, services);
         ValidateConstructorCycles(model);
@@ -90,7 +91,7 @@ internal static class BoundProgramBuilder
     {
         var initializerIndex = 0;
         foreach (var field in model.UserTypes.SelectMany(type => type.Fields)
-                     .Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>"))
+                     .Where(field => field.IsStatic && field.Initializer is not null && !field.IsConstInit && field.Name != "<underlying>"))
         {
             var method = new MethodSymbol
             {

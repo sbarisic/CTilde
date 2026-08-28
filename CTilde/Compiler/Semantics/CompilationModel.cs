@@ -50,6 +50,7 @@ internal sealed partial class CompilationModel
     public CompilationArchitecture Architecture => _architecture;
     public DiagnosticBag Diagnostics { get; }
     public List<BoundStaticAssertion> StaticAssertions { get; } = [];
+    public ImmutableDictionary<FieldSymbol, ConstDataValue> ConstInitializers { get; set; } = ImmutableDictionary<FieldSymbol, ConstDataValue>.Empty;
     public HashSet<TypeSymbol> StaticAssertionLayoutTypes { get; } = [];
     public Dictionary<string, TypeSymbol> Types { get; }
     public DocumentationIndex Documentation { get; }
@@ -378,6 +379,7 @@ internal sealed partial class CompilationModel
             ReturnType = method.ReturnType,
             Parameters = method.Parameters,
             Body = method.Body,
+            AssemblyBody = method.AssemblyBody,
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
             DeclaredEffects = method.DeclaredEffects,
@@ -587,6 +589,7 @@ internal sealed partial class CompilationModel
                 IsSynchronousCallback = parameter.IsSynchronousCallback,
             }).ToImmutableArray(),
             Body = method.Body,
+            AssemblyBody = method.AssemblyBody,
             IsConstructor = method.IsConstructor,
             IsEntryPoint = method.IsEntryPoint,
             DeclaredEffects = method.DeclaredEffects,
@@ -1246,7 +1249,7 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits", "InterruptSafe"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits", "InterruptSafe", "ConstInit"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
@@ -1263,6 +1266,7 @@ internal sealed partial class CompilationModel
                     var bitsAttribute = FindAttribute(field.Attributes, "Bits");
                     var registerAttribute = FindAttribute(field.Attributes, "Register");
                     var interruptSafeAttribute = FindAttribute(field.Attributes, "InterruptSafe");
+                    var constInitAttribute = FindAttribute(field.Attributes, "ConstInit");
                     string? externName = null;
                     string? linkerSymbolName = null;
                     int? bitFirst = null;
@@ -1339,6 +1343,7 @@ internal sealed partial class CompilationModel
                         LinkerSymbolName = linkerSymbolName,
                         IsNativeVolatile = nativeVolatileAttribute is not null,
                         IsUsed = usedAttribute is not null,
+                        IsConstInit = constInitAttribute is not null,
                         IsInterruptSafe = interruptSafeAttribute is not null,
                         BitFirst = bitFirst,
                         BitLast = bitLast,
@@ -1369,6 +1374,15 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
                     if (interruptSafeAttribute is not null && externAttribute is null)
                         Diagnostics.Add("CT1306", "InterruptSafe data requires an extern static field.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
+                    if (constInitAttribute is not null)
+                    {
+                        if (!constInitAttribute.Arguments.IsEmpty)
+                            Diagnostics.Add("CT1308", "ConstInit does not accept arguments.", constInitAttribute.Source, constInitAttribute.Span);
+                        if (!symbol.IsStatic || !symbol.IsReadonly || symbol.Initializer is null || symbol.IsConst || symbol.IsVolatile ||
+                            symbol.ExternName is not null || symbol.LinkerSymbolName is not null || symbol.IsRegister || nativeVolatileAttribute is not null ||
+                            !IsCompleteUnmanagedType(symbol.Type) || symbol.Type.ContainsManagedReferences || symbol.Type.ContainsPointer || symbol.Type.ContainsAtomic)
+                            Diagnostics.Add("CT1308", "ConstInit requires owned static readonly pointer-free unmanaged storage with an initializer and no conflicting storage attributes.", constInitAttribute.Source, constInitAttribute.Span);
+                    }
                     if (linkerSymbolAttribute is not null && (!symbol.IsStatic || !symbol.IsReadonly || !symbol.IsUnsafe || symbol.IsConst || symbol.IsVolatile || symbol.Initializer is not null || !IsLinkerAddressType(symbol.Type) || externAttribute is not null || sectionAttribute is not null || usedAttribute is not null || nativeVolatileAttribute is not null || fieldAlignment is not null))
                         Diagnostics.Add("CT1296", "LinkerSymbol requires a static unsafe readonly pointer, nuint, or nuint-backed newtype field without storage, initialization, volatility, or conflicting native attributes.", linkerSymbolAttribute.Source, linkerSymbolAttribute.Span);
                     if (fieldAlignment is not null && (symbol.IsConst || symbol.ExternName is not null || !symbol.IsStatic && type.Kind != DeclaredTypeKind.Struct))
@@ -1538,6 +1552,8 @@ internal sealed partial class CompilationModel
                 break;
             case MethodDeclarationSyntax method:
                 {
+                    var hasBody = method.Body is not null || method.AssemblyBody is not null;
+                    var isAssemblyFunction = method.AssemblyBody is not null;
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
                     ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
@@ -1598,19 +1614,19 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1273", "Interface methods are public instance contracts.", method.Source, method.Span);
                     if (isAbstractMethod && type.Kind != DeclaredTypeKind.Interface && !type.IsAbstract)
                         Diagnostics.Add("CT1270", "An abstract method requires an abstract class.", method.Source, method.Span);
-                    if (isAbstractMethod && method.Body is not null)
+                    if (isAbstractMethod && hasBody)
                         Diagnostics.Add("CT1270", "An abstract or interface method cannot have a body.", method.Source, method.Span);
-                    if (sectionAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
+                    if (sectionAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null))
                         Diagnostics.Add("CT1287", "Section requires a body-bearing static non-extern method.", sectionAttribute.Source, sectionAttribute.Span);
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noRecursion is not null && noRecursion.Arguments.Length != 0)
                         Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
-                    if (noRecursion is not null && (method.Body is null || isAbstractMethod || external is not null))
+                    if (noRecursion is not null && (!hasBody || isAbstractMethod || external is not null))
                         Diagnostics.Add("CT1294", "NoRecursion requires a body-bearing non-extern method.", noRecursion.Source, noRecursion.Span);
                     if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
-                    if (usedAttribute is not null && (!isStatic || method.Body is null || isAbstractMethod || external is not null))
+                    if (usedAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null))
                         Diagnostics.Add("CT1288", "Used requires a body-bearing static non-extern method.", usedAttribute.Source, usedAttribute.Span);
                     if (nakedAttribute is not null && nakedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1302", "Naked does not accept arguments.", nakedAttribute.Source, nakedAttribute.Span);
@@ -1626,10 +1642,10 @@ internal sealed partial class CompilationModel
                             externalName = value;
                         else
                             Diagnostics.Add("CT1204", "Extern requires one string containing a portable C identifier.", external.Source, external.Span);
-                        if (!isStatic || method.Body is not null)
+                        if (!isStatic || hasBody)
                             Diagnostics.Add("CT1205", "An Extern method must be static and bodyless.", method.Source, method.Span);
                     }
-                    else if (method.Body is null && !isAbstractMethod)
+                    else if (!hasBody && !isAbstractMethod)
                         Diagnostics.Add("CT1206", "A bodyless method requires Extern or abstract.", method.Source, method.Span);
                     if (export is not null)
                     {
@@ -1638,7 +1654,7 @@ internal sealed partial class CompilationModel
                             exportName = value;
                         else
                             Diagnostics.Add("CT1243", "Export requires one string containing a portable C identifier.", export.Source, export.Span);
-                        if (external is not null || entry is not null || !isStatic || method.Body is null || accessibility != Accessibility.Public)
+                        if (external is not null || entry is not null || !isStatic || !hasBody || accessibility != Accessibility.Public)
                             Diagnostics.Add("CT1244", "Export requires a public static body-bearing method and cannot be combined with EntryPoint or Extern.", method.Source, method.Span);
                     }
                     var returnType = ResolveType(method.ReturnType, tree);
@@ -1681,6 +1697,7 @@ internal sealed partial class CompilationModel
                         ReturnType = returnType,
                         Parameters = methodParameters,
                         Body = method.Body,
+                        AssemblyBody = method.AssemblyBody,
                         IsEntryPoint = entry is not null,
                         DeclaredEffects = methodEffects,
                         IsNoRecursion = noRecursion is not null,
@@ -1705,26 +1722,32 @@ internal sealed partial class CompilationModel
                         IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = method.Modifiers.Contains("sealed", StringComparer.Ordinal),
                     };
-                    if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || method.Body is null))
+                    if (isAssemblyFunction &&
+                        (!isStatic || !symbol.IsUnsafe || isAbstractMethod || external is not null || symbol.IsVirtual ||
+                         !method.TypeParameters.IsDefaultOrEmpty || entry is not null || taskEntryAttribute is not null ||
+                         runtimeImplAttribute is not null || interruptAttribute is not null ||
+                         !IsInlineAssemblyValueType(returnType, allowVoid: true) || methodParameters.Any(parameter => !IsInlineAssemblyValueType(parameter.Type, allowVoid: false))))
+                        Diagnostics.Add("CT1307", "An asm function must be a static unsafe non-generic non-virtual method with only scalar assembly-compatible parameters and result.", method.Source, method.Span);
+                    if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || !hasBody))
                         Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
                     if (taskEntryAttribute is not null &&
-                        (_target != CompilationTarget.EspIdf || accessibility != Accessibility.Public || !isStatic || method.Body is null || isAbstractMethod ||
+                        (_target != CompilationTarget.EspIdf || accessibility != Accessibility.Public || !isStatic || !hasBody || isAbstractMethod ||
                          external is not null || exportName is null || entry is not null || !method.TypeParameters.IsDefaultOrEmpty || returnType != CType.Void ||
                          methodParameters is not [{ Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
                         Diagnostics.Add("CT1292", "TaskEntry requires an ESP-IDF public static non-generic exported void(void*) method body.", taskEntryAttribute.Source, taskEntryAttribute.Span);
                     if (runtimeImplAttribute is not null &&
                         (_target != CompilationTarget.Freestanding || runtimeImplementation is null ||
-                         !isStatic || method.Body is null || isAbstractMethod || external is not null || export is not null || entry is not null ||
+                         !isStatic || !hasBody || isAbstractMethod || external is not null || export is not null || entry is not null ||
                          taskEntryAttribute is not null || nakedAttribute is not null || !method.TypeParameters.IsDefaultOrEmpty || noAlloc is null))
                         Diagnostics.Add("CT1299", "RuntimeImpl requires a freestanding non-generic static body-bearing NoAlloc method without native-entry attributes.", runtimeImplAttribute.Source, runtimeImplAttribute.Span);
                     if (nakedAttribute is not null && !IsValidNakedMethod(symbol))
-                        Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() method containing exactly one operand-free NoAlloc asm statement.", nakedAttribute.Source, nakedAttribute.Span);
-                    if (interruptSafeAttribute is not null && external is null)
-                        Diagnostics.Add("CT1306", "InterruptSafe methods must be extern native boundaries.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
+                        Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() assembly function without operands, or the compatible one-statement NoAlloc asm form.", nakedAttribute.Source, nakedAttribute.Span);
+                    if (interruptSafeAttribute is not null && external is null && !isAssemblyFunction)
+                        Diagnostics.Add("CT1306", "InterruptSafe methods must be extern or assembly native boundaries.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
                     if (interruptAttribute is not null && _target != CompilationTarget.EspIdf)
                         Diagnostics.Add("CT4117", "Interrupt entry points require the ESP-IDF target.", interruptAttribute.Source, interruptAttribute.Span);
                     if (interruptAttribute is not null &&
-                        (accessibility != Accessibility.Public || !isStatic || !symbol.IsUnsafe || method.Body is null || isAbstractMethod ||
+                        (accessibility != Accessibility.Public || !isStatic || !symbol.IsUnsafe || !hasBody || isAbstractMethod ||
                          external is not null || exportName is null || entry is not null || taskEntryAttribute is not null || runtimeImplAttribute is not null ||
                          nakedAttribute is not null || sectionAttribute is not null || symbol.IsVirtual || !method.TypeParameters.IsDefaultOrEmpty ||
                          returnType != CType.Void || methodParameters is not [{ PassingKind: ParameterPassingKind.Value, Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
@@ -1748,6 +1771,12 @@ internal sealed partial class CompilationModel
             return true;
         return type.ElementType is not null && ForbiddenNativeBoundaryType(type.ElementType);
     }
+
+    private static bool IsInlineAssemblyValueType(CType type, bool allowVoid) =>
+        allowVoid && type == CType.Void || type.Kind is
+            CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
+            CTypeKind.Float or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
 
     private ImmutableArray<ParameterSymbol> DeclareParameters(ImmutableArray<ParameterSyntax> parameters, SyntaxTree tree, bool isExtern)
     {
@@ -1852,8 +1881,11 @@ internal sealed partial class CompilationModel
     private bool IsValidNakedMethod(MethodSymbol method)
     {
         if (_target != CompilationTarget.Freestanding || method.Accessibility != Accessibility.Public || !method.IsStatic || !method.IsUnsafe ||
-            method.ReturnType != CType.Void || method.Parameters.Length != 0 || method.ExportName is null || !method.IsNoAlloc || method.IsGenericDefinition ||
-            method.Body is not { Statements: [InlineAssemblyStatementSyntax assembly] })
+            method.ReturnType != CType.Void || method.Parameters.Length != 0 || method.ExportName is null || !method.IsNoAlloc || method.IsGenericDefinition)
+            return false;
+        if (method.IsAssemblyFunction)
+            return method.AssemblyBody is { Operands.IsEmpty: true, Clobbers.IsEmpty: true };
+        if (method.Body is not { Statements: [InlineAssemblyStatementSyntax assembly] })
             return false;
         return assembly.Operands.IsEmpty && assembly.Clobbers.IsEmpty &&
             assembly.Attributes is [AttributeSyntax { Name: "NoAlloc", Arguments.IsEmpty: true }];

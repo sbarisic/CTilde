@@ -7,6 +7,7 @@ internal enum NativeSectionKind
 {
     Code,
     Data,
+    ReadOnlyData,
 }
 
 internal static class NativeSection
@@ -31,6 +32,8 @@ internal static class NativeSection
         yield return "#if defined(_MSC_VER)";
         if (kind == NativeSectionKind.Data)
             yield return $"#pragma section(\"{name}\", read, write)";
+        else if (kind == NativeSectionKind.ReadOnlyData)
+            yield return $"#pragma section(\"{name}\", read)";
         yield return kind == NativeSectionKind.Code
             ? $"#define {macro} __declspec(code_seg(\"{name}\"))"
             : $"#define {macro} __declspec(allocate(\"{name}\"))";
@@ -44,13 +47,16 @@ internal static class NativeSection
 
     public static string StripDataDefinitionMacro(string declaration)
     {
-        const string prefix = "CT_SECTION_DATA_";
-        if (!declaration.StartsWith(prefix, StringComparison.Ordinal))
-            return declaration;
-        var separator = prefix.Length + 24;
-        return separator < declaration.Length && declaration[separator] == ' '
-            ? declaration[(separator + 1)..]
-            : declaration;
+        foreach (var prefix in new[] { "CT_SECTION_DATA_", "CT_SECTION_READONLYDATA_" })
+        {
+            if (!declaration.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+            var separator = prefix.Length + 24;
+            return separator < declaration.Length && declaration[separator] == ' '
+                ? declaration[(separator + 1)..]
+                : declaration;
+        }
+        return declaration;
     }
 
     private static bool IsFirstCharacter(char character) =>

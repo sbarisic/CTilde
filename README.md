@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, Cosmopolitan, or ESP-IDF tooling to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.24 adds a measured x86-64 Cosmopolitan APE target to the Draft 0.23 interrupt-safe ESP-IDF surface. It retains the Draft 0.22 effect engine and Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.25 adds callable assembly-only functions and `[ConstInit]` immutable native image data. The bootable QEMU kernel now defines its Multiboot header, port I/O, and naked startup entirely in C~, without a source assembly file. It retains the Draft 0.24 x86-64 Cosmopolitan target, Draft 0.23 interrupt-safe ESP-IDF surface, Draft 0.22 effect engine, and Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 The x86-64 [Cosmopolitan target](COSMOPOLITAN.md) uses hosted C~ semantics and a dedicated Actually Portable Executable build pipeline. The same measured APE runs under WSL/Linux and Windows. It does not treat `cosmocc` as an ordinary hosted compiler alias, and it defers Arm64 and x86-64/Arm64 fat output until C~ can perform one semantic compilation per architecture.
 
@@ -51,7 +51,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to
 - MSVC, GCC, or Clang for hosted programs.
 - ESP-IDF 6 for ESP32-family projects.
 - GNU-compatible ELF GCC or Clang for freestanding images.
-- Cosmopolitan builds require an external official `cosmocc` toolchain and a Unix shell. Draft 0.24 accepts only the `x86_64-unknown-cosmo-cc` wrapper and explicit `architecture: "x64"`.
+- Cosmopolitan builds require an external official `cosmocc` toolchain and a Unix shell. Draft 0.25 accepts only the `x86_64-unknown-cosmo-cc` wrapper and explicit `architecture: "x64"`.
 
 Build the solution and compile the checked hello-world example:
 
@@ -94,6 +94,8 @@ Pass `--compiler clang` instead to use Clang. The example uses GNU AT&T x86 asse
 - Non-moving atomic reference counting with deterministic destruction of acyclic managed values. Reference cycles intentionally leak.
 - Explicit native and semantic contracts through attributes such as `[Extern]`, `[Export]`, `[Section]`, `[Interrupt]`, `[InterruptSafe]`, `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, `[NoRuntime]`, and ownership annotations.
 - Raw GNU inline assembly with typed operands for GCC and Clang builds. Programs containing `asm` are rejected by the MSVC native-build path.
+- Static unsafe assembly functions reuse those operands and effect contracts, can be called from C~, and can return through an explicit `out result` operand. Freestanding naked assembly functions own startup control flow without a separate `.S` file.
+- `[ConstInit]` emits pointer-free unmanaged `static readonly` values directly as immutable scalar or positional aggregate data, including restricted straight-line struct construction.
 
 The bundled standard library supplies objects and exceptions, console I/O, single-precision math and vectors, runtime memory operations, hosted binary file I/O, and a small target-specific ESP-IDF surface. See [STDLIB.md](STDLIB.md) for signatures and runtime behavior.
 
@@ -199,7 +201,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.24 implementation, not a stable production language. Draft 0.24 retains runtime ABI 16 and debug metadata v3. The x86-64 APE driver, interrupt entry, general effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and native execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.25 implementation, not a stable production language. Draft 0.25 retains runtime ABI 16 and debug metadata v3. Assembly functions, constant-initialized image data, the x86-64 APE driver, interrupt entry, general effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and native execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -216,13 +218,13 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.24 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.25 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — measured feature and validation status.
 - [TODO.md](TODO.md) — concise outstanding roadmap and release blockers.
-- [FUTURE_FEATURES.md](FUTURE_FEATURES.md) — staged designs for future language, SIMD, resource, and project facilities; none are current Draft 0.24 claims.
+- [FUTURE_FEATURES.md](FUTURE_FEATURES.md) — staged designs for future language, SIMD, resource, and project facilities; none are current Draft 0.25 claims.
 - [COSMOPOLITAN.md](COSMOPOLITAN.md) — staged APE target design, constraints, and acceptance plan.
 
 ## Validation

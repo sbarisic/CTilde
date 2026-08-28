@@ -41,7 +41,10 @@ internal sealed partial class CEmitter
                 AddCType(parameter.Type);
         }
 
-        foreach (var function in program.Functions)
+        var functions = IsFreestanding && !Model.FreestandingRuntimeRequired
+            ? program.Functions.Where(function => function.Method.IsNaked)
+            : program.Functions;
+        foreach (var function in functions)
         {
             AddMethod(function.Method);
             if (function.Property is not null)
@@ -62,7 +65,8 @@ internal sealed partial class CEmitter
             AddType(field.ContainingType);
             AddCType(field.Type);
         }
-        AddType(Model.Types.GetValueOrDefault("System.Object"));
+        if (!IsFreestanding || Model.FreestandingRuntimeRequired)
+            AddType(Model.Types.GetValueOrDefault("System.Object"));
         foreach (var type in Model.StaticAssertionLayoutTypes)
             AddType(type);
         foreach (var name in RuntimeFaultTypeNames)

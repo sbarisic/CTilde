@@ -155,6 +155,13 @@ public sealed partial class LanguageServiceSnapshot
             foreach (var operand in assembly.Operands)
                 results.Add(new LanguageCompletion(operand.Name, LanguageCompletionKind.Variable, "inline assembly operand", operand.Name, replacement, "0"));
         }
+        foreach (var assembly in context.Nodes.OfType<AssemblyFunctionBodySyntax>()
+                     .Where(assembly => position >= assembly.BodySpan.Start && position <= assembly.BodySpan.End)
+                     .OrderBy(assembly => assembly.Span.Length).Take(1))
+        {
+            foreach (var operand in assembly.Operands)
+                results.Add(new LanguageCompletion(operand.Name, LanguageCompletionKind.Variable, "assembly-function operand", operand.Name, replacement, "0"));
+        }
         return [.. results
             .Where(item => replacement.Length == 0 || item.Label.StartsWith(tree.Text.Slice(replacement), StringComparison.OrdinalIgnoreCase))
             .GroupBy(item => (item.Label, item.Detail, item.Kind))
@@ -415,7 +422,9 @@ public sealed partial class LanguageServiceSnapshot
         "NoBlock" => "[NoBlock] - the callable does not wait for time, I/O, synchronization, another thread, or external progress.",
         "NoRuntime" => "[NoRuntime] - the callable is bootstrap-safe and uses no managed runtime; implies NoThrow and NoAlloc.",
         "Interrupt" => "[Interrupt] - an ESP-IDF native-only void(void*) entry whose transitive C~ closure is NoRuntime, NoBlock, and IRAM/DRAM safe.",
-        "InterruptSafe" => "[InterruptSafe] - a trusted cache-disabled-safe extern, extern-data, or inline-assembly boundary; effect contracts remain explicit.",
+        "InterruptSafe" => "[InterruptSafe] - a trusted cache-disabled-safe extern, extern-data, inline-assembly, or assembly-function boundary; effect contracts remain explicit.",
+        "ConstInit" => "[ConstInit] - emit immutable unmanaged static readonly data directly in the native image without module initialization.",
+        "Naked" => "[Naked] - a freestanding exported startup function whose complete raw assembly body owns control flow.",
         _ => null,
     };
 

@@ -28,7 +28,7 @@ internal static class FreestandingValidator
             .Concat(allBodies.Where(body => body.Method.Name == "<module_init>").Select(body => body.Method))
             .Distinct()
             .ToArray();
-        model.FreestandingRuntimeRequired = roots.Length != 0 || model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsUsed);
+        model.FreestandingRuntimeRequired = roots.Length != 0 || model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsUsed && !field.IsConstInit);
 
         var reachable = model.Effects.ReachableMethods(roots);
         model.FreestandingHeapRequired = reachable.Any(method => (model.Effects.GetEffects(method) & EffectKind.Allocates) != 0);

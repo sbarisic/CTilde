@@ -19,6 +19,7 @@ internal sealed class IrExpressionValue
     public MethodGroupBinding? MethodGroup { get; init; }
     public bool IsFunctionAddress { get; init; }
     public object? Symbol { get; init; }
+    public bool IsConstInitStorage { get; init; }
     public bool IsKnownNonNull { get; set; }
     public int? KnownLength { get; set; }
     public string? OwnedCleanupRecord { get; set; }
@@ -39,6 +40,7 @@ internal sealed class IrValueStorage
     public PropertySymbol? Property { get; init; }
     public ParameterSymbol? Parameter { get; init; }
     public bool IsBaseReceiver { get; init; }
+    public bool IsConstInitStorage { get; init; }
 }
 
 internal sealed partial class TypedIrBodyLowerer
@@ -130,11 +132,15 @@ internal sealed partial class TypedIrBodyLowerer
 
     public string EmitDefinition()
     {
+        if (_method.IsAssemblyFunction && !_method.IsNaked)
+            return EmitAssemblyFunctionDefinition();
         if (_method.IsNaked)
         {
             if (_analysisOnly)
             {
-                if (_method.Body is not null)
+                if (_method.IsAssemblyFunction)
+                    RecordAssemblyFunctionEffect(_method.AssemblyBody!);
+                else if (_method.Body is not null)
                     _ = EmitStatements(NullLoweringWriter.Instance, _method.Body.Statements);
                 return string.Empty;
             }
@@ -199,14 +205,14 @@ internal sealed partial class TypedIrBodyLowerer
 
     private string EmitNakedDefinition()
     {
-        var assembly = (InlineAssemblyStatementSyntax)_method.Body!.Statements[0];
+        var assemblyBody = _method.AssemblyBody?.Body ?? ((InlineAssemblyStatementSyntax)_method.Body!.Statements[0]).Body;
         var writer = new CWriter();
         var section = _method.SectionName is null
             ? string.Empty
             : NativeSection.MacroName(NativeSectionKind.Code, _method.SectionName) + " ";
         writer.WriteLine($"{section}__attribute__((naked, noreturn, used)) void {_method.ExportName}(void)");
         using (writer.Block())
-            writer.WriteLine($"__asm__(\"{EscapeNakedAssembly(assembly.Body)}\");");
+            writer.WriteLine($"__asm__(\"{EscapeNakedAssembly(assemblyBody)}\");");
         writer.WriteLine();
         return writer.ToString();
     }
@@ -217,6 +223,132 @@ internal sealed partial class TypedIrBodyLowerer
         .Replace("\r\n", "\\n\\t", StringComparison.Ordinal)
         .Replace("\r", "\\n\\t", StringComparison.Ordinal)
         .Replace("\n", "\\n\\t", StringComparison.Ordinal);
+
+    private string EmitAssemblyFunctionDefinition()
+    {
+        var syntax = _method.AssemblyBody!;
+        RecordAssemblyFunctionEffect(syntax);
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        var parameters = new HashSet<ParameterSymbol>(ReferenceEqualityComparer.Instance);
+        var lowered = new List<(InlineAssemblyOperandSyntax Syntax, string Code, CType Type, string Constraint)>();
+        var resultCount = 0;
+
+        for (var index = 0; index < syntax.Operands.Length; index++)
+        {
+            var operand = syntax.Operands[index];
+            if (!aliases.Add(operand.Name))
+                Report("CT2192", $"Assembly function operand name '{operand.Name}' is already declared.", operand);
+
+            CType type;
+            string code;
+            BoundSemanticEntry semantic;
+            if (operand.Variable.Name == "result")
+            {
+                resultCount++;
+                type = _method.ReturnType;
+                code = "ct_asm_result";
+                semantic = new BoundSemanticEntry(operand.Variable, type, null, null, OwnershipKind.None, BoundValueCategory.Variable);
+                _semanticEntries[operand.Variable] = semantic;
+                if (_method.ReturnType == CType.Void || operand.Kind != InlineAssemblyOperandKind.Output)
+                    Report("CT2217", "The reserved assembly-function result must be one out operand of a non-void function.", operand);
+            }
+            else if (_parameters.TryGetValue(operand.Variable.Name, out var parameter))
+            {
+                if (!parameters.Add(parameter))
+                    Report("CT2217", $"Assembly function parameter '{parameter.Name}' must appear exactly once in the operand clause.", operand);
+                var expected = parameter.PassingKind switch
+                {
+                    ParameterPassingKind.Ref => InlineAssemblyOperandKind.InputOutput,
+                    ParameterPassingKind.Out => InlineAssemblyOperandKind.Output,
+                    _ => InlineAssemblyOperandKind.Input,
+                };
+                if (operand.Kind != expected)
+                    Report("CT2217", $"Assembly operand '{parameter.Name}' must use role '{AssemblyRole(expected)}' for its parameter passing kind.", operand);
+                var expression = operand.Kind == InlineAssemblyOperandKind.Output ? LowerAssignable(operand.Variable) : LowerExpression(operand.Variable);
+                type = expression.Type;
+                code = expression.Code;
+                semantic = _semanticEntries.GetValueOrDefault(operand.Variable) ??
+                    new BoundSemanticEntry(operand.Variable, type, parameter, null, OwnershipKind.None, BoundValueCategory.Variable);
+            }
+            else
+            {
+                type = CType.Error;
+                code = "0";
+                semantic = new BoundSemanticEntry(operand.Variable, type, null, null, OwnershipKind.None, BoundValueCategory.Error);
+                _semanticEntries[operand.Variable] = semantic;
+                Report("CT2193", $"Assembly function operand '{operand.Variable.Name}' must name a parameter or the reserved result.", operand.Variable);
+            }
+
+            if (!IsInlineAssemblyType(type))
+                Report("CT2195", $"Type '{type.DisplayName}' is not a supported assembly operand type.", operand.Variable);
+            if (operand.Constraint is null && type == CType.Float)
+                Report("CT2196", "A float assembly operand requires an explicit GNU constraint.", operand);
+            var constraint = operand.Constraint ?? "r";
+            ValidateAssemblyConstraint(constraint, operand);
+            var emittedConstraint = operand.Kind switch
+            {
+                InlineAssemblyOperandKind.Output => $"={constraint}",
+                InlineAssemblyOperandKind.InputOutput => $"+{constraint}",
+                _ => constraint,
+            };
+            lowered.Add((operand, code, type, emittedConstraint));
+            foreach (var reference in syntax.References.Where(reference => reference.OperandIndex == index))
+                _semanticEntries[reference] = semantic with { Syntax = reference };
+        }
+
+        foreach (var parameter in _method.Parameters.Where(parameter => !parameters.Contains(parameter)))
+            Report("CT2217", $"Assembly function parameter '{parameter.Name}' must appear exactly once in the operand clause.", parameter.Syntax ?? _method.Syntax!);
+        if (_method.ReturnType == CType.Void && resultCount != 0 || _method.ReturnType != CType.Void && resultCount != 1)
+            Report("CT2217", _method.ReturnType == CType.Void
+                ? "A void assembly function cannot declare a result operand."
+                : "A non-void assembly function requires exactly one out result operand.", syntax);
+
+        ValidateAssemblyClobbers(syntax.Clobbers, syntax);
+        if (_analysisOnly)
+            return string.Empty;
+
+        var writer = new CWriter();
+        if (_method.ReturnType != CType.Void)
+            writer.WriteLine($"{_emitter.CTypeName(_method.ReturnType)} ct_asm_result;");
+        writer.WriteLine("__asm__ volatile (");
+        writer.WriteLine($"    \"{BuildAssemblyTemplate(syntax.Body, syntax.BodySpan, syntax.References)}\"");
+        var outputs = lowered.Select((item, index) => (item, index))
+            .Where(pair => pair.item.Syntax.Kind is InlineAssemblyOperandKind.Output or InlineAssemblyOperandKind.InputOutput)
+            .Select(pair => $"[ct_asm_{pair.index}] \"{EscapeInlineAssemblyCString(pair.item.Constraint)}\" ({pair.item.Code})");
+        var inputs = lowered.Select((item, index) => (item, index))
+            .Where(pair => pair.item.Syntax.Kind == InlineAssemblyOperandKind.Input)
+            .Select(pair => $"[ct_asm_{pair.index}] \"{EscapeInlineAssemblyCString(pair.item.Constraint)}\" ({pair.item.Code})");
+        writer.WriteLine($"    : {string.Join(", ", outputs)}");
+        writer.WriteLine($"    : {string.Join(", ", inputs)}");
+        writer.WriteLine($"    : {string.Join(", ", syntax.Clobbers.Select(clobber => $"\"{EscapeInlineAssemblyCString(clobber)}\""))});");
+        writer.WriteLine(_method.ReturnType == CType.Void ? "return;" : "return ct_asm_result;");
+        return RenderFunction(_emitter.MethodSignature(_method, _nameOverride), writer);
+    }
+
+    private void RecordAssemblyFunctionEffect(AssemblyFunctionBodySyntax syntax) =>
+        _emitter.Effects.Record(_method, syntax, EffectKind.All, "assembly function boundary", _method.DeclaredEffects);
+
+    private void ValidateAssemblyConstraint(string constraint, SyntaxNode syntax)
+    {
+        if (constraint.Length == 0 || constraint.Contains('\0') || constraint.Contains('\r') || constraint.Contains('\n') ||
+            constraint.Contains('=') || constraint.Contains('+'))
+            Report("CT2197", "Assembly constraints must be non-empty single-line strings and omit '=' and '+'.", syntax);
+    }
+
+    private void ValidateAssemblyClobbers(IEnumerable<string> clobberSequence, SyntaxNode syntax)
+    {
+        var clobbers = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var clobber in clobberSequence)
+            if (clobber.Length == 0 || clobber.Contains('\0') || clobber.Contains('\r') || clobber.Contains('\n') || !clobbers.Add(clobber))
+                Report("CT2199", $"Assembly clobber '{clobber}' must be unique, non-empty, and single-line.", syntax);
+    }
+
+    private static string AssemblyRole(InlineAssemblyOperandKind kind) => kind switch
+    {
+        InlineAssemblyOperandKind.Output => "out",
+        InlineAssemblyOperandKind.InputOutput => "ref",
+        _ => "in",
+    };
 
     private string EmitClassConstructorDefinition()
     {

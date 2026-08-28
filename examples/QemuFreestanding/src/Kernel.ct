@@ -1,24 +1,61 @@
 using System.Runtime;
 
-public static class Qemu
+[Packed(4)]
+public readonly struct MultibootHeader
 {
-    [Extern("qemu_debug_write")]
-    [NoAlloc]
-    [NoThrow]
-    [NoBlock]
-    [NoRuntime]
-    public static void DebugWrite(char value);
+    public readonly uint Magic;
+    public readonly uint Flags;
+    public readonly uint Checksum;
 
-    [Extern("qemu_debug_exit")]
-    [NoAlloc]
-    [NoThrow]
-    [NoBlock]
-    [NoRuntime]
-    public static void Exit(uint code);
+    public MultibootHeader(uint magic, uint flags, uint checksum)
+    {
+        Magic = magic;
+        Flags = flags;
+        Checksum = checksum;
+    }
 }
 
-public static class Platform
+public static class BootImage
 {
+    [ConstInit]
+    [Used]
+    [Section(".multiboot")]
+    [Align(4)]
+    private static readonly MultibootHeader Header = new MultibootHeader(
+        0x1BADB002u,
+        0x00000003u,
+        0u - 0x1BADB002u - 0x00000003u);
+
+    static assert(sizeof(MultibootHeader) == 12u);
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static unsafe asm void DebugWrite(char value)
+        (in("a") value as output)
+    {
+        outb output, $0xe9
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    private static unsafe void Write(string message)
+    {
+        for (int index = 0; index < message.Length; index++)
+            DebugWrite(message[index]);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static unsafe asm void Exit(uint code)
+        (in("a") code as status)
+    {
+        outl status, $0xf4
+    }
+
     [RuntimeImpl(Runtime.Panic)]
     [NoAlloc]
     [NoThrow]
@@ -26,36 +63,37 @@ public static class Platform
     [NoRuntime]
     private static unsafe void Panic(RuntimePanicInfo info)
     {
-        Qemu.Exit(1u);
+        Exit(1u);
         while (true)
             Cpu.Pause();
     }
-}
 
-public static class Kernel
-{
     [Export("kernel_main")]
     [NoAlloc]
-    [NoThrow]
     [NoBlock]
-    [NoRuntime]
-    public static int Main()
+    public static unsafe int Main()
     {
-        Qemu.DebugWrite('C');
-        Qemu.DebugWrite('T');
-        Qemu.DebugWrite('I');
-        Qemu.DebugWrite('L');
-        Qemu.DebugWrite('D');
-        Qemu.DebugWrite('E');
-        Qemu.DebugWrite('_');
-        Qemu.DebugWrite('Q');
-        Qemu.DebugWrite('E');
-        Qemu.DebugWrite('M');
-        Qemu.DebugWrite('U');
-        Qemu.DebugWrite('_');
-        Qemu.DebugWrite('O');
-        Qemu.DebugWrite('K');
-        Qemu.DebugWrite('\n');
+        Write("CTILDE_QEMU_OK\n");
         return 0;
+    }
+
+    [Naked]
+    [Export("_start")]
+    [NoAlloc]
+    public static unsafe asm void Start()
+    {
+        cli
+        cld
+        movl $stack_top, %esp
+        xorl %ebp, %ebp
+        call ct_runtime_initialize
+        call kernel_main
+        movl %eax, %ebx
+        call ct_runtime_shutdown
+        movl %ebx, %eax
+        outl %eax, $0xf4
+    1:
+        hlt
+        jmp 1b
     }
 }

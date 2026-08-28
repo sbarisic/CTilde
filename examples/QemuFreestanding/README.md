@@ -2,7 +2,7 @@
 
 This example builds a 32-bit x86 Multiboot kernel and boots it directly with QEMU. Unlike the Linux-loaded [freestanding example](../Freestanding/README.md), this image uses no Linux process loader or syscall ABI. It has no libc, CRT, managed heap, console, filesystem, threads, exceptions, or operating-system services.
 
-The C~ kernel writes `CTILDE_QEMU_OK` through QEMU's debug console at I/O port `0xE9`. Its Multiboot startup initializes the C~ runtime, calls `kernel_main`, shuts the runtime down, and writes the returned status to QEMU's `isa-debug-exit` device at port `0xF4`.
+The C~ source owns the complete image: `[ConstInit]` emits the Multiboot header as immutable native data, assembly functions implement the debug ports, and a naked assembly function provides `_start`. There are no native assembly source files. Startup initializes the C~ runtime, calls `kernel_main`, shuts the runtime down, and writes the returned status to QEMU's `isa-debug-exit` device at port `0xF4`. The kernel writes its marker by looping over an immutable string literal, which is emitted directly into the image and performs no managed heap allocation.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ From the repository root in PowerShell, run the standalone smoke test:
 .\Test\Test-QemuFreestanding.ps1
 ```
 
-The script checks the toolchain, builds the image, inspects its ELF class, architecture, required symbols, and undefined symbols, then boots it headlessly under QEMU with a ten-second timeout. QEMU returns process status `1` for a successful guest status of zero because `isa-debug-exit` encodes the result as `(value << 1) | 1`; the script handles that convention.
+The script checks the toolchain, builds the image, inspects its ELF class, architecture, required symbols, undefined symbols, Multiboot placement, and exact header bytes, then boots it headlessly under QEMU with a ten-second timeout. QEMU returns process status `1` for a successful guest status of zero because `isa-debug-exit` encodes the result as `(value << 1) | 1`; the script handles that convention.
 
 To build without running QEMU:
 

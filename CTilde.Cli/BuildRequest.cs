@@ -118,7 +118,7 @@ internal static class BuildRequestResolver
         var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
             project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject);
         if (project.Configuration.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
-            throw new CommandLineException("Draft 0.24 Cosmopolitan projects require architecture 'x64'.");
+            throw new CommandLineException("Draft 0.25 Cosmopolitan projects require architecture 'x64'.");
         var freestanding = project.Configuration.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, project.Configuration.Freestanding, project.RootDirectory, buildNative, executable)
             : null;
@@ -192,7 +192,7 @@ internal static class BuildRequestResolver
             symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject);
         if (options.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
-            throw new CommandLineException("Draft 0.24 Cosmopolitan builds require --architecture x64.");
+            throw new CommandLineException("Draft 0.25 Cosmopolitan builds require --architecture x64.");
         var freestanding = options.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, null, root, buildNative, executable)
             : null;
@@ -290,9 +290,9 @@ internal static class BuildRequestResolver
         if (target != CompilationTarget.Cosmopolitan && options.CosmopolitanModeSpecified)
             throw new CommandLineException("--cosmopolitan-mode is valid only for Cosmopolitan builds.");
         if (target == CompilationTarget.Cosmopolitan && options.ArchitectureSpecified && options.Architecture != CompilationArchitecture.X64)
-            throw new CommandLineException("Draft 0.24 Cosmopolitan builds require --architecture x64.");
+            throw new CommandLineException("Draft 0.25 Cosmopolitan builds require --architecture x64.");
         if (target == CompilationTarget.Cosmopolitan && options.PrepareDebug is not null)
-            throw new CommandLineException("Debug preparation is not available for Cosmopolitan builds in Draft 0.24; use the retained .dbg carrier with a native debugger.");
+            throw new CommandLineException("Debug preparation is not available for Cosmopolitan builds in Draft 0.25; use the retained .dbg carrier with a native debugger.");
         if (target != CompilationTarget.EspIdf && options.SerialPort is not null)
             throw new CommandLineException("--serial-port is valid only for ESP-IDF debugging.");
         if (target == CompilationTarget.EspIdf && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))

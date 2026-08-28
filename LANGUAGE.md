@@ -1,16 +1,16 @@
 # C~ language specification
 
-Specification version: draft 0.24
+Specification version: draft 0.25
 
 ## Status
 
-This document is the normative specification for C~ draft 0.24.
+This document is the normative specification for C~ draft 0.25.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.24 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.25 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.24 adds an x86-64 Cosmopolitan target with hosted language semantics, an explicit target profile, an ELF/DWARF carrier, and an unwrapped APE distribution artifact. It retains Draft 0.23 compiler-checked ESP-IDF interrupt entry points, the Draft 0.22 effect engine, and the Draft 0.21 GNU/ELF freestanding profile. Runtime ABI 16 and debug metadata version 3 are unchanged.
+Draft 0.25 adds assembly-only functions and constant-initialized immutable native data, allowing a freestanding image to define its startup and retained headers entirely in C~. It retains the Draft 0.24 x86-64 Cosmopolitan target, Draft 0.23 compiler-checked ESP-IDF interrupt entry points, Draft 0.22 effect engine, and Draft 0.21 GNU/ELF freestanding profile. Runtime ABI 16, debug metadata version 3, the manifest schema, and compiler APIs are unchanged.
 
-`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.24 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.25 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -105,7 +105,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.24 has no aliases and no `using static`.
+Draft 0.25 has no aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -177,7 +177,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.24 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.25 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -214,7 +214,7 @@ Every expression has a compile-time type before C emission.
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.24 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
+Draft 0.25 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -236,7 +236,7 @@ Every array has a read-only `Length` property of type `int`. Indexing starts at 
 
 Inline arrays support one dimension, default initialization, checked indexing, by-value copying, parameters, and returns. Constant out-of-range indices are rejected; dynamic failures use `CTA0003`. Elements that contain managed references are retained and dropped element by element. Native ABI exposure requires a recursively complete unmanaged element type. Managed, multidimensional inline, jagged, and nested inline arrays are not part of this draft. Invalid lengths report `CT2204`.
 
-Draft 0.24 has no multidimensional or jagged managed arrays.
+Draft 0.25 has no multidimensional or jagged managed arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
@@ -305,7 +305,7 @@ Enum initializers are integral constants. An omitted initializer is one greater 
 
 `public newtype Name : Underlying;` declares a distinct nominal value type with the representation, layout, calling convention, boxing behavior, and native ABI of its complete unmanaged non-void underlying type. Recursive definitions report `CT1295`.
 
-Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.24.
+Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.25.
 
 The standard library declares `be16`, `be32`, `le16`, and `le32` as nominal newtypes. Their stored bytes use the named wire order. `System.Endian` converts between native numeric values and these types, folds constant operands, and lowers big-endian conversions to byte swaps on the currently little-endian target set. Ordinary explicit newtype casts remain representation-preserving. Invalid intrinsic calls report `CT2208`.
 
@@ -382,7 +382,7 @@ public delegate int Transformer(int value);
 
 A compatible method group converts contextually to that delegate. Overload resolution uses the delegate's exact parameter and return types. Static, instance, inherited, virtual, and `base` method groups are supported. An instance delegate retains its receiver; virtual invocation dispatches against the captured receiver, while `base.Method` remains a direct base call.
 
-Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.24 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
+Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.25 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
 
 ### Classes
 
@@ -576,7 +576,7 @@ Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site
 
 An `out` call treats the caller slot as an uninitialized destination. The caller drops an initialized managed/reference-bearing value, clears the slot to a safe empty state, and marks it uninitialized before entry. The callee's first assignment constructs or moves directly into the destination without reading, retaining, or dropping an old value. Later assignments use ordinary strong-slot replacement. The rule is identical for methods, constructors, delegates, unmanaged function pointers, externs, and exported C declarations. Normal return assigns the caller slot; exceptional control leaves its safe empty value but does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
 
-Draft 0.24 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
+Draft 0.25 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### User-defined arithmetic operators
 
@@ -626,11 +626,11 @@ A runtime implementation and its transitive C~ call closure cannot use managed v
 
 The compiler changes a zero-byte request to one byte, calls the selected allocator, panics with `CTM0001` on null, and clears the returned storage before object construction. The allocator must return storage aligned to at least 16 bytes. Generated code does not pass null to the free role. Runtime faults call the panic role directly and are not catchable; if panic returns, generated code loops forever.
 
-### Narrow naked startup
+### Naked startup
 
-`[Naked]` is a freestanding-only startup facility. It requires a public static unsafe non-generic `void()` method with `[Export]`, `[NoAlloc]`, and exactly one operand-free `[NoAlloc] asm` statement. Parameters, locals, expressions, ordinary calls, operands, clobbers, and generated cleanup are forbidden. Invalid declarations or bodies report `CT1302`; a non-GNU/ELF native toolchain reports `CT4116`.
+`[Naked]` is a freestanding-only startup facility. It requires a public static unsafe non-generic `void()` method with `[Export]` and `[NoAlloc]`. The preferred body is an assembly-function body with no operands or clobbers. The older ordinary method containing exactly one operand-free `[NoAlloc] asm` statement remains source-compatible. Parameters, locals, C~ expressions, compiler-bound operands, clobbers, and generated cleanup are forbidden. Invalid declarations or bodies report `CT1302`; a non-GNU/ELF native toolchain reports `CT4116`.
 
-The GNU backend emits one exported `naked,noreturn` definition rather than an export wrapper and internal implementation. It copies the basic assembly body without operand substitution or percent escaping and emits no prologue, epilogue, return, runtime check, ARC, instrumentation, or exception barrier. `[Section]` remains valid. General naked functions and compiler-bound naked assembly operands are deferred.
+The GNU backend emits one exported `naked,noreturn` definition rather than an export wrapper and internal implementation. It copies the basic assembly body without operand substitution or percent escaping and emits no prologue, epilogue, return, runtime check, ARC, instrumentation, or exception barrier. `[Section]` remains valid. Naked parameters and compiler-bound naked assembly operands are deferred.
 
 ### Extern
 
@@ -646,9 +646,17 @@ Unknown attributes, invalid targets, duplicate attributes, and non-constant argu
 
 `[Section("name")]` controls the native object section of an eligible definition. The name is one ASCII string from 1 through 128 characters. Letters, digits, `.`, `_`, `$`, and `-` are permitted; the first character must be a letter, `.`, `_`, or `$`. Malformed arguments and names report `CT1286`.
 
-The attribute is valid on a body-bearing static method of any accessibility and on a non-const static field whose declared type is complete and unmanaged. A sectioned field may be `readonly` or `volatile`; its native section remains writable because module initialization can assign it. Constructors, operators, properties, instance members, abstract or extern methods, const fields, and managed or incomplete field types report `CT1287`.
+The attribute is valid on a body-bearing static method of any accessibility and on a non-const static field whose declared type is complete and unmanaged. An ordinary sectioned field may be `readonly` or `volatile`; its native section remains writable because module initialization can assign it. A `[ConstInit]` field instead occupies read-only native storage. Constructors, operators, properties, instance members, abstract or extern methods, const fields, and managed or incomplete field types report `CT1287`.
 
-Several code definitions may share one section, and several data definitions may share one section. One name cannot be used for both code and data in the same compilation; that conflict reports `CT4107` with the earlier declaration location. Closed generic methods and closed generic-type static fields inherit the annotation from their source declaration.
+Several definitions of the same section category may share one name. Code, writable data, and `[ConstInit]` read-only data are distinct categories and cannot share a custom section name; a conflict reports `CT4107` with the earlier declaration location. Closed generic methods and closed generic-type static fields inherit the annotation from their source declaration.
+
+### Constant-initialized immutable data
+
+`[ConstInit]` accepts no arguments and applies to an owned `static readonly` field with an initializer and a complete unmanaged, non-atomic, pointer-free type. It evaluates before module-initializer construction and emits a `const` positional C aggregate directly at file scope. The field creates no zero-then-assign sequence, constructor call, module lifecycle work, runtime requirement, or runtime call-graph edge. `[Used]`, `[Section]`, and `[Align]` retain their ordinary meanings; `[Used]` alone does not require the freestanding runtime.
+
+Scalar constants, enums, newtypes, explicit casts, wrapping arithmetic, constant fields, target/layout constants, zero values, and nested sequential structure construction are supported. A structure constructor is eligible only when its body consists of straight-line assignments of compile-time expressions to every instance field exactly once. Branches, loops, locals, calls, constructor chaining, properties, managed operations, unions, overlapping explicit layout, recursion, and general compile-time execution report `CT2218`. Invalid field shapes report `CT1308`.
+
+The field and every member or indexed location rooted in it are immutable storage. Reads, member reads, value copies, and `in` passing are valid. Assignment, increment, `ref`/`out`, explicit address-taking, and direct instance method calls report `CT2219`; a copied local value may be mutated normally. `[ConstInit]` data is initialized and readable in freestanding bootstrap and interrupt closures. Symbol maps record `constInit`.
 
 For `[Export]`, the internal C~ implementation and external wrapper use the requested code section, and the exported native-header prototype carries the matching declaration annotation. For `[EntryPoint]`, only the C~ implementation is placed; generated `main` and `app_main` wrappers remain in their default sections. `[Section]` does not make a method or field reachable, does not change linkage or initialization order, and does not specify ordering, alignment, retention, linker-script mapping, memory regions, or final addresses.
 
@@ -664,7 +672,7 @@ Ordinary parameters are borrowed for the duration of a call. `[Retained]` accept
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.24 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.25 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
 
 ### Effect contracts
 
@@ -692,9 +700,9 @@ The compiler places every C~ method in the interrupt call closure in ESP-IDF IRA
 
 Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Console`, `Environment`, single-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types as applicable to the target. Freestanding imports only the object/storage core, primitive and managed value support, `Memory`, target queries, endian helpers, MMIO, and CPU intrinsics; it does not expose exceptions, console or process services, managed threading, ESP-IDF APIs, or libm-backed math. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-`Vec2`, `Vec3`, and `Vec4` are scalar geometry structures in Draft 0.24. The language has no fixed-width SIMD types, SIMD lane or shuffle operations, `CpuFeature`, `Target.HasFeature`, or `cpuFeatures` project option. The separate future proposal preserves geometry semantics while adding explicit 128-bit lane values and scalar fallback; see [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+`Vec2`, `Vec3`, and `Vec4` are scalar geometry structures in Draft 0.25. The language has no fixed-width SIMD types, SIMD lane or shuffle operations, `CpuFeature`, `Target.HasFeature`, or `cpuFeatures` project option. The separate future proposal preserves geometry semantics while adding explicit 128-bit lane values and scalar fallback; see [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
 
-Draft 0.24 does not provide `System.Type`, reflection, or `System.Convert`.
+Draft 0.25 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation
 
@@ -792,7 +800,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.24 has no pattern cases and no `goto case`.
+Draft 0.25 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -855,7 +863,7 @@ Exceptions are unchecked. Every call can complete by throwing. A throw from a ca
 
 A finally block runs when its protected statement completes normally, returns, breaks, continues, or throws. A return, break, or continue cannot leave a finally block. A throw from finally replaces the pending action. `Environment.Exit` terminates the process without running finally blocks or defers.
 
-Exception filters, inner exceptions, stack traces, user-defined runtime-fault policies, and automatic disposal are not part of draft 0.24. An exception that escapes a supported synchronous native boundary becomes a panic with `CTE0003`; general exception propagation across native boundaries is unsupported.
+Exception filters, inner exceptions, stack traces, user-defined runtime-fault policies, and automatic disposal are not part of draft 0.25. An exception that escapes a supported synchronous native boundary becomes a panic with `CTE0003`; general exception propagation across native boundaries is unsupported.
 
 ## Unsafe code
 
@@ -874,6 +882,24 @@ public static unsafe void Clear(byte* address, int length)
 Unsafe code remains statically typed. `unsafe` permits pointer declarations, address-of, dereference, pointer indexing, pointer arithmetic, pointer casts, unmanaged function-pointer declarations, method-address acquisition, native-buffer construction, stack allocation, comparisons, casts, and invocation. It does not disable normal type checking.
 
 ### Inline assembly
+
+An assembly function places `asm` after `static unsafe` and before the result type. It is body-bearing, non-generic, and non-virtual, and may be called like an ordinary C~ function:
+
+```csharp
+[NoRuntime]
+[NoBlock]
+public static unsafe asm uint ReadPort(uint port)
+    (in("d") port, out("a") result as value)
+{
+    inl port, value
+}
+```
+
+Parameters and results are limited to inline-assembly-compatible scalar, enum, newtype, opaque, pointer, or unmanaged-function-pointer values. Every declared parameter appears exactly once with a compatible `in`, `out`, or `ref` role. A non-void method declares exactly one `out result` operand; a void method cannot declare `result`. The reserved `result` name is local to the declaration. Assembly functions reuse the constraint, alias, clobber, substitution, and validation rules below.
+
+A non-naked assembly function emits an ordinary C ABI definition containing one `__asm__ volatile` block and, for a non-void result, a compiler-generated C return. Its assembly falls through exactly once and cannot contain its own ABI return. `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]` independently contract the opaque boundary; omitted contracts remain conservatively unknown to constrained callers. `[Export]`, `[Used]`, `[Section]`, and `[InterruptSafe]` follow their ordinary method rules. Raw assembly calls remain opaque to reachability: native calls from a raw body must manually obey the ABI and target a stable exported/native symbol.
+
+Assembly functions select the same GNU assembly toolchain path as inline assembly. GCC and Clang are supported; hosted MSVC native builds reject them. Symbol maps record `assemblyFunction`.
 
 An `asm` statement contains raw GNU assembly text and requires an unsafe method or block. The compiler does not parse instructions, registers, directives, or the target instruction set. The selected GCC or Clang assembler validates them.
 
@@ -925,15 +951,15 @@ An `Atomic<T>` value is non-copyable. It can be directly constructed as a local,
 
 A thread starts at most once. Joining before start, starting twice, or joining itself throws `ThreadStateException`. A worker retains its delegate and control object until completion, so releasing the source `Thread` reference does not cancel it. An exception escaping the delegate is fatal through the existing unhandled-exception path. Workers attach to independent C~ exception, cleanup, ARC-release, and debug state before invoking source code and detach after cleanup.
 
-`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX or Cosmopolitan mutexes, or recursive FreeRTOS mutexes. Cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, and `async` are not part of Draft 0.24.
+`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX or Cosmopolitan mutexes, or recursive FreeRTOS mutexes. Cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, and `async` are not part of Draft 0.25.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.24 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.25 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
 
-Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.24.
+Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.25.
 
-Draft 0.24 uses a data-race-free memory model for hosted, Cosmopolitan, and ESP-IDF programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. Freestanding v1 has one compiler-owned execution state and no managed threading surface.
+Draft 0.25 uses a data-race-free memory model for hosted, Cosmopolitan, and ESP-IDF programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. Freestanding v1 has one compiler-owned execution state and no managed threading surface.
 
 One C~ runtime exists per process. `ct_runtime_initialize(config)` attaches the calling primary thread, initializes immortal runtime-fault objects and the ABI-versioned module descriptor, then publishes the ready phase. `ct_runtime_shutdown()` requires all secondary threads detached, finalizes modules, drains ARC work, and detaches the primary thread. `main` and `app_main` perform this lifecycle automatically. A native-created thread uses `ct_thread_attach()` and `ct_thread_detach()` between those calls and must detach with no active C~ calls, cleanup records, exception frames, pending exception, or release drain. Export wrappers, callback trampolines, `ct_retain`, and `ct_release` require attachment. Runtime-phase misuse and unattached entry are panics. Modules cannot unload while their descriptors, vtables, delegates, objects, or generated function pointers remain live. Independent DLL loading and runtime registration are deferred.
 
@@ -951,7 +977,7 @@ An unhandled exception prints `CTE0001`, its fully qualified runtime type, and i
 
 `System.Runtime.Target.Profile`, `Architecture`, and `PointerSize` are compiler constants and have no runtime storage. The architecture is selected through `CompilationOptions.Architecture`, top-level `architecture` in `ctilde.json`, or CLI `--architecture`; CLI input has precedence. The supported values are `auto`, `x86`, `x64`, `arm32`, `arm64`, `xtensa`, `riscv32`, and `riscv64`. An architecture-dependent query with no resolved architecture reports `CT4108`.
 
-The `cosmopolitan` target requires `architecture: "x64"`; automatic or other architecture selection reports `CT4118`. It requires one ordinary `[EntryPoint]`, generates hosted startup and runtime lifecycle, and exposes the hosted object, exception, console, file, math, threading, mutex, and TLS facilities. `Target.Profile` is `TargetProfile.Cosmopolitan`, `Target.Architecture` is `TargetArchitecture.X64`, and `Target.PointerSize` is eight. The native build emits an x86-64 APE distribution image and retains its ELF/DWARF carrier as `<image>.dbg`. Arm64 and fat multi-architecture APEs are outside Draft 0.24.
+The `cosmopolitan` target requires `architecture: "x64"`; automatic or other architecture selection reports `CT4118`. It requires one ordinary `[EntryPoint]`, generates hosted startup and runtime lifecycle, and exposes the hosted object, exception, console, file, math, threading, mutex, and TLS facilities. `Target.Profile` is `TargetProfile.Cosmopolitan`, `Target.Architecture` is `TargetArchitecture.X64`, and `Target.PointerSize` is eight. The native build emits an x86-64 APE distribution image and retains its ELF/DWARF carrier as `<image>.dbg`. Arm64 and fat multi-architecture APEs are outside Draft 0.25.
 
 `static if (condition) statement else statement` is statement-level compile-time selection. Its condition must be a compile-time Boolean. Only the selected branch is bound, analyzed, lowered, and made reachable. The inactive branch must parse but can name APIs unavailable on the selected target.
 
@@ -996,7 +1022,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.24 when:
+A compiler conforms to draft 0.25 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1004,7 +1030,7 @@ A compiler conforms to draft 0.24 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.24 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.25 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1015,4 +1041,4 @@ The canonical backend is GNU C23. Draft 0.24 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.24 defers Arm64 and fat Cosmopolitan output, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.
+Draft 0.25 defers Arm64 and fat Cosmopolitan output, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.

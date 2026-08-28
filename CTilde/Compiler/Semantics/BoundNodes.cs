@@ -92,6 +92,10 @@ internal sealed record BoundFlowSummary(
 
 internal sealed record BoundStaticAssertion(StaticAssertDeclarationSyntax Syntax, string ConditionCode, string Message);
 
+internal abstract record ConstDataValue(CType Type);
+internal sealed record ConstDataScalar(CType Type, string Code) : ConstDataValue(Type);
+internal sealed record ConstDataAggregate(CType Type, ImmutableArray<ConstDataValue> Elements) : ConstDataValue(Type);
+
 internal sealed record BoundBody(
     MethodSymbol Method,
     BoundStatement Root,

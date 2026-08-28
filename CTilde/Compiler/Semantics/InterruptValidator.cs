@@ -24,6 +24,8 @@ internal static class InterruptValidator
             foreach (var method in closure.OrderBy(NameMangler.MethodIdentity, StringComparer.Ordinal))
             {
                 method.IsInterruptCode = true;
+                if (method.IsAssemblyFunction && !method.IsInterruptSafe && method.Syntax is { } assemblyFunctionSyntax)
+                    Report("CT2216", $"Interrupt call path '{Path(root, method)}' reaches an assembly function without InterruptSafe.", assemblyFunctionSyntax);
                 if (method.SectionName is not null && method.Syntax is { } sectionSyntax)
                     Report("CT2216", $"Interrupt call path '{Path(root, method)}' uses custom code section '{method.SectionName}'; interrupt code placement is compiler-controlled.", sectionSyntax);
 
@@ -83,6 +85,8 @@ internal static class InterruptValidator
                 return;
             }
             if (field.IsRegister || field.LinkerSymbolName is not null)
+                return;
+            if (field.IsConstInit && model.ConstInitializers.ContainsKey(field))
                 return;
             if (field.ExternName is not null)
             {

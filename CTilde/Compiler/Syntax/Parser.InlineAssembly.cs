@@ -4,10 +4,44 @@ namespace CTilde;
 
 internal sealed partial class Parser
 {
+    private AssemblyFunctionBodySyntax ParseAssemblyFunctionBody()
+    {
+        var start = Current.Span.Start;
+        ParseInlineAssemblyParts(out var operands, out var clobbers, out var body, out var close);
+        var bodyText = body.Value as string ?? body.Text;
+        return new AssemblyFunctionBodySyntax(
+            _source,
+            TextSpan.FromBounds(start, close.Span.End),
+            operands,
+            clobbers,
+            body.Span,
+            bodyText,
+            FindInlineAssemblyReferences(bodyText, body.Span.Start, operands));
+    }
+
     private InlineAssemblyStatementSyntax ParseInlineAssembly(ImmutableArray<AttributeSyntax> attributes)
     {
         var start = attributes.IsDefaultOrEmpty ? Current.Span.Start : attributes[0].Span.Start;
         Match(SyntaxKind.AsmKeyword);
+        ParseInlineAssemblyParts(out var operands, out var clobbers, out var body, out var close);
+        var bodyText = body.Value as string ?? body.Text;
+        return new InlineAssemblyStatementSyntax(
+            _source,
+            TextSpan.FromBounds(start, close.Span.End),
+            attributes,
+            operands,
+            clobbers,
+            body.Span,
+            bodyText,
+            FindInlineAssemblyReferences(bodyText, body.Span.Start, operands));
+    }
+
+    private void ParseInlineAssemblyParts(
+        out ImmutableArray<InlineAssemblyOperandSyntax> operandsResult,
+        out ImmutableArray<string> clobbersResult,
+        out SyntaxToken body,
+        out SyntaxToken close)
+    {
         var operands = ImmutableArray.CreateBuilder<InlineAssemblyOperandSyntax>();
         var clobbers = ImmutableArray.CreateBuilder<string>();
         if (Current.Kind == SyntaxKind.OpenParenToken)
@@ -26,18 +60,10 @@ internal sealed partial class Parser
             Match(SyntaxKind.CloseParenToken);
         }
         Match(SyntaxKind.OpenBraceToken);
-        var body = Match(SyntaxKind.AsmTextToken);
-        var close = Match(SyntaxKind.CloseBraceToken);
-        var bodyText = body.Value as string ?? body.Text;
-        return new InlineAssemblyStatementSyntax(
-            _source,
-            TextSpan.FromBounds(start, close.Span.End),
-            attributes,
-            operands.ToImmutable(),
-            clobbers.ToImmutable(),
-            body.Span,
-            bodyText,
-            FindInlineAssemblyReferences(bodyText, body.Span.Start, operands));
+        body = Match(SyntaxKind.AsmTextToken);
+        close = Match(SyntaxKind.CloseBraceToken);
+        operandsResult = operands.ToImmutable();
+        clobbersResult = clobbers.ToImmutable();
     }
 
     private void ParseInlineAssemblyClobbers(ImmutableArray<string>.Builder clobbers)
@@ -95,9 +121,10 @@ internal sealed partial class Parser
     private static ImmutableArray<InlineAssemblyReferenceSyntax> FindInlineAssemblyReferences(
         string body,
         int bodyStart,
-        ImmutableArray<InlineAssemblyOperandSyntax>.Builder operands)
+        IEnumerable<InlineAssemblyOperandSyntax> operandSequence)
     {
         var references = ImmutableArray.CreateBuilder<InlineAssemblyReferenceSyntax>();
+        var operands = operandSequence.ToArray();
         var aliases = operands.Select((operand, index) => (operand.Name, Index: index))
             .OrderByDescending(item => item.Name.Length).ToArray();
         char quote = '\0';

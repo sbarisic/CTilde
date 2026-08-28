@@ -1153,15 +1153,27 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"extern {qualifiers}{CDeclaration(field.Type, field.CName)};");
                 continue;
             }
-            var value = field.Type.Kind is CTypeKind.Struct or CTypeKind.InlineArray ? "{0}" : DefaultValue(field.Type);
+            var constInitializer = Model.ConstInitializers.GetValueOrDefault(field);
+            var value = constInitializer is null
+                ? field.Type.Kind is CTypeKind.Struct or CTypeKind.InlineArray ? "{0}" : DefaultValue(field.Type)
+                : RenderConstData(constInitializer);
             var retention = field.IsUsed ? "CT_USED " : field.Alignment is not null ? "CT_UNUSED " : string.Empty;
             var storage = field.IsUsed ? string.Empty : "static ";
             var interruptData = IsEspIdf && field.IsInterruptData ? "DRAM_ATTR " : string.Empty;
-            writer.WriteLine($"{(field.Alignment is int alignment ? $"CT_ALIGN({alignment}) " : string.Empty)}{storage}{interruptData}{retention}{SectionAnnotation(NativeSectionKind.Data, field.SectionName)}{CDeclaration(field.Type, field.CName)} = {value};");
+            var sectionKind = field.IsConstInit ? NativeSectionKind.ReadOnlyData : NativeSectionKind.Data;
+            var qualifier = field.IsConstInit ? "const " : string.Empty;
+            writer.WriteLine($"{(field.Alignment is int alignment ? $"CT_ALIGN({alignment}) " : string.Empty)}{storage}{interruptData}{retention}{SectionAnnotation(sectionKind, field.SectionName)}{qualifier}{CDeclaration(field.Type, field.CName)} = {value};");
         }
         if (EmittedTypes.SelectMany(type => type.Fields).Any(field => field.IsStatic && field.Name != "<underlying>"))
             writer.WriteLine();
     }
+
+    private static string RenderConstData(ConstDataValue value) => value switch
+    {
+        ConstDataScalar scalar => scalar.Code,
+        ConstDataAggregate aggregate => $"{{ {string.Join(", ", aggregate.Elements.Select(RenderConstData))} }}",
+        _ => throw new InvalidOperationException("Unknown constant-data initializer kind."),
+    };
 
     private void EmitPrototypes(CWriter writer)
     {

@@ -1,6 +1,6 @@
 # Cosmopolitan APE example
 
-This Draft 0.24 project builds one x86-64 Actually Portable Executable with the Cosmopolitan Libc toolchain. The same `Cosmopolitan.com` payload is intended to run on supported x86-64 Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD systems.
+This project uses the target introduced in Draft 0.24 to build one x86-64 Actually Portable Executable with the Cosmopolitan Libc toolchain. The same `Cosmopolitan.com` payload is intended to run on supported x86-64 Linux, macOS, Windows, FreeBSD, OpenBSD, and NetBSD systems.
 
 The example exercises the ordinary C~ hosted runtime rather than the freestanding profile. It uses managed strings and arrays, ARC, a worker thread and mutex, exceptions, console output, and file output.
 
@@ -16,4 +16,4 @@ The archive contains symbolic links and must be extracted by a ZIP tool that pre
 
 The build retains `build/Cosmopolitan.com.dbg`, the ELF/DWARF carrier used for symbol inspection and native debugging. `build/Cosmopolitan.com` is the unwrapped APE payload. Successful execution prints the worker result and creates `cosmopolitan-output.txt` in the current directory.
 
-Draft 0.24 accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.
+Draft 0.25 accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.

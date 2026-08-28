@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.24 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.25 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -71,7 +71,7 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 
 - [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC.
 - [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
-- [ ] Generalize the narrow freestanding naked-startup and ESP-IDF interrupt forms to target-specific naked functions with parameters, compiler-bound assembly operands, and additional interrupt signatures.
+- [ ] Generalize freestanding naked startup beyond parameterless complete raw bodies to target-specific naked parameters, compiler-bound operands, and additional interrupt signatures.
 - [ ] Define retained callback registration, unregistration, rooting, and cross-thread lifetime rules separately from the existing synchronous callback profile.
 
 ## Deferred research

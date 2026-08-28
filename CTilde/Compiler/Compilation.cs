@@ -83,7 +83,7 @@ public sealed class Compilation
             if (target == CompilationTarget.Freestanding && architecture == CompilationArchitecture.Auto)
                 diagnostics.Add("CT4108", "Freestanding compilations require an explicit target architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
-                diagnostics.Add("CT4118", "Draft 0.24 Cosmopolitan compilations require the explicit x64 architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+                diagnostics.Add("CT4118", "Draft 0.25 Cosmopolitan compilations require the explicit x64 architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Freestanding && (Options.DebugInformation != DebugInformationMode.None || Options.DebugMemory != DebugMemoryMode.Off))
                 diagnostics.Add("CT4115", "Debug information and debug-memory instrumentation are unavailable for freestanding compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             ValidateSourceIdentityRoot(diagnostics);

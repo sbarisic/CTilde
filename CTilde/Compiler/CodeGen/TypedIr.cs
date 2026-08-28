@@ -254,7 +254,7 @@ internal sealed class TypedIrLowerer(BoundProgram program)
             }
         }
         var moduleInitializers = Model.UserTypes.SelectMany(type => type.Fields)
-            .Where(field => field.IsStatic && field.Initializer is not null && field.Name != "<underlying>")
+            .Where(field => field.IsStatic && field.Initializer is not null && !field.IsConstInit && field.Name != "<underlying>")
             .Select(field => new IrStaticInitializer(
                 field,
                 FindInitializerBoundBody(field.Syntax!),

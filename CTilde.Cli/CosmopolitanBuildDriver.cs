@@ -16,7 +16,7 @@ internal static class CosmopolitanBuildDriver
     public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, CancellationToken cancellationToken)
     {
         if (request.Architecture != CompilationArchitecture.X64)
-            throw new NativeBuildException("CT4118: Draft 0.24 Cosmopolitan builds require the explicit x64 architecture.");
+            throw new NativeBuildException("CT4118: Draft 0.25 Cosmopolitan builds require the explicit x64 architecture.");
 
         var image = request.ExecutablePath ?? throw new NativeBuildException("Cosmopolitan executable output is missing.");
         Directory.CreateDirectory(Path.GetDirectoryName(image)!);
@@ -125,7 +125,7 @@ internal static class CosmopolitanBuildDriver
         if (name.Contains("-linux-cosmo-", StringComparison.Ordinal))
             throw new NativeBuildException("Use the supported x86_64-unknown-cosmo-cc wrapper, not a physical *-linux-cosmo-* tool.");
         if (!name.Equals("x86_64-unknown-cosmo-cc", StringComparison.Ordinal))
-            throw new NativeBuildException("Draft 0.24 requires the single-architecture x86_64-unknown-cosmo-cc wrapper; fat cosmocc and Arm64 wrappers are deferred.");
+            throw new NativeBuildException("Draft 0.25 requires the single-architecture x86_64-unknown-cosmo-cc wrapper; fat cosmocc and Arm64 wrappers are deferred.");
     }
 
     private static async Task<string> ValidateCompilerAsync(CosmopolitanCompiler compiler, BuildRequest request, CancellationToken cancellationToken)

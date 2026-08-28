@@ -233,6 +233,7 @@ internal sealed class FieldSymbol : MemberSymbol
     public string? LinkerSymbolName { get; init; }
     public bool IsNativeVolatile { get; init; }
     public bool IsUsed { get; init; }
+    public bool IsConstInit { get; init; }
     public bool IsInterruptSafe { get; init; }
     public bool IsInterruptData { get; set; }
     public int? BitFirst { get; init; }
@@ -304,6 +305,8 @@ internal sealed class MethodSymbol : MemberSymbol
     public required CType ReturnType { get; init; }
     public required ImmutableArray<ParameterSymbol> Parameters { get; init; }
     public required BlockStatementSyntax? Body { get; init; }
+    public AssemblyFunctionBodySyntax? AssemblyBody { get; init; }
+    public bool IsAssemblyFunction => AssemblyBody is not null;
     public bool IsConstructor { get; init; }
     public bool IsEntryPoint { get; init; }
     public EffectContract DeclaredEffects { get; set; }

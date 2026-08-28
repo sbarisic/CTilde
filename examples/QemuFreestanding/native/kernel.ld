@@ -41,6 +41,13 @@ SECTIONS
         *(COMMON)
     } :data
 
+    .bootstrap_stack (NOLOAD) : ALIGN(16)
+    {
+        stack_bottom = .;
+        . += 16K;
+        stack_top = .;
+    } :data
+
     /DISCARD/ :
     {
         *(.comment)

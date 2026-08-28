@@ -5,17 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#080a0d">
-  <meta name="description" content="C~ is a small, statically typed systems language with familiar C#-style syntax and deterministic GNU C23 output.">
+  <meta name="description" content="C~ is a small, statically typed systems language with familiar C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="C~ — Familiar syntax. Native systems.">
-  <meta property="og:description" content="A small, statically typed systems language with C#-style syntax and deterministic GNU C23 output.">
+  <meta property="og:description" content="A small systems language with C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
   <meta property="og:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="C~ — Familiar syntax. Native systems.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="C~ — Familiar syntax. Native systems.">
-  <meta name="twitter:description" content="A small, statically typed systems language with C#-style syntax and deterministic GNU C23 output.">
+  <meta name="twitter:description" content="A small systems language with C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
   <title>C~ — Familiar syntax. Native systems.</title>
   <link rel="stylesheet" href="styles.css">
@@ -101,7 +101,10 @@
             <button class="tab" id="tab-generics" type="button" role="tab" aria-selected="false" aria-controls="panel-generics" tabindex="-1">Generics</button>
             <button class="tab" id="tab-exceptions" type="button" role="tab" aria-selected="false" aria-controls="panel-exceptions" tabindex="-1">Exceptions</button>
             <button class="tab" id="tab-unsafe" type="button" role="tab" aria-selected="false" aria-controls="panel-unsafe" tabindex="-1">Unsafe</button>
-            <button class="tab" id="tab-assembly" type="button" role="tab" aria-selected="false" aria-controls="panel-assembly" tabindex="-1">Assembly</button>
+            <button class="tab" id="tab-assembly" type="button" role="tab" aria-selected="false" aria-controls="panel-assembly" tabindex="-1">Inline asm</button>
+            <button class="tab" id="tab-asm-functions" type="button" role="tab" aria-selected="false" aria-controls="panel-asm-functions" tabindex="-1">Asm functions</button>
+            <button class="tab" id="tab-const-data" type="button" role="tab" aria-selected="false" aria-controls="panel-const-data" tabindex="-1">Const data</button>
+            <button class="tab" id="tab-freestanding" type="button" role="tab" aria-selected="false" aria-controls="panel-freestanding" tabindex="-1">Freestanding</button>
           </div>
           <p class="sr-only" id="example-status" aria-live="polite"></p>
 
@@ -368,6 +371,123 @@
     movl source, %eax
     addl %eax, accumulator
     movl %eax, result
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-asm-functions" role="tabpanel" aria-labelledby="tab-asm-functions" hidden>
+            <div class="example-copy">
+              <p class="example-number">09 / ASSEMBLY FUNCTIONS</p>
+              <h3>Call assembly like an ordinary function.</h3>
+              <p>Draft 0.25 gives raw GNU assembly a typed C ABI boundary. Parameters and results use explicit operands while effect attributes describe the opaque native work.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#inline-assembly" target="_blank" rel="noopener noreferrer">Read about assembly functions <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>AssemblyFunctions.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde assembly function example"><code><span class="tok-attribute">[NoRuntime]</span>
+<span class="tok-attribute">[NoBlock]</span>
+<span class="tok-keyword">public static unsafe asm void</span> DebugWrite(<span class="tok-keyword">char</span> value)
+    (<span class="tok-keyword">in</span>(<span class="tok-string">"a"</span>) value <span class="tok-keyword">as</span> output)
+{
+    outb output, $0xe9
+}
+
+<span class="tok-attribute">[NoRuntime]</span>
+<span class="tok-attribute">[NoBlock]</span>
+<span class="tok-keyword">public static unsafe asm uint</span> ReadPort()
+    (<span class="tok-keyword">out</span>(<span class="tok-string">"a"</span>) <span class="tok-keyword">result as</span> value)
+{
+    inl $0xf4, value
+}
+
+DebugWrite(<span class="tok-string">'C'</span>);
+<span class="tok-keyword">uint</span> status = ReadPort();</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-const-data" role="tabpanel" aria-labelledby="tab-const-data" hidden>
+            <div class="example-copy">
+              <p class="example-number">10 / CONSTANT IMAGE DATA</p>
+              <h3>Build native data before startup.</h3>
+              <p><code>[ConstInit]</code> evaluates restricted unmanaged values at compile time and emits immutable storage directly into the native image—without a module initializer or runtime edge.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#constant-initialized-immutable-data" target="_blank" rel="noopener noreferrer">Read about constant data <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>MultibootHeader.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde constant initialized data example"><code><span class="tok-attribute">[Packed(</span><span class="tok-number">4</span><span class="tok-attribute">)]</span>
+<span class="tok-keyword">public readonly struct</span> <span class="tok-type">MultibootHeader</span>
+{
+    <span class="tok-keyword">public readonly uint</span> Magic;
+    <span class="tok-keyword">public readonly uint</span> Flags;
+    <span class="tok-keyword">public readonly uint</span> Checksum;
+
+    <span class="tok-keyword">public</span> MultibootHeader(<span class="tok-keyword">uint</span> magic, <span class="tok-keyword">uint</span> flags, <span class="tok-keyword">uint</span> checksum)
+    {
+        Magic = magic;
+        Flags = flags;
+        Checksum = checksum;
+    }
+}
+
+<span class="tok-attribute">[ConstInit]</span>
+<span class="tok-attribute">[Used]</span>
+<span class="tok-attribute">[Section(</span><span class="tok-string">".multiboot"</span><span class="tok-attribute">)]</span>
+<span class="tok-attribute">[Align(</span><span class="tok-number">4</span><span class="tok-attribute">)]</span>
+<span class="tok-keyword">private static readonly</span> <span class="tok-type">MultibootHeader</span> Header =
+    <span class="tok-keyword">new</span> <span class="tok-type">MultibootHeader</span>(
+        <span class="tok-number">0x1BADB002u</span>,
+        <span class="tok-number">0x00000003u</span>,
+        <span class="tok-number">0u</span> - <span class="tok-number">0x1BADB002u</span> - <span class="tok-number">0x00000003u</span>);
+
+<span class="tok-keyword">static assert</span>(<span class="tok-keyword">sizeof</span>(<span class="tok-type">MultibootHeader</span>) == <span class="tok-number">12u</span>);</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-freestanding" role="tabpanel" aria-labelledby="tab-freestanding" hidden>
+            <div class="example-copy">
+              <p class="example-number">11 / FREESTANDING QEMU</p>
+              <h3>Own the image from first instruction.</h3>
+              <p>The QEMU example combines immutable Multiboot data, assembly functions, a naked C~ entry point, explicit runtime lifecycle calls, and a regular string—without libc, a CRT, or a source assembly file.</p>
+              <a href="https://github.com/sbarisic/CTilde/tree/master/examples/QemuFreestanding" target="_blank" rel="noopener noreferrer">Boot the complete kernel <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>QemuFreestanding/Kernel.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde QEMU freestanding kernel example"><code><span class="tok-attribute">[Export(</span><span class="tok-string">"kernel_main"</span><span class="tok-attribute">)]</span>
+<span class="tok-attribute">[NoAlloc]</span>
+<span class="tok-attribute">[NoBlock]</span>
+<span class="tok-keyword">public static unsafe int</span> Main()
+{
+    Write(<span class="tok-string">"CTILDE_QEMU_OK\n"</span>);
+    <span class="tok-keyword">return</span> <span class="tok-number">0</span>;
+}
+
+<span class="tok-attribute">[Naked]</span>
+<span class="tok-attribute">[Export(</span><span class="tok-string">"_start"</span><span class="tok-attribute">)]</span>
+<span class="tok-attribute">[NoAlloc]</span>
+<span class="tok-keyword">public static unsafe asm void</span> Start()
+{
+    cli
+    cld
+    movl $stack_top, %esp
+    xorl %ebp, %ebp
+    call ct_runtime_initialize
+    call kernel_main
+    movl %eax, %ebx
+    call ct_runtime_shutdown
+    movl %ebx, %eax
+    outl %eax, $0xf4
+<span class="tok-number">1</span>:
+    hlt
+    jmp 1b
 }</code></pre>
             </div>
           </div>

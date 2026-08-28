@@ -1,0 +1,20 @@
+{
+  "target": "freestanding",
+  "architecture": "x86",
+  "sources": ["src/Kernel.ct"],
+  "build": {
+    "cLayout": "modules",
+    "compiler": "wsl:gcc",
+    "configuration": "release",
+    "image": "build/kernel.elf"
+  },
+  "freestanding": {
+    "linkerScript": "native/kernel.ld",
+    "entrySymbol": "_start",
+    "nativeSources": ["native/start.S"],
+    "objectFiles": [],
+    "libraries": [],
+    "compileOptions": [],
+    "linkOptions": ["-Wl,--build-id=none"]
+  }
+}

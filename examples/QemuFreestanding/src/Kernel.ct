@@ -1,0 +1,61 @@
+using System.Runtime;
+
+public static class Qemu
+{
+    [Extern("qemu_debug_write")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static void DebugWrite(char value);
+
+    [Extern("qemu_debug_exit")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static void Exit(uint code);
+}
+
+public static class Platform
+{
+    [RuntimeImpl(Runtime.Panic)]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static unsafe void Panic(RuntimePanicInfo info)
+    {
+        Qemu.Exit(1u);
+        while (true)
+            Cpu.Pause();
+    }
+}
+
+public static class Kernel
+{
+    [Export("kernel_main")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static int Main()
+    {
+        Qemu.DebugWrite('C');
+        Qemu.DebugWrite('T');
+        Qemu.DebugWrite('I');
+        Qemu.DebugWrite('L');
+        Qemu.DebugWrite('D');
+        Qemu.DebugWrite('E');
+        Qemu.DebugWrite('_');
+        Qemu.DebugWrite('Q');
+        Qemu.DebugWrite('E');
+        Qemu.DebugWrite('M');
+        Qemu.DebugWrite('U');
+        Qemu.DebugWrite('_');
+        Qemu.DebugWrite('O');
+        Qemu.DebugWrite('K');
+        Qemu.DebugWrite('\n');
+        return 0;
+    }
+}

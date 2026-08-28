@@ -16,7 +16,7 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.9.0");
+  assert.equal(manifest.version, "0.10.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "Unlicense");
   assert.equal(manifest.repository.directory, "editors/vscode");
@@ -130,6 +130,9 @@ test("project schema includes native build configuration", async () => {
 test("grammar exposes the expected root scope and repositories", async () => {
   const grammar = await readJson("syntaxes/ctilde.tmLanguage.json");
   const requiredRepositories = [
+    "assembly-function",
+    "inline-assembly",
+    "inline-assembly-block",
     "comments",
     "strings",
     "characters",

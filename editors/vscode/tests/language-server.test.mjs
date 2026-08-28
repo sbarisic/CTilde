@@ -110,6 +110,95 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
   }
 });
 
+test("language server exposes draft 0.25 freestanding assembly functions and constant data", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-freestanding-"));
+  const programPath = path.join(directory, "Kernel.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = `public static class LowLevel
+{
+
+    [ConstInit]
+    private static readonly uint Header = 42u;
+
+    [NoRuntime]
+    [NoBlock]
+    public static unsafe asm uint Read(uint port)
+        (in("d") port as source, out("a") result as value)
+    {
+        inl source, value
+    }
+
+    [Naked]
+    [Export("_start")]
+    [NoAlloc]
+    public static unsafe asm void Start()
+    {
+        hlt
+    }
+}`;
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "freestanding", architecture: "x86", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+
+  const client = new LspClient(serverDll);
+  try {
+    const initialized = await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "freestanding-fixture" }],
+      capabilities: {}
+    });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+
+    const diagnostics = await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === uri && value.version === 1);
+    assert.deepEqual(diagnostics.diagnostics, []);
+
+    const memberOffset = source.indexOf("\n\n") + 1;
+    const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: positionAt(source, memberOffset) });
+    for (const label of ["asm", "ConstInit", "Naked"])
+      assert.ok(completion.items.some(item => item.label === label), `missing ${label} member completion`);
+
+    const bodyOffset = source.indexOf("{", source.indexOf("public static unsafe asm uint Read")) + 1;
+    const bodyCompletion = await client.request("textDocument/completion", { textDocument: { uri }, position: positionAt(source, bodyOffset) });
+    for (const label of ["source", "value"])
+      assert.ok(bodyCompletion.items.some(item => item.label === label), `missing ${label} assembly alias completion`);
+
+    const constInitOffset = source.indexOf("ConstInit") + 1;
+    const constInitHover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, constInitOffset) });
+    assert.match(constInitHover.contents.value, /immutable unmanaged static readonly data/);
+
+    const sourceAliasOffset = source.indexOf("inl source") + "inl ".length;
+    const parameterHover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, sourceAliasOffset) });
+    assert.match(parameterHover.contents.value, /uint port/);
+    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, sourceAliasOffset) });
+    assert.deepEqual(definition.range.start, positionAt(source, source.indexOf("port)")));
+
+    const resultAliasOffset = source.indexOf("value\n");
+    const resultHover = await client.request("textDocument/hover", { textDocument: { uri }, position: positionAt(source, resultAliasOffset) });
+    assert.match(resultHover.contents.value, /uint value \(assembly-function result\)/);
+
+    const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri } });
+    const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, source);
+    assert.ok(decoded.some(token => token.text === "Header" && token.type === "property" && token.modifiers.includes("static") && token.modifiers.includes("readonly")));
+    assert.ok(decoded.some(token => token.text === "result" && token.type === "variable"));
+    assert.ok(decoded.some(token => token.text === "value" && token.type === "variable"));
+    assert.ok(decoded.some(token => token.text === "source" && token.type === "parameter"));
+
+    const documentSymbols = await client.request("textDocument/documentSymbol", { textDocument: { uri } });
+    const lowLevel = documentSymbols.find(symbol => symbol.name === "LowLevel");
+    assert.ok(lowLevel?.children.some(symbol => symbol.name === "Header"));
+    assert.ok(lowLevel?.children.some(symbol => symbol.name === "Read"));
+    assert.ok(lowLevel?.children.some(symbol => symbol.name === "Start"));
+
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("language server exposes draft 0.12 operator declarations and usages", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-operator-"));
   const programPath = path.join(directory, "Program.ct");

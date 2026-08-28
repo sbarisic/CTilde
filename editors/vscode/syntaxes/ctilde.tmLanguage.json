@@ -4,6 +4,9 @@
   "scopeName": "source.ctilde",
   "patterns": [
     {
+      "include": "#assembly-function"
+    },
+    {
       "include": "#inline-assembly"
     },
     {
@@ -59,6 +62,118 @@
     }
   ],
   "repository": {
+    "assembly-function": {
+      "name": "meta.assembly-function.ctilde",
+      "begin": "^(?=\\s*(?:\\[[^\\]\\r\\n]*\\]\\s*)*(?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)*asm\\s+@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?\\s+@?[_\\p{L}][_\\p{L}\\p{Nd}]*\\s*\\()",
+      "end": "(?<=\\})",
+      "patterns": [
+        {
+          "include": "#attributes"
+        },
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#strings"
+        },
+        {
+          "include": "#characters"
+        },
+        {
+          "match": "(?<![@_\\p{L}\\p{Nd}])((?:(?:public|internal|protected|private|static|sealed|abstract|readonly|volatile|const|unsafe|virtual|override)\\s+)*)(asm)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*\\()",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.ctilde"
+            },
+            "2": {
+              "name": "keyword.control.asm.ctilde"
+            },
+            "3": {
+              "name": "storage.type.ctilde"
+            },
+            "4": {
+              "name": "entity.name.function.member.ctilde"
+            }
+          }
+        },
+        {
+          "match": "(?<![@_\\p{L}\\p{Nd}])(out)(?![_\\p{L}\\p{Nd}])(\\s*\\(\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\s*\\))?\\s+(result)(?![_\\p{L}\\p{Nd}])\\s+(as)(?![_\\p{L}\\p{Nd}])\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.asm-operand.ctilde"
+            },
+            "3": {
+              "name": "string.quoted.double.ctilde"
+            },
+            "4": {
+              "name": "variable.language.assembly-result.ctilde"
+            },
+            "5": {
+              "name": "keyword.other.alias.ctilde"
+            },
+            "6": {
+              "name": "variable.other.readwrite.assembly-alias.ctilde"
+            }
+          }
+        },
+        {
+          "match": "(?<![@_\\p{L}\\p{Nd}])(in|out|ref)(?![_\\p{L}\\p{Nd}])(\\s*\\(\\s*(\"(?:\\\\.|[^\"\\\\])*\")\\s*\\))?\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?:\\s+(as)(?![_\\p{L}\\p{Nd}])\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*))?",
+          "captures": {
+            "1": {
+              "name": "storage.modifier.asm-operand.ctilde"
+            },
+            "3": {
+              "name": "string.quoted.double.ctilde"
+            },
+            "4": {
+              "name": "variable.parameter.ctilde"
+            },
+            "5": {
+              "name": "keyword.other.alias.ctilde"
+            },
+            "6": {
+              "name": "variable.other.readwrite.assembly-alias.ctilde"
+            }
+          }
+        },
+        {
+          "name": "keyword.other.asm-clobber.ctilde",
+          "match": "(?<![@_\\p{L}\\p{Nd}])clobber(?![_\\p{L}\\p{Nd}])"
+        },
+        {
+          "match": "(@?[_\\p{L}][_\\p{L}\\p{Nd}]*(?:\\s*\\.\\s*@?[_\\p{L}][_\\p{L}\\p{Nd}]*)*(?:\\s*\\*+)?(?:\\s*\\[\\s*\\])?)\\s+(@?[_\\p{L}][_\\p{L}\\p{Nd}]*)(?=\\s*[,\\)])",
+          "captures": {
+            "1": {
+              "name": "storage.type.ctilde"
+            },
+            "2": {
+              "name": "variable.parameter.ctilde"
+            }
+          }
+        },
+        {
+          "include": "#inline-assembly-block"
+        },
+        {
+          "include": "#numbers"
+        },
+        {
+          "include": "#built-in-types"
+        },
+        {
+          "include": "#modifiers"
+        },
+        {
+          "include": "#other-keywords"
+        },
+        {
+          "include": "#punctuation"
+        },
+        {
+          "include": "#identifiers"
+        }
+      ]
+    },
     "inline-assembly": {
       "name": "meta.inline-assembly.ctilde",
       "begin": "(?<![@_\\p{L}\\p{Nd}])(asm)(?![_\\p{L}\\p{Nd}])",

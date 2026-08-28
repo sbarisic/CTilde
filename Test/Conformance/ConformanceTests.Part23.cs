@@ -72,6 +72,22 @@ internal static partial class ConformanceTests
             var operand = source.IndexOf("output, $0xe9", StringComparison.Ordinal);
             Assert(service.GetHover("assembly-functions.ct", operand)?.Contents.Contains("value", StringComparison.Ordinal) == true,
                 "Assembly-function operand hover did not resolve its parameter.");
+            var resultOperand = source.IndexOf("result as value", StringComparison.Ordinal);
+            var resultAlias = source.IndexOf("value\n", source.IndexOf("inl $0xf4", StringComparison.Ordinal), StringComparison.Ordinal);
+            Assert(service.GetHover("assembly-functions.ct", resultOperand)?.Contents.Contains("uint result (assembly-function result)", StringComparison.Ordinal) == true,
+                "Assembly-function result hover did not expose the return type.");
+            Assert(service.GetHover("assembly-functions.ct", resultAlias)?.Contents.Contains("uint value (assembly-function result)", StringComparison.Ordinal) == true,
+                "Assembly-function result alias hover did not expose the return type.");
+            var semanticTokens = service.GetSemanticTokens("assembly-functions.ct");
+            Assert(semanticTokens.Any(token => token.Span.Start == resultOperand && token.Kind == LanguageSemanticTokenKind.Variable),
+                "Assembly-function result operand did not receive a variable semantic token.");
+            Assert(semanticTokens.Any(token => token.Span.Start == resultAlias && token.Kind == LanguageSemanticTokenKind.Variable),
+                "Assembly-function result alias did not receive a variable semantic token.");
+            var memberCompletions = service.GetCompletions("assembly-functions.ct", source.IndexOf("[RuntimeImpl", StringComparison.Ordinal));
+            Assert(new[] { "asm", "ConstInit", "Naked" }.All(label => memberCompletions.Any(item => item.Label == label)),
+                "Draft 0.25 member completions were incomplete.");
+            var bodyCompletions = service.GetCompletions("assembly-functions.ct", source.IndexOf("inl $0xf4", StringComparison.Ordinal) + "inl ".Length);
+            Assert(bodyCompletions.Any(item => item.Label == "value"), "Assembly-function aliases were missing from raw-body completion.");
         });
 
         suite.Run("draft 0.25 assembly function validation", () =>

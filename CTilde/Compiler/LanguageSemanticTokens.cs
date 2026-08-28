@@ -45,11 +45,21 @@ public sealed partial class LanguageServiceSnapshot
 
         foreach (var reference in index.Nodes.OfType<InlineAssemblyReferenceSyntax>())
         {
-            if (!_boundProgram.SemanticMap.TryGetValue(reference, out var semantic) || semantic.Symbol is null)
+            if (!_boundProgram.SemanticMap.TryGetValue(reference, out var semantic))
                 continue;
+            if (semantic.Symbol is null)
+            {
+                if (IsAssemblyResult(semantic))
+                    Add(result, reference.Span, LanguageSemanticTokenKind.Variable, LanguageSemanticTokenModifiers.None);
+                continue;
+            }
             if (ClassifySymbol(semantic.Symbol) is { } classification)
                 Add(result, reference.Span, classification.Kind, classification.Modifiers);
         }
+
+        foreach (var expression in index.Nodes.OfType<NameExpressionSyntax>().Where(expression => expression.Name == "result"))
+            if (_boundProgram.SemanticMap.TryGetValue(expression, out var semantic) && IsAssemblyResult(semantic))
+                Add(result, expression.Span, LanguageSemanticTokenKind.Variable, LanguageSemanticTokenModifiers.None);
 
         foreach (var token in tree.Tokens)
         {

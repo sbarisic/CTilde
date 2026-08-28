@@ -59,7 +59,7 @@ public sealed record LanguageWorkspaceSymbol(
 public sealed partial class LanguageServiceSnapshot
 {
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "union", "enum", "delegate", "opaque", "newtype", "static", "sealed", "abstract"];
-    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void"];
+    private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void", "asm"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "sizeof", "alignof", "offsetof", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
     private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
 
@@ -176,17 +176,23 @@ public sealed partial class LanguageServiceSnapshot
         if (!TryGetTree(filePath, out var tree))
             return null;
         if (InlineAssemblyReferenceAt(tree, position) is { } assemblyReference &&
-            _boundProgram.SemanticMap.TryGetValue(assemblyReference, out var assemblySemantic) &&
-            assemblySemantic.Symbol is { } assemblySymbol)
+            _boundProgram.SemanticMap.TryGetValue(assemblyReference, out var assemblySemantic))
         {
-            var section = new LanguageDocumentedSignature(FormatSymbol(assemblySymbol), _model.Documentation.GetDocumentation(assemblySymbol));
-            return new LanguageHover(section.Signature, assemblyReference.Span, [section]);
+            if (assemblySemantic.Symbol is { } assemblySymbol)
+            {
+                var section = new LanguageDocumentedSignature(FormatSymbol(assemblySymbol), _model.Documentation.GetDocumentation(assemblySymbol));
+                return new LanguageHover(section.Signature, assemblyReference.Span, [section]);
+            }
+            if (IsAssemblyResult(assemblySemantic))
+                return new LanguageHover($"{assemblySemantic.Type.DisplayName} {assemblyReference.Name} (assembly-function result)", assemblyReference.Span);
         }
         var token = HoverTokenAt(tree, position);
         if (token is null)
             return null;
         if (token.Kind == SyntaxKind.IdentifierToken && ContractAttributeHover(token.Text) is { } effectHover)
             return new LanguageHover(effectHover, token.Span);
+        if (TryGetBoundEntry(tree, token.Span, out var boundEntry) && IsAssemblyResult(boundEntry))
+            return new LanguageHover($"{boundEntry.Type.DisplayName} {token.Text} (assembly-function result)", token.Span);
         if (token.Kind != SyntaxKind.IdentifierToken && !OperatorFacts.IsSupported(token.Kind))
         {
             var builtIn = TypeFacts.BuiltIn(token.Text);
@@ -367,6 +373,8 @@ public sealed partial class LanguageServiceSnapshot
             Add(effect, LanguageCompletionKind.Keyword, "analysis-only effect contract attribute", "0");
         if (insideType)
         {
+            Add("ConstInit", LanguageCompletionKind.Keyword, "compile-time initialized immutable data attribute", "0");
+            Add("Naked", LanguageCompletionKind.Keyword, "freestanding naked startup attribute", "0");
             Add("Interrupt", LanguageCompletionKind.Keyword, "ESP-IDF interrupt entry attribute", "0");
             Add("InterruptSafe", LanguageCompletionKind.Keyword, "trusted interrupt-safe native boundary attribute", "0");
         }
@@ -427,6 +435,10 @@ public sealed partial class LanguageServiceSnapshot
         "Naked" => "[Naked] - a freestanding exported startup function whose complete raw assembly body owns control flow.",
         _ => null,
     };
+
+    private static bool IsAssemblyResult(BoundSemanticEntry semantic) =>
+        semantic.Symbol is null && semantic.ValueCategory == BoundValueCategory.Variable && !semantic.Type.IsError &&
+        (semantic.Syntax is InlineAssemblyReferenceSyntax || semantic.Syntax is NameExpressionSyntax { Name: "result" });
 
     private void AddMemberCompletions(List<LanguageCompletion> results, DocumentContext context, MemberAccessExpressionSyntax member, TextSpan replacement)
     {

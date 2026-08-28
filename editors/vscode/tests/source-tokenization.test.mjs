@@ -48,7 +48,7 @@ function expectScope(line, spelling, scope) {
   assert.ok(scopesAt(line, offset).includes(scope), `'${spelling}' should have ${scope} in '${line}'`);
 }
 
-test("every draft 0.18 keyword receives its intended scope", () => {
+test("every language keyword receives its intended scope", () => {
   const groups = [
     {
       words: ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object", "void"],
@@ -122,6 +122,7 @@ test("XML documentation comments expose comment, tag, and attribute scopes", () 
 
 test("representative repository sources finish in the root grammar state", async () => {
   const sourceFiles = [
+    "examples/QemuFreestanding/src/Kernel.ct",
     "examples/Features.ct",
     "examples/ObjectModel.ct",
     "examples/Exceptions.ct",

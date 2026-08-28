@@ -472,8 +472,14 @@ class LanguageServerController {
             await languageClient.start();
         } catch (error) {
             languageClient.outputChannel.appendLine(`Failed to start C~ language server: ${String(error)}`);
-            void vscode.window.showErrorMessage(
-                'C~ language server could not start. Check the configured server path and .NET 10 host.');
+            const action = await vscode.window.showErrorMessage(
+                'C~ language server could not start. Check the configured server path and .NET 10 host.',
+                'Download .NET 10',
+                'Open C~ Settings');
+            if (action === 'Download .NET 10')
+                await vscode.env.openExternal(vscode.Uri.parse('https://dotnet.microsoft.com/download/dotnet/10.0'));
+            else if (action === 'Open C~ Settings')
+                await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:sbarisic.ctilde-language');
             if (this.client === languageClient) {
                 this.client = undefined;
                 this.provider.attach(undefined);

@@ -1,17 +1,40 @@
 {
   "name": "ctilde-language",
-  "displayName": "C~ Language Support",
-  "description": "C~ syntax and semantic highlighting, diagnostics, completion, and navigation.",
-  "version": "0.10.0",
-  "publisher": "ctilde",
-  "license": "Unlicense",
+  "displayName": "C~ Compiler and Debugger",
+  "description": "Official C~ language support with IntelliSense, diagnostics, project builds, and source-level debugging.",
+  "version": "0.10.1",
+  "publisher": "sbarisic",
+  "license": "SEE LICENSE IN LICENSE",
+  "preview": true,
+  "icon": "images/ctilde-icon.png",
+  "galleryBanner": {
+    "color": "#05090b",
+    "theme": "dark"
+  },
   "repository": {
     "type": "git",
     "url": "https://github.com/sbarisic/CTilde.git",
     "directory": "editors/vscode"
   },
+  "homepage": "https://ctilde.sbarisic.com",
+  "bugs": {
+    "url": "https://github.com/sbarisic/CTilde/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "C~ project analysis, builds, and debugging execute bundled or configured development tools and therefore require a trusted workspace."
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "C~ projects require a local or remote filesystem plus native compiler and debugger processes."
+    }
   },
   "main": "./out/extension.js",
   "activationEvents": [
@@ -26,16 +49,30 @@
     "onDebug:ctilde"
   ],
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Debuggers"
   ],
   "keywords": [
     "C~",
     "CTilde",
     "language",
-    "syntax highlighting"
+    "syntax highlighting",
+    "IntelliSense",
+    "compiler",
+    "debugger",
+    "GDB",
+    "systems programming",
+    "ESP-IDF",
+    "embedded"
   ],
   "files": [
     "LICENSE",
+    "CHANGELOG.md",
+    "SUPPORT.md",
+    "THIRD-PARTY-NOTICES.md",
+    "images/ctilde-icon.png",
+    "images/marketplace-hero.png",
+    "images/systems-pipeline.png",
     "language-configuration.json",
     "syntaxes/ctilde.tmLanguage.json",
     "schemas/ctilde.schema.json",
@@ -59,7 +96,11 @@
     "test:grammar": "vscode-tmgrammar-test \"tests/**/*.test.ct\"",
     "test:sources": "node --test ./tests/source-tokenization.test.mjs",
     "test:server": "node --test ./tests/language-server.test.mjs",
-    "test:extension": "npm run build && node ./out/test/runTest.js"
+    "test:extension": "npm run build && node ./out/test/runTest.js bundled",
+    "test:extension:external": "npm run build && node ./out/test/runTest.js external",
+    "test:extension:minimum": "npm run build && node ./out/test/runTest.js bundled 1.85.0",
+    "release:check": "npm test && npm run test:extension && npm run test:extension:minimum && npm audit --omit=dev",
+    "package:pre-release": "vsce package --pre-release --no-dependencies"
   },
   "dependencies": {
     "@vscode/debugadapter": "^1.68.0",
@@ -70,7 +111,7 @@
     "@types/node": "22.15.3",
     "@types/vscode": "1.85.0",
     "@vscode/test-electron": "3.1.0",
-    "@vscode/vsce": "3.6.0",
+    "@vscode/vsce": "3.9.2",
     "esbuild": "0.25.3",
     "typescript": "5.8.3",
     "vscode-oniguruma": "2.0.1",
@@ -191,7 +232,11 @@
         },
         "ctilde.debugger.memoryDiagnostics": {
           "type": "string",
-          "enum": ["off", "objects", "guarded"],
+          "enum": [
+            "off",
+            "objects",
+            "guarded"
+          ],
           "default": "objects",
           "scope": "machine",
           "description": "ARC diagnostics for newly prepared instrumented debug images. Objects tracks live allocations; guarded also adds canaries, poisoning, and bounded quarantine."
@@ -230,7 +275,10 @@
               },
               "backend": {
                 "type": "string",
-                "enum": ["auto", "gdb"],
+                "enum": [
+                  "auto",
+                  "gdb"
+                ],
                 "default": "auto"
               },
               "gdbPath": {
@@ -243,7 +291,9 @@
               },
               "args": {
                 "type": "array",
-                "items": { "type": "string" },
+                "items": {
+                  "type": "string"
+                },
                 "default": []
               },
               "stopAtEntry": {
@@ -265,7 +315,11 @@
               },
               "memoryDiagnostics": {
                 "type": "string",
-                "enum": ["off", "objects", "guarded"],
+                "enum": [
+                  "off",
+                  "objects",
+                  "guarded"
+                ],
                 "default": "objects"
               }
             }
@@ -281,11 +335,17 @@
               },
               "backend": {
                 "type": "string",
-                "enum": ["auto", "gdb"],
+                "enum": [
+                  "auto",
+                  "gdb"
+                ],
                 "default": "auto"
               },
               "processId": {
-                "type": ["string", "number"],
+                "type": [
+                  "string",
+                  "number"
+                ],
                 "default": "${command:pickProcess}"
               },
               "gdbPath": {

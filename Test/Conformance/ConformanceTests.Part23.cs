@@ -73,7 +73,7 @@ internal static partial class ConformanceTests
             Assert(service.GetHover("assembly-functions.ct", operand)?.Contents.Contains("value", StringComparison.Ordinal) == true,
                 "Assembly-function operand hover did not resolve its parameter.");
             var resultOperand = source.IndexOf("result as value", StringComparison.Ordinal);
-            var resultAlias = source.IndexOf("value\n", source.IndexOf("inl $0xf4", StringComparison.Ordinal), StringComparison.Ordinal);
+            var resultAlias = source.IndexOf("value", source.IndexOf("inl $0xf4", StringComparison.Ordinal), StringComparison.Ordinal);
             Assert(service.GetHover("assembly-functions.ct", resultOperand)?.Contents.Contains("uint result (assembly-function result)", StringComparison.Ordinal) == true,
                 "Assembly-function result hover did not expose the return type.");
             Assert(service.GetHover("assembly-functions.ct", resultAlias)?.Contents.Contains("uint value (assembly-function result)", StringComparison.Ordinal) == true,

@@ -1,6 +1,30 @@
-# C~ Language Support for Visual Studio Code
+# C~ Compiler and Debugger for Visual Studio Code
+
+![C~ - Familiar syntax. Native systems.](images/marketplace-hero.png)
+
+[C~ website](https://ctilde.sbarisic.com) · [Source code and issue tracker](https://github.com/sbarisic/CTilde)
 
 This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
+
+This is a preview for the experimental C~ Draft 0.25 language. The extension, language server, compiler, and debug adapter are versioned and released together.
+
+## Requirements
+
+- Visual Studio Code 1.85 or newer.
+- The [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0). The package includes the C~ compiler and language server, but not the .NET runtime.
+- A supported native C toolchain for native builds.
+- GDB for C~-aware GCC, Clang, WSL, or ESP-IDF debugging.
+- The Microsoft C/C++ extension for MSVC debugging.
+
+If `dotnet`, the native compiler, or the debugger is outside `PATH`, configure its path in the C~ settings.
+
+## Installation
+
+After the Marketplace preview is published, search for **C~ Compiler and Debugger** in the Extensions view. To install a downloaded package instead, run:
+
+```powershell
+code --install-extension .\ctilde-language-0.10.1.vsix
+```
 
 ## Features
 
@@ -21,6 +45,8 @@ This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware high
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` projects and ESP-IDF binding manifests.
 - Check, native Build, Debug, and Attach commands for every workspace project.
+
+![C~ compiler and systems pipeline](images/systems-pipeline.png)
 
 Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `exception`, `see`, `paramref`, and sole-element `inheritdoc`. Documentation warnings remain non-blocking. Links, documentation-tag completion, XML output files, raw Markdown/HTML, and block documentation comments are not implemented.
 
@@ -114,12 +140,15 @@ Install dependencies, build the TypeScript client and .NET server, and run the g
 
 ```powershell
 cd .\editors\vscode
-npm install
+npm ci
 npm test
 npm run test:extension
+npm run test:extension:minimum
 npm run build
 npm run package
 ```
+
+For a clean upload-ready package, `Build-Vsix.ps1` runs `npm ci`, the source and protocol tests, bundled-server Extension Host tests on current and minimum VS Code, the production dependency audit, and `vsce package`. It prints the final path, size, and SHA-256 digest.
 
 The bundled language server and compiler require an installed .NET 10 runtime. Set their respective `dotnetPath` settings when `dotnet` is not on `PATH`. Semantic highlighting follows VS Code's `editor.semanticHighlighting.enabled` setting and the active theme; TextMate highlighting remains available for lexical and unresolved syntax. Use **C~: Show Language Server Output**, **C~: Restart Language Server**, or `ctilde.trace.server` when troubleshooting.
 
@@ -147,5 +176,11 @@ dotnet build .\CTilde.LanguageServer\CTilde.LanguageServer.csproj
 The incremental build updates both `CTilde.LanguageServer.dll` and `CTilde.Compiler.dll`. The extension watches those files, waits for the build writes to settle, copies the completed output to private extension storage, and restarts from that shadow copy. The server therefore does not lock the repository build output on Windows. This workflow does not require rebuilding the TypeScript client, repackaging the VSIX, or reinstalling the extension. Clear `ctilde.languageServer.serverPath` to return to the bundled server.
 
 The extension always starts a built assembly with `dotnet <server.dll> --stdio`. Do not configure `dotnet run` as the server command because build or console output on standard output would corrupt the LSP protocol stream.
+
+## Security, privacy, and support
+
+The extension does not collect telemetry. It starts compiler, language-server, and debugger processes on the machine that owns the workspace. C~ workspaces must therefore be trusted before the extension activates, and virtual workspaces are not supported.
+
+See [SUPPORT.md](SUPPORT.md) for requirements, troubleshooting, and issue-reporting guidance. See [CHANGELOG.md](CHANGELOG.md) for release notes and [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) for bundled dependency licenses.
 
 The extension uses the same Unlicense terms as the repository root.

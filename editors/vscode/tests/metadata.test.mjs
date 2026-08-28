@@ -18,7 +18,12 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(manifest.name, "ctilde-language");
   assert.equal(manifest.version, "0.10.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
-  assert.equal(manifest.license, "Unlicense");
+  assert.equal(manifest.license, "SEE LICENSE IN LICENSE");
+  assert.equal(manifest.preview, true);
+  assert.equal(manifest.icon, "images/ctilde-icon.png");
+  assert.deepEqual(manifest.extensionKind, ["workspace"]);
+  assert.equal(manifest.capabilities.untrustedWorkspaces.supported, false);
+  assert.equal(manifest.capabilities.virtualWorkspaces.supported, false);
   assert.equal(manifest.repository.directory, "editors/vscode");
   assert.equal(manifest.main, "./out/extension.js");
   assert.deepEqual(manifest.activationEvents, [
@@ -63,6 +68,8 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
   assert.equal(manifest.contributes.problemMatchers[0].owner, "ctilde-build");
   assert.ok(manifest.files.includes("compiler/**"));
+  assert.ok(manifest.files.includes("images/ctilde-icon.png"));
+  assert.ok(manifest.files.includes("THIRD-PARTY-NOTICES.md"));
   assert.ok(manifest.files.includes("out/debugAdapter.js"));
   assert.deepEqual(manifest.contributes.breakpoints, [{ language: "ctilde" }]);
   const debuggerContribution = manifest.contributes.debuggers[0];
@@ -95,6 +102,12 @@ test("manifest registers the C~ language and grammar", async () => {
   await access(path.resolve(extensionRoot, grammar.path));
   await access(path.resolve(extensionRoot, "schemas/ctilde.schema.json"));
   await access(path.resolve(extensionRoot, "schemas/esp-idf-bindings.schema.json"));
+  await access(path.resolve(extensionRoot, "images/ctilde-icon.png"));
+  await access(path.resolve(extensionRoot, "images/marketplace-hero.png"));
+  await access(path.resolve(extensionRoot, "images/systems-pipeline.png"));
+  await access(path.resolve(extensionRoot, "CHANGELOG.md"));
+  await access(path.resolve(extensionRoot, "SUPPORT.md"));
+  await access(path.resolve(extensionRoot, "THIRD-PARTY-NOTICES.md"));
 });
 
 test("ESP serial bridge opens without asserting reset control lines", async () => {

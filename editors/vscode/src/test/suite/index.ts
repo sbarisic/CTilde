@@ -11,19 +11,22 @@ export function run(): Promise<void> {
 }
 
 async function extensionSmokeTest(): Promise<void> {
-    const extension = vscode.extensions.getExtension('ctilde.ctilde-language');
+    const extension = vscode.extensions.getExtension('sbarisic.ctilde-language');
     assert.ok(extension, 'C~ development extension was not discovered.');
+    const mode = process.env.CTILDE_TEST_MODE ?? 'bundled';
     const externalServer = process.env.CTILDE_TEST_EXTERNAL_SERVER;
-    assert.ok(externalServer, 'External C~ test language server was not configured.');
     const externalCompiler = process.env.CTILDE_TEST_EXTERNAL_COMPILER;
-    assert.ok(externalCompiler, 'External C~ test compiler was not configured.');
     const directory = process.env.CTILDE_TEST_WORKSPACE;
     assert.ok(directory, 'C~ extension test workspace was not configured.');
     const languageServerConfiguration = vscode.workspace.getConfiguration('ctilde.languageServer');
-    await languageServerConfiguration.update('serverPath', externalServer, vscode.ConfigurationTarget.Global);
+    if (mode === 'external') {
+        assert.ok(externalServer, 'External C~ test language server was not configured.');
+        assert.ok(externalCompiler, 'External C~ test compiler was not configured.');
+    }
+    await languageServerConfiguration.update('serverPath', externalServer ?? '', vscode.ConfigurationTarget.Global);
     await languageServerConfiguration.update('restartOnServerChange', true, vscode.ConfigurationTarget.Global);
     const compilerConfiguration = vscode.workspace.getConfiguration('ctilde.compiler');
-    await compilerConfiguration.update('compilerPath', externalCompiler, vscode.ConfigurationTarget.Global);
+    await compilerConfiguration.update('compilerPath', externalCompiler ?? '', vscode.ConfigurationTarget.Global);
     await compilerConfiguration.update('nativeCompiler', '', vscode.ConfigurationTarget.Global);
     await extension.activate();
     const filePath = path.join(directory, 'Program.ct');
@@ -155,10 +158,10 @@ async function hostedIoFeatures(root: string): Promise<{ labels: string[]; docum
         async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, position, '.', 100),
         value => value.items.some(item => item.label === 'Open'),
         value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
-    const open = completions.items.find(item => item.label === 'Open');
+    const openItems = completions.items.filter(item => item.label === 'Open');
     return {
         labels: completions.items.map(item => typeof item.label === 'string' ? item.label : item.label.label),
-        documentation: documentationText(open?.documentation),
+        documentation: openItems.map(item => documentationText(item.documentation)).join('\n'),
     };
 }
 

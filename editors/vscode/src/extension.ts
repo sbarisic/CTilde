@@ -39,6 +39,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('ctilde.languageServer.showOutput', () => controller?.showOutput()),
         vscode.commands.registerCommand('ctilde.project.check', () => buildProvider.runProject('check')),
         vscode.commands.registerCommand('ctilde.project.build', () => buildProvider.runProject('build')),
+        vscode.commands.registerCommand('ctilde.project.run', () => buildProvider.runProject('run')),
         vscode.commands.registerCommand('ctilde.project.generateBindings', () => buildProvider.runProject('bindings')),
         vscode.commands.registerCommand('ctilde.project.debug', () => debugProvider.runProject('launch')),
         vscode.commands.registerCommand('ctilde.project.attach', () => debugProvider.runProject('attach')),
@@ -62,7 +63,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
     public async provideTasks(): Promise<vscode.Task[]> {
         const manifests = await this.discoverProjects();
         return manifests.flatMap(manifest => {
-            const tasks = [this.createTask(manifest, 'build'), this.createTask(manifest, 'check')];
+            const tasks = [this.createTask(manifest, 'build'), this.createTask(manifest, 'run'), this.createTask(manifest, 'check')];
             if (this.readProjectTarget(manifest) === 'esp-idf') tasks.push(this.createTask(manifest, 'bindings'));
             return tasks;
         });
@@ -70,7 +71,8 @@ class CTildeTaskProvider implements vscode.TaskProvider {
 
     public resolveTask(task: vscode.Task): vscode.Task | undefined {
         const definition = task.definition as Partial<CTildeTaskDefinition>;
-        if (typeof definition.project !== 'string' || (definition.mode !== 'build' && definition.mode !== 'check' && definition.mode !== 'bindings'))
+        if (typeof definition.project !== 'string' ||
+            (definition.mode !== 'build' && definition.mode !== 'run' && definition.mode !== 'check' && definition.mode !== 'bindings'))
             return undefined;
         const folder = typeof task.scope === 'object' ? task.scope : undefined;
         try {
@@ -117,11 +119,13 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         });
         const definition: CTildeTaskDefinition = { type: 'ctilde', project, mode };
         const projectName = path.basename(path.dirname(project));
-        const label = `${mode === 'build' ? 'Build' : mode === 'bindings' ? 'Generate Bindings' : 'Check'} ${projectName}`;
+        const label = `${mode === 'build' ? 'Build' : mode === 'run' ? 'Run' : mode === 'bindings' ? 'Generate Bindings' : 'Check'} ${projectName}`;
         const execution = new vscode.ProcessExecution(launch.command, args, { cwd: path.dirname(project) });
         const task = new vscode.Task(definition, folder ?? vscode.TaskScope.Workspace, label, 'C~', execution,
             ['$ctilde', '$gcc', '$msCompile']);
         task.group = mode === 'build' ? vscode.TaskGroup.Build : mode === 'check' ? vscode.TaskGroup.Test : undefined;
+        if (mode === 'run')
+            task.presentationOptions = { reveal: vscode.TaskRevealKind.Always, clear: true };
         task.runOptions = { reevaluateOnRerun: true, instanceLimit: 1 } as vscode.RunOptions & { instanceLimit: number };
         return task;
     }
@@ -171,7 +175,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
             description: vscode.workspace.asRelativePath(project),
             project,
         }));
-        return (await vscode.window.showQuickPick(choices, { placeHolder: 'Select the C~ project to build' }))?.project;
+        return (await vscode.window.showQuickPick(choices, { placeHolder: 'Select the C~ project' }))?.project;
     }
 }
 
@@ -181,6 +185,8 @@ interface PreparedDebugTarget {
     readonly program: string;
     readonly sourceRoot: string;
     readonly workingDirectory: string;
+    readonly arguments?: readonly string[];
+    readonly environment?: Readonly<Record<string, string>>;
     readonly serialPort?: string;
     readonly baudRate?: number;
     readonly memoryDiagnostics?: 'off' | 'objects' | 'guarded';
@@ -290,7 +296,9 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                     type: 'cppvsdbg', request, name: supplied.name ?? 'Debug C~ Project',
                     program: prepared.program,
                     cwd: stringSetting(supplied.cwd, prepared.workingDirectory),
-                    args: supplied.args ?? [],
+                    args: supplied.args ?? prepared.arguments ?? [],
+                    environment: Object.entries(supplied.environment ?? prepared.environment ?? {})
+                        .map(([name, value]) => ({ name, value })),
                     stopAtEntry: supplied.stopAtEntry ?? false,
                     sourceFileMap: { '.': prepared.sourceRoot },
                 };
@@ -310,6 +318,8 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                 memoryDiagnostics: request === 'attach' ? prepared.memoryDiagnostics : memoryDiagnostics,
                 showRuntimeFrames: supplied.showRuntimeFrames ?? debuggerSettings.get<boolean>('showRuntimeFrames', false),
                 cwd: stringSetting(supplied.cwd, prepared.workingDirectory),
+                args: supplied.args ?? prepared.arguments,
+                environment: supplied.environment ?? prepared.environment,
                 processId: request === 'attach' && target === 'hosted'
                     ? supplied.processId ?? '${command:pickProcess}' : supplied.processId,
             };

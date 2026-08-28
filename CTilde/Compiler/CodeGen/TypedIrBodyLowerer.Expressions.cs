@@ -11,6 +11,7 @@ internal sealed partial class TypedIrBodyLowerer
         var result = syntax switch
         {
             LiteralExpressionSyntax literal => LowerLiteral(literal),
+            LambdaExpressionSyntax lambda => new IrExpressionValue { Type = CType.Error, Code = string.Empty, Lambda = lambda, Symbol = lambda },
             NameExpressionSyntax name => LowerName(name, false),
             ThisExpressionSyntax @this => LowerThis(@this),
             BaseExpressionSyntax @base => LowerBase(@base),
@@ -82,8 +83,8 @@ internal sealed partial class TypedIrBodyLowerer
     private CType ResolveLayoutOperatorType(TypeSyntax syntax, SyntaxNode expression)
     {
         var type = ResolveType(syntax);
-        var valid = type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
+        var valid = type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Rune or
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or
             CTypeKind.Enum or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer ||
             type.Kind == CTypeKind.Struct && !type.ContainsManagedReferences && !type.ContainsAtomic;
         if (!valid)
@@ -142,10 +143,14 @@ internal sealed partial class TypedIrBodyLowerer
             return new IrExpressionValue { Type = CType.String, Code = _emitter.RegisterString((string)syntax.Value!), IsConstant = true, ConstantValue = syntax.Value, Ownership = OwnershipKind.Immortal, IsKnownNonNull = true };
         if (syntax.LiteralKind == SyntaxKind.CharacterToken)
             return Constant(CType.Char, syntax.Value, ((byte)syntax.Value!).ToString(CultureInfo.InvariantCulture));
+        if (syntax.LiteralKind == SyntaxKind.RuneToken)
+            return Constant(CType.Rune, syntax.Value, $"UINT32_C({((uint)syntax.Value!).ToString(CultureInfo.InvariantCulture)})");
         if (syntax.Value is NumericLiteralValue numeric)
         {
-            if (numeric.FloatingPoint is float value)
-                return Constant(CType.Float, value, FormatFloat(value));
+            if (numeric.FloatingPoint is double value)
+                return numeric.FloatingKind == FloatingLiteralKind.Double
+                    ? Constant(CType.Double, value, FormatDouble(value))
+                    : Constant(CType.Float, (float)value, FormatFloat((float)value));
             if (numeric.Suffix == IntegerLiteralSuffix.None && numeric.Integer <= int.MaxValue)
                 return Constant(CType.Int, (int)numeric.Integer, FormatInt32((int)numeric.Integer));
             if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Unsigned && numeric.Integer <= uint.MaxValue)
@@ -845,7 +850,8 @@ internal sealed partial class TypedIrBodyLowerer
             CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Char => 1UL,
             CTypeKind.Short or CTypeKind.Ushort => 2UL,
             CTypeKind.Int or CTypeKind.Uint or CTypeKind.Float => 4UL,
-            CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Pointer or CTypeKind.FunctionPointer => 8UL,
+            CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Double => 8UL,
+            CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Pointer or CTypeKind.FunctionPointer => 8UL,
             _ => 0UL,
         };
         return maximumElementSize != 0UL && value <= uint.MaxValue / maximumElementSize;
@@ -892,6 +898,23 @@ internal sealed partial class TypedIrBodyLowerer
 
     private IrExpressionValue LowerCall(CallExpressionSyntax syntax, bool captureForDefer = false)
     {
+        if (syntax.Target is MemberAccessExpressionSyntax { Name: "HasFeature" } featureMember &&
+            TryResolveTypeExpression(featureMember.Receiver)?.FullName == "System.Runtime.Target")
+        {
+            if (syntax.Arguments.Length != 1)
+            {
+                Report("CT2122", "Target.HasFeature requires exactly one CpuFeature argument.", syntax);
+                return ErrorExpression();
+            }
+            var argument = LowerExpression(syntax.Arguments[0].Expression);
+            if (argument.Type.Symbol?.FullName != "System.Runtime.CpuFeature" || !argument.IsConstant || !TryIntegralConstant(argument.ConstantValue, out var numeric) || numeric < 0 || numeric > int.MaxValue)
+            {
+                Report("CT2225", "Target.HasFeature requires a compile-time CpuFeature value.", syntax.Arguments[0]);
+                return ErrorExpression(argument.Prelude);
+            }
+            var enabled = _emitter.HasCpuFeature((CpuFeature)(int)numeric);
+            return new IrExpressionValue { Type = CType.Bool, Code = enabled ? "true" : "false", Prelude = argument.Prelude, IsConstant = true, ConstantValue = enabled };
+        }
         var possibleDelegate = syntax.Target switch
         {
             NameExpressionSyntax delegateName when IsCallablePointer(FindLocal(delegateName.Name)?.Type) ||
@@ -1523,7 +1546,7 @@ internal sealed partial class TypedIrBodyLowerer
 
     private static bool SupportsBuiltInToString(CType type) => type.Kind is
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or
-        CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.String;
+        CTypeKind.Char or CTypeKind.Rune or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or CTypeKind.String;
 
     private IrExpressionValue LowerBuiltInToString(CallExpressionSyntax syntax, MemberAccessExpressionSyntax member, IrExpressionValue receiver, bool captureForDefer = false)
     {
@@ -1560,6 +1583,7 @@ internal sealed partial class TypedIrBodyLowerer
         {
             CTypeKind.Bool => "ct_to_string_bool",
             CTypeKind.Char => "ct_to_string_char",
+            CTypeKind.Rune => "ct_to_string_rune",
             CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint",
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int",
             CTypeKind.Long => "ct_to_string_long",
@@ -1567,6 +1591,7 @@ internal sealed partial class TypedIrBodyLowerer
             CTypeKind.Nint => "ct_to_string_nint",
             CTypeKind.Nuint => "ct_to_string_nuint",
             CTypeKind.Float => "ct_to_string_float",
+            CTypeKind.Double => "ct_to_string_double",
             _ => throw new InvalidOperationException($"Unsupported ToString receiver '{receiver.Type.DisplayName}'."),
         };
         var argument = receiver.Type.Kind switch

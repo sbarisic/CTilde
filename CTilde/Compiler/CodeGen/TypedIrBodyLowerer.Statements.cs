@@ -309,8 +309,8 @@ internal sealed partial class TypedIrBodyLowerer
 
             if (!IsInlineAssemblyType(expression.Type))
                 Report("CT2195", $"Type '{expression.Type.DisplayName}' is not a supported inline assembly operand type.", operand.Variable);
-            if (operand.Constraint is null && expression.Type == CType.Float)
-                Report("CT2196", "A float inline assembly operand requires an explicit GNU constraint.", operand);
+            if (operand.Constraint is null && expression.Type.Kind is CTypeKind.Float or CTypeKind.Double)
+                Report("CT2196", "A floating-point inline assembly operand requires an explicit GNU constraint.", operand);
 
             var constraint = operand.Constraint ?? "r";
             if (constraint.Length == 0 || constraint.Contains('\0') || constraint.Contains('\r') || constraint.Contains('\n'))
@@ -375,7 +375,7 @@ internal sealed partial class TypedIrBodyLowerer
     private static bool IsInlineAssemblyType(CType type) => type.Kind is
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
-        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
+        CTypeKind.Float or CTypeKind.Double or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
 
     private static string Role(InlineAssemblyOperandKind kind) => kind == InlineAssemblyOperandKind.Output ? "out" : "ref";
 

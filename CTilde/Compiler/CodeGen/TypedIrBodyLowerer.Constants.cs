@@ -28,6 +28,10 @@ internal sealed partial class TypedIrBodyLowerer
                     var floating = -(float)operand.ConstantValue!;
                     result = Constant(CType.Float, floating, FormatFloat(floating));
                     return true;
+                case SyntaxKind.MinusToken when operand.Type == CType.Double:
+                    var binary64 = -(double)operand.ConstantValue!;
+                    result = Constant(CType.Double, binary64, FormatDouble(binary64));
+                    return true;
                 case SyntaxKind.BangToken when operand.Type == CType.Bool:
                     var boolean = !(bool)operand.ConstantValue!;
                     result = Constant(CType.Bool, boolean, boolean ? "true" : "false");
@@ -102,6 +106,28 @@ internal sealed partial class TypedIrBodyLowerer
         var comparison = syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken or SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken;
         try
         {
+            if (common == CType.Double)
+            {
+                var l = (double)left.ConstantValue!; var r = (double)right.ConstantValue!;
+                if (comparison)
+                {
+                    var boolean = CompareDouble(syntax.OperatorKind, l, r);
+                    result = Constant(CType.Bool, boolean, boolean ? "true" : "false");
+                    return true;
+                }
+                if (syntax.OperatorKind is not (SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken))
+                    return false;
+                var value = syntax.OperatorKind switch
+                {
+                    SyntaxKind.PlusToken => l + r,
+                    SyntaxKind.MinusToken => l - r,
+                    SyntaxKind.StarToken => l * r,
+                    SyntaxKind.SlashToken => l / r,
+                    _ => double.NaN,
+                };
+                result = Constant(CType.Double, value, FormatDouble(value));
+                return true;
+            }
             if (common == CType.Float)
             {
                 var l = (float)left.ConstantValue!; var r = (float)right.ConstantValue!;
@@ -304,6 +330,12 @@ internal sealed partial class TypedIrBodyLowerer
                 result = Constant(target, value, FormatFloat(value));
                 return true;
             }
+            if (target == CType.Double)
+            {
+                var value = System.Convert.ToDouble(expression.ConstantValue, CultureInfo.InvariantCulture);
+                result = Constant(target, value, FormatDouble(value));
+                return true;
+            }
             if (target == CType.Uint)
             {
                 var value = expression.ConstantValue switch
@@ -311,6 +343,7 @@ internal sealed partial class TypedIrBodyLowerer
                     uint unsigned => unsigned,
                     int signed => unchecked((uint)signed),
                     float floating => unchecked((uint)floating),
+                    double floating => unchecked((uint)floating),
                     _ => unchecked((uint)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, $"UINT32_C({value.ToString(CultureInfo.InvariantCulture)})");
@@ -322,6 +355,7 @@ internal sealed partial class TypedIrBodyLowerer
                 {
                     ulong unsigned => unchecked((long)unsigned),
                     float floating => unchecked((long)floating),
+                    double floating => unchecked((long)floating),
                     _ => unchecked(System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, FormatInt64(value));
@@ -335,6 +369,7 @@ internal sealed partial class TypedIrBodyLowerer
                     long signed => unchecked((ulong)signed),
                     int signed => unchecked((ulong)signed),
                     float floating => unchecked((ulong)floating),
+                    double floating => unchecked((ulong)floating),
                     _ => unchecked(System.Convert.ToUInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, FormatUInt64(value));
@@ -346,6 +381,7 @@ internal sealed partial class TypedIrBodyLowerer
                 {
                     ulong unsigned => unchecked((long)unsigned),
                     float floating => unchecked((long)floating),
+                    double floating => unchecked((long)floating),
                     _ => unchecked(System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, $"((intptr_t){FormatInt64(value)})");
@@ -359,6 +395,7 @@ internal sealed partial class TypedIrBodyLowerer
                     long signed => unchecked((ulong)signed),
                     int signed => unchecked((ulong)signed),
                     float floating => unchecked((ulong)floating),
+                    double floating => unchecked((ulong)floating),
                     _ => unchecked(System.Convert.ToUInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
                 };
                 result = Constant(target, value, $"((uintptr_t){FormatUInt64(value)})");
@@ -371,6 +408,7 @@ internal sealed partial class TypedIrBodyLowerer
                 long signed => unchecked((int)signed),
                 ulong unsigned => unchecked((int)unsigned),
                 float floating => unchecked((int)floating),
+                double floating => unchecked((int)floating),
                 _ => unchecked((int)System.Convert.ToInt64(expression.ConstantValue, CultureInfo.InvariantCulture)),
             };
             if (target == CType.Int)
@@ -441,7 +479,32 @@ internal sealed partial class TypedIrBodyLowerer
         return text + "f";
     }
 
+    private static string FormatDouble(double value)
+    {
+        if (double.IsNaN(value))
+            return "NAN";
+        if (double.IsPositiveInfinity(value))
+            return "INFINITY";
+        if (double.IsNegativeInfinity(value))
+            return "(-INFINITY)";
+        var text = value.ToString("R", CultureInfo.InvariantCulture);
+        if (!text.Contains('.') && !text.Contains('E') && !text.Contains('e'))
+            text += ".0";
+        return text;
+    }
+
     private static bool CompareFloat(SyntaxKind operation, float left, float right) => operation switch
+    {
+        SyntaxKind.EqualsEqualsToken => left == right,
+        SyntaxKind.BangEqualsToken => left != right,
+        SyntaxKind.LessToken => left < right,
+        SyntaxKind.LessEqualsToken => left <= right,
+        SyntaxKind.GreaterToken => left > right,
+        SyntaxKind.GreaterEqualsToken => left >= right,
+        _ => false,
+    };
+
+    private static bool CompareDouble(SyntaxKind operation, double left, double right) => operation switch
     {
         SyntaxKind.EqualsEqualsToken => left == right,
         SyntaxKind.BangEqualsToken => left != right,

@@ -2,7 +2,7 @@
 
 C~ is a small, statically typed systems language with familiar C#-style syntax. It compiles `.ct` source to deterministic GNU C23, then optionally invokes GCC, Clang, MSVC, Cosmopolitan, or ESP-IDF tooling to produce native programs. Generated programs use a compact C runtime; they do not require the CLR or a C# runtime.
 
-Draft 0.25 adds callable assembly-only functions and `[ConstInit]` immutable native image data. The bootable QEMU kernel now defines its Multiboot header, port I/O, and naked startup entirely in C~, without a source assembly file. It retains the Draft 0.24 x86-64 Cosmopolitan target, Draft 0.23 interrupt-safe ESP-IDF surface, Draft 0.22 effect engine, and Draft 0.21 GNU/ELF freestanding target. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
+Draft 0.34 adds source-owner identity, IEEE-754 `double`, Unicode `rune`, fixed-width 128-bit SIMD, immutable `[Embed]` resources, captureless and explicitly captured ARC-managed lambdas, and exact repository modules with lock files, aliases, vendoring, local replacements, and explicit update policies. It retains the low-level targets and contracts from Drafts 0.21 through 0.25. The language is experimental and intentionally smaller than C#; [the specification](LANGUAGE.md) lists the exact supported and deferred features.
 
 The x86-64 [Cosmopolitan target](COSMOPOLITAN.md) uses hosted C~ semantics and a dedicated Actually Portable Executable build pipeline. The same measured APE runs under WSL/Linux and Windows. It does not treat `cosmocc` as an ordinary hosted compiler alias, and it defers Arm64 and x86-64/Arm64 fat output until C~ can perform one semantic compilation per architecture.
 
@@ -51,7 +51,7 @@ You need the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0) to
 - MSVC, GCC, or Clang for hosted programs.
 - ESP-IDF 6 for ESP32-family projects.
 - GNU-compatible ELF GCC or Clang for freestanding images.
-- Cosmopolitan builds require an external official `cosmocc` toolchain and a Unix shell. Draft 0.25 accepts only the `x86_64-unknown-cosmo-cc` wrapper and explicit `architecture: "x64"`.
+- Cosmopolitan builds require an external official `cosmocc` toolchain and a Unix shell. Draft 0.34 accepts only the `x86_64-unknown-cosmo-cc` wrapper and explicit `architecture: "x64"`.
 
 Build the solution and compile the checked hello-world example:
 
@@ -88,14 +88,16 @@ Pass `--compiler clang` instead to use Clang. The example uses GNU AT&T x86 asse
 ## What the language provides
 
 - C#-style namespaces, classes, structures, enums, constructors, properties, overloads, and single inheritance.
-- Fixed-width and native-width integers, checked arrays, immutable UTF-8 strings, pointers, native buffers, and stack allocation.
-- Virtual dispatch, boxing, named single-cast delegates, unmanaged function pointers, and user-defined `+`, `-`, `*`, and `/` operators.
+- Fixed-width and native-width integers, IEEE-754 binary32/binary64 values, Unicode scalar `rune`, checked arrays, immutable UTF-8 strings, pointers, native buffers, and stack allocation.
+- Virtual dispatch, boxing, named single-cast delegates, captureless lambdas, explicit value-capture ARC closures, unmanaged function pointers, and user-defined `+`, `-`, `*`, and `/` operators.
 - Typed exceptions, `try`/`catch`/`finally`, deterministic `defer`, and catchable allocation-free runtime faults.
 - Non-moving atomic reference counting with deterministic destruction of acyclic managed values. Reference cycles intentionally leak.
 - Explicit native and semantic contracts through attributes such as `[Extern]`, `[Export]`, `[Section]`, `[Interrupt]`, `[InterruptSafe]`, `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, `[NoRuntime]`, and ownership annotations.
 - Raw GNU inline assembly with typed operands for GCC and Clang builds. Programs containing `asm` are rejected by the MSVC native-build path.
 - Static unsafe assembly functions reuse those operands and effect contracts, can be called from C~, and can return through an explicit `out result` operand. Freestanding naked assembly functions own startup control flow without a separate `.S` file.
 - `[ConstInit]` emits pointer-free unmanaged `static readonly` values directly as immutable scalar or positional aggregate data, including restricted straight-line struct construction.
+- `[Embed("path")]` emits owner-relative bytes as immutable `ReadOnlyNativeBuffer<byte>` storage without leaking build-machine paths.
+- `System.Simd` supplies deterministic 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values. Scalar lowering is the portable default; `simd128` is an explicit architecture-checked CPU feature.
 
 The bundled standard library supplies objects and exceptions, console I/O, single-precision math and vectors, runtime memory operations, hosted binary file I/O, and a small target-specific ESP-IDF surface. See [STDLIB.md](STDLIB.md) for signatures and runtime behavior.
 
@@ -120,6 +122,13 @@ Compile one or more files directly, or use a `ctilde.json` manifest when several
     "cLayout": "modules",
     "configuration": "release",
     "lto": true
+  },
+  "run": {
+    "executor": "host",
+    "args": ["--verbose"],
+    "workingDirectory": ".",
+    "environment": {},
+    "successExitCodes": [0]
   }
 }
 ```
@@ -127,9 +136,18 @@ Compile one or more files directly, or use a `ctilde.json` manifest when several
 ```powershell
 dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --check
 dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --build
+dotnet run --project .\CTilde.Cli -- --project .\ctilde.json --run
 ```
 
-Project globs and generated paths are deterministic and confined to the manifest directory. Unity output is one self-contained C file. Modular output contains shared headers, a runtime source, stable source-owned modules, an entry/lifecycle source, a versioned symbol map, and a CMake source fragment. ESP-IDF manifests can select `panicPolicy` as `abort`, `restart`, or `halt`; CLI `--panic-policy` overrides it.
+Project globs and generated paths are deterministic and confined to the manifest directory. `--run` rebuilds, releases the build lock, and launches only after success. Run configuration uses argument arrays without shell evaluation, supports host and WSL executors, and expands `${projectRoot}` and `${buildOutput}`. Unity output is one self-contained C file. Modular output contains shared headers, a runtime source, stable source-owned modules, an entry/lifecycle source, a versioned symbol map, and a CMake source fragment. ESP-IDF manifests can select `panicPolicy` as `abort`, `restart`, or `halt`; CLI `--panic-policy` overrides it.
+
+Repository modules declare a canonical `path`, repository, commit/tag/branch selector, optional alias, source globs, vendor path, and `locked` or `refresh` update policy. Commit `ctilde.lock.json`; do not commit the ignored `ctilde.local.json`. Ordinary check/build is network-free and resolves modules in this order: local replacement, verified vendor directory, exact `.ctilde/modules` cache. Network and checkout mutation occur only in explicit commands:
+
+```text
+ctilde restore --project <ctilde.json>
+ctilde update --project <ctilde.json>
+ctilde vendor --project <ctilde.json>
+```
 
 Freestanding manifests select `target: "freestanding"`, require an explicit architecture, and provide an image path, linker script, and entry symbol for `--build`. They may also list native `.c`/`.S`/`.s` sources, ELF objects, archives, and controlled compile/link options. See [the Linux-loaded freestanding example](examples/Freestanding/README.md) for a complete runtime-hook and naked `_start` image, or [the QEMU freestanding example](examples/QemuFreestanding/README.md) for a bootable 32-bit x86 Multiboot kernel and standalone smoke test.
 
@@ -141,11 +159,12 @@ Useful CLI workflows include:
 ctilde <input.ct>... --check
 ctilde <input.ct>... -o <program.c> [--header <exports.h>]
 ctilde <input.ct>... --build [--compiler auto|msvc|gcc|clang]
-ctilde --project <ctilde.json> [--check|--build]
+ctilde --project <ctilde.json> [--check|--build|--run]
 ctilde --project <ctilde.json> --generate-bindings [--esp-clang <path>]
 ctilde --project <ctilde.json> --verify-bindings [--esp-clang <path>]
 ctilde --project <ctilde.json> --prepare-debug launch --debug-target <target.json> --debug-memory objects
 ctilde --project <ctilde.json> --prepare-debug attach --debug-target <target.json>
+ctilde restore|update|vendor --project <ctilde.json>
 ```
 
 Run `ctilde --help` for modular-layout, reproducible-path, toolchain, LTO, ESP-IDF, and directory-compilation options. Native builds write generated files atomically only when their bytes change, lock their build directory, and never invoke the native toolchain after a C~ error. `--trace` reports changed outputs, binding-cache decisions, and compiler/native phase timings.
@@ -201,7 +220,7 @@ Rename, references, formatting, code actions, auto-import edits, and semantic-to
 
 ## Project status
 
-C~ is an experimental Draft 0.25 implementation, not a stable production language. Draft 0.25 retains runtime ABI 16 and debug metadata v3. Assembly functions, constant-initialized image data, the x86-64 APE driver, interrupt entry, general effect contracts, freestanding semantics, runtime roles, naked startup, manifest validation, and native execution are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+C~ is an experimental Draft 0.34 implementation, not a stable production language. Draft 0.34 retains runtime ABI 16 and debug metadata v3. The language, runtime, project, editor, and native paths described above are covered by conformance and acceptance; ESP-IDF cross-build and connected-board evidence remains recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload, allocation-failure and fatal-runtime images, guarded debugger-v3 matrix, detach continuation, no-debugger startup timeout, exact USB-to-UART console check, and visible LED confirmation. Both ESP32 and ESP32-C3 also pass the ABI 15 cross-build gate. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured results and [TODO.md](TODO.md) for outstanding work.
 
@@ -218,13 +237,13 @@ On 2026-08-23, the connected classic ESP32 completed the ABI 15 Release workload
 
 The documentation is split by purpose:
 
-- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.25 language specification.
+- [LANGUAGE.md](LANGUAGE.md) — normative Draft 0.34 language specification.
 - [STDLIB.md](STDLIB.md) — standard-library API and runtime behavior.
 - [C_ABI.md](C_ABI.md) — generated C layouts, lifecycle, symbols, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) — measured feature and validation status.
 - [TODO.md](TODO.md) — concise outstanding roadmap and release blockers.
-- [FUTURE_FEATURES.md](FUTURE_FEATURES.md) — staged designs for future language, SIMD, resource, and project facilities; none are current Draft 0.25 claims.
+- [FUTURE_FEATURES.md](FUTURE_FEATURES.md) — historical design record for the feature groups delivered across Drafts 0.26 through 0.34; the language specification is normative.
 - [COSMOPOLITAN.md](COSMOPOLITAN.md) — staged APE target design, constraints, and acceptance plan.
 
 ## Validation

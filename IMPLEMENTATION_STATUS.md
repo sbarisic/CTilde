@@ -4,13 +4,13 @@ Last reviewed: 2026-08-28
 
 ## Current state
 
-C~ draft 0.25 has one compiler path:
+C~ draft 0.34 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding/Cosmopolitan GNU C23
 ```
 
-The compiler library, CLI, and conformance runner target .NET 10. The previous prototype AST, direct assembly backend, mutable backend state, and demonstration harness have been removed.
+The compiler library, CLI, and conformance runner target .NET 10. Drafts 0.26 through 0.34 add source-owner identity, binary64, scalar-default and explicit hardware SIMD, Unicode scalars, immutable embedded resources, captureless and explicit-capture ARC closures, and exact repository module restore/update/vendor workflows. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
 
 The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. Cosmopolitan output uses hosted runtime semantics and produces an x86-64 APE plus a retained ELF/DWARF carrier. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, Cosmopolitan, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted, Cosmopolitan, and freestanding modular objects use draft-versioned content-addressed caches.
 
@@ -22,7 +22,7 @@ The current workspace builds with:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.25 coverage adds callable assembly-only functions, explicit assembly results, effect-aware opaque boundaries, restricted `[ConstInit]` structured data, read-only section classification, and an assembly-source-free QEMU kernel. Draft 0.24 added Cosmopolitan target state, x64 validation, project/CLI/schema/editor integration, and real cross-host APE execution. Draft 0.23 added direct ISR export emission, transitive IRAM/DRAM placement, implicit effect validation, explicit interrupt-safe native boundaries, deterministic residency diagnostics, symbol metadata, and language services. Draft 0.22 added direct, recursive, transitive, inherited, generic, extern, assembly, runtime-check, blocking, bootstrap, symbol-map, completion, and hover effect cases. Draft 0.21 added target isolation, role validation, heap inference, bootstrap-safe closure checks, naked startup, manifest/CLI validation, and real WSL GCC ELF execution and inspection. Earlier deterministic debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and exact reduced-image gates continue to pass.
+The .NET 10 build uses SDK `10.0.400-preview.0.26322.102` and completes with zero warnings and zero errors. Draft 0.34 module coverage exercises exact locks, offline resolution, verified vendoring, local replacements, and explicit selector updates. Draft 0.33 established lock/cache restore. Draft 0.32 added ARC-managed explicit value captures; Draft 0.31 added captureless lambdas; Draft 0.30 added `[Embed]`; Draft 0.29 added `rune`; Draft 0.28 added SIMD; Draft 0.27 added `double`; and Draft 0.26 added source-owner identity. Draft 0.25 coverage adds callable assembly-only functions, explicit assembly results, effect-aware opaque boundaries, restricted `[ConstInit]` structured data, read-only section classification, and an assembly-source-free QEMU kernel. Earlier target, effect, debug, runtime-fault, generic, concurrency, modular-emission, immutable-metadata, renderer, and reduced-image gates continue to pass.
 
 Draft 0.15 completed its hosted, ESP32/ESP32-C3 cross-build, and connected T-CAN485 acceptance on 2026-08-23. The physical ESP32-D0WDQ6-V3 run used ESP-IDF 6.0.2, Xtensa GCC 15.2.0, ESP-GDB 17.1, COM4 at 460800 baud, and the onboard USB-to-UART bridge. The 171,136-byte pre-network Release binary reported 297,036 bytes free heap, a 284,304-byte minimum, and 6,736 bytes of main-task stack headroom while completing every ABI 15 marker and 25 alternating WS2812 transitions. The operator confirmed visible LED activity. The default firmware now invokes its Wi-Fi/HTTPS worker whenever an SSID is configured and uses an empty tracked SSID as the clean-checkout offline fallback. Linking Wi-Fi, TLS, the HTTP client, and the full certificate bundle increased the accepted ESP32 cross-build to 1,009,888 binary bytes and 1,009,764 image bytes, with 696,614 bytes flash code, 204,380 bytes flash data, 90,779 bytes IRAM, and 38,871 bytes static DRAM. The corresponding ESP32-C3 cross-build is 1,072,512 binary bytes and 1,072,142 image bytes, with 776,986 bytes flash code, 206,596 bytes flash data, and 109,488 bytes static DRAM. These larger values are an explicit ESP-IDF 6.0.2/GCC 15.2.0 memory-baseline update, not an ABI change.
 
@@ -92,6 +92,11 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | UTF-8 files and Unicode identifiers | Implemented | Strict UTF-8 decoding and rune-based identifier categories |
 | Full-fidelity tokens and trivia | Implemented | Valid and invalid exact round-trip tests |
 | Comments, escapes, and numeric forms | Implemented | Lexer diagnostics and literal tests |
+| IEEE-754 `double` and Unicode `rune` | Implemented | Exact layouts, conversions, math, boxing, UTF-8 output, and invalid-scalar diagnostics |
+| Fixed-width 128-bit SIMD | Implemented | Four 16-byte lane types, scalar-default semantics, lane checks, and explicit x86 hardware lowering |
+| Immutable `[Embed]` resources | Implemented | Owner-relative traversal checks, exact read-only bytes, and path-leak validation |
+| Lambdas and explicit value captures | Implemented | Captureless static lowering, explicit capture diagnostics, ARC environment lifetime, and native execution |
+| Exact repository modules | Implemented | Lock/cache restore, commit/tag/branch selectors, aliases, verified vendor content, ignored replacements, and offline load precedence |
 | File and block namespaces | Implemented | Parser and multi-file test |
 | Namespace imports | Implemented | Multi-file test with imported type |
 | Classes and static classes | Implemented | Native object test and feature example |
@@ -361,7 +366,7 @@ These features are outside draft 0.22:
 - Parallel renderer row workers; the per-sample RNG contract is ready for them, but the example remains intentionally single-threaded.
 - Exception filters, inner exceptions, stack traces, and specialized exception subclasses.
 - General exceptions across native boundaries.
-- Lambdas, closures, retained callbacks, and callback registration lifetime management.
+- Retained callbacks and callback registration lifetime management.
 - Long-lived owned native-resource fields and exported delegates as ordinary ABI values.
 - Managed-reference and floating-point atomics, plus compiler-checked ISR or IRAM execution profiles.
 - Iterators and yield statements.
@@ -375,7 +380,7 @@ These features are outside draft 0.22:
 
 ## Release gate
 
-A draft 0.25 release requires:
+A draft 0.34 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -390,4 +395,4 @@ On 2026-08-28, the Draft 0.24 solution build completed with zero warnings and er
 
 On 2026-08-28, the Draft 0.23 solution build completed with zero warnings and errors and all 160 conformance cases passed under MSVC, WSL GCC, and WSL Clang. The ESP-IDF runner passed its direct Xtensa and RISC-V compiler probes, ordinary ESP32 and ESP32-C3 builds, and the Draft 0.23 interrupt fixture for both architectures. Xtensa ELF inspection placed `ctilde_draft023_timer_isr` and `ct_draft023_ack` in `.iram0.text` and the C~-owned counter in `.dram0.data`. VS Code 0.8.0 tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The connected automated T-CAN485 run exercised the GPTimer ISR, observed matching C~ and native acknowledgement counters, and emitted `CTILDE_DRAFT_023_OK`; the same run passed the earlier Draft 0.18 through 0.20 fixtures, panic-policy images, memory, console, debugger, detach, and startup-timeout gates before restoring the ordinary Release firmware. Its ignored report is `artifacts/esp32-hardware/20260828-000319.json`. After restoration, the operator confirmed that the ordinary firmware visibly alternated the onboard LED between blue and purple, closing the visual gate. Historical Draft 0.22 and earlier hosted, cross-build, and hardware evidence remains preserved above and in Git history.
 
-Draft 0.25 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.
+Draft 0.34 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.

@@ -15,5 +15,28 @@
     "libraries": [],
     "compileOptions": [],
     "linkOptions": ["-Wl,--build-id=none"]
+  },
+  "run": {
+    "executor": "wsl",
+    "command": "qemu-system-x86_64",
+    "args": [
+      "-accel", "tcg",
+      "-machine", "pc",
+      "-m", "16M",
+      "-smp", "1",
+      "-nodefaults",
+      "-no-reboot",
+      "-display", "none",
+      "-monitor", "none",
+      "-serial", "none",
+      "-parallel", "none",
+      "-kernel", "${buildOutput}",
+      "-chardev", "stdio,id=debugcon,signal=off",
+      "-device", "isa-debugcon,iobase=0xe9,chardev=debugcon",
+      "-device", "isa-debug-exit,iobase=0xf4,iosize=0x4"
+    ],
+    "workingDirectory": ".",
+    "environment": {},
+    "successExitCodes": [1]
   }
 }

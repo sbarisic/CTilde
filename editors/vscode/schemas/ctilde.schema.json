@@ -24,6 +24,34 @@
       "default": "auto",
       "description": "Compilation architecture used by compile-time target queries and target-specific intrinsics."
     },
+    "cpuFeatures": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "enum": ["simd128"] },
+      "description": "Explicit CPU features. SIMD remains scalar unless simd128 is selected."
+    },
+    "modules": {
+      "type": "array",
+      "description": "Exact repository-backed source modules. Build and check never access the network.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "repository", "selector"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1 },
+          "repository": { "type": "string", "minLength": 1 },
+          "selector": { "type": "string", "minLength": 1, "description": "Commit, tag, or branch resolved to an exact lock revision." },
+          "alias": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "sources": {
+            "type": "array", "minItems": 1, "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1 },
+            "default": ["**/*.ct"]
+          },
+          "vendor": { "type": "string", "minLength": 1, "description": "Project-relative verified vendor directory." },
+          "updatePolicy": { "type": "string", "enum": ["locked", "refresh"], "default": "locked" }
+        }
+      }
+    },
     "noRecursion": {
       "type": "boolean",
       "default": false,
@@ -167,6 +195,51 @@
           "minLength": 1,
           "default": ".",
           "description": "ESP-IDF project directory relative to the C~ project directory."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional rebuild-and-run process settings used by ctilde --run and the VS Code Run Project command.",
+      "properties": {
+        "executor": {
+          "type": "string",
+          "enum": ["host", "wsl"],
+          "default": "host",
+          "description": "Run directly on the host or through wsl --exec. WSL execution is available only from Windows."
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "description": "PATH command or project-relative executable. Hosted and Cosmopolitan projects default to their built output."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Arguments passed without shell parsing. Supports ${projectRoot} and ${buildOutput}."
+        },
+        "workingDirectory": {
+          "type": "string",
+          "minLength": 1,
+          "default": ".",
+          "description": "Project-contained working directory. Supports ${projectRoot} and ${buildOutput}."
+        },
+        "environment": {
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "additionalProperties": { "type": "string" },
+          "default": {},
+          "description": "Environment overrides. Values support ${projectRoot} and ${buildOutput}."
+        },
+        "successExitCodes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "integer" },
+          "default": [0],
+          "description": "Process exit codes treated as a successful run."
         }
       }
     }

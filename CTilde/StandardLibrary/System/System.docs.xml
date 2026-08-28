@@ -45,8 +45,9 @@
   <member id="T:System.Environment"><summary>Provides hosted process operations.</summary></member>
   <member id="M:System.Environment.Exit(int)"><summary>Terminates a hosted process with an exit code.</summary><param name="exitCode">The process exit code.</param><remarks>This API is unavailable for ESP-IDF compilations.</remarks></member>
 
-  <member id="T:System.Math"><summary>Provides single-precision mathematical functions.</summary><remarks>Functions follow the target C math library for NaN, infinity, signed-zero, and domain behavior. They do not expose errno or floating-point exception state.</remarks></member>
+  <member id="T:System.Math"><summary>Provides single- and double-precision mathematical functions.</summary><remarks>Functions follow the target C math library for NaN, infinity, signed-zero, and domain behavior. They do not expose errno or floating-point exception state.</remarks></member>
   <member id="F:System.Math.Pi"><summary>Represents the nearest single-precision value to pi.</summary></member>
+  <member id="F:System.Math.Pi64"><summary>Represents the nearest double-precision value to pi.</summary></member>
   <member id="M:System.Math.Sqrt(float)"><summary>Returns the square root of a value.</summary><param name="value">The input value.</param><returns>The native C square-root result.</returns></member>
   <member id="M:System.Math.Abs(float)"><summary>Returns the absolute magnitude of a value.</summary><param name="value">The input value.</param><returns>The native C absolute-value result.</returns></member>
   <member id="M:System.Math.Tan(float)"><summary>Returns the tangent of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C tangent result.</returns></member>
@@ -56,6 +57,15 @@
   <member id="M:System.Math.Cos(float)"><summary>Returns the cosine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C cosine result.</returns></member>
   <member id="M:System.Math.Floor(float)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a float.</returns></member>
   <member id="M:System.Math.Ceiling(float)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a float.</returns></member>
+  <member id="M:System.Math.Sqrt(double)"><summary>Returns the square root of a value.</summary><param name="value">The input value.</param><returns>The native C square-root result.</returns></member>
+  <member id="M:System.Math.Abs(double)"><summary>Returns the absolute magnitude of a value.</summary><param name="value">The input value.</param><returns>The native C absolute-value result.</returns></member>
+  <member id="M:System.Math.Tan(double)"><summary>Returns the tangent of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C tangent result.</returns></member>
+  <member id="M:System.Math.Min(double,double)"><summary>Returns the smaller of two values using native C minimum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C minimum result.</returns></member>
+  <member id="M:System.Math.Max(double,double)"><summary>Returns the larger of two values using native C maximum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C maximum result.</returns></member>
+  <member id="M:System.Math.Sin(double)"><summary>Returns the sine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C sine result.</returns></member>
+  <member id="M:System.Math.Cos(double)"><summary>Returns the cosine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C cosine result.</returns></member>
+  <member id="M:System.Math.Floor(double)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a double.</returns></member>
+  <member id="M:System.Math.Ceiling(double)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a double.</returns></member>
 
   <member id="T:System.Vec2"><summary>Represents a mutable two-component single-precision vector.</summary></member>
   <member id="F:System.Vec2.X"><summary>Gets or sets the X component.</summary></member>

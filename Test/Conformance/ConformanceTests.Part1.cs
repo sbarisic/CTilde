@@ -357,6 +357,127 @@ internal static partial class ConformanceTests
             }
         });
 
+        suite.Run("project run configuration and CLI", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-project-run-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(Path.Combine(directory, "src"));
+            Directory.CreateDirectory(Path.Combine(directory, "run-cwd"));
+            File.WriteAllText(Path.Combine(directory, "run-cwd", "marker.txt"), "ready");
+            try
+            {
+                var command = OperatingSystem.IsWindows() ? "powershell" : "sh";
+                var arguments = OperatingSystem.IsWindows()
+                    ? new[] { "-NoProfile", "-File", "${projectRoot}/run.ps1", "hello" }
+                    : new[] { "-c", "test \"$CTILDE_RUN_SENTINEL\" = ok && test -f marker.txt && test \"$1\" = hello; exit 7", "ctilde-run", "hello" };
+                if (OperatingSystem.IsWindows())
+                    File.WriteAllText(Path.Combine(directory, "run.ps1"), "if ($env:CTILDE_RUN_SENTINEL -eq 'ok' -and (Test-Path -LiteralPath 'marker.txt') -and $args[0] -eq 'hello') { exit 7 } else { exit 9 }");
+                var manifest = new
+                {
+                    target = "hosted",
+                    sources = new[] { "src/**/*.ct" },
+                    build = new { executable = OperatingSystem.IsWindows() ? "build/program.exe" : "build/program" },
+                    run = new
+                    {
+                        executor = "host",
+                        command,
+                        args = arguments,
+                        workingDirectory = "run-cwd",
+                        environment = new Dictionary<string, string> { ["CTILDE_RUN_SENTINEL"] = "ok", ["CTILDE_RUN_OUTPUT"] = "${buildOutput}" },
+                        successExitCodes = new[] { 7 },
+                    },
+                };
+                var manifestPath = Path.Combine(directory, "ctilde.json");
+                File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(manifest));
+                File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+                var project = CTildeProjectFile.Load(manifestPath);
+                Assert(project.Configuration.Run is { Executor: CTildeRunExecutor.Host } run &&
+                    run.WorkingDirectoryPath == Path.Combine(directory, "run-cwd") && run.SuccessExitCodes.SequenceEqual([7]) &&
+                    run.Environment["CTILDE_RUN_OUTPUT"] == "${buildOutput}", "Project run settings were not loaded deterministically.");
+
+                var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+                var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+                var result = RunProcess("dotnet", [cliDll, "--project", manifestPath, "--run"]);
+                Assert(result.ExitCode == 0, $"Project run did not accept its configured exit code: {result.StandardOutput}{result.StandardError}");
+
+                var debugTarget = Path.Combine(directory, "build", "debug-target.json");
+                var debugPreparation = RunProcess("dotnet", [cliDll, "--project", manifestPath, "--prepare-debug", "launch", "--debug-target", debugTarget]);
+                Assert(debugPreparation.ExitCode == 0 && File.Exists(debugTarget),
+                    $"Hosted debug preparation with run defaults failed: {debugPreparation.StandardOutput}{debugPreparation.StandardError}");
+                using (var debugDocument = System.Text.Json.JsonDocument.Parse(File.ReadAllText(debugTarget)))
+                {
+                    var root = debugDocument.RootElement;
+                    Assert(root.GetProperty("workingDirectory").GetString() == Path.Combine(directory, "run-cwd"),
+                        "Hosted debugging did not inherit run.workingDirectory.");
+                    var debugArguments = root.GetProperty("arguments").EnumerateArray().Select(value => value.GetString()).ToArray();
+                    Assert(debugArguments.Contains("hello") && debugArguments.Any(value => value?.Contains(directory, StringComparison.OrdinalIgnoreCase) == true),
+                        "Hosted debugging did not inherit or expand run.args.");
+                    Assert(root.GetProperty("environment").GetProperty("CTILDE_RUN_SENTINEL").GetString() == "ok" &&
+                        root.GetProperty("environment").GetProperty("CTILDE_RUN_OUTPUT").GetString() == Path.Combine(directory, "build", OperatingSystem.IsWindows() ? "program.exe" : "program"),
+                        "Hosted debugging did not inherit or expand run.environment.");
+                }
+
+                File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    target = "hosted",
+                    sources = new[] { "src/**/*.ct" },
+                    build = new { executable = OperatingSystem.IsWindows() ? "build/program.exe" : "build/program" },
+                    run = new { },
+                }));
+                var defaults = CTildeProjectFile.Load(manifestPath).Configuration.Run;
+                Assert(defaults is { Executor: CTildeRunExecutor.Host, Command: null } && defaults.Arguments.IsEmpty &&
+                    defaults.WorkingDirectoryPath == directory && defaults.Environment.IsEmpty && defaults.SuccessExitCodes.SequenceEqual([0]),
+                    "Project run defaults were not stable.");
+                var defaultRun = RunProcess("dotnet", [cliDll, "--project", manifestPath, "--run"]);
+                Assert(defaultRun.ExitCode == 0, $"A hosted project did not default to running its built output: {defaultRun.StandardOutput}{defaultRun.StandardError}");
+
+                File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    target = "hosted",
+                    sources = new[] { "src/**/*.ct" },
+                    build = new { executable = OperatingSystem.IsWindows() ? "build/program.exe" : "build/program" },
+                    run = new { command, args = arguments, workingDirectory = "run-cwd", environment = new Dictionary<string, string> { ["CTILDE_RUN_SENTINEL"] = "ok" }, successExitCodes = new[] { 0 } },
+                }));
+                var rejectedExit = RunProcess("dotnet", [cliDll, "--project", manifestPath, "--run"]);
+                Assert(rejectedExit.ExitCode == 7 && rejectedExit.StandardError.Contains("expected 0", StringComparison.Ordinal),
+                    "An unexpected run exit code was not propagated.");
+
+                var launchMarker = Path.Combine(directory, "run-cwd", "launched.txt");
+                var failingArguments = OperatingSystem.IsWindows()
+                    ? new[] { "-NoProfile", "-Command", "Set-Content -LiteralPath 'launched.txt' -Value launched" }
+                    : new[] { "-c", "printf launched > launched.txt" };
+                File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    target = "hosted",
+                    sources = new[] { "src/**/*.ct" },
+                    build = new { executable = OperatingSystem.IsWindows() ? "build/program.exe" : "build/program" },
+                    run = new { command, args = failingArguments, workingDirectory = "run-cwd" },
+                }));
+                File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "this is not valid C~");
+                var failedBuild = RunProcess("dotnet", [cliDll, "--project", manifestPath, "--run"]);
+                Assert(failedBuild.ExitCode != 0 && !File.Exists(launchMarker), "A run command started after its C~ build failed.");
+
+                foreach (var invalidRun in new object[]
+                {
+                    new { workingDirectory = "../outside" },
+                    new { command = "${unknown}" },
+                    new { successExitCodes = new[] { 1, 1 } },
+                    new { environment = new Dictionary<string, string> { ["BAD=NAME"] = "value" } },
+                    new { environment = new Dictionary<string, string> { ["1BAD"] = "value" } },
+                })
+                {
+                    File.WriteAllText(manifestPath, System.Text.Json.JsonSerializer.Serialize(new { sources = new[] { "src/**/*.ct" }, run = invalidRun }));
+                    var rejected = false;
+                    try { _ = CTildeProjectFile.Load(manifestPath); }
+                    catch (CTildeProjectException) { rejected = true; }
+                    Assert(rejected, $"Invalid project run settings were accepted: {System.Text.Json.JsonSerializer.Serialize(invalidRun)}");
+                }
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+
         suite.Run("CLI preserves unchanged generated timestamps", () =>
         {
             var directory = Path.Combine(Path.GetTempPath(), "ctilde-incremental-output-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));

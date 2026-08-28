@@ -1,16 +1,16 @@
 # C~ language specification
 
-Specification version: draft 0.25
+Specification version: draft 0.34
 
 ## Status
 
-This document is the normative specification for C~ draft 0.25.
+This document is the normative specification for C~ draft 0.34.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.25 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.34 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.25 adds assembly-only functions and constant-initialized immutable native data, allowing a freestanding image to define its startup and retained headers entirely in C~. It retains the Draft 0.24 x86-64 Cosmopolitan target, Draft 0.23 compiler-checked ESP-IDF interrupt entry points, Draft 0.22 effect engine, and Draft 0.21 GNU/ELF freestanding profile. Runtime ABI 16, debug metadata version 3, the manifest schema, and compiler APIs are unchanged.
+Draft 0.34 completes source owners, binary64, fixed-width SIMD, Unicode scalars, immutable embedded resources, lambdas and ARC closures, and exact repository modules. It retains the assembly-only functions and constant-initialized immutable native data from Draft 0.25 and the target contracts from Drafts 0.21 through 0.24. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
-`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.25 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.34 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -63,6 +63,10 @@ One compilation can contain multiple files. All files share declarations and `in
 
 Bundled standard-library trees are internal trusted inputs. `Compilation.SyntaxTrees` contains only trees supplied by the caller.
 
+Every user syntax tree has a source owner. The root application owner has a module identity and content root; every repository module owner additionally has an exact locked revision. Source-owned output identities and `[Embed]` paths use this owner instead of the current process directory. A source file cannot be assigned to two owners in one compilation.
+
+Repository modules use canonical slash-separated paths and exact `ctilde.lock.json` revisions. Selectors can name commits, tags, or branches. `ctilde restore` materializes locked revisions, `ctilde update` resolves selectors again, and `ctilde vendor` copies verified exact content. `updatePolicy: "locked"` advances only during update; `"refresh"` also advances during an explicit restore. Check and build never access the network. Resolution precedence is an ignored `ctilde.local.json` replacement, verified vendor content, then the exact `.ctilde/modules` cache. An alias is a unique project-local module name used for stable vendor placement; it does not change the canonical source-owner identity.
+
 A file contains:
 
 1. Zero or more `using` directives.
@@ -105,7 +109,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.25 has no aliases and no `using static`.
+Draft 0.34 has no using aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -127,11 +131,11 @@ int @class = 1;
 abstract  alignof    as         asm        base       bool       break      byte
 case      catch      char       class      clobber    const
 defer     delegate   do         else       enum       false
-finally   float      for        foreach    get        if
+finally   float      double     for        foreach    get        if
 in        int        interface  internal   is         lock       long
 namespace
 new       nint       nuint      null       object     out
-override  private    protected  public     readonly   ref
+override  private    protected  public     readonly   ref        rune
 offsetof  return     sbyte      sealed     set        short      sizeof
 stackalloc static    string     struct     switch     this       throw
 true      try        uint       ulong      union      unmanaged  unsafe
@@ -158,13 +162,15 @@ Integer literals can use decimal, hexadecimal, or binary notation. Underscores c
 0b1010_0110
 ```
 
-Integer suffixes are case-insensitive. With no suffix, the literal takes the first type that can contain it from `int`, `uint`, `long`, and `ulong`. `U` selects the first fit from `uint` and `ulong`; `L` selects the first fit from `long` and `ulong`; `UL` and `LU` select `ulong`. `F` selects `float`.
+Integer suffixes are case-insensitive. With no suffix, the literal takes the first type that can contain it from `int`, `uint`, `long`, and `ulong`. `U` selects the first fit from `uint` and `ulong`; `L` selects the first fit from `long` and `ulong`; `UL` and `LU` select `ulong`. `F` selects `float`; `D` selects `double`. A decimal point or exponent without `F` also selects `double`.
 
 ```csharp
 42u
 4_294_967_296L
 18_446_744_073_709_551_615UL
 3.5f
+1.25d
+6.022e23
 ```
 
 A literal must fit its selected type. Malformed, duplicated, mixed floating/integer, and overflowing suffixes are errors. The unary forms `-2147483648` and `-9223372036854775808L` are valid signed-minimum constants. An explicit cast applies normal truncation rules after literal typing.
@@ -173,11 +179,13 @@ A literal must fit its selected type. Malformed, duplicated, mixed floating/inte
 
 `char` is one eight-bit UTF-8 code unit. A character literal must encode to exactly one byte.
 
+`rune` is one valid Unicode scalar value stored in 32 bits. A rune literal uses the `r'…'` prefix and must contain exactly one scalar. Surrogates and values above `0x10FFFF` are invalid. Explicit conversion between `rune` and `uint` preserves the scalar value and validates conversion into `rune`.
+
 Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`, `\\`, and `\xHH`. A hexadecimal escape contains exactly two hexadecimal digits.
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.25 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.34 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -208,13 +216,15 @@ Every expression has a compile-time type before C emission.
 | `nint` | Signed value | Target pointer width |
 | `nuint` | Unsigned value | Target pointer width |
 | `float` | IEEE-754 binary32 value | 4 bytes |
+| `double` | IEEE-754 binary64 value | 8 bytes |
+| `rune` | Unicode scalar value | 4 bytes |
 | `string` | Managed reference | Target pointer width |
 | `object` | Managed root reference | Target pointer width |
 | `void` | Return marker | None |
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.25 has no `double` or `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
+Draft 0.34 has no `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -236,7 +246,7 @@ Every array has a read-only `Length` property of type `int`. Indexing starts at 
 
 Inline arrays support one dimension, default initialization, checked indexing, by-value copying, parameters, and returns. Constant out-of-range indices are rejected; dynamic failures use `CTA0003`. Elements that contain managed references are retained and dropped element by element. Native ABI exposure requires a recursively complete unmanaged element type. Managed, multidimensional inline, jagged, and nested inline arrays are not part of this draft. Invalid lengths report `CT2204`.
 
-Draft 0.25 has no multidimensional or jagged managed arrays.
+Draft 0.34 has no multidimensional or jagged managed arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
@@ -305,7 +315,7 @@ Enum initializers are integral constants. An omitted initializer is one greater 
 
 `public newtype Name : Underlying;` declares a distinct nominal value type with the representation, layout, calling convention, boxing behavior, and native ABI of its complete unmanaged non-void underlying type. Recursive definitions report `CT1295`.
 
-Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.25.
+Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.34.
 
 The standard library declares `be16`, `be32`, `le16`, and `le32` as nominal newtypes. Their stored bytes use the named wire order. `System.Endian` converts between native numeric values and these types, folds constant operands, and lowers big-endian conversions to byte swaps on the currently little-endian target set. Ordinary explicit newtype casts remain representation-preserving. Invalid intrinsic calls report `CT2208`.
 
@@ -382,7 +392,9 @@ public delegate int Transformer(int value);
 
 A compatible method group converts contextually to that delegate. Overload resolution uses the delegate's exact parameter and return types. Static, instance, inherited, virtual, and `base` method groups are supported. An instance delegate retains its receiver; virtual invocation dispatches against the captured receiver, while `base.Method` remains a direct base call.
 
-Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes. Draft 0.25 delegates are single-cast: there are no lambdas, closures, multicast operations, open-instance delegates, generic `Action`/`Func`, or variance.
+Delegate creation allocates a target-and-thunk object. Parameters are borrowed and managed or reference-containing results are owned, like ordinary C~ calls. Invocation propagates C~ exceptions normally, and null invocation throws `NullReferenceException` with origin code `CTN0001`. Equality compares delegate object identity, not target and method structure. Delegates can be generic and can be stored in fields, arrays, structures, parameters, returns, and boxes.
+
+A lambda converts only in a named-delegate context. Parameters can be inferred or explicitly typed, and its body is an expression or block. A captureless lambda has no access to enclosing locals or parameters. An explicit capture list precedes its parameters: `[value, copy = expression] (int item) => item + value + copy`. Each initializer is evaluated once, left to right, when the closure is created. Captures are by value; managed captures are retained in a compiler-generated ARC environment and released with it. Duplicate captures and use of an uncaptured outer value are errors. Delegates remain single-cast; multicast operations, open-instance delegates, generic `Action`/`Func`, and variance are not supported.
 
 ### Classes
 
@@ -576,7 +588,7 @@ Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site
 
 An `out` call treats the caller slot as an uninitialized destination. The caller drops an initialized managed/reference-bearing value, clears the slot to a safe empty state, and marks it uninitialized before entry. The callee's first assignment constructs or moves directly into the destination without reading, retaining, or dropping an old value. Later assignments use ordinary strong-slot replacement. The rule is identical for methods, constructors, delegates, unmanaged function pointers, externs, and exported C declarations. Normal return assigns the caller slot; exceptional control leaves its safe empty value but does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
 
-Draft 0.25 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
+Draft 0.34 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### User-defined arithmetic operators
 
@@ -658,6 +670,8 @@ Scalar constants, enums, newtypes, explicit casts, wrapping arithmetic, constant
 
 The field and every member or indexed location rooted in it are immutable storage. Reads, member reads, value copies, and `in` passing are valid. Assignment, increment, `ref`/`out`, explicit address-taking, and direct instance method calls report `CT2219`; a copied local value may be mutated normally. `[ConstInit]` data is initialized and readable in freestanding bootstrap and interrupt closures. Symbol maps record `constInit`.
 
+`[Embed("relative/path")]` applies to an uninitialized `public static unsafe readonly ReadOnlyNativeBuffer<byte>` field. The path resolves under the declaring source owner's content root and cannot escape it. The compiler reads the exact bytes during compilation and emits immutable native storage plus its length; generated output and symbol metadata do not contain the absolute source path. Missing content, traversal, an invalid target, or mutable storage reports `CT2222`.
+
 For `[Export]`, the internal C~ implementation and external wrapper use the requested code section, and the exported native-header prototype carries the matching declaration annotation. For `[EntryPoint]`, only the C~ implementation is placed; generated `main` and `app_main` wrappers remain in their default sections. `[Section]` does not make a method or field reachable, does not change linkage or initialization order, and does not specify ordering, alignment, retention, linker-script mapping, memory regions, or final addresses.
 
 ### Native calls and callbacks
@@ -672,7 +686,7 @@ Ordinary parameters are borrowed for the duration of a call. `[Retained]` accept
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.25 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.34 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
 
 ### Effect contracts
 
@@ -700,9 +714,9 @@ The compiler places every C~ method in the interrupt call closure in ESP-IDF IRA
 
 Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Console`, `Environment`, single-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types as applicable to the target. Freestanding imports only the object/storage core, primitive and managed value support, `Memory`, target queries, endian helpers, MMIO, and CPU intrinsics; it does not expose exceptions, console or process services, managed threading, ESP-IDF APIs, or libm-backed math. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
 
-`Vec2`, `Vec3`, and `Vec4` are scalar geometry structures in Draft 0.25. The language has no fixed-width SIMD types, SIMD lane or shuffle operations, `CpuFeature`, `Target.HasFeature`, or `cpuFeatures` project option. The separate future proposal preserves geometry semantics while adding explicit 128-bit lane values and scalar fallback; see [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+`Vec2`, `Vec3`, and `Vec4` remain scalar geometry structures. `System.Simd` defines fixed 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with constant lane access, shuffle, comparisons, selection, and arithmetic. Scalar lowering is the default. `CpuFeature.Simd128`, `Target.HasFeature`, manifest `cpuFeatures`, and CLI `--cpu-feature simd128` enable architecture-validated x86 or Arm intrinsic lowering explicitly.
 
-Draft 0.25 does not provide `System.Type`, reflection, or `System.Convert`.
+Draft 0.34 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation
 
@@ -800,7 +814,7 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.25 has no pattern cases and no `goto case`.
+Draft 0.34 has no pattern cases and no `goto case`.
 
 ### Loops
 
@@ -1022,7 +1036,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.25 when:
+A compiler conforms to draft 0.34 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1030,7 +1044,7 @@ A compiler conforms to draft 0.25 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.25 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.34 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1041,4 +1055,4 @@ The canonical backend is GNU C23. Draft 0.25 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.25 defers Arm64 and fat Cosmopolitan output, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, lambdas and closures, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.
+Draft 0.34 defers Arm64 and fat Cosmopolitan output, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.

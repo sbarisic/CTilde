@@ -16,7 +16,7 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.10.0");
+  assert.equal(manifest.version, "0.11.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "SEE LICENSE IN LICENSE");
   assert.equal(manifest.preview, true);
@@ -32,6 +32,7 @@ test("manifest registers the C~ language and grammar", async () => {
     "onTaskType:ctilde",
     "onCommand:ctilde.project.check",
     "onCommand:ctilde.project.build",
+    "onCommand:ctilde.project.run",
     "onCommand:ctilde.project.generateBindings",
     "onCommand:ctilde.project.debug",
     "onCommand:ctilde.project.attach",
@@ -64,7 +65,8 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.equal(configuration["ctilde.debugger.showRuntimeFrames"].default, false);
   assert.match(configuration["ctilde.debugger.showRuntimeFrames"].description, /trap reports/);
   assert.deepEqual(manifest.contributes.taskDefinitions[0].required, ["project", "mode"]);
-  assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build", "bindings"]);
+  assert.deepEqual(manifest.contributes.taskDefinitions[0].properties.mode.enum, ["check", "build", "run", "bindings"]);
+  assert.ok(manifest.contributes.commands.some(command => command.command === "ctilde.project.run" && command.title === "C~: Run Project"));
   assert.equal(manifest.contributes.problemMatchers[0].name, "ctilde");
   assert.equal(manifest.contributes.problemMatchers[0].owner, "ctilde-build");
   assert.ok(manifest.files.includes("compiler/**"));
@@ -79,6 +81,11 @@ test("manifest registers the C~ language and grammar", async () => {
   assert.deepEqual(debuggerContribution.configurationAttributes.launch.required, ["project"]);
   assert.equal(debuggerContribution.configurationAttributes.launch.properties.baudRate.default, 115200);
   assert.equal(debuggerContribution.configurationAttributes.launch.properties.memoryDiagnostics.default, "objects");
+  assert.equal(debuggerContribution.configurationAttributes.launch.properties.cwd.default, undefined);
+  assert.equal(debuggerContribution.configurationAttributes.launch.properties.args.default, undefined);
+  assert.equal(debuggerContribution.configurationAttributes.launch.properties.environment.type, "object");
+  assert.equal(debuggerContribution.initialConfigurations[0].cwd, undefined);
+  assert.equal(debuggerContribution.initialConfigurations[0].args, undefined);
   assert.equal(debuggerContribution.initialConfigurations.length, 2);
   assert.equal(manifest.contributes.jsonValidation[0].fileMatch, "**/ctilde.json");
   assert.equal(manifest.contributes.jsonValidation[1].fileMatch, "**/*.bindings.json");
@@ -126,6 +133,10 @@ test("project schema includes native build configuration", async () => {
   assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
   assert.ok(schema.properties.target.enum.includes("cosmopolitan"));
   assert.deepEqual(schema.properties.cosmopolitan.properties.mode.enum, ["default", "tiny", "debug"]);
+  const run = schema.properties.run;
+  assert.deepEqual(run.properties.executor.enum, ["host", "wsl"]);
+  assert.deepEqual(run.properties.successExitCodes.default, [0]);
+  assert.equal(run.properties.environment.additionalProperties.type, "string");
   const bindings = await readJson("schemas/esp-idf-bindings.schema.json");
   assert.equal(bindings.properties.schemaVersion.const, 1);
   assert.equal(bindings.$defs.import.additionalProperties, false);

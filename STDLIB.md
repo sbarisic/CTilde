@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ draft 0.25 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF retain the object, exception, console, math, vector, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
+This document is the canonical standard-library reference for C~ draft 0.34 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF retain the object, exception, console, math, vector, SIMD, concurrency, target, MMIO, CPU, endian, and address facilities appropriate to each profile. Freestanding exposes only the object/storage core, primitive and managed storage metadata, `Memory`, target queries, SIMD, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, environment/process, managed threading, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
 The Cosmopolitan profile reuses the hosted object, exception, console, environment, math, file-I/O, threading, and TLS surface through Cosmopolitan's portable POSIX facade. It does not expose ESP-IDF, MMIO/register, freestanding runtime-role, or dynamic-library APIs. Draft 0.24 has measured managed strings/arrays, ARC, exceptions, `defer`, console, file output, threads, mutexes, initialization, and shutdown on WSL/Linux and Windows.
 
@@ -10,7 +10,7 @@ The Cosmopolitan profile reuses the hosted object, exception, console, environme
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
 
-Draft 0.25 marks target queries, CPU operations, MMIO, and endian conversion with trusted `[NoRuntime]` and `[NoBlock]` contracts in addition to `[NoThrow]` and `[NoAlloc]`. Atomic operations are non-blocking, but dynamic memory-order validation can throw and use the managed runtime. `Thread.Join`, nonzero or dynamic `Thread.Sleep`, and `Mutex.Enter` are blocking; `TryEnter`, `Yield`, and CPU pause hints are not. Console, file, and unannotated native I/O remain conservative effect boundaries.
+Draft 0.34 marks target queries, CPU and SIMD operations, MMIO, and endian conversion with trusted `[NoRuntime]` and `[NoBlock]` contracts in addition to `[NoThrow]` and `[NoAlloc]`. Atomic operations are non-blocking, but dynamic memory-order validation can throw and use the managed runtime. `Thread.Join`, nonzero or dynamic `Thread.Sleep`, and `Mutex.Enter` are blocking; `TryEnter`, `Yield`, and CPU pause hints are not. Console, file, and unannotated native I/O remain conservative effect boundaries.
 
 `[Interrupt]` and `[InterruptSafe]` are compiler-defined attributes rather than ordinary runtime APIs. On ESP-IDF, an interrupt entry has the exact exported `void(void*)` signature and runs without runtime attachment, managed cleanup, exception machinery, or blocking calls. Interrupt-safe externs and assembly must also declare their ordinary effect contracts independently.
 
@@ -174,7 +174,7 @@ public struct Vec3
 
 `Vec2` provides `UnitX` and `UnitY`; `Vec4` additionally provides `UnitZ` and `UnitW`. Vector-vector multiplication and division operate component by component. Dot products remain explicit. Normalization divides by the native square-root result without a special zero check, so normalizing a zero vector produces NaN components according to target floating-point behavior. Vector declarations are loaded into compilation only when the corresponding exact type name appears in source; editor services load all three for completion and embedded-source navigation.
 
-Draft 0.25 does not provide hardware SIMD types and does not give `Vec4` native-register semantics. The future standard-library proposal adds explicit `System.Simd.F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with deterministic 16-byte storage, scalar fallback, compile-time lanes and shuffles, checked and unchecked memory operations, and a separate compiler-verified CPU-feature query. Pure SIMD operations will use the existing four low-level effect contracts; checked buffer access retains its ordinary bounds-check effects. The staged surface and floating-point rules are documented in [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+`System.Simd` provides explicit `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with deterministic 16-byte storage, scalar-default behavior, constant lanes and shuffles, comparisons, and selection. `Vec4` keeps its scalar geometry semantics. Manifest `cpuFeatures: ["simd128"]` or CLI `--cpu-feature simd128` enables compiler-verified x86 or Arm intrinsic lowering; `Target.HasFeature(CpuFeature.Simd128)` exposes the selected contract to C~ code.
 
 ## Threading
 

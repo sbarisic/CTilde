@@ -188,6 +188,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static ct_object* ct_safe_cast(ct_object* value, const ct_type_descriptor* target) { return value != NULL && ct_type_is_assignable(value->Type, target) ? value : NULL; }");
         writer.WriteLine("static uint32_t ct_hash_bytes(const void* value, size_t size) { const uint8_t* bytes = (const uint8_t*)value; uint32_t hash = UINT32_C(2166136261); for (size_t i = 0; i < size; ++i) { hash ^= bytes[i]; hash *= UINT32_C(16777619); } return hash; }");
         writer.WriteLine("static uint32_t ct_hash_float(float value) { if (isnan(value)) return UINT32_C(0x7FC00000); if (value == 0.0f) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
+        writer.WriteLine("static uint32_t ct_hash_double(double value) { if (isnan(value)) return UINT32_C(0x7FF80000); if (value == 0.0) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
         EmitDefaultVTable(writer, "ct_default_vtable", virtualMethods, virtualProperties);
         writer.WriteLine("static ct_string* ct_string_v_to_string(ct_object* value) { ct_retain(value); return (ct_string*)(void*)value; }");
         writer.WriteLine("static bool ct_string_v_equals(ct_object* left, ct_object* right) { return right != NULL && right->Type == &ct_desc_string && ct_string_equal((ct_string*)(void*)left, (ct_string*)(void*)right); }");
@@ -677,6 +678,7 @@ internal sealed partial class CEmitter
             CTypeKind.Enum => $"{enumFormatter}(box->Value)",
             CTypeKind.Bool => "ct_to_string_bool(box->Value, \"<runtime>\", 0)",
             CTypeKind.Char => "ct_to_string_char(box->Value, \"<runtime>\", 0)",
+            CTypeKind.Rune => "ct_to_string_rune(box->Value, \"<runtime>\", 0)",
             CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint => "ct_to_string_uint((uint32_t)box->Value, \"<runtime>\", 0)",
             CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int => "ct_to_string_int((int32_t)box->Value, \"<runtime>\", 0)",
             CTypeKind.Long => "ct_to_string_long(box->Value, \"<runtime>\", 0)",
@@ -684,10 +686,11 @@ internal sealed partial class CEmitter
             CTypeKind.Nint => "ct_to_string_nint(box->Value, \"<runtime>\", 0)",
             CTypeKind.Nuint => "ct_to_string_nuint(box->Value, \"<runtime>\", 0)",
             CTypeKind.Float => "ct_to_string_float(box->Value, \"<runtime>\", 0)",
+            CTypeKind.Double => "ct_to_string_double(box->Value, \"<runtime>\", 0)",
             _ => $"ct_string_from_bytes((const uint8_t*)\"{EscapeCString(type.DisplayName)}\", {Encoding.UTF8.GetByteCount(type.DisplayName)}, \"<runtime>\", 0)",
         };
         writer.WriteLine($"static ct_string* {toString}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; (void)box; return {toStringExpression}; }}");
-        var comparison = type.Kind == CTypeKind.Float
+        var comparison = type.Kind is CTypeKind.Float or CTypeKind.Double
             ? "left->Value == right->Value || (isnan(left->Value) && isnan(right->Value))"
             : type.Kind == CTypeKind.Struct
                 ? StructEqualityExpression(type.Symbol!, "left->Value", "right->Value")
@@ -707,6 +710,8 @@ internal sealed partial class CEmitter
         }
         else if (type.Kind == CTypeKind.Float)
             writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; return ct_i32_bits(ct_hash_float(box->Value)); }}");
+        else if (type.Kind == CTypeKind.Double)
+            writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; return ct_i32_bits(ct_hash_double(box->Value)); }}");
         else
             writer.WriteLine($"static int32_t {hash}(ct_object* value) {{ {box}* box = ({box}*)(void*)value; return ct_i32_bits(ct_hash_bytes(&box->Value, sizeof(box->Value))); }}");
         EmitBoxVTable(writer, type, $"ct_vtable_box_{code}", toString, equals, hash, methods, properties);
@@ -784,6 +789,7 @@ internal sealed partial class CEmitter
     private static string ValueEqualityExpression(CType type, string left, string right) => type.Kind switch
     {
         CTypeKind.Float => $"{left} == {right} || (isnan({left}) && isnan({right}))",
+        CTypeKind.Double => $"{left} == {right} || (isnan({left}) && isnan({right}))",
         CTypeKind.String => $"ct_string_equal({left}, {right})",
         CTypeKind.Class or CTypeKind.Array => $"ct_object_value_equals((ct_object*)(void*){left}, (ct_object*)(void*){right})",
         CTypeKind.Struct => StructEqualityExpression(type.Symbol!, left, right),
@@ -793,6 +799,7 @@ internal sealed partial class CEmitter
     private static string ValueHashExpression(CType type, string value) => type.Kind switch
     {
         CTypeKind.Float => $"ct_hash_float({value})",
+        CTypeKind.Double => $"ct_hash_double({value})",
         CTypeKind.String => $"({value} == NULL ? 0u : ct_hash_bytes({value}->Data, (size_t){value}->Length))",
         CTypeKind.Class or CTypeKind.Array => $"ct_object_value_hash((ct_object*)(void*){value})",
         CTypeKind.Struct => StructHashExpression(type.Symbol!, value),

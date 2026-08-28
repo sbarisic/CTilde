@@ -10,6 +10,7 @@ public enum SyntaxKind
     NumberToken,
     StringToken,
     CharacterToken,
+    RuneToken,
     AsmTextToken,
 
     OpenParenToken,
@@ -50,6 +51,7 @@ public enum SyntaxKind
     GreaterEqualsToken,
     LessLessToken,
     GreaterGreaterToken,
+    EqualsGreaterToken,
 
     AbstractKeyword,
     AlignofKeyword,
@@ -75,6 +77,7 @@ public enum SyntaxKind
     FalseKeyword,
     FinallyKeyword,
     FloatKeyword,
+    DoubleKeyword,
     ForKeyword,
     ForeachKeyword,
     IfKeyword,
@@ -103,6 +106,7 @@ public enum SyntaxKind
     ReadonlyKeyword,
     RefKeyword,
     ReturnKeyword,
+    RuneKeyword,
     SbyteKeyword,
     SealedKeyword,
     ShortKeyword,
@@ -234,7 +238,7 @@ public abstract record SyntaxNode(SourceText Source, TextSpan Span)
 
 public sealed record SyntaxTree
 {
-    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<SyntaxToken> tokens, ImmutableArray<SyntaxToken> skippedTokens, ImmutableArray<Diagnostic> diagnostics, SyntaxTreeOrigin origin)
+    private SyntaxTree(SourceText text, CompilationUnitSyntax root, ImmutableArray<SyntaxToken> tokens, ImmutableArray<SyntaxToken> skippedTokens, ImmutableArray<Diagnostic> diagnostics, SyntaxTreeOrigin origin, SourceOwnerIdentity? sourceOwner)
     {
         Text = text;
         Root = root;
@@ -242,6 +246,7 @@ public sealed record SyntaxTree
         SkippedTokens = skippedTokens;
         Diagnostics = diagnostics;
         Origin = origin;
+        SourceOwner = sourceOwner;
         Root.AttachTokens(tokens);
     }
 
@@ -250,23 +255,31 @@ public sealed record SyntaxTree
     public ImmutableArray<SyntaxToken> Tokens { get; }
     public ImmutableArray<SyntaxToken> SkippedTokens { get; }
     public ImmutableArray<Diagnostic> Diagnostics { get; }
+    public SourceOwnerIdentity? SourceOwner { get; private init; }
     internal SyntaxTreeOrigin Origin { get; private init; }
     public string ToFullString() => Text.Text;
 
-    public static SyntaxTree Parse(SourceText text)
+    public static SyntaxTree Parse(SourceText text) => Parse(text, SourceOwnerIdentity.ImplicitRoot);
+
+    public static SyntaxTree Parse(SourceText text, SourceOwnerIdentity sourceOwner)
     {
         ArgumentNullException.ThrowIfNull(text);
+        ArgumentNullException.ThrowIfNull(sourceOwner);
         var diagnostics = new DiagnosticBag();
         var lexicalTokens = new Lexer(text, diagnostics).Lex();
         var parser = new Parser(text, lexicalTokens, diagnostics);
         var root = parser.ParseCompilationUnit();
         var tokens = MergeTokens(lexicalTokens, parser.MissingTokens, parser.SkippedTokens);
-        return new SyntaxTree(text, root, tokens, parser.SkippedTokens, diagnostics.ToImmutable(), SyntaxTreeOrigin.User);
+        return new SyntaxTree(text, root, tokens, parser.SkippedTokens, diagnostics.ToImmutable(), SyntaxTreeOrigin.User, sourceOwner);
     }
 
-    internal static SyntaxTree ParseEspIdfBinding(SourceText text) => Parse(text) with { Origin = SyntaxTreeOrigin.EspIdfBinding };
+    internal static SyntaxTree ParseEspIdfBinding(SourceText text) => Parse(text) with { Origin = SyntaxTreeOrigin.EspIdfBinding, SourceOwner = null };
+
+    internal static SyntaxTree ParseStandardLibrary(SourceText text) => Parse(text) with { Origin = SyntaxTreeOrigin.StandardLibrary, SourceOwner = null };
 
     public static SyntaxTree ParseText(string text, string filePath = "<memory>") => Parse(SourceText.From(text, filePath));
+
+    public static SyntaxTree ParseText(string text, string filePath, SourceOwnerIdentity sourceOwner) => Parse(SourceText.From(text, filePath), sourceOwner);
 
     private static ImmutableArray<SyntaxToken> MergeTokens(ImmutableArray<SyntaxToken> lexicalTokens, ImmutableArray<SyntaxToken> missingTokens, ImmutableArray<SyntaxToken> skippedTokens)
     {
@@ -301,6 +314,7 @@ internal enum SyntaxTreeOrigin
 {
     User,
     EspIdfBinding,
+    StandardLibrary,
 }
 
 public sealed record CompilationUnitSyntax(
@@ -510,6 +524,15 @@ public sealed record SwitchLabelSyntax(SourceText Source, TextSpan Span, Express
 public abstract record ExpressionSyntax(SourceText Source, TextSpan Span) : SyntaxNode(Source, Span);
 public sealed record ArgumentSyntax(SourceText Source, TextSpan Span, ParameterPassingKind PassingKind, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
 public sealed record LiteralExpressionSyntax(SourceText Source, TextSpan Span, object? Value, SyntaxKind LiteralKind) : ExpressionSyntax(Source, Span);
+public sealed record LambdaParameterSyntax(SourceText Source, TextSpan Span, TypeSyntax? Type, string Name, ParameterPassingKind PassingKind) : SyntaxNode(Source, Span);
+public sealed record LambdaCaptureSyntax(SourceText Source, TextSpan Span, string Name, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
+public sealed record LambdaExpressionSyntax(
+    SourceText Source,
+    TextSpan Span,
+    ImmutableArray<LambdaCaptureSyntax> Captures,
+    ImmutableArray<LambdaParameterSyntax> Parameters,
+    ExpressionSyntax? ExpressionBody,
+    BlockStatementSyntax? BlockBody) : ExpressionSyntax(Source, Span);
 public sealed record NameExpressionSyntax(SourceText Source, TextSpan Span, string Name, ImmutableArray<TypeSyntax> TypeArguments = default) : ExpressionSyntax(Source, Span);
 public sealed record ThisExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);
 public sealed record BaseExpressionSyntax(SourceText Source, TextSpan Span) : ExpressionSyntax(Source, Span);

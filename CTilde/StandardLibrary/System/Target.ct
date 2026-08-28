@@ -33,6 +33,11 @@ public enum TargetArchitecture
     RiscV64
 }
 
+public enum CpuFeature
+{
+    Simd128
+}
+
 public static class Target
 {
     [NoAlloc]
@@ -52,6 +57,12 @@ public static class Target
     [NoBlock]
     [NoRuntime]
     public static int PointerSize { get { return 4; } }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool HasFeature(CpuFeature feature) { return false; }
 }
 
 public static class Mmio

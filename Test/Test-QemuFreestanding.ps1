@@ -124,4 +124,14 @@ if ($qemuText.Trim() -ne 'CTILDE_QEMU_OK') {
     throw "QEMU output was not exactly the CTILDE_QEMU_OK marker. Output:`n$qemuText"
 }
 
+$manifestRunOutput = & dotnet run --project (Join-Path $repository 'CTilde.Cli') -c Release --no-launch-profile -- --project $manifest --run 2>&1
+$manifestRunExitCode = $LASTEXITCODE
+$manifestRunText = ($manifestRunOutput | ForEach-Object { $_.ToString() }) -join "`n"
+if ($manifestRunExitCode -ne 0) {
+    throw "The manifest-driven QEMU run failed with exit code $manifestRunExitCode. Output:`n$manifestRunText"
+}
+if ($manifestRunText.Trim() -ne 'CTILDE_QEMU_OK') {
+    throw "The manifest-driven QEMU output was not exactly the CTILDE_QEMU_OK marker. Output:`n$manifestRunText"
+}
+
 Write-Output 'QEMU freestanding smoke test passed.'

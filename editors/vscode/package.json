@@ -2,7 +2,7 @@
   "name": "ctilde-language",
   "displayName": "C~ Compiler and Debugger",
   "description": "Official C~ language support with IntelliSense, diagnostics, project builds, and source-level debugging.",
-  "version": "0.10.1",
+  "version": "0.11.0",
   "publisher": "sbarisic",
   "license": "SEE LICENSE IN LICENSE",
   "preview": true,
@@ -43,6 +43,7 @@
     "onTaskType:ctilde",
     "onCommand:ctilde.project.check",
     "onCommand:ctilde.project.build",
+    "onCommand:ctilde.project.run",
     "onCommand:ctilde.project.generateBindings",
     "onCommand:ctilde.project.debug",
     "onCommand:ctilde.project.attach",
@@ -135,6 +136,10 @@
       {
         "command": "ctilde.project.build",
         "title": "C~: Build Project"
+      },
+      {
+        "command": "ctilde.project.run",
+        "title": "C~: Run Project"
       },
       {
         "command": "ctilde.project.generateBindings",
@@ -286,15 +291,19 @@
                 "default": ""
               },
               "cwd": {
-                "type": "string",
-                "default": "${workspaceFolder}"
+                "type": "string"
               },
               "args": {
                 "type": "array",
                 "items": {
                   "type": "string"
-                },
-                "default": []
+                }
+              },
+              "environment": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                }
               },
               "stopAtEntry": {
                 "type": "boolean",
@@ -380,8 +389,6 @@
             "project": "${workspaceFolder}/ctilde.json",
             "backend": "auto",
             "gdbPath": "",
-            "cwd": "${workspaceFolder}",
-            "args": [],
             "stopAtEntry": false,
             "showRuntimeFrames": false,
             "serialPort": "",
@@ -421,9 +428,10 @@
             "enum": [
               "check",
               "build",
+              "run",
               "bindings"
             ],
-            "description": "Whether to check C~ semantics, produce native output, or generate tracked ESP-IDF bindings."
+            "description": "Whether to check C~ semantics, produce native output, rebuild and run, or generate tracked ESP-IDF bindings."
           }
         }
       }

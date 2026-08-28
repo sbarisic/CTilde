@@ -323,7 +323,7 @@
     },
     "characters": {
       "name": "string.quoted.single.ctilde",
-      "begin": "'",
+      "begin": "(?<![@_\\p{L}\\p{Nd}])r?'",
       "beginCaptures": {
         "0": {
           "name": "punctuation.definition.string.begin.ctilde"
@@ -566,7 +566,7 @@
         },
         {
           "name": "constant.numeric.float.ctilde",
-          "match": "(?<![_\\p{L}\\p{Nd}])(?:[0-9](?:_?[0-9])*\\.[0-9](?:_?[0-9])*(?:[fF])?|[0-9](?:_?[0-9])*[fF])(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![_\\p{L}\\p{Nd}])(?:[0-9](?:_?[0-9])*(?:\\.[0-9](?:_?[0-9])*)?(?:[eE][+-]?[0-9](?:_?[0-9])*)?[fFdD]|[0-9](?:_?[0-9])*\\.[0-9](?:_?[0-9])*(?:[eE][+-]?[0-9](?:_?[0-9])*)?)(?![_\\p{L}\\p{Nd}])"
         },
         {
           "name": "constant.numeric.integer.decimal.ctilde",
@@ -590,7 +590,7 @@
         },
         {
           "name": "storage.type.builtin.ctilde",
-          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|int|uint|long|ulong|nint|nuint|float|string|object|void)(?![_\\p{L}\\p{Nd}])"
+          "match": "(?<![@_\\p{L}\\p{Nd}])(?:bool|byte|sbyte|short|ushort|char|rune|int|uint|long|ulong|nint|nuint|float|double|string|object|void)(?![_\\p{L}\\p{Nd}])"
         }
       ]
     },

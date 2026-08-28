@@ -87,8 +87,10 @@ public sealed class Compilation
             if (target == CompilationTarget.Freestanding && (Options.DebugInformation != DebugInformationMode.None || Options.DebugMemory != DebugMemoryMode.Off))
                 diagnostics.Add("CT4115", "Debug information and debug-memory instrumentation are unavailable for freestanding compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             ValidateSourceIdentityRoot(diagnostics);
+            ValidateSourceOwners(diagnostics);
+            ValidateCpuFeatures(diagnostics, architecture);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
-            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture);
+            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.CpuFeatures);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
@@ -276,6 +278,59 @@ public sealed class Compilation
                 diagnostics.Add("CT4112", $"Source identity '{identity}' is declared more than once.", tree.Text, new TextSpan(0, 0), previous.Text.GetLocation(new TextSpan(0, 0)));
             else
                 identities[identity] = tree;
+        }
+    }
+
+    private void ValidateSourceOwners(DiagnosticBag diagnostics)
+    {
+        foreach (var tree in SyntaxTrees.Where(tree => tree.Origin == SyntaxTreeOrigin.User))
+        {
+            var owner = tree.SourceOwner;
+            if (owner is null)
+            {
+                diagnostics.Add("CT4119", "A user source file requires a source owner.", tree.Text, new TextSpan(0, 0));
+                continue;
+            }
+            if (string.IsNullOrWhiteSpace(owner.ModulePath))
+                diagnostics.Add("CT4119", "A source owner requires a non-empty module path.", tree.Text, new TextSpan(0, 0));
+            ValidateOwnerRoot(owner.ContentRoot, "content root", tree, diagnostics);
+            ValidateOwnerRoot(owner.SourceIdentityRoot, "source identity root", tree, diagnostics);
+            if (owner.IsRootApplication && owner.LockedRevision is not null)
+                diagnostics.Add("CT4119", "The root application source owner cannot have a locked revision.", tree.Text, new TextSpan(0, 0));
+            if (!owner.IsRootApplication && string.IsNullOrWhiteSpace(owner.LockedRevision))
+                diagnostics.Add("CT4119", "A dependency source owner requires an exact locked revision.", tree.Text, new TextSpan(0, 0));
+        }
+    }
+
+    private void ValidateCpuFeatures(DiagnosticBag diagnostics, CompilationArchitecture architecture)
+    {
+        var features = Options.CpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : Options.CpuFeatures;
+        var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
+        foreach (var feature in features)
+            if (!Enum.IsDefined(feature))
+                diagnostics.Add("CT4120", $"Unknown CPU feature value '{(int)feature}'.", source, new TextSpan(0, 0));
+        if (features.Distinct().Count() != features.Length)
+            diagnostics.Add("CT4120", "A CPU feature can be selected only once.", source, new TextSpan(0, 0));
+        if (features.Contains(CpuFeature.Simd128) && architecture is not (CompilationArchitecture.X86 or CompilationArchitecture.X64 or CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64))
+            diagnostics.Add("CT4120", $"CPU feature 'simd128' is not available for architecture '{architecture}'.", source, new TextSpan(0, 0));
+    }
+
+    private static void ValidateOwnerRoot(string? value, string label, SyntaxTree tree, DiagnosticBag diagnostics)
+    {
+        if (value is null)
+            return;
+        if (!Path.IsPathFullyQualified(value))
+        {
+            diagnostics.Add("CT4119", $"The source-owner {label} must be an absolute path.", tree.Text, new TextSpan(0, 0));
+            return;
+        }
+        try
+        {
+            _ = Path.GetFullPath(value);
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            diagnostics.Add("CT4119", $"The source-owner {label} is invalid: {exception.Message}", tree.Text, new TextSpan(0, 0));
         }
     }
 }

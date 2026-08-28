@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace CTilde;
 
 public enum CompilationTarget
@@ -41,6 +43,11 @@ public enum EspIdfPanicPolicy
     Halt,
 }
 
+public enum CpuFeature
+{
+    Simd128,
+}
+
 public sealed record CompilationOptions(
     CompilationTarget Target = CompilationTarget.Hosted,
     string? SourceRoot = null,
@@ -49,4 +56,5 @@ public sealed record CompilationOptions(
     CompilationArchitecture Architecture = CompilationArchitecture.Auto,
     bool NoRecursion = false,
     string? SourceIdentityRoot = null,
-    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort);
+    EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
+    ImmutableArray<CpuFeature> CpuFeatures = default);

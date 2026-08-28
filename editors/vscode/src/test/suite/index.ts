@@ -121,14 +121,44 @@ async function nativeBuildFeatures(root: string): Promise<void> {
     const filePath = path.join(directory, 'Program.ct');
     const source = 'public static class Program { [EntryPoint] public static void Main() { } }';
     await mkdir(directory);
-    await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['Program.ct'] }));
+    const run = process.platform === 'win32'
+        ? { command: 'powershell', args: ['-NoProfile', '-Command', "Set-Content -LiteralPath 'run-command.ok' -Value ok"] }
+        : { command: 'sh', args: ['-c', 'printf ok > run-command.ok'] };
+    await writeFile(path.join(directory, 'ctilde.json'), JSON.stringify({ target: 'hosted', sources: ['Program.ct'], run }));
     await writeFile(filePath, source);
     const document = await vscode.workspace.openTextDocument(filePath);
     await vscode.window.showTextDocument(document);
-    await vscode.commands.executeCommand('ctilde.project.build');
+    const manifest = path.join(directory, 'ctilde.json');
+    await executeProjectCommand('ctilde.project.build', 'build', manifest);
     const generated = path.join(directory, 'build', 'generated', 'ctilde_program.c');
     const executable = path.join(directory, 'build', `native-build${process.platform === 'win32' ? '.exe' : ''}`);
     await waitForFiles([generated, executable]);
+    const tasks = await vscode.tasks.fetchTasks({ type: 'ctilde' });
+    assert.ok(tasks.some(task => task.definition.mode === 'run' &&
+        path.resolve(task.definition.project).localeCompare(manifest, undefined, { sensitivity: 'accent' }) === 0),
+        'The C~ Run Project task was not discovered.');
+    await executeProjectCommand('ctilde.project.run', 'run', manifest);
+    await waitForFiles([path.join(directory, 'run-command.ok')]);
+}
+
+async function executeProjectCommand(command: string, mode: string, manifest: string): Promise<void> {
+    const completed = new Promise<number | undefined>((resolve, reject) => {
+        const timer = setTimeout(() => {
+            subscription.dispose();
+            reject(new Error(`Timed out waiting for the C~ ${mode} task.`));
+        }, 30000);
+        const subscription = vscode.tasks.onDidEndTaskProcess(event => {
+            const definition = event.execution.task.definition;
+            if (definition.mode !== mode || typeof definition.project !== 'string' ||
+                path.resolve(definition.project).localeCompare(manifest, undefined, { sensitivity: 'accent' }) !== 0)
+                return;
+            clearTimeout(timer);
+            subscription.dispose();
+            resolve(event.exitCode);
+        });
+    });
+    await vscode.commands.executeCommand(command);
+    assert.equal(await completed, 0, `The C~ ${mode} task failed.`);
 }
 
 async function waitForFiles(files: string[]): Promise<void> {
@@ -156,7 +186,7 @@ async function hostedIoFeatures(root: string): Promise<{ labels: string[]; docum
     const position = document.positionAt(source.indexOf('File.') + 'File.'.length);
     const completions = await waitFor(
         async () => vscode.commands.executeCommand<vscode.CompletionList>('vscode.executeCompletionItemProvider', document.uri, position, '.', 100),
-        value => value.items.some(item => item.label === 'Open'),
+        value => value.items.some(item => item.label === 'Open' && documentationText(item.documentation).includes('Opens, creates, or appends')),
         value => value.items.slice(0, 20).map(item => typeof item.label === 'string' ? item.label : item.label.label).join(', '));
     const openItems = completions.items.filter(item => item.label === 'Open');
     return {

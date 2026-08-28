@@ -57,6 +57,23 @@ internal static partial class ConformanceTests
             var retainedField = FindSymbol(retainedSymbols, "field", "Retained::field");
             var retainedMethod = FindSymbol(retainedSymbols, "method", "Retained::Method");
             var retainedExportImplementation = FindSymbol(retainedSymbols, "method", "Retained::Exported");
+            var retentionBundle = retentionCompilation.EmitCBundle();
+            Assert(retentionBundle.Success, string.Join(Environment.NewLine, retentionBundle.Diagnostics));
+            var retentionHeader = retentionBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            Assert(!retentionHeader.Contains("extern CT_FORCE_INCLUDE", StringComparison.Ordinal),
+                "A [Used] retention macro invocation was misclassified as a function declaration.");
+            Assert(!retentionHeader.Contains("extern static_assert", StringComparison.Ordinal),
+                "A generated static assertion was misclassified as a data definition.");
+            Assert(retentionHeader.Contains(retainedField, StringComparison.Ordinal) &&
+                !retentionHeader.Contains($"{retainedField} =", StringComparison.Ordinal),
+                "A [Used] data definition was duplicated into the modular internal header.");
+            var retainedFieldDeclaration = retentionHeader.Split('\n').Single(line =>
+                line.StartsWith("extern ", StringComparison.Ordinal) && line.Contains(retainedField, StringComparison.Ordinal));
+            Assert(!retainedFieldDeclaration.Contains("CT_USED", StringComparison.Ordinal),
+                "Definition-only [Used] attributes leaked onto a modular extern declaration.");
+            Assert(retentionHeader.Split('\n').Count(line => line.StartsWith("#if", StringComparison.Ordinal)) ==
+                retentionHeader.Split('\n').Count(line => line.StartsWith("#endif", StringComparison.Ordinal)),
+                "A [Used] retention block left the modular internal header with unbalanced conditional directives.");
             var retainedImage = CompileAndInspectRetainedImage(retentionSource).Output;
             Assert(retainedImage.Contains(retainedField, StringComparison.Ordinal) && retainedImage.Contains(retainedMethod, StringComparison.Ordinal) &&
                 retainedImage.Contains(retainedExportImplementation, StringComparison.Ordinal) && retainedImage.Contains("ct_used_export", StringComparison.Ordinal),

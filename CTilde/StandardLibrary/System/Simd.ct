@@ -1,0 +1,127 @@
+namespace System.Simd;
+
+public struct Mask32x4
+{
+    private uint l0;
+    private uint l1;
+    private uint l2;
+    private uint l3;
+
+    internal Mask32x4(uint a, uint b, uint c, uint d) { l0 = a; l1 = b; l2 = c; l3 = d; }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] internal static Mask32x4 FromBools(bool a, bool b, bool c, bool d) { return new Mask32x4(Bits(a), Bits(b), Bits(c), Bits(d)); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static uint Bits(bool value) { if (value) { return 0xffffffffu; } return 0u; }
+
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 And(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 & right.l0, left.l1 & right.l1, left.l2 & right.l2, left.l3 & right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 Or(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 | right.l0, left.l1 | right.l1, left.l2 | right.l2, left.l3 | right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 Xor(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 ^ right.l0, left.l1 ^ right.l1, left.l2 ^ right.l2, left.l3 ^ right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 AndNot(Mask32x4 left, Mask32x4 right) { return new Mask32x4((~left.l0) & right.l0, (~left.l1) & right.l1, (~left.l2) & right.l2, (~left.l3) & right.l3); }
+
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public bool GetLane<const int Lane>()
+    {
+        if (Lane == 0) { return l0 != 0; }
+        else if (Lane == 1) { return l1 != 0; }
+        else if (Lane == 2) { return l2 != 0; }
+        else { return l3 != 0; }
+    }
+}
+
+public struct F32x4
+{
+    private float l0;
+    private float l1;
+    private float l2;
+    private float l3;
+
+    public F32x4(float a, float b, float c, float d) { l0 = a; l1 = b; l2 = c; l3 = d; }
+
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 Zero { get { return new F32x4(0.0f, 0.0f, 0.0f, 0.0f); } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 Splat(float value) { return new F32x4(value, value, value, value); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 Create(float a, float b, float c, float d) { return new F32x4(a, b, c, d); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 operator +(F32x4 left, F32x4 right) { return new F32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 operator -(F32x4 left, F32x4 right) { return new F32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 operator *(F32x4 left, F32x4 right) { return new F32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 operator /(F32x4 left, F32x4 right) { return new F32x4(left.l0 / right.l0, left.l1 / right.l1, left.l2 / right.l2, left.l3 / right.l3); }
+
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public float GetLane<const int Lane>()
+    {
+        if (Lane == 0) { return l0; }
+        else if (Lane == 1) { return l1; }
+        else if (Lane == 2) { return l2; }
+        else { return l3; }
+    }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public F32x4 WithLane<const int Lane>(float value)
+    {
+        if (Lane == 0) { return new F32x4(value, l1, l2, l3); }
+        else if (Lane == 1) { return new F32x4(l0, value, l2, l3); }
+        else if (Lane == 2) { return new F32x4(l0, l1, value, l3); }
+        else { return new F32x4(l0, l1, l2, value); }
+    }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public F32x4 Shuffle<const int A, const int B, const int C, const int D>()
+    {
+        return new F32x4(GetLane<A>(), GetLane<B>(), GetLane<C>(), GetLane<D>());
+    }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 CompareEqual(F32x4 left, F32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 CompareLessThan(F32x4 left, F32x4 right) { return Mask32x4.FromBools(left.l0 < right.l0, left.l1 < right.l1, left.l2 < right.l2, left.l3 < right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static F32x4 Select(Mask32x4 mask, F32x4 whenTrue, F32x4 whenFalse) { return new F32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static float Choose(bool condition, float whenTrue, float whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+}
+
+public struct I32x4
+{
+    private int l0; private int l1; private int l2; private int l3;
+    public I32x4(int a, int b, int c, int d) { l0 = a; l1 = b; l2 = c; l3 = d; }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Zero { get { return new I32x4(0, 0, 0, 0); } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Splat(int value) { return new I32x4(value, value, value, value); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Create(int a, int b, int c, int d) { return new I32x4(a, b, c, d); }
+    [NoAlloc] [NoBlock] public static I32x4 operator +(I32x4 left, I32x4 right) { return new I32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
+    [NoAlloc] [NoBlock] public static I32x4 operator -(I32x4 left, I32x4 right) { return new I32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
+    [NoAlloc] [NoBlock] public static I32x4 operator *(I32x4 left, I32x4 right) { return new I32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public int GetLane<const int Lane>() { if (Lane == 0) { return l0; } else if (Lane == 1) { return l1; } else if (Lane == 2) { return l2; } else { return l3; } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public I32x4 WithLane<const int Lane>(int value) { if (Lane == 0) { return new I32x4(value, l1, l2, l3); } else if (Lane == 1) { return new I32x4(l0, value, l2, l3); } else if (Lane == 2) { return new I32x4(l0, l1, value, l3); } else { return new I32x4(l0, l1, l2, value); } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 CompareEqual(I32x4 left, I32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static I32x4 Select(Mask32x4 mask, I32x4 whenTrue, I32x4 whenFalse) { return new I32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static int Choose(bool condition, int whenTrue, int whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+}
+
+public struct U32x4
+{
+    private uint l0; private uint l1; private uint l2; private uint l3;
+    public U32x4(uint a, uint b, uint c, uint d) { l0 = a; l1 = b; l2 = c; l3 = d; }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Zero { get { return new U32x4(0u, 0u, 0u, 0u); } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Splat(uint value) { return new U32x4(value, value, value, value); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Create(uint a, uint b, uint c, uint d) { return new U32x4(a, b, c, d); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator +(U32x4 left, U32x4 right) { return new U32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator -(U32x4 left, U32x4 right) { return new U32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator *(U32x4 left, U32x4 right) { return new U32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public uint GetLane<const int Lane>() { if (Lane == 0) { return l0; } else if (Lane == 1) { return l1; } else if (Lane == 2) { return l2; } else { return l3; } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public U32x4 WithLane<const int Lane>(uint value) { if (Lane == 0) { return new U32x4(value, l1, l2, l3); } else if (Lane == 1) { return new U32x4(l0, value, l2, l3); } else if (Lane == 2) { return new U32x4(l0, l1, value, l3); } else { return new U32x4(l0, l1, l2, value); } }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static Mask32x4 CompareEqual(U32x4 left, U32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    public static U32x4 Select(Mask32x4 mask, U32x4 whenTrue, U32x4 whenFalse) { return new U32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
+    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static uint Choose(bool condition, uint whenTrue, uint whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+}

@@ -108,6 +108,8 @@ interface DebugTarget {
     readonly debugMap: string;
     readonly sourceRoot: string;
     readonly workingDirectory: string;
+    readonly arguments?: readonly string[];
+    readonly environment?: Readonly<Record<string, string>>;
     readonly gdbCommand?: string;
     readonly gdbPrefixArguments?: readonly string[];
     readonly serialPython?: string;
@@ -121,6 +123,7 @@ interface CTildeDebugArguments {
     readonly debugTarget: string;
     readonly request: 'launch' | 'attach';
     readonly args?: readonly string[];
+    readonly environment?: Readonly<Record<string, string>>;
     readonly cwd?: string;
     readonly stopAtEntry?: boolean;
     readonly showRuntimeFrames?: boolean;
@@ -306,8 +309,13 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 await this.gdb.command(`-interpreter-exec console ${miQuote('set remote trace-status-packet off')}`);
                 await this.gdb.command(`-interpreter-exec console ${miQuote('set remote software-breakpoint-packet on')}`);
             }
-            if (request === 'launch' && args.args !== undefined && args.args.length !== 0)
-                await this.gdb.command(`-exec-arguments ${args.args.map(miQuote).join(' ')}`);
+            const launchArguments = args.args ?? this.target.arguments ?? [];
+            if (request === 'launch' && launchArguments.length !== 0)
+                await this.gdb.command(`-exec-arguments ${launchArguments.map(miQuote).join(' ')}`);
+            const launchEnvironment = args.environment ?? this.target.environment ?? {};
+            if (request === 'launch')
+            for (const [name, value] of Object.entries(launchEnvironment).sort(([left], [right]) => left.localeCompare(right)))
+                await this.gdb.command(`-gdb-set environment ${miQuote(`${name}=${value}`)}`);
             this.sendEvent(new InitializedEvent());
             this.sendResponse(response);
         } catch (error) {

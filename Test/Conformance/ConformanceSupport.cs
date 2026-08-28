@@ -32,6 +32,26 @@ internal static partial class ConformanceTests
     static ProcessResult CompileAndRun(string source, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null, bool conformance = false, bool layoutDiagnostics = false)
         => CompileAndRun([SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics, nativeSuffix, threads, standardInput, standardInputBytes, captureFile, conformance, layoutDiagnostics);
 
+    static ProcessResult CompileAndRun(string source, CompilationOptions options)
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ctilde-option-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var cPath = Path.Combine(directory, "program.c");
+            var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
+            File.WriteAllText(cPath, Emit(source, options), new UTF8Encoding(false));
+            var compilerResult = RunCompiler(cPath, executablePath, memoryDiagnostics: false, threads: false, conformance: false, layoutDiagnostics: false);
+            Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
+            return RunCompiledProgram(executablePath, null, null, null);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, true);
+        }
+    }
+
     static ProcessResult CompileAndRun(IEnumerable<SyntaxTree> sources, bool memoryDiagnostics = false, string nativeSuffix = "", bool threads = false, string? standardInput = null, byte[]? standardInputBytes = null, string? captureFile = null, bool conformance = false, bool layoutDiagnostics = false)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));

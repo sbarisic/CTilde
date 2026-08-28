@@ -2,9 +2,9 @@
 
 ## Status
 
-This document proposes six future C~ feature groups. It does not describe the current language.
+This document is the historical design record for feature groups implemented across Drafts 0.26 through 0.34. It is not normative and some final syntax differs; see [LANGUAGE.md](LANGUAGE.md) for the current contract.
 
-The proposals cover embedded resources, lambdas, Unicode runes, binary64 numbers, fixed-width SIMD, and source modules from repositories.
+The record covers source-owner identity, embedded resources, lambdas, Unicode runes, binary64 numbers, fixed-width SIMD, and source modules from repositories.
 
 Each feature must satisfy the extension rules in [ARCHITECTURE.md](ARCHITECTURE.md). A complete revision includes syntax, binding, lowering, diagnostics, generated C, tools, documentation, and tests.
 

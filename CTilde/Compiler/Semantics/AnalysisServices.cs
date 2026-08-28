@@ -48,6 +48,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public bool EmitDebugInstrumentation => false;
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -121,6 +122,7 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Void => "void",
         CTypeKind.Bool => "bool",
         CTypeKind.Byte or CTypeKind.Char => "uint8_t",
+        CTypeKind.Rune => "uint32_t",
         CTypeKind.Sbyte => "int8_t",
         CTypeKind.Short => "int16_t",
         CTypeKind.Ushort => "uint16_t",
@@ -131,6 +133,7 @@ internal sealed class AnalysisServices : ILoweringServices
         CTypeKind.Nint => "intptr_t",
         CTypeKind.Nuint => "uintptr_t",
         CTypeKind.Float => "float",
+        CTypeKind.Double => "double",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class or CTypeKind.Delegate => $"{NameMangler.Type(type.Symbol!)}*",
         CTypeKind.Interface => "ct_object*",
@@ -183,6 +186,7 @@ internal sealed class AnalysisServices : ILoweringServices
     {
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
+        CTypeKind.Double => "0.0",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Interface or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
         CTypeKind.Opaque => $"({CTypeName(type)})0",
         CTypeKind.EspError => "ESP_OK",

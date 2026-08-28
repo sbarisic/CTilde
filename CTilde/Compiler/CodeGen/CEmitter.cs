@@ -120,6 +120,7 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
@@ -141,9 +142,10 @@ internal sealed partial class CEmitter : ILoweringServices
             return "<memory>/" + Hash96(method.Syntax.Source.Text);
         try
         {
-            if (_sourceIdentityRoot is not null && Path.IsPathFullyQualified(path))
+            var identityRoot = Model.SourceOwnerFor(method.Syntax.Source)?.SourceIdentityRoot ?? _sourceIdentityRoot;
+            if (identityRoot is not null && Path.IsPathFullyQualified(path))
             {
-                var relative = Path.GetRelativePath(_sourceIdentityRoot, path);
+                var relative = Path.GetRelativePath(identityRoot, path);
                 if (relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) && !Path.IsPathFullyQualified(relative))
                     path = relative;
             }
@@ -357,6 +359,7 @@ internal sealed partial class CEmitter : ILoweringServices
         writer.WriteLine("static_assert(sizeof(int32_t) == 4 && sizeof(uint32_t) == 4, \"C~ requires exact 32-bit integers\");");
         writer.WriteLine("static_assert(sizeof(int64_t) == 8 && sizeof(uint64_t) == 8, \"C~ requires exact 64-bit integers\");");
         writer.WriteLine("static_assert(sizeof(float) == 4 && FLT_RADIX == 2 && FLT_MANT_DIG == 24, \"C~ requires IEEE-754 binary32 float\");");
+        writer.WriteLine("static_assert(sizeof(double) == 8 && FLT_RADIX == 2 && DBL_MANT_DIG == 53, \"C~ requires IEEE-754 binary64 double\");");
         writer.WriteLine("static_assert(INT32_MIN == (-2147483647 - 1), \"C~ requires two's-complement int32_t\");");
         writer.WriteLine();
     }
@@ -500,6 +503,18 @@ internal sealed partial class CEmitter : ILoweringServices
             }
 
             var declaration = RemoveInternalLinkage(line);
+            if (declaration is null && line.Length != 0 && !char.IsWhiteSpace(line[0]) && line[0] != '#')
+            {
+                var equals = FindTopLevelInitializer(line);
+                if (equals >= 0)
+                {
+                    var externalDeclaration = StripExternalDataDefinitionAttributes(line[..equals].TrimEnd());
+                    writer.Append("extern ").Append(externalDeclaration).Append(";\n");
+                    if (!line.TrimEnd().EndsWith(';'))
+                        skipInitializer = true;
+                    continue;
+                }
+            }
             if (declaration is not null)
             {
                 declaration = declaration.Replace("DRAM_ATTR ", string.Empty, StringComparison.Ordinal);
@@ -560,6 +575,87 @@ internal sealed partial class CEmitter : ILoweringServices
         return writer.ToString();
     }
 
+    private static int FindTopLevelInitializer(string line)
+    {
+        var parenthesisDepth = 0;
+        var bracketDepth = 0;
+        var braceDepth = 0;
+        var inString = false;
+        var inCharacter = false;
+        var escaped = false;
+        for (var index = 0; index < line.Length; index++)
+        {
+            var character = line[index];
+            if (escaped)
+            {
+                escaped = false;
+                continue;
+            }
+            if ((inString || inCharacter) && character == '\\')
+            {
+                escaped = true;
+                continue;
+            }
+            if (!inCharacter && character == '"')
+            {
+                inString = !inString;
+                continue;
+            }
+            if (!inString && character == '\'')
+            {
+                inCharacter = !inCharacter;
+                continue;
+            }
+            if (inString || inCharacter)
+                continue;
+            switch (character)
+            {
+                case '(':
+                    parenthesisDepth++;
+                    break;
+                case ')':
+                    parenthesisDepth--;
+                    break;
+                case '[':
+                    bracketDepth++;
+                    break;
+                case ']':
+                    bracketDepth--;
+                    break;
+                case '{':
+                    braceDepth++;
+                    break;
+                case '}':
+                    braceDepth--;
+                    break;
+                case '=' when parenthesisDepth == 0 && bracketDepth == 0 && braceDepth == 0 &&
+                    (index == 0 || line[index - 1] is not '!' and not '<' and not '>' and not '=') &&
+                    (index + 1 >= line.Length || line[index + 1] != '='):
+                    return index;
+            }
+        }
+        return -1;
+    }
+
+    private static string StripExternalDataDefinitionAttributes(string declaration)
+    {
+        declaration = declaration.Replace("DRAM_ATTR ", string.Empty, StringComparison.Ordinal)
+            .Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal)
+            .Replace("CT_USED ", string.Empty, StringComparison.Ordinal)
+            .Replace("CT_UNUSED ", string.Empty, StringComparison.Ordinal);
+        foreach (var prefix in new[] { "CT_SECTION_DATA_", "CT_SECTION_READONLYDATA_" })
+        {
+            var start = declaration.IndexOf(prefix, StringComparison.Ordinal);
+            if (start < 0 || (start > 0 && !char.IsWhiteSpace(declaration[start - 1])))
+                continue;
+            var end = declaration.IndexOf(' ', start);
+            declaration = end < 0
+                ? declaration[..start].TrimEnd()
+                : declaration.Remove(start, end - start + 1);
+        }
+        return declaration;
+    }
+
     private static string? RemoveInternalLinkage(string line)
     {
         const string noReturnMarked = "CT_NORETURN static CT_UNUSED ";
@@ -600,7 +696,7 @@ internal sealed partial class CEmitter : ILoweringServices
             line.StartsWith("static", StringComparison.Ordinal) || line.StartsWith("CT_NORETURN static", StringComparison.Ordinal))
             return false;
         var open = line.IndexOf('(');
-        return open > 0 && !line.EndsWith(';');
+        return open > 0 && line.AsSpan(0, open).ContainsAny(' ', '\t') && !line.EndsWith(';');
     }
 
     private static string ExternalizeDefinitions(string source, bool runtimeUnit)
@@ -651,6 +747,8 @@ internal sealed partial class CEmitter : ILoweringServices
             var entry = SymbolMapEntry(NameMangler.Member(field), NameMangler.MemberIdentity(field), "field", field.Type.DisplayName, field.Syntax);
             entry["used"] = field.IsUsed;
             entry["constInit"] = field.IsConstInit;
+            entry["embeddedResource"] = field.EmbeddedResourceIdentity;
+            entry["embeddedBytes"] = field.EmbeddedData?.Length;
             entry["linkerRetained"] = field.IsUsed;
             entry["linkerSymbol"] = field.LinkerSymbolName;
             entry["registerAddress"] = field.RegisterAddress?.ToString(CultureInfo.InvariantCulture);
@@ -1097,6 +1195,7 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Void => "void",
         CTypeKind.Bool => "bool",
         CTypeKind.Byte or CTypeKind.Char => "uint8_t",
+        CTypeKind.Rune => "uint32_t",
         CTypeKind.Sbyte => "int8_t",
         CTypeKind.Short => "int16_t",
         CTypeKind.Ushort => "uint16_t",
@@ -1107,6 +1206,7 @@ internal sealed partial class CEmitter : ILoweringServices
         CTypeKind.Nint => "intptr_t",
         CTypeKind.Nuint => "uintptr_t",
         CTypeKind.Float => "float",
+        CTypeKind.Double => "double",
         CTypeKind.String => "ct_string*",
         CTypeKind.Class => $"{NameMangler.Type(type.Symbol!)}*",
         CTypeKind.Interface => "ct_object*",
@@ -1195,6 +1295,7 @@ internal sealed partial class CEmitter : ILoweringServices
     {
         CTypeKind.Bool => "false",
         CTypeKind.Float => "0.0f",
+        CTypeKind.Double => "0.0",
         CTypeKind.String or CTypeKind.Class or CTypeKind.Interface or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Null => "NULL",
         CTypeKind.Opaque => $"({CTypeName(type)})0",
         CTypeKind.EspError => "ESP_OK",

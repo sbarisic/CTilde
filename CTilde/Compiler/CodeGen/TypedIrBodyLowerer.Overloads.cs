@@ -163,7 +163,9 @@ internal sealed partial class TypedIrBodyLowerer
     }
 
     private static bool CanConvertExpression(IrExpressionValue expression, CType target) =>
-        expression.MethodGroup is { } group
+        expression.Lambda is { } lambda
+            ? target.Kind == CTypeKind.Delegate && target.Symbol is not null && lambda.Parameters.Length == target.Symbol.DelegateParameters.Length
+            : expression.MethodGroup is { } group
             ? target.Kind == CTypeKind.Delegate && FindDelegateMethod(group, target.Symbol!) is not null
             : TypeFacts.CanImplicitlyConvert(expression.Type, target) || CanImplicitNativeConstant(expression, target);
 

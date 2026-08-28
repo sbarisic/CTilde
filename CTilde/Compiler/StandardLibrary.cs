@@ -11,7 +11,8 @@ internal enum StandardVectorTypes
     Vec2 = 1,
     Vec3 = 2,
     Vec4 = 4,
-    All = Vec2 | Vec3 | Vec4,
+    Simd = 8,
+    All = Vec2 | Vec3 | Vec4 | Simd,
 }
 
 internal static class StandardLibrary
@@ -37,6 +38,8 @@ internal static class StandardLibrary
                 files.Add("Vec3.ct");
             if ((key.Vectors & StandardVectorTypes.Vec4) != 0)
                 files.Add("Vec4.ct");
+            if ((key.Vectors & StandardVectorTypes.Simd) != 0)
+                files.Add("Simd.ct");
             if (key.HostedIo)
                 files.Add("HostedIO.ct");
             if (key.Target == CompilationTarget.EspIdf)
@@ -55,6 +58,7 @@ internal static class StandardLibrary
                 "Vec2" => StandardVectorTypes.Vec2,
                 "Vec3" => StandardVectorTypes.Vec3,
                 "Vec4" => StandardVectorTypes.Vec4,
+                "F32x4" or "I32x4" or "U32x4" or "Mask32x4" => StandardVectorTypes.Simd,
                 _ => StandardVectorTypes.None,
             };
         }
@@ -121,7 +125,7 @@ internal static class StandardLibrary
                 text = text.Replace("    // CTILDE_HOSTED_INPUT_MEMBERS", HostedConsoleInputMembers, StringComparison.Ordinal);
             if (file == "Memory.ct" && includeNativeUtf8)
                 text = text.Replace("// CTILDE_NATIVE_UTF8_DECLARATION", NativeUtf8Declaration, StringComparison.Ordinal);
-            trees.Add(SyntaxTree.ParseText(text, $"stdlib/System/{file}"));
+            trees.Add(SyntaxTree.ParseStandardLibrary(SourceText.From(text, $"stdlib/System/{file}")));
         }
 
         return trees.ToImmutable();

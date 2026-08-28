@@ -1,6 +1,6 @@
 import * as path from 'path';
 
-export type CTildeTaskMode = 'check' | 'build' | 'bindings';
+export type CTildeTaskMode = 'check' | 'build' | 'run' | 'bindings';
 export type CTildeProjectTarget = 'hosted' | 'esp-idf' | 'freestanding' | 'cosmopolitan' | 'unknown';
 
 export interface CompilerLaunchConfiguration {
@@ -73,8 +73,8 @@ export function compilerArguments(
     settings: BuildArgumentSettings,
 ): string[] {
     const result = [...launch.prefixArguments, '--project', manifestPath,
-        mode === 'build' ? '--build' : mode === 'bindings' ? '--generate-bindings' : '--check'];
-    if (mode === 'build' && (target === 'hosted' || target === 'cosmopolitan') && settings.nativeCompiler.trim().length !== 0)
+        mode === 'build' ? '--build' : mode === 'run' ? '--run' : mode === 'bindings' ? '--generate-bindings' : '--check'];
+    if ((mode === 'build' || mode === 'run') && (target === 'hosted' || target === 'cosmopolitan') && settings.nativeCompiler.trim().length !== 0)
         result.push('--compiler', settings.nativeCompiler.trim());
     if (target === 'esp-idf' && settings.idfPath.trim().length !== 0)
         result.push('--idf-path', settings.idfPath.trim());

@@ -53,6 +53,12 @@ test("task arguments apply only target-appropriate machine settings", () => {
     compilerArguments(launch, manifest, "build", "hosted", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-5),
     ["--project", manifest, "--build", "--compiler", "clang"]);
   assert.deepEqual(
+    compilerArguments(launch, manifest, "run", "hosted", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-5),
+    ["--project", manifest, "--run", "--compiler", "clang"]);
+  assert.deepEqual(
+    compilerArguments(launch, manifest, "run", "freestanding", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-3),
+    ["--project", manifest, "--run"]);
+  assert.deepEqual(
     compilerArguments(launch, manifest, "build", "cosmopolitan", { nativeCompiler: "wsl:/opt/cosmocc/bin/x86_64-unknown-cosmo-cc", idfPath: "idf", espClangPath: "esp-clang" }).slice(-5),
     ["--project", manifest, "--build", "--compiler", "wsl:/opt/cosmocc/bin/x86_64-unknown-cosmo-cc"]);
   assert.deepEqual(

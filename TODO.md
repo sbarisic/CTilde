@@ -1,17 +1,14 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.25 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.34 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-The staged contracts for embedded resources, binary64 numbers, Unicode runes, lambdas, fixed-width SIMD, and repository source modules are documented in [FUTURE_FEATURES.md](FUTURE_FEATURES.md). Implement them as separate language revisions:
+Drafts 0.26 through 0.34 completed the source-owner, binary64, rune primitive, embedded-resource, lambda/closure, fixed-width SIMD, and exact repository-module milestones. Remaining follow-ups are:
 
-- [ ] Add the source-owner identity used by embedded-resource paths, module-local `internal` access, canonical symbols, and dependency source navigation. Preserve current single-project behavior.
-- [ ] Add IEEE-754 binary64 `double` with `D` literals, decimal exponents, numeric promotion, native ABI mapping, formatting, math overloads, editor support, and cross-toolchain tests.
-- [ ] Add four-byte Unicode `rune` with suffixed scalar literals, validated construction, allocation-free UTF-8 decode and encode APIs, exact console bytes, and editor support. Keep `char` and string indexing byte-based.
-- [ ] Add `[Embed]` on static readonly `EmbeddedResource` fields. Resolve confined project or module paths before compilation and emit immutable, prunable resource artifacts for every target.
-- [ ] Add captureless lambdas that convert only to named delegates. Then add explicit by-value capture lists, closure objects, ARC rules, effect checks, source debugging, and editor support.
-- [ ] Add exact-pinned repository source modules with a lock file, content-addressed cache, direct import aliases, module-local access, deterministic lifecycle order, offline restore, vendoring, and no dependency scripts.
+- [ ] Add allocation-free rune decode/encode helpers and Unicode escape forms without changing byte-based `char` and string indexing.
+- [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
+- [ ] Extend closure source-debug metadata beyond the current generated-method mapping and add dedicated lambda editor-service fixtures.
 
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
 - [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.
@@ -20,16 +17,11 @@ The staged contracts for embedded resources, binary64 numbers, Unicode runes, la
 
 ## Fixed-width SIMD
 
-Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. Implement the explicit 128-bit SIMD contract in [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd) in measured stages:
+Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte lane types, scalar-default contract, constant lane validation, and explicit x86/Arm `simd128` lowering are implemented. Remaining measured stages are:
 
-- [ ] Record current scalar `Vec4`, contiguous-buffer, and path-tracer baselines with GCC/Clang vectorization reports and MSVC disassembly.
-- [ ] Specify exact `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` lane, mask, integer-wrapping, shuffle, and floating-point semantics. Do not enable implicit fast math.
-- [ ] Add deterministic 16-byte storage and scalar implementations for construction, arithmetic, masks, selection, lane operations, shuffles, reinterpretation, and checked/unchecked loads and stores.
-- [ ] Add target-neutral `SimdShape`/`IrSimdOperation` lowering, constant-generic lane validation, and correct `[NoAlloc]`, `[NoThrow]`, `[NoBlock]`, and `[NoRuntime]` classification.
-- [ ] Add a compiler-verified `CpuFeature`/`Target.HasFeature` model plus manifest and CLI `cpuFeatures`; keep scalar fallback available when `Simd128` acceleration is disabled.
-- [ ] Emit alias-safe GCC/Clang fixed-vector helpers and MSVC SSE helpers, then add accepted Arm64 Neon lowering. Keep AVX2, SVE, and RISC-V V as later explicit profiles.
-- [ ] Reject SIMD values at public native ABI boundaries in the first revision; add symbol-map/debug lane metadata, editor support, unity/modular determinism, and MSVC/GCC/Clang/Cosmopolitan/freestanding/ESP-IDF acceptance.
-- [ ] After explicit SIMD passes, benchmark transparent `Vec4` lowering and a structure-of-arrays `Vec3x4` four-ray path-tracer workload without changing geometry layout or source semantics.
+- [ ] Add reinterpretation and checked/unchecked buffer load/store APIs with alias-safe lowering.
+- [ ] Add symbol-map/debug lane metadata and complete MSVC, GCC, Clang, Cosmopolitan, freestanding, and ESP-IDF acceptance across supported architectures.
+- [ ] Record scalar and intrinsic baselines, then benchmark transparent `Vec4` lowering and a structure-of-arrays `Vec3x4` four-ray workload without changing geometry layout or source semantics.
 
 ## Compiler optimization
 

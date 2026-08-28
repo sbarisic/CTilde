@@ -8,6 +8,8 @@ internal static class CTildeCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length > 0 && args[0] is "restore" or "update" or "vendor")
+            return RunModuleCommand(args);
         if (!CommandLineOptions.TryParse(args, out var options, out var parseError, out var showHelp))
             return UsageError(parseError!);
         if (args.Length == 0 || showHelp)
@@ -42,36 +44,41 @@ internal static class CTildeCommand
             if (request.PrepareDebug == "attach")
                 return DebugPreparation.ValidateAttach(request);
 
-            await using var buildLock = request.BuildNative || request.BindingManifests is { Count: > 0 }
+            await using (var buildLock = request.BuildNative || request.BindingManifests is { Count: > 0 }
                 ? BuildLock.Acquire(request.LockDirectory)
-                : null;
-            if (request.BindingManifests is { Count: > 0 })
+                : null)
             {
-                if (!await EspIdfBindingGenerator.RefreshAsync(request, request.VerifyBindings, cancellation.Token))
-                    return 1;
-                if (request.GenerateBindingsOnly || request.VerifyBindings)
-                    return 0;
-                request = request with { Inputs = CTildeProjectFile.Load(request.ManifestPath!).SourceFiles };
+                if (request.BindingManifests is { Count: > 0 })
+                {
+                    if (!await EspIdfBindingGenerator.RefreshAsync(request, request.VerifyBindings, cancellation.Token))
+                        return 1;
+                    if (request.GenerateBindingsOnly || request.VerifyBindings)
+                        return 0;
+                    var refreshedProject = CTildeProjectFile.Load(request.ManifestPath!);
+                    request = request with { Inputs = refreshedProject.SourceFiles, SourceOwners = refreshedProject.SourceOwners };
+                }
+                var compileElapsed = Stopwatch.StartNew();
+                var result = Compile(request);
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: C~ compile phase {compileElapsed.ElapsedMilliseconds} ms");
+                if (result.ExitCode != 0 || !request.BuildNative)
+                    return result.ExitCode;
+                var nativeElapsed = Stopwatch.StartNew();
+                var nativeResult = await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: native build phase {nativeElapsed.ElapsedMilliseconds} ms");
+                if (nativeResult.ExitCode != 0)
+                    return nativeResult.ExitCode;
+                if (request.PrepareDebug == "launch")
+                {
+                    if (request.Target == CompilationTarget.EspIdf)
+                        await EspIdfBuildDriver.PrepareDebugLaunchAsync(request, cancellation.Token);
+                    DebugPreparation.WriteDescriptor(request, nativeResult);
+                }
             }
-            var compileElapsed = Stopwatch.StartNew();
-            var result = Compile(request);
-            if (request.Trace)
-                Console.Error.WriteLine($"trace: C~ compile phase {compileElapsed.ElapsedMilliseconds} ms");
-            if (result.ExitCode != 0 || !request.BuildNative)
-                return result.ExitCode;
-            var nativeElapsed = Stopwatch.StartNew();
-            var nativeResult = await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
-            if (request.Trace)
-                Console.Error.WriteLine($"trace: native build phase {nativeElapsed.ElapsedMilliseconds} ms");
-            if (nativeResult.ExitCode != 0)
-                return nativeResult.ExitCode;
-            if (request.PrepareDebug == "launch")
-            {
-                if (request.Target == CompilationTarget.EspIdf)
-                    await EspIdfBuildDriver.PrepareDebugLaunchAsync(request, cancellation.Token);
-                DebugPreparation.WriteDescriptor(request, nativeResult);
-            }
-            return 0;
+            return request.RunAfterBuild
+                ? await ProjectRunDriver.RunAsync(request, cancellation.Token)
+                : 0;
         }
         catch (BuildLockException exception)
         {
@@ -107,18 +114,26 @@ internal static class CTildeCommand
             }
             var bindingDeclarations = (request.BindingManifests ?? []).Select(manifest => manifest.DeclarationsPath)
                 .ToHashSet(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-            var trees = request.Inputs.Select(path => bindingDeclarations.Contains(Path.GetFullPath(path))
-                ? SyntaxTree.ParseEspIdfBinding(SourceText.FromFile(path))
-                : SyntaxTree.Parse(SourceText.FromFile(path))).ToArray();
             var sourceRoot = request.DebugInformation != DebugInformationMode.None
                 ? request.SourceRoot ?? (request.ManifestPath is null ? null : request.RootDirectory)
                 : request.SourceRoot;
             var sourceIdentityRoot = request.ManifestPath is null
                 ? CommonSourceIdentityRoot(request.Inputs)
                 : request.RootDirectory;
+            var rootOwner = new SourceOwnerIdentity("<root>", request.RootDirectory, sourceIdentityRoot, true, null);
+            var trees = request.Inputs.Select(path =>
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (bindingDeclarations.Contains(fullPath))
+                    return SyntaxTree.ParseEspIdfBinding(SourceText.FromFile(fullPath));
+                var owner = request.SourceOwners is not null && request.SourceOwners.TryGetValue(fullPath, out var moduleOwner)
+                    ? moduleOwner
+                    : rootOwner;
+                return SyntaxTree.Parse(SourceText.FromFile(fullPath), owner);
+            }).ToArray();
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
                 request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
-                sourceIdentityRoot, request.PanicPolicy));
+                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []]));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -190,7 +205,7 @@ internal static class CTildeCommand
         if (options.Target == CompilationTarget.EspIdf && options.SourceRoot is not null)
             return UsageError("--source-root is unavailable for ESP-IDF compilations.");
         if (options.Inputs.Count != 0 || options.Output is not null || options.HeaderOutput is not null ||
-            options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Configuration is not null ||
+            options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Run || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
             options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
             options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null ||
@@ -211,7 +226,7 @@ internal static class CTildeCommand
             {
                 var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
                 var request = new BuildRequest([input], options.Target, options.Architecture, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
-                    null, false, options.Trace, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null,
+                    null, false, options.Trace, false, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null,
                     GeneratedCLayout.Unity, null, null, false);
                 if (Compile(request).ExitCode != 0)
                 {
@@ -334,11 +349,12 @@ internal static class CTildeCommand
 
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--cpu-feature simd128] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|freestanding|cosmopolitan] [native build options] [--trace]");
-        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] [--build] [native build options] [--check] [--trace]");
+        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] --build|--run [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
+        Console.Error.WriteLine("       ctilde restore|update|vendor --project <ctilde.json>");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");
@@ -346,5 +362,31 @@ internal static class CTildeCommand
         Console.Error.WriteLine("Cosmopolitan build: --architecture x64 [--cosmopolitan-mode default|tiny|debug] [--compiler wsl:<cosmocc>] [--native-output <program.com>]");
         Console.Error.WriteLine("ESP-IDF bindings: --generate-bindings --verify-bindings --esp-clang <path>");
         Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--debug-memory off|objects|guarded] [--serial-port <port>] [--baud-rate <rate>]");
+    }
+
+    private static int RunModuleCommand(string[] args)
+    {
+        if (args.Length != 3 || args[1] != "--project" || string.IsNullOrWhiteSpace(args[2]))
+            return UsageError($"{args[0]} requires exactly --project <ctilde.json>.");
+        try
+        {
+            var (root, modules) = CTildeProjectFile.ReadModuleReferences(args[2]);
+            if (args[0] == "vendor")
+                RepositoryModules.Vendor(root, modules);
+            else
+                RepositoryModules.Restore(root, modules, update: args[0] == "update");
+            Console.WriteLine(args[0] switch
+            {
+                "restore" => $"Restored {modules.Length} exact module(s).",
+                "update" => $"Updated and locked {modules.Length} module(s).",
+                _ => $"Vendored {modules.Length} exact module(s).",
+            });
+            return 0;
+        }
+        catch (CTildeProjectException exception)
+        {
+            Console.Error.WriteLine($"ctilde: {exception.Message}");
+            return 1;
+        }
     }
 }

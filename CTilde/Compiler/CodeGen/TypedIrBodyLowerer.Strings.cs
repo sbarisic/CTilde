@@ -86,6 +86,12 @@ internal sealed partial class TypedIrBodyLowerer
                 prelude.Add($"{buildName}_parts[{index}] = {buffer};");
                 prelude.Add($"{buildName}_lengths[{index}] = 1;");
                 return true;
+            case CTypeKind.Rune:
+                prelude.Add($"uint8_t {buffer}[4] = {{0}};");
+                prelude.Add($"int32_t {length} = ct_utf8_encode_rune({value}, {buffer});");
+                prelude.Add($"{buildName}_parts[{index}] = {buffer};");
+                prelude.Add($"{buildName}_lengths[{index}] = {length};");
+                return true;
         }
 
         var (capacity, format, argument) = receiver.Type.Kind switch
@@ -97,6 +103,7 @@ internal sealed partial class TypedIrBodyLowerer
             CTypeKind.Nint => ("3 * sizeof(intptr_t) + 2", "\"%\" PRIdPTR", value),
             CTypeKind.Nuint => ("3 * sizeof(uintptr_t) + 1", "\"%\" PRIuPTR", value),
             CTypeKind.Float => ("32", "\"%.9g\"", $"(double){value}"),
+            CTypeKind.Double => ("48", "\"%.17g\"", value),
             _ => throw new InvalidOperationException($"Unsupported scalar string segment '{receiver.Type.DisplayName}'."),
         };
         prelude.Add($"char {buffer}[{capacity}];");

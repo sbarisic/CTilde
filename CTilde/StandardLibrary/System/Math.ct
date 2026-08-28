@@ -3,6 +3,7 @@ namespace System;
 public static class Math
 {
     public const float Pi = 3.14159265358979323846f;
+    public const double Pi64 = 3.14159265358979323846264338327950288d;
 
     [Extern("ct_math_sqrt")]
     [NoAlloc]
@@ -39,4 +40,40 @@ public static class Math
     [Extern("ct_math_ceiling")]
     [NoAlloc]
     public static float Ceiling(float value);
+
+    [Extern("ct_math_sqrt_double")]
+    [NoAlloc]
+    public static double Sqrt(double value);
+
+    [Extern("ct_math_abs_double")]
+    [NoAlloc]
+    public static double Abs(double value);
+
+    [Extern("ct_math_tan_double")]
+    [NoAlloc]
+    public static double Tan(double value);
+
+    [Extern("ct_math_min_double")]
+    [NoAlloc]
+    public static double Min(double left, double right);
+
+    [Extern("ct_math_max_double")]
+    [NoAlloc]
+    public static double Max(double left, double right);
+
+    [Extern("ct_math_sin_double")]
+    [NoAlloc]
+    public static double Sin(double value);
+
+    [Extern("ct_math_cos_double")]
+    [NoAlloc]
+    public static double Cos(double value);
+
+    [Extern("ct_math_floor_double")]
+    [NoAlloc]
+    public static double Floor(double value);
+
+    [Extern("ct_math_ceiling_double")]
+    [NoAlloc]
+    public static double Ceiling(double value);
 }

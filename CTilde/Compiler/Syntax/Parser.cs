@@ -813,6 +813,8 @@ internal sealed partial class Parser
 
     private ExpressionSyntax ParseExpression()
     {
+        if (LooksLikeLambda())
+            return ParseLambdaExpression();
         var left = ParseBinaryExpression();
         if (IsAssignment(Current.Kind))
         {
@@ -821,6 +823,98 @@ internal sealed partial class Parser
             return new AssignmentExpressionSyntax(_source, TextSpan.FromBounds(left.Span.Start, right.Span.End), left, op.Kind, right);
         }
         return left;
+    }
+
+    private bool LooksLikeLambda()
+    {
+        if (Current.Kind == SyntaxKind.OpenBracketToken)
+            return true;
+        if (Current.Kind == SyntaxKind.IdentifierToken && Peek(1).Kind == SyntaxKind.EqualsGreaterToken)
+            return true;
+        if (Current.Kind != SyntaxKind.OpenParenToken)
+            return false;
+        var depth = 0;
+        for (var index = _position; index < _tokens.Length; index++)
+        {
+            if (_tokens[index].Kind == SyntaxKind.OpenParenToken)
+                depth++;
+            else if (_tokens[index].Kind == SyntaxKind.CloseParenToken && --depth == 0)
+                return index + 1 < _tokens.Length && _tokens[index + 1].Kind == SyntaxKind.EqualsGreaterToken;
+            else if (_tokens[index].Kind == SyntaxKind.EndOfFileToken)
+                return false;
+        }
+        return false;
+    }
+
+    private LambdaExpressionSyntax ParseLambdaExpression()
+    {
+        var start = Current.Span.Start;
+        var captures = ImmutableArray.CreateBuilder<LambdaCaptureSyntax>();
+        if (Current.Kind == SyntaxKind.OpenBracketToken)
+        {
+            NextToken();
+            while (Current.Kind is not SyntaxKind.CloseBracketToken and not SyntaxKind.EndOfFileToken)
+            {
+                var captureStart = Current.Span.Start;
+                var name = Match(SyntaxKind.IdentifierToken);
+                ExpressionSyntax value = new NameExpressionSyntax(_source, name.Span, name.Text);
+                if (Current.Kind == SyntaxKind.EqualsToken)
+                {
+                    NextToken();
+                    value = ParseBinaryExpression();
+                }
+                captures.Add(new LambdaCaptureSyntax(_source, TextSpan.FromBounds(captureStart, value.Span.End), name.Text, value));
+                if (Current.Kind != SyntaxKind.CommaToken)
+                    break;
+                NextToken();
+            }
+            Match(SyntaxKind.CloseBracketToken);
+        }
+        var parameters = ImmutableArray.CreateBuilder<LambdaParameterSyntax>();
+        if (Current.Kind == SyntaxKind.IdentifierToken)
+        {
+            var name = NextToken();
+            parameters.Add(new LambdaParameterSyntax(_source, name.Span, null, name.Text, ParameterPassingKind.Value));
+        }
+        else
+        {
+            Match(SyntaxKind.OpenParenToken);
+            while (Current.Kind is not SyntaxKind.CloseParenToken and not SyntaxKind.EndOfFileToken)
+            {
+                var parameterStart = Current.Span.Start;
+                var passingKind = Current.Kind switch
+                {
+                    SyntaxKind.RefKeyword => ParameterPassingKind.Ref,
+                    SyntaxKind.InKeyword => ParameterPassingKind.In,
+                    SyntaxKind.OutKeyword => ParameterPassingKind.Out,
+                    _ => ParameterPassingKind.Value,
+                };
+                if (passingKind != ParameterPassingKind.Value)
+                    NextToken();
+                TypeSyntax? type = null;
+                SyntaxToken name;
+                if (Current.Kind == SyntaxKind.IdentifierToken && Peek(1).Kind is SyntaxKind.CommaToken or SyntaxKind.CloseParenToken)
+                    name = NextToken();
+                else
+                {
+                    type = ParseType();
+                    name = Match(SyntaxKind.IdentifierToken);
+                }
+                parameters.Add(new LambdaParameterSyntax(_source, TextSpan.FromBounds(parameterStart, name.Span.End), type, name.Text, passingKind));
+                if (Current.Kind != SyntaxKind.CommaToken)
+                    break;
+                NextToken();
+            }
+            Match(SyntaxKind.CloseParenToken);
+        }
+        Match(SyntaxKind.EqualsGreaterToken);
+        if (Current.Kind == SyntaxKind.OpenBraceToken)
+        {
+            var body = ParseBlock();
+            return new LambdaExpressionSyntax(_source, TextSpan.FromBounds(start, body.Span.End), captures.ToImmutable(), parameters.ToImmutable(), null, body);
+        }
+        var expression = ParseExpression();
+        return new LambdaExpressionSyntax(_source, TextSpan.FromBounds(start, expression.Span.End), captures.ToImmutable(), parameters.ToImmutable(), expression, null);
     }
 
     private ExpressionSyntax ParseBinaryExpression(int parentPrecedence = 0)
@@ -942,6 +1036,7 @@ internal sealed partial class Parser
             case SyntaxKind.NumberToken:
             case SyntaxKind.StringToken:
             case SyntaxKind.CharacterToken:
+            case SyntaxKind.RuneToken:
                 NextToken();
                 return new LiteralExpressionSyntax(_source, token.Span, token.Value, token.Kind);
             case SyntaxKind.IdentifierToken:
@@ -1029,7 +1124,7 @@ internal sealed partial class Parser
 
     private TypeSyntax ParseGenericArgument()
     {
-        if (Current.Kind is SyntaxKind.NumberToken or SyntaxKind.CharacterToken || Current.Kind == SyntaxKind.OpenParenToken ||
+        if (Current.Kind is SyntaxKind.NumberToken or SyntaxKind.CharacterToken or SyntaxKind.RuneToken || Current.Kind == SyntaxKind.OpenParenToken ||
             Current.Kind == SyntaxKind.MinusToken && Peek(1).Kind == SyntaxKind.NumberToken)
         {
             // Stop before the generic argument's closing '>'; arithmetic and
@@ -1137,7 +1232,7 @@ internal sealed partial class Parser
         return modifiers.ToImmutable();
     }
 
-    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.LongKeyword or SyntaxKind.UlongKeyword or SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
+    private static bool IsBuiltInType(SyntaxKind kind) => kind is SyntaxKind.BoolKeyword or SyntaxKind.ByteKeyword or SyntaxKind.SbyteKeyword or SyntaxKind.ShortKeyword or SyntaxKind.UshortKeyword or SyntaxKind.CharKeyword or SyntaxKind.RuneKeyword or SyntaxKind.IntKeyword or SyntaxKind.UintKeyword or SyntaxKind.LongKeyword or SyntaxKind.UlongKeyword or SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.FloatKeyword or SyntaxKind.DoubleKeyword or SyntaxKind.StringKeyword or SyntaxKind.ObjectKeyword or SyntaxKind.VoidKeyword;
     private static bool IsAssignment(SyntaxKind kind) => kind is SyntaxKind.EqualsToken or SyntaxKind.PlusEqualsToken or SyntaxKind.MinusEqualsToken or SyntaxKind.StarEqualsToken or SyntaxKind.SlashEqualsToken or SyntaxKind.PercentEqualsToken;
     private static int GetUnaryPrecedence(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.BangToken or SyntaxKind.TildeToken or SyntaxKind.PlusPlusToken or SyntaxKind.MinusMinusToken or SyntaxKind.StarToken or SyntaxKind.AmpersandToken ? 12 : 0;
     private static int GetBinaryPrecedence(SyntaxKind kind) => kind switch

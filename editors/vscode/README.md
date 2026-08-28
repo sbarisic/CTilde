@@ -44,7 +44,7 @@ code --install-extension .\ctilde-language-0.10.1.vsix
 - Hover, signature help, go-to-definition, document symbols, and workspace symbols.
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` projects and ESP-IDF binding manifests.
-- Check, native Build, Debug, and Attach commands for every workspace project.
+- Check, native Build, rebuild-and-Run, Debug, and Attach commands for workspace projects.
 
 ![C~ compiler and systems pipeline](images/systems-pipeline.png)
 
@@ -72,11 +72,28 @@ Put `ctilde.json` at a project root to select the target and source set:
 
 The nearest ancestor manifest owns a file. Source and exclusion globs are relative to the manifest and cannot escape its directory. A file excluded from that source set is analyzed independently with the manifest target. Without a manifest, the extension treats each file as a standalone hosted program.
 
-The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `target` defaults to `hosted`; `sources` is required. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. An ESP-IDF project can add `espIdf.bindings` with project-relative binding manifests. All manifest paths remain inside the project root.
+The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `target` defaults to `hosted`; `sources` is required. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. The optional `run` object selects a host or WSL executor, command, argument array, working directory, environment, and accepted exit codes. Hosted and Cosmopolitan projects can omit `run.command` to execute their build output. Freestanding and ESP-IDF projects require an explicit command. An ESP-IDF project can add `espIdf.bindings` with project-relative binding manifests. All manifest paths remain inside the project root.
 
 ## Project builds
 
-Use **C~: Check Project** or **C~: Build Project**. The active file's nearest manifest is selected; a picker appears when several projects are open and none owns the active file. The same actions are available under **Tasks: Run Task** as one Check and Build task per manifest. Command-driven builds save dirty source and manifest files first.
+Use **C~: Check Project**, **C~: Build Project**, or **C~: Run Project**. Run always rebuilds first, stops on a build failure, and then launches the configured program or emulator. The active file's nearest manifest is selected; a picker appears when several projects are open and none owns the active file. The same actions are available under **Tasks: Run Task** as one Check, Build, and Run task per manifest. Command-driven tasks save dirty source and manifest files first, and only one Run task per project can execute at a time.
+
+For example, a headless QEMU project can run through WSL without shell evaluation:
+
+```json
+{
+  "run": {
+    "executor": "wsl",
+    "command": "qemu-system-x86_64",
+    "args": ["-kernel", "${buildOutput}"],
+    "workingDirectory": ".",
+    "environment": {},
+    "successExitCodes": [1]
+  }
+}
+```
+
+`${projectRoot}` and `${buildOutput}` are available in run command, arguments, working directory, and environment values. Use `ctilde --project <ctilde.json> --run` for the same workflow outside VS Code.
 
 Hosted Build emits C and a native header, discovers MSVC/GCC/Clang, and creates the configured executable. ESP-IDF Check and Build validate declared bindings first; the ignored `build/.ctilde/bindings` cache makes this a fast local check when manifests, headers, configuration, tools, and generated outputs have not changed. Build writes only byte-changed generated artifacts and then invokes `idf.py build`, allowing Ninja to compile only affected modules. **C~: Generate ESP-IDF Bindings** deliberately bypasses the cache and refreshes the tracked C~ declarations and C adapters. Binding-manifest completion and validation cover initializer macros, mixed native/configuration parameters, nested fields, bounded fixed UTF-8 arrays, output structures, and opaque return ownership. Target selection, flashing, and monitoring remain ESP-IDF operations.
 
@@ -102,8 +119,6 @@ Use **C~: Debug Project** to save, build, and launch the nearest project. Use **
   "project": "${workspaceFolder}/ctilde.json",
   "backend": "auto",
   "gdbPath": "",
-  "cwd": "${workspaceFolder}",
-  "args": [],
   "stopAtEntry": false,
   "showRuntimeFrames": false,
   "memoryDiagnostics": "objects",
@@ -113,6 +128,8 @@ Use **C~: Debug Project** to save, build, and launch the nearest project. Use **
 ```
 
 Hosted GCC and Clang builds use the bundled C~-aware GDB/MI adapter. WSL builds start GDB in the same WSL environment. Debug Launch creates version-3 instrumented metadata; Attach validates and reuses that exact image. Version-3 maps include optional target-memory layouts for bulk logical-stop and runtime-summary reads plus constructed generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation. Source and qualified function breakpoints, conditions, positive-integer hit counts, logpoints, exception filters, and Run to Cursor use compiler-emitted logical probes instead of native instruction breakpoints. Step Into, Over, and Out follow C~ sites and method depth, so ARC and cleanup helpers do not become intermediate stops. Threads, stacks, direct locals, and target values are cached for one stop and invalidated when execution resumes. Locals are filtered by initialization point, lexical lifetime, and shadowing. Runtime and ARC frames and the native trap reports behind logical probes are hidden unless `showRuntimeFrames` is enabled. Genuine native signals and hardware-watchpoint reports remain visible.
+
+For hosted launches, `run.args`, `run.workingDirectory`, and `run.environment` are debugger defaults. Explicit `args`, `cwd`, or `environment` values in `launch.json` override them. Debugging still launches the actual built executable; `run.command`, `run.executor`, and `run.successExitCodes` apply only to Run Project. ESP-IDF keeps its existing Debug Project workflow. Freestanding and Cosmopolitan debugging are not supported.
 
 The `C~ Runtime` scope lists live managed objects, allocation and final-release counters, identities, reference counts, allocation sites, and last ARC sites. Set `memoryDiagnostics` or `ctilde.debugger.memoryDiagnostics` to `off`, `objects`, or `guarded`; `objects` is the default. Guarded mode also displays canary and quarantine state. The reserved function breakpoints `$allocation`, `$final-release`, and `$leak` stop on ARC events without consuming instruction-breakpoint slots. Data breakpoints use GDB hardware watchpoints for addressable locals, fields, array elements, managed-reference slots, and reference counts. ESP values must meet the target's size and alignment rules, and GDB reports the actual watchpoint-slot limit. A local watchpoint is removed when its owning method activation exits.
 

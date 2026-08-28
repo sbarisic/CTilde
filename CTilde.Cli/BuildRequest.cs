@@ -15,6 +15,7 @@ internal sealed record BuildRequest(
     bool CheckOnly,
     bool Trace,
     bool BuildNative,
+    bool RunAfterBuild,
     CTildeNativeBuildConfiguration Configuration,
     string Compiler,
     string? ExecutablePath,
@@ -39,7 +40,10 @@ internal sealed record BuildRequest(
     bool NoRecursion = false,
     EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
     FreestandingProjectConfiguration? Freestanding = null,
-    CosmopolitanRuntimeMode CosmopolitanMode = CosmopolitanRuntimeMode.Default)
+    CosmopolitanRuntimeMode CosmopolitanMode = CosmopolitanRuntimeMode.Default,
+    IReadOnlyList<CpuFeature>? CpuFeatures = null,
+    IReadOnlyDictionary<string, SourceOwnerIdentity>? SourceOwners = null,
+    CTildeProjectRunConfiguration? RunConfiguration = null)
 {
     public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan
         ? Path.GetDirectoryName(ExecutablePath!)!
@@ -79,7 +83,7 @@ internal static class BuildRequestResolver
         var preparingLaunch = options.PrepareDebug == "launch";
         var preparingAttach = options.PrepareDebug == "attach";
         var checkOnly = options.CheckOnly;
-        var buildNative = options.Build || preparingLaunch;
+        var buildNative = options.Build || options.Run || preparingLaunch;
         var configuration = preparingLaunch && project.Configuration.Target == CompilationTarget.Hosted
             ? CTildeNativeBuildConfiguration.Debug
             : options.Configuration ?? build.Configuration;
@@ -124,13 +128,15 @@ internal static class BuildRequestResolver
             : null;
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, architecture, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
-            configuration, options.Compiler ?? build.Compiler, executable,
+            options.Run, configuration, options.Compiler ?? build.Compiler, executable,
             idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
             build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
             options.NoRecursion || project.Configuration.NoRecursion,
             options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding,
-            options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default);
+            options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default,
+            options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
+            project.SourceOwners, project.Configuration.Run);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -147,7 +153,7 @@ internal static class BuildRequestResolver
         var root = Directory.GetCurrentDirectory();
         var preparingLaunch = options.PrepareDebug == "launch";
         var preparingAttach = options.PrepareDebug == "attach";
-        var buildNative = options.Build || preparingLaunch;
+        var buildNative = options.Build || options.Run || preparingLaunch;
         if (buildNative && options.Target == CompilationTarget.Freestanding && options.NativeOutput is null)
             throw new CommandLineException("Direct freestanding builds require --native-output.");
         var layout = options.CLayout ?? GeneratedCLayout.Unity;
@@ -198,11 +204,11 @@ internal static class BuildRequestResolver
             : null;
         return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, architecture, null, root,
             ResolveSourceRoot(options),
-            generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach,
+            generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach, false,
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode);
+            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
@@ -216,13 +222,17 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--generate-bindings and --verify-bindings cannot be combined.");
         if ((options.GenerateBindings || options.VerifyBindings) && (options.ProjectManifest is null || options.Inputs.Count != 0 || options.InputDirectory is not null))
             throw new CommandLineException("Binding generation requires --project and cannot be combined with direct inputs or --compile-directory.");
-        if ((options.GenerateBindings || options.VerifyBindings) && (options.Build || options.CheckOnly || options.PrepareDebug is not null))
-            throw new CommandLineException("Binding-only modes cannot be combined with --build, --check, or --prepare-debug.");
-        if (options.CheckOnly && (options.Build || hasNativeOptions || options.HeaderOutput is not null || options.SymbolMap is not null ||
+        if ((options.GenerateBindings || options.VerifyBindings) && (options.Build || options.Run || options.CheckOnly || options.PrepareDebug is not null))
+            throw new CommandLineException("Binding-only modes cannot be combined with --build, --run, --check, or --prepare-debug.");
+        if (options.Run && options.ProjectManifest is null)
+            throw new CommandLineException("--run requires --project <ctilde.json>.");
+        if (options.Run && (options.Build || options.CheckOnly || options.PrepareDebug is not null))
+            throw new CommandLineException("--run cannot be combined with --build, --check, or --prepare-debug.");
+        if (options.CheckOnly && (options.Build || options.Run || hasNativeOptions || options.HeaderOutput is not null || options.SymbolMap is not null ||
             options.OutputDirectory is not null || options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null))
             throw new CommandLineException("--check cannot be combined with build outputs or native-build options.");
-        if (!options.Build && options.PrepareDebug is null && hasNativeOptions)
-            throw new CommandLineException("Native-build options require --build.");
+        if (!options.Build && !options.Run && options.PrepareDebug is null && hasNativeOptions)
+            throw new CommandLineException("Native-build options require --build or --run.");
         if (options.DebugMap is not null && !options.DebugInfo && options.PrepareDebug is null)
             throw new CommandLineException("--debug-map requires --debug-info or --prepare-debug.");
         if (options.DebugMemory is not null && options.PrepareDebug != "launch")

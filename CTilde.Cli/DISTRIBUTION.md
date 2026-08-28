@@ -8,6 +8,14 @@ Build a hosted project with an installed MSVC, GCC, or Clang toolchain:
 ctilde --project path/to/ctilde.json --build
 ```
 
+Rebuild and launch a project using its optional top-level `run` configuration:
+
+```text
+ctilde --project path/to/ctilde.json --run
+```
+
+Hosted and Cosmopolitan projects run their built output when `run.command` is omitted. Freestanding and ESP-IDF projects require an explicit command. The runner does not invoke a shell.
+
 Build an ESP-IDF project from an activated ESP-IDF terminal:
 
 ```text

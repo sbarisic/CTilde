@@ -25,6 +25,14 @@ From the repository root in PowerShell, run the standalone smoke test:
 
 The script checks the toolchain, builds the image, inspects its ELF class, architecture, required symbols, undefined symbols, Multiboot placement, and exact header bytes, then boots it headlessly under QEMU with a ten-second timeout. QEMU returns process status `1` for a successful guest status of zero because `isa-debug-exit` encodes the result as `(value << 1) | 1`; the script handles that convention.
 
+To rebuild and run through the manifest:
+
+```powershell
+dotnet run --project .\CTilde.Cli -c Release --no-launch-profile -- --project .\examples\QemuFreestanding\ctilde.json --run
+```
+
+With the C~ VS Code extension installed, open a source file in this project and use **C~: Run Project**. The manifest starts QEMU headlessly through WSL and treats raw QEMU exit status `1` as success. QEMU remote debugging is not included.
+
 To build without running QEMU:
 
 ```powershell

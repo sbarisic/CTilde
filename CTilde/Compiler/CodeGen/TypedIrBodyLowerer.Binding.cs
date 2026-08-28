@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Globalization;
 using System.Numerics;
 
@@ -179,7 +180,7 @@ internal sealed partial class TypedIrBodyLowerer
         var prelude = new List<string>(target.Prelude);
         var old = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(target.Type, old)} = {target.Code};");
-        var one = target.Type == CType.Float ? "1.0f" : "1";
+        var one = target.Type == CType.Float ? "1.0f" : target.Type == CType.Double ? "1.0" : "1";
         var nextCode = NumericOperation(syntax.OperatorKind == SyntaxKind.PlusPlusToken ? SyntaxKind.PlusToken : SyntaxKind.MinusToken, target.Type, old, one, syntax);
         var next = NewTemp();
         prelude.Add($"{_emitter.CDeclaration(target.Type, next)} = {nextCode};");
@@ -727,6 +728,8 @@ internal sealed partial class TypedIrBodyLowerer
     {
         if (expression.IsFunctionAddress)
             return ConvertFunctionAddress(expression, target, syntax);
+        if (expression.Lambda is not null)
+            return ConvertLambda(expression, target, syntax);
         if (expression.MethodGroup is not null)
             return ConvertMethodGroup(expression, target, syntax);
         if (expression.Type == target || expression.Type.IsError || target.IsError)
@@ -758,6 +761,27 @@ internal sealed partial class TypedIrBodyLowerer
             Report(expression.Type.Kind == CTypeKind.Newtype || target.Kind == CTypeKind.Newtype ? "CT2205" : "CT2137", $"Cannot {(explicitConversion ? "cast" : "implicitly convert")} '{expression.Type.DisplayName}' to '{target.DisplayName}'.", syntax);
             return new IrExpressionValue { Type = target, Code = _emitter.DefaultValue(target), Prelude = expression.Prelude };
         }
+        if (sourceType == CType.Uint && target == CType.Rune)
+        {
+            if (expression.IsConstant && expression.ConstantValue is uint scalar)
+            {
+                if (scalar > 0x10ffffu || scalar is >= 0xd800u and <= 0xdfffu)
+                {
+                    Report("CT2221", $"U+{scalar:X} is not a Unicode scalar value.", syntax);
+                    return Constant(CType.Rune, 0u, "UINT32_C(0)");
+                }
+                return Constant(CType.Rune, scalar, $"UINT32_C({scalar.ToString(CultureInfo.InvariantCulture)})");
+            }
+            RecordRuntimeFault(syntax, "Unicode scalar validation");
+            return new IrExpressionValue
+            {
+                Type = CType.Rune,
+                Code = $"ct_validate_rune({expression.Code}, {_emitter.SourceArgument(syntax)})",
+                Prelude = expression.Prelude,
+            };
+        }
+        if (sourceType == CType.Rune && target == CType.Uint)
+            return new IrExpressionValue { Type = CType.Uint, Code = expression.Code, Prelude = expression.Prelude, IsConstant = expression.IsConstant, ConstantValue = expression.ConstantValue };
         if (expression.IsConstant && TryConvertConstant(expression, target, out var constant))
             return constant;
         var objectType = _model.Types.GetValueOrDefault("System.Object")?.Type;
@@ -819,6 +843,164 @@ internal sealed partial class TypedIrBodyLowerer
             OwnedCleanupRecord = expression.OwnedCleanupRecord,
             IsConstInitStorage = expression.IsConstInitStorage,
         };
+    }
+
+    private IrExpressionValue ConvertLambda(IrExpressionValue expression, CType target, SyntaxNode syntax)
+    {
+        var lambda = expression.Lambda!;
+        if (target.Kind != CTypeKind.Delegate || target.Symbol is null)
+        {
+            Report("CT2223", $"A lambda requires a compatible named delegate target, not '{target.DisplayName}'.", syntax);
+            return ErrorExpression(expression.Prelude);
+        }
+        var delegateType = target.Symbol;
+        if (lambda.Parameters.Length != delegateType.DelegateParameters.Length)
+        {
+            Report("CT2223", $"Lambda parameter count does not match delegate '{delegateType.FullName}'.", lambda);
+            return ErrorExpression(expression.Prelude);
+        }
+        for (var index = 0; index < lambda.Parameters.Length; index++)
+        {
+            var lambdaParameter = lambda.Parameters[index];
+            var delegateParameter = delegateType.DelegateParameters[index];
+            if (lambdaParameter.PassingKind != delegateParameter.PassingKind)
+                Report("CT2223", $"Lambda parameter '{lambdaParameter.Name}' must use '{delegateParameter.PassingKind.ToString().ToLowerInvariant()}' passing.", lambdaParameter);
+            if (lambdaParameter.Type is not null && ResolveType(lambdaParameter.Type) != delegateParameter.Type)
+                Report("CT2223", $"Lambda parameter '{lambdaParameter.Name}' does not match delegate parameter type '{delegateParameter.Type.DisplayName}'.", lambdaParameter);
+        }
+
+        if (lambda.Captures.Select(capture => capture.Name).Distinct(StringComparer.Ordinal).Count() != lambda.Captures.Length)
+        {
+            Report("CT2224", "A closure capture name can appear only once.", lambda);
+            return ErrorExpression(expression.Prelude);
+        }
+        var captureValues = lambda.Captures.Select(capture => (Capture: capture, Value: Materialize(LowerExpression(capture.Expression), capture.Expression))).ToArray();
+        if (captureValues.Any(capture => capture.Value.Type.IsNativeBuffer || capture.Value.Type.IsNativeUtf8String))
+        {
+            Report("CT2224", "Scoped native views cannot be stored in a closure environment.", lambda);
+            return ErrorExpression(captureValues.SelectMany(capture => capture.Value.Prelude));
+        }
+        var parameterNames = lambda.Parameters.Select(parameter => parameter.Name).ToHashSet(StringComparer.Ordinal);
+        var captureNames = lambda.Captures.Select(capture => capture.Name).ToHashSet(StringComparer.Ordinal);
+        if (parameterNames.Overlaps(captureNames))
+        {
+            Report("CT2224", "A capture name cannot duplicate a lambda parameter name.", lambda);
+            return ErrorExpression(captureValues.SelectMany(capture => capture.Value.Prelude));
+        }
+        SyntaxNode lambdaBody = (SyntaxNode?)lambda.BlockBody ?? lambda.ExpressionBody!;
+        var lambdaLocals = DescendantNodes(lambdaBody).OfType<LocalDeclarationStatementSyntax>().Select(local => local.Name).ToHashSet(StringComparer.Ordinal);
+        var implicitCaptures = DescendantNodes(lambdaBody)
+            .OfType<NameExpressionSyntax>()
+            .Select(reference => reference.Name)
+            .Where(name => !parameterNames.Contains(name) && !captureNames.Contains(name) && !lambdaLocals.Contains(name) && (_parameters.ContainsKey(name) || FindLocal(name) is not null))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (implicitCaptures.Length != 0 || DescendantNodes(lambdaBody).Any(node => node is ThisExpressionSyntax or BaseExpressionSyntax))
+        {
+            var detail = implicitCaptures.Length == 0 ? "this/base" : string.Join(", ", implicitCaptures);
+            Report("CT2223", $"A lambda cannot implicitly reference outer state ({detail}); add it to the explicit value-capture list.", lambda);
+            return ErrorExpression(captureValues.SelectMany(capture => capture.Value.Prelude));
+        }
+
+        if (!_model.LambdaMethods.TryGetValue(lambda, out var method))
+        {
+            var body = lambda.BlockBody;
+            if (body is null)
+            {
+                StatementSyntax statement = delegateType.DelegateReturnType == CType.Void
+                    ? new ExpressionStatementSyntax(lambda.Source, lambda.ExpressionBody!.Span, lambda.ExpressionBody)
+                    : new ReturnStatementSyntax(lambda.Source, lambda.ExpressionBody!.Span, lambda.ExpressionBody);
+                body = new BlockStatementSyntax(lambda.Source, lambda.Span, [statement]);
+            }
+            TypeSymbol containingType = _method.ContainingType;
+            if (lambda.Captures.Length != 0)
+            {
+                var closureName = $"__Closure_{NameMangler.Artifact(string.Empty, $"{_method.ContainingType.FullName}:{lambda.Source.FilePath}:{lambda.Span.Start}:{lambda.Span.Length}")}";
+                var closureSyntax = new TypeDeclarationSyntax(lambda.Source, lambda.Span, TypeDeclarationKind.Class, closureName,
+                    ["private", "sealed"], [], null, [], null, [], null, [], [], [], [], []);
+                var closure = new TypeSymbol
+                {
+                    Namespace = _method.ContainingType.Namespace,
+                    Name = closureName,
+                    Kind = DeclaredTypeKind.Class,
+                    Syntax = closureSyntax,
+                    BaseType = _model.Types.GetValueOrDefault("System.Object"),
+                    IsSealed = true,
+                    Accessibility = Accessibility.Private,
+                };
+                for (var index = 0; index < captureValues.Length; index++)
+                {
+                    var capture = captureValues[index];
+                    closure.Fields.Add(new FieldSymbol
+                    {
+                        Name = capture.Capture.Name,
+                        ContainingType = closure,
+                        Accessibility = Accessibility.Private,
+                        IsStatic = false,
+                        Syntax = capture.Capture,
+                        Type = capture.Value.Type,
+                        IsReadonly = true,
+                        IsConst = false,
+                    });
+                }
+                _model.Types.Add(closure.FullName, closure);
+                _model.LambdaEnvironments.Add(lambda, closure);
+                containingType = closure;
+            }
+            method = new MethodSymbol
+            {
+                Name = $"<lambda_{lambda.Span.Start}_{lambda.Span.Length}>",
+                ContainingType = containingType,
+                Accessibility = Accessibility.Private,
+                IsStatic = lambda.Captures.Length == 0,
+                Syntax = lambda,
+                ReturnType = delegateType.DelegateReturnType!,
+                Parameters = lambda.Parameters.Select((parameter, index) => new ParameterSymbol
+                {
+                    Name = parameter.Name,
+                    Type = delegateType.DelegateParameters[index].Type,
+                    Syntax = null,
+                    PassingKind = delegateType.DelegateParameters[index].PassingKind,
+                }).ToImmutableArray(),
+                Body = body,
+            };
+            _model.LambdaMethods.Add(lambda, method);
+            containingType.Methods.Add(method);
+        }
+        var group = new MethodGroupBinding([method], null, false);
+        IrExpressionValue result;
+        if (lambda.Captures.Length == 0)
+        {
+            result = ConvertMethodGroup(new IrExpressionValue { Type = CType.Error, Code = string.Empty, Prelude = expression.Prelude, MethodGroup = group }, target, syntax);
+        }
+        else
+        {
+            var closure = _model.LambdaEnvironments[lambda];
+            _emitter.RegisterType(closure.Type);
+            var prelude = new List<string>(expression.Prelude);
+            foreach (var capture in captureValues)
+                prelude.AddRange(capture.Value.Prelude);
+            var environment = NewTemp();
+            prelude.Add($"{_emitter.CTypeName(closure.Type)} {environment} = ({_emitter.CTypeName(closure.Type)})(void*)ct_alloc(sizeof({NameMangler.Type(closure)}), {_emitter.SourceArgument(lambda)});");
+            prelude.Add($"ct_init_object({environment}, {_emitter.DescriptorExpression(closure.Type)});");
+            for (var index = 0; index < captureValues.Length; index++)
+            {
+                var field = closure.Fields[index];
+                var value = captureValues[index].Value;
+                prelude.Add($"{environment}->{field.CAccessPath} = {value.Code};");
+                if (field.Type.ContainsManagedReferences)
+                    prelude.Add(_emitter.RetainValueStatement(field.Type, $"&{environment}->{field.CAccessPath}"));
+            }
+            var thunk = _emitter.RegisterDelegateThunk(delegateType, method, false);
+            var delegateValue = NewTemp();
+            prelude.Add($"{_emitter.CTypeName(target)} {delegateValue} = {CEmitter.DelegateFactoryName(delegateType)}((ct_object*)(void*){environment}, &{thunk}, {_emitter.SourceArgument(lambda)});");
+            prelude.Add($"ct_release((ct_object*)(void*){environment});");
+            _emitter.Effects.RecordAllocation(_method, lambda, $"creation of ARC closure '{target.DisplayName}'");
+            result = OwnResult(target, delegateValue, prelude, symbol: method);
+        }
+        _semanticEntries[lambda] = new BoundSemanticEntry(lambda, target, group, null, result.Ownership, BoundValueCategory.Value);
+        return result;
     }
 
     private IrExpressionValue ConvertFunctionAddress(IrExpressionValue expression, CType target, SyntaxNode syntax)

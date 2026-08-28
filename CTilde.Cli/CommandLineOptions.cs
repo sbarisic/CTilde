@@ -16,6 +16,7 @@ internal sealed record CommandLineOptions(
     CompilationArchitecture Architecture,
     bool ArchitectureSpecified,
     bool Build,
+    bool Run,
     CTildeNativeBuildConfiguration? Configuration,
     string? Compiler,
     CosmopolitanRuntimeMode CosmopolitanMode,
@@ -46,7 +47,8 @@ internal sealed record CommandLineOptions(
     IReadOnlyList<string> ObjectFiles,
     IReadOnlyList<string> Libraries,
     IReadOnlyList<string> CompileOptions,
-    IReadOnlyList<string> LinkOptions)
+    IReadOnlyList<string> LinkOptions,
+    IReadOnlyList<CpuFeature> CpuFeatures)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -83,10 +85,12 @@ internal sealed record CommandLineOptions(
         var libraries = new List<string>();
         var compileOptions = new List<string>();
         var linkOptions = new List<string>();
+        var cpuFeatures = new List<CpuFeature>();
         var baudRate = 115200;
         var check = false;
         var trace = false;
         var build = false;
+        var run = false;
         var target = CompilationTarget.Hosted;
         var targetSpecified = false;
         var architecture = CompilationArchitecture.Auto;
@@ -152,6 +156,20 @@ internal sealed record CommandLineOptions(
                 case "--compile-option":
                     if (RequireValue() is { } compileOption) compileOptions.Add(compileOption);
                     break;
+                case "--cpu-feature":
+                    var cpuFeatureValue = RequireValue();
+                    var cpuFeature = cpuFeatureValue switch
+                    {
+                        "simd128" => CpuFeature.Simd128,
+                        _ => (CpuFeature)(-1),
+                    };
+                    if (cpuFeatureValue is not null && !Enum.IsDefined(cpuFeature))
+                        parseError = $"Unknown CPU feature '{cpuFeatureValue}'; expected simd128.";
+                    else if (cpuFeatureValue is not null && cpuFeatures.Contains(cpuFeature))
+                        parseError = $"CPU feature '{cpuFeatureValue}' was specified more than once.";
+                    else if (cpuFeatureValue is not null)
+                        cpuFeatures.Add(cpuFeature);
+                    break;
                 case "--link-option":
                     if (RequireValue() is { } linkOption) linkOptions.Add(linkOption);
                     break;
@@ -200,6 +218,7 @@ internal sealed record CommandLineOptions(
                 case "--check": check = true; break;
                 case "--trace": trace = true; break;
                 case "--build": build = true; break;
+                case "--run": run = true; break;
                 case "--generate-bindings": generateBindings = true; break;
                 case "--verify-bindings": verifyBindings = true; break;
                 case "--no-recursion": noRecursion = true; break;
@@ -276,9 +295,9 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, architecture, architectureSpecified, build, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
+            targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
-            panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
+            panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures);
         return true;
     }
 }

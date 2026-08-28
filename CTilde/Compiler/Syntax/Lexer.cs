@@ -13,7 +13,8 @@ internal enum IntegerLiteralSuffix
     UnsignedLong,
 }
 
-internal sealed record NumericLiteralValue(BigInteger Integer, IntegerLiteralSuffix Suffix, float? FloatingPoint);
+internal enum FloatingLiteralKind { None, Float, Double }
+internal sealed record NumericLiteralValue(BigInteger Integer, IntegerLiteralSuffix Suffix, double? FloatingPoint, FloatingLiteralKind FloatingKind = FloatingLiteralKind.None);
 
 internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 {
@@ -31,6 +32,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["catch"] = SyntaxKind.CatchKeyword,
         ["clobber"] = SyntaxKind.ClobberKeyword,
         ["char"] = SyntaxKind.CharKeyword,
+        ["rune"] = SyntaxKind.RuneKeyword,
         ["class"] = SyntaxKind.ClassKeyword,
         ["const"] = SyntaxKind.ConstKeyword,
         ["continue"] = SyntaxKind.ContinueKeyword,
@@ -43,6 +45,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["false"] = SyntaxKind.FalseKeyword,
         ["finally"] = SyntaxKind.FinallyKeyword,
         ["float"] = SyntaxKind.FloatKeyword,
+        ["double"] = SyntaxKind.DoubleKeyword,
         ["for"] = SyntaxKind.ForKeyword,
         ["foreach"] = SyntaxKind.ForeachKeyword,
         ["if"] = SyntaxKind.IfKeyword,
@@ -143,6 +146,12 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             _position++;
             ReadIdentifierRunes();
             return Token(SyntaxKind.IdentifierToken, start, _position - start, source.Text[(start + 1).._position]);
+        }
+
+        if (current == 'r' && _position + 1 < source.Length && source[_position + 1] == '\'')
+        {
+            _position++;
+            return LexQuoted('\'', SyntaxKind.RuneToken, start);
         }
 
         if (IsIdentifierStart(PeekRune()))
@@ -268,6 +277,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ("!=", SyntaxKind.BangEqualsToken), ("<=", SyntaxKind.LessEqualsToken),
         (">=", SyntaxKind.GreaterEqualsToken), ("<<", SyntaxKind.LessLessToken),
         (">>", SyntaxKind.GreaterGreaterToken),
+        ("=>", SyntaxKind.EqualsGreaterToken),
     ];
 
     private SyntaxToken LexNumber()
@@ -297,6 +307,17 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
                 _position++;
                 ReadDigits(10);
             }
+            if (_position < source.Length && source[_position] is 'e' or 'E')
+            {
+                floating = true;
+                _position++;
+                if (_position < source.Length && source[_position] is '+' or '-')
+                    _position++;
+                var exponentStart = _position;
+                ReadDigits(10);
+                if (_position == exponentStart)
+                    diagnostics.Add("CT0002", "A floating-point exponent requires at least one digit.", source, new TextSpan(start, _position - start));
+            }
         }
 
         var suffixStart = _position;
@@ -314,10 +335,11 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             _ => IntegerLiteralSuffix.None,
         };
         var floatSuffix = normalizedSuffix == "F";
-        var validSuffix = floatSuffix
+        var doubleSuffix = normalizedSuffix == "D";
+        var validSuffix = floatSuffix || doubleSuffix
             ? numberBase == 10
             : normalizedSuffix is "" or "U" or "L" or "UL" or "LU";
-        floating |= floatSuffix;
+        floating |= floatSuffix || doubleSuffix;
 
         var text = source.Text[start.._position];
         var literalBody = source.Text[start..suffixStart];
@@ -330,11 +352,20 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
             NumericLiteralValue value;
             if (floating)
             {
-                if (numberBase != 10 || !float.TryParse(digits, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var result) || float.IsInfinity(result))
+                if (numberBase != 10 || !validSuffix || !floatSuffix && !doubleSuffix && suffixText.Length > 0)
                     throw new FormatException();
-                if (!validSuffix || !floatSuffix && suffixText.Length > 0)
-                    throw new FormatException();
-                value = new NumericLiteralValue(BigInteger.Zero, IntegerLiteralSuffix.None, result);
+                if (doubleSuffix)
+                {
+                    if (!double.TryParse(digits, NumberStyles.Float, CultureInfo.InvariantCulture, out var result) || double.IsInfinity(result))
+                        throw new FormatException();
+                    value = new NumericLiteralValue(BigInteger.Zero, IntegerLiteralSuffix.None, result, FloatingLiteralKind.Double);
+                }
+                else
+                {
+                    if (!float.TryParse(digits, NumberStyles.Float, CultureInfo.InvariantCulture, out var result) || float.IsInfinity(result))
+                        throw new FormatException();
+                    value = new NumericLiteralValue(BigInteger.Zero, IntegerLiteralSuffix.None, result, FloatingLiteralKind.Float);
+                }
             }
             else
             {
@@ -368,9 +399,10 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         return value;
     }
 
-    private SyntaxToken LexQuoted(char quote, SyntaxKind kind)
+    private SyntaxToken LexQuoted(char quote, SyntaxKind kind, int? literalStart = null)
     {
-        var start = _position++;
+        var start = literalStart ?? _position;
+        _position++;
         var value = new StringBuilder();
         var terminated = false;
         while (_position < source.Length)
@@ -430,6 +462,17 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
 
         if (!terminated)
             diagnostics.Add("CT0005", "Unterminated quoted literal.", source, new TextSpan(start, Math.Max(1, _position - start)));
+
+        if (kind == SyntaxKind.RuneToken)
+        {
+            var text = value.ToString();
+            if (!System.Text.Rune.TryGetRuneAt(text, 0, out var rune) || rune.Utf16SequenceLength != text.Length)
+            {
+                diagnostics.Add("CT0009", "A rune literal must contain exactly one Unicode scalar value.", source, new TextSpan(start, _position - start));
+                return Token(kind, start, _position - start, 0u);
+            }
+            return Token(kind, start, _position - start, (uint)rune.Value);
+        }
 
         if (kind == SyntaxKind.CharacterToken)
         {

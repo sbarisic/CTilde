@@ -7,7 +7,7 @@ namespace CTilde;
 
 internal enum CTypeKind
 {
-    Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Int, Uint, Long, Ulong, Nint, Nuint, Float, String,
+    Error, Void, Bool, Byte, Sbyte, Short, Ushort, Char, Rune, Int, Uint, Long, Ulong, Nint, Nuint, Float, Double, String,
     Class, Struct, Interface, TypeParameter, Constant, Enum, Delegate, Opaque, Newtype, EspError, Array, InlineArray, Pointer, FunctionPointer, NativeBuffer, ReadOnlyNativeBuffer, NativeUtf8String, Null,
 }
 
@@ -40,6 +40,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public static readonly CType Short = new(CTypeKind.Short);
     public static readonly CType Ushort = new(CTypeKind.Ushort);
     public static readonly CType Char = new(CTypeKind.Char);
+    public static readonly CType Rune = new(CTypeKind.Rune);
     public static readonly CType Int = new(CTypeKind.Int);
     public static readonly CType Uint = new(CTypeKind.Uint);
     public static readonly CType Long = new(CTypeKind.Long);
@@ -47,11 +48,12 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public static readonly CType Nint = new(CTypeKind.Nint);
     public static readonly CType Nuint = new(CTypeKind.Nuint);
     public static readonly CType Float = new(CTypeKind.Float);
+    public static readonly CType Double = new(CTypeKind.Double);
     public static readonly CType String = new(CTypeKind.String);
     public static readonly CType Null = new(CTypeKind.Null);
 
     public bool IsError => Kind == CTypeKind.Error;
-    public bool IsNumeric => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float;
+    public bool IsNumeric => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double;
     public bool IsIntegral => Kind is CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Enum;
     public bool IsReference => Kind is CTypeKind.Class or CTypeKind.Interface or CTypeKind.Delegate or CTypeKind.Array or CTypeKind.String;
     public bool IsNativeBuffer => Kind is CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
@@ -61,7 +63,7 @@ internal sealed record CType(CTypeKind Kind, TypeSymbol? Symbol = null, CType? E
     public bool ContainsManagedReferences => ContainsManagedReferencesCore(this, []);
     public bool IsPointerLike => IsReference || Kind is CTypeKind.Pointer or CTypeKind.FunctionPointer or CTypeKind.Opaque;
     public bool ContainsPointer => ContainsPointerCore(this, []);
-    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.InlineArray or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.NativeUtf8String;
+    public bool IsValueType => Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or CTypeKind.Rune or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or CTypeKind.Struct or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.InlineArray or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.NativeUtf8String;
 
     public string DisplayName => Kind switch
     {
@@ -234,6 +236,8 @@ internal sealed class FieldSymbol : MemberSymbol
     public bool IsNativeVolatile { get; init; }
     public bool IsUsed { get; init; }
     public bool IsConstInit { get; init; }
+    public byte[]? EmbeddedData { get; init; }
+    public string? EmbeddedResourceIdentity { get; init; }
     public bool IsInterruptSafe { get; init; }
     public bool IsInterruptData { get; set; }
     public int? BitFirst { get; init; }
@@ -453,6 +457,7 @@ internal static class NameMangler
         CTypeKind.Short => "i16",
         CTypeKind.Ushort => "u16",
         CTypeKind.Char => "c8",
+        CTypeKind.Rune => "r32",
         CTypeKind.Int => "i32",
         CTypeKind.Uint => "u32",
         CTypeKind.Long => "i64",
@@ -460,6 +465,7 @@ internal static class NameMangler
         CTypeKind.Nint => "ni",
         CTypeKind.Nuint => "nu",
         CTypeKind.Float => "f32",
+        CTypeKind.Double => "f64",
         CTypeKind.String => "str",
         CTypeKind.Class => $"r{Hash96(CanonicalType(type))}",
         CTypeKind.Interface => $"i{Hash96(CanonicalType(type))}",
@@ -521,6 +527,7 @@ internal static class TypeFacts
         "short" => CType.Short,
         "ushort" => CType.Ushort,
         "char" => CType.Char,
+        "rune" => CType.Rune,
         "int" => CType.Int,
         "uint" => CType.Uint,
         "long" => CType.Long,
@@ -528,6 +535,7 @@ internal static class TypeFacts
         "nint" => CType.Nint,
         "nuint" => CType.Nuint,
         "float" => CType.Float,
+        "double" => CType.Double,
         "string" => CType.String,
         _ => null,
     };
@@ -552,21 +560,23 @@ internal static class TypeFacts
             return true;
         return from.Kind switch
         {
-            CTypeKind.Byte => to.Kind is CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float,
-            CTypeKind.Sbyte => to.Kind is CTypeKind.Short or CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float,
-            CTypeKind.Short => to.Kind is CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float,
-            CTypeKind.Ushort or CTypeKind.Char => to.Kind is CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float,
-            CTypeKind.Int => to.Kind is CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float,
-            CTypeKind.Uint => to.Kind is CTypeKind.Long or CTypeKind.Nuint or CTypeKind.Float,
-            CTypeKind.Nint => to.Kind is CTypeKind.Long or CTypeKind.Float,
-            CTypeKind.Nuint => to.Kind is CTypeKind.Ulong or CTypeKind.Float,
-            CTypeKind.Long or CTypeKind.Ulong => to.Kind == CTypeKind.Float,
+            CTypeKind.Byte => to.Kind is CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Sbyte => to.Kind is CTypeKind.Short or CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Short => to.Kind is CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Ushort or CTypeKind.Char => to.Kind is CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Int => to.Kind is CTypeKind.Long or CTypeKind.Nint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Uint => to.Kind is CTypeKind.Long or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Nint => to.Kind is CTypeKind.Long or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Nuint => to.Kind is CTypeKind.Ulong or CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Long or CTypeKind.Ulong => to.Kind is CTypeKind.Float or CTypeKind.Double,
+            CTypeKind.Float => to.Kind == CTypeKind.Double,
             _ => false,
         };
     }
 
     public static bool CanExplicitlyConvert(CType from, CType to) =>
         CanImplicitlyConvert(from, to) || from.IsNumeric && to.IsNumeric ||
+        from.Kind == CTypeKind.Rune && to.Kind == CTypeKind.Uint || from.Kind == CTypeKind.Uint && to.Kind == CTypeKind.Rune ||
         from.Kind == CTypeKind.Newtype && from.Symbol?.UnderlyingType == to ||
         to.Kind == CTypeKind.Newtype && to.Symbol?.UnderlyingType == from ||
         from.Symbol?.IsBitField == true && from.Symbol.BitFieldBackingType == to ||
@@ -589,6 +599,8 @@ internal static class TypeFacts
 
     public static CType PromoteNumeric(CType left, CType right)
     {
+        if (left.Kind == CTypeKind.Double || right.Kind == CTypeKind.Double)
+            return CType.Double;
         if (left.Kind == CTypeKind.Float || right.Kind == CTypeKind.Float)
             return CType.Float;
         if (left.Kind == CTypeKind.Nint || right.Kind == CTypeKind.Nint)

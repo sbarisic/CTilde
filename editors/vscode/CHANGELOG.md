@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0 - 2026-08-28
+
+- Added **C~: Run Project** and manifest-driven rebuild-and-run tasks.
+- Added hosted debug defaults from `run.args`, `run.workingDirectory`, and `run.environment`.
+- Added QEMU/WSL run support for freestanding projects; freestanding debugging remains unsupported.
+
 ## 0.10.1 - 2026-08-28
 
 - Added the official C~ website to the Marketplace Details and Resources sections.

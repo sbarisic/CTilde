@@ -17,6 +17,7 @@ internal sealed class IrExpressionValue
     public bool IsBaseReceiver { get; init; }
     public OwnershipKind Ownership { get; init; }
     public MethodGroupBinding? MethodGroup { get; init; }
+    public LambdaExpressionSyntax? Lambda { get; init; }
     public bool IsFunctionAddress { get; init; }
     public object? Symbol { get; init; }
     public bool IsConstInitStorage { get; init; }
@@ -132,6 +133,8 @@ internal sealed partial class TypedIrBodyLowerer
 
     public string EmitDefinition()
     {
+        if (!_analysisOnly && TryEmitHardwareSimdOperator(out var simdDefinition))
+            return simdDefinition;
         if (_method.IsAssemblyFunction && !_method.IsNaked)
             return EmitAssemblyFunctionDefinition();
         if (_method.IsNaked)
@@ -201,6 +204,36 @@ internal sealed partial class TypedIrBodyLowerer
             }
         }
         return _analysisOnly ? string.Empty : RenderFunction(_emitter.MethodSignature(_method, _nameOverride), body);
+    }
+
+    private bool TryEmitHardwareSimdOperator(out string definition)
+    {
+        definition = string.Empty;
+        if (!_emitter.HasCpuFeature(CpuFeature.Simd128) || !_method.IsOperator || !_method.IsStatic || _method.Parameters.Length != 2 ||
+            _method.ContainingType.Namespace != "System.Simd" || _method.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4"))
+            return false;
+        var intrinsic = (_emitter.Architecture, _method.ContainingType.Name, _method.OperatorKind) switch
+        {
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.PlusToken) => "_mm_add_ps",
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.MinusToken) => "_mm_sub_ps",
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.StarToken) => "_mm_mul_ps",
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.SlashToken) => "_mm_div_ps",
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "I32x4" or "U32x4", SyntaxKind.PlusToken) => "_mm_add_epi32",
+            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "I32x4" or "U32x4", SyntaxKind.MinusToken) => "_mm_sub_epi32",
+            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.PlusToken) => "vaddq_f32",
+            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.MinusToken) => "vsubq_f32",
+            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.StarToken) => "vmulq_f32",
+            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "I32x4" or "U32x4", SyntaxKind.PlusToken) => "vaddq_u32",
+            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "I32x4" or "U32x4", SyntaxKind.MinusToken) => "vsubq_u32",
+            _ => null,
+        };
+        if (intrinsic is null)
+            return false;
+        var left = NameMangler.Identifier(_method.Parameters[0].Name);
+        var right = NameMangler.Identifier(_method.Parameters[1].Name);
+        var type = _emitter.CTypeName(_method.ReturnType);
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    ct_result.ct_simd = {intrinsic}({left}.ct_simd, {right}.ct_simd);\n    return ct_result;\n}}";
+        return true;
     }
 
     private string EmitNakedDefinition()
@@ -281,8 +314,8 @@ internal sealed partial class TypedIrBodyLowerer
 
             if (!IsInlineAssemblyType(type))
                 Report("CT2195", $"Type '{type.DisplayName}' is not a supported assembly operand type.", operand.Variable);
-            if (operand.Constraint is null && type == CType.Float)
-                Report("CT2196", "A float assembly operand requires an explicit GNU constraint.", operand);
+            if (operand.Constraint is null && type.Kind is CTypeKind.Float or CTypeKind.Double)
+                Report("CT2196", "A floating-point assembly operand requires an explicit GNU constraint.", operand);
             var constraint = operand.Constraint ?? "r";
             ValidateAssemblyConstraint(constraint, operand);
             var emittedConstraint = operand.Kind switch

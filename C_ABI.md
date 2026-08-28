@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.25 and runtime ABI 16. Draft 0.25 adds assembly-function and constant-image-data metadata while retaining the Draft 0.24 x86-64 Cosmopolitan artifact pipeline and Draft 0.23 ESP-IDF interrupt entry and residency metadata.
+This document defines the generated C contract for C~ draft 0.34 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
 
-Draft 0.25 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.34 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -21,6 +21,7 @@ The generated file includes only C standard-library headers. Compile-time assert
 - `intptr_t` and `uintptr_t` matching data-pointer width when native-sized integers are used.
 - `size_t` representable by `uintptr_t` when native buffers are used.
 - A four-byte IEEE-754 binary32 `float`.
+- An eight-byte IEEE-754 binary64 `double`.
 - C23 language support. The native test driver first uses `-std=gnu23`. It retries with `-std=gnu2x` only after an option error. `CTILDE_C_STANDARD` selects an explicit dialect and disables this retry.
 
 References, unsafe pointers, `nint`, and `nuint` use native C pointer width. A 64-bit C target therefore uses 64-bit values for all four. Fixed-width C~ scalar sizes do not change with the target.
@@ -49,6 +50,8 @@ Hosted programs that use console input or `System.IO` additionally include the C
 | `nint` | `intptr_t` |
 | `nuint` | `uintptr_t` |
 | `float` | `float` |
+| `double` | `double` |
+| `rune` | `uint32_t` |
 | `T*` | the mapped C type followed by `*` |
 | `void*` | `void*` |
 | `delegate* unmanaged<P..., R>` | exact `R (*)(P...)` function pointer |
@@ -57,7 +60,7 @@ A nominal `newtype N : T` emits a named `typedef` with the representation and AB
 
 Signed arithmetic uses generated helpers to avoid C signed-overflow undefined behavior. Draft 0.10 defines two's-complement wrapping for fixed and native-width signed integers. Native shifts derive their mask from `sizeof(uintptr_t) * CHAR_BIT`.
 
-The emitter writes finite float constants with a decimal point and an `f` suffix. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
+The emitter writes finite float constants with a decimal point and an `f` suffix and finite double constants with sufficient binary64 precision. It preserves negative zero. Folded non-finite values use the `<math.h>` forms `NAN`, `INFINITY`, and `(-INFINITY)`.
 
 ## Generated names and symbol map
 
@@ -365,7 +368,7 @@ An extern method, extern data symbol, inline assembly block, or assembly functio
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize absolute inputs against `CompilationOptions.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.25.
+Source identities normalize each input against its `SourceOwnerIdentity.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. Repository owners include their canonical module path and exact locked revision. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.34.
 
 ## Portable CPU lowering
 
@@ -412,9 +415,9 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.25.
+This section records constraints that remain after draft 0.34.
 
-The proposed fixed-width SIMD revision initially treats SIMD values as internal C~ value types only. It rejects them in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use GCC/Clang vector values, MSVC intrinsics, Neon, or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI. See [FUTURE_FEATURES.md](FUTURE_FEATURES.md#fixed-width-128-bit-simd).
+Fixed-width SIMD values are internal C~ value types. They are rejected in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use x86/Arm intrinsics or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI.
 
 Public ESP-IDF headers are the source of truth for native declarations. ESP-IDF promises source compatibility but does not promise stable enum values or structure layouts between releases. The binding generator therefore compiles generated C adapters against the selected configured headers. It does not copy configuration-structure layouts or numeric enum values into a version-independent C~ ABI.
 

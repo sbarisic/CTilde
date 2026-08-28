@@ -61,7 +61,7 @@ public sealed partial class LanguageServiceSnapshot
     private static readonly string[] TopLevelKeywords = ["using", "namespace", "public", "internal", "class", "interface", "struct", "union", "enum", "delegate", "opaque", "newtype", "static", "sealed", "abstract"];
     private static readonly string[] TypeKeywords = ["public", "internal", "protected", "private", "static", "readonly", "const", "volatile", "unsafe", "virtual", "abstract", "override", "sealed", "operator", "where", "void", "asm"];
     private static readonly string[] StatementKeywords = ["if", "else", "while", "do", "for", "foreach", "switch", "case", "default", "break", "continue", "defer", "lock", "return", "throw", "try", "catch", "finally", "unsafe", "asm", "new", "stackalloc", "sizeof", "alignof", "offsetof", "ref", "in", "out", "this", "base", "true", "false", "null", "var"];
-    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "int", "uint", "long", "ulong", "nint", "nuint", "float", "string", "object"];
+    private static readonly string[] BuiltInTypes = ["bool", "byte", "sbyte", "short", "ushort", "char", "rune", "int", "uint", "long", "ulong", "nint", "nuint", "float", "double", "string", "object"];
 
     private readonly ImmutableArray<SyntaxTree> _userTrees;
     private readonly ImmutableArray<SyntaxTree> _allTrees;
@@ -101,7 +101,7 @@ public sealed partial class LanguageServiceSnapshot
                 _ => CompilationArchitecture.Auto,
             }
             : options.Architecture;
-        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture);
+        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture, options.CpuFeatures);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
@@ -610,6 +610,7 @@ public sealed partial class LanguageServiceSnapshot
                     SyntaxKind.TrueKeyword or SyntaxKind.FalseKeyword => CType.Bool,
                     SyntaxKind.StringToken => CType.String,
                     SyntaxKind.CharacterToken => CType.Char,
+                    SyntaxKind.RuneToken => CType.Rune,
                     SyntaxKind.NullKeyword => CType.Null,
                     SyntaxKind.NumberToken when literal.Value is NumericLiteralValue numeric => InferNumericLiteralType(numeric),
                     _ => CType.Int,
@@ -687,7 +688,7 @@ public sealed partial class LanguageServiceSnapshot
     private static CType InferNumericLiteralType(NumericLiteralValue numeric)
     {
         if (numeric.FloatingPoint is not null)
-            return CType.Float;
+            return numeric.FloatingKind == FloatingLiteralKind.Double ? CType.Double : CType.Float;
         if (numeric.Suffix == IntegerLiteralSuffix.None && numeric.Integer <= int.MaxValue)
             return CType.Int;
         if (numeric.Suffix is IntegerLiteralSuffix.None or IntegerLiteralSuffix.Unsigned && numeric.Integer <= uint.MaxValue)

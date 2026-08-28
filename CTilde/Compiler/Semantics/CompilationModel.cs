@@ -23,10 +23,11 @@ internal sealed partial class CompilationModel
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
 
-    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture)
+    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture, ImmutableArray<CpuFeature> cpuFeatures = default)
     {
         _target = target;
         _architecture = architecture;
+        CpuFeatures = (cpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : cpuFeatures).ToImmutableHashSet();
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
         Diagnostics = diagnostics;
@@ -48,11 +49,14 @@ internal sealed partial class CompilationModel
     public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public ImmutableHashSet<CpuFeature> CpuFeatures { get; }
     public DiagnosticBag Diagnostics { get; }
     public List<BoundStaticAssertion> StaticAssertions { get; } = [];
     public ImmutableDictionary<FieldSymbol, ConstDataValue> ConstInitializers { get; set; } = ImmutableDictionary<FieldSymbol, ConstDataValue>.Empty;
     public HashSet<TypeSymbol> StaticAssertionLayoutTypes { get; } = [];
     public Dictionary<string, TypeSymbol> Types { get; }
+    public Dictionary<LambdaExpressionSyntax, MethodSymbol> LambdaMethods { get; } = [];
+    public Dictionary<LambdaExpressionSyntax, TypeSymbol> LambdaEnvironments { get; } = [];
     public DocumentationIndex Documentation { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
     public MethodSymbol? EntryPoint { get; private set; }
@@ -61,6 +65,9 @@ internal sealed partial class CompilationModel
     public bool FreestandingRuntimeRequired { get; set; }
     public bool FreestandingHeapRequired { get; set; }
     public EffectAnalysis Effects { get; set; } = EffectAnalysis.Empty;
+
+    public SourceOwnerIdentity? SourceOwnerFor(SourceText source) =>
+        SyntaxTrees.FirstOrDefault(tree => ReferenceEquals(tree.Text, source))?.SourceOwner;
 
     public CType ResolveType(TypeSyntax syntax, SyntaxTree tree, bool report = true)
     {
@@ -353,6 +360,7 @@ internal sealed partial class CompilationModel
             return null;
         }
         ValidateGenericArguments(definition.TypeParameters, definition.TypeParameterConstraints, arguments, syntax);
+        ValidateSimdLaneArguments(definition, arguments, syntax);
         var identity = string.Join(";", arguments.Select(NameMangler.CanonicalType));
         if (_constructedMethods.TryGetValue((definition, identity), out var existing))
             return existing;
@@ -412,6 +420,20 @@ internal sealed partial class CompilationModel
             TypeSubstitutions = method.TypeSubstitutions,
             GenericDefinition = genericDefinition,
         };
+    }
+
+    private void ValidateSimdLaneArguments(MethodSymbol definition, ImmutableArray<CType> arguments, SyntaxNode syntax)
+    {
+        if (definition.ContainingType.Namespace != "System.Simd" ||
+            definition.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4" or "Mask32x4") ||
+            definition.Name is not ("GetLane" or "WithLane" or "Shuffle"))
+            return;
+
+        foreach (var argument in arguments)
+        {
+            if (argument.Kind == CTypeKind.Constant && argument.ConstantValue is BigInteger lane && (lane < BigInteger.Zero || lane > new BigInteger(3)))
+                Diagnostics.Add("CT2220", $"SIMD lane index '{lane}' is outside the fixed range 0..3.", syntax.Source, syntax.Span);
+        }
     }
 
     private void FinalizeConstructedTypes()
@@ -489,6 +511,8 @@ internal sealed partial class CompilationModel
                 BitLast = field.BitLast,
                 RegisterAddress = registerAddress,
                 RegisterAddressParameter = field.RegisterAddressParameter,
+                EmbeddedData = field.EmbeddedData,
+                EmbeddedResourceIdentity = field.EmbeddedResourceIdentity,
             });
         }
         foreach (var property in definition.Properties)
@@ -662,13 +686,13 @@ internal sealed partial class CompilationModel
     private static bool IsUnmanagedFunctionPointerElement(CType type, bool allowVoid) =>
         type.Kind == CTypeKind.Void ? allowVoid :
         type.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
+            CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer;
 
     private static bool IsCompleteUnmanagedType(CType type) => type.Kind switch
     {
         CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
-        CTypeKind.Float or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
+        CTypeKind.Float or CTypeKind.Double or CTypeKind.Enum or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer => true,
         CTypeKind.Newtype => type.Symbol?.UnderlyingType is { } underlying && IsCompleteUnmanagedType(underlying),
         CTypeKind.InlineArray => type.InlineArrayLength > 0 && IsCompleteUnmanagedType(type.ElementType!),
         CTypeKind.Struct => !type.ContainsManagedReferences,
@@ -1249,7 +1273,7 @@ internal sealed partial class CompilationModel
             case FieldDeclarationSyntax field:
                 {
                     ValidateAllowedModifiers(field.Modifiers, ["public", "internal", "protected", "private", "static", "const", "readonly", "unsafe", "volatile"], field);
-                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits", "InterruptSafe", "ConstInit"]);
+                    ValidateAttributes(field.Attributes, field, ["FieldOffset", "Section", "Used", "Extern", "NativeVolatile", "Align", "LinkerSymbol", "Register", "Bit", "Bits", "InterruptSafe", "ConstInit", "Embed"]);
                     if (type.Kind == DeclaredTypeKind.Interface)
                         Diagnostics.Add("CT1273", "An interface can contain only instance method and property contracts.", field.Source, field.Span);
                     var isVolatile = field.Modifiers.Contains("volatile", StringComparer.Ordinal);
@@ -1267,8 +1291,11 @@ internal sealed partial class CompilationModel
                     var registerAttribute = FindAttribute(field.Attributes, "Register");
                     var interruptSafeAttribute = FindAttribute(field.Attributes, "InterruptSafe");
                     var constInitAttribute = FindAttribute(field.Attributes, "ConstInit");
+                    var embedAttribute = FindAttribute(field.Attributes, "Embed");
                     string? externName = null;
                     string? linkerSymbolName = null;
+                    byte[]? embeddedData = null;
+                    string? embeddedResourceIdentity = null;
                     int? bitFirst = null;
                     int? bitLast = null;
                     var registerAddress = ParseRegisterAddress(registerAttribute,
@@ -1322,6 +1349,49 @@ internal sealed partial class CompilationModel
                         if (type.Kind != DeclaredTypeKind.Struct || isStatic)
                             Diagnostics.Add("CT1281", "FieldOffset is valid only on an instance field of a struct.", fieldOffsetAttribute.Source, fieldOffsetAttribute.Span);
                     }
+                    var resolvedFieldType = ResolveType(field.Type, tree);
+                    if (embedAttribute is not null)
+                    {
+                        var validShape = isStatic && field.Modifiers.Contains("readonly", StringComparer.Ordinal) &&
+                            !field.Modifiers.Contains("const", StringComparer.Ordinal) && !isVolatile && field.Initializer is null &&
+                            resolvedFieldType.Kind == CTypeKind.ReadOnlyNativeBuffer && resolvedFieldType.ElementType == CType.Byte &&
+                            field.Attributes.Length == 1 && field.Modifiers.All(modifier => modifier is "public" or "internal" or "protected" or "private" or "static" or "readonly" or "unsafe");
+                        if (!validShape)
+                            Diagnostics.Add("CT2222", "Embed requires an otherwise unadorned static readonly unsafe ReadOnlyNativeBuffer<byte> field without an initializer.", embedAttribute.Source, embedAttribute.Span);
+                        if (embedAttribute.Arguments is not [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string resourcePath }] ||
+                            string.IsNullOrWhiteSpace(resourcePath) || Path.IsPathFullyQualified(resourcePath))
+                        {
+                            Diagnostics.Add("CT2222", "Embed requires one non-empty owner-relative resource path.", embedAttribute.Source, embedAttribute.Span);
+                        }
+                        else if (validShape)
+                        {
+                            var owner = SourceOwnerFor(field.Source);
+                            if (owner?.ContentRoot is null || !Path.IsPathFullyQualified(owner.ContentRoot))
+                                Diagnostics.Add("CT2222", "Embed requires the source owner to define an absolute content root.", embedAttribute.Source, embedAttribute.Span);
+                            else
+                            {
+                                try
+                                {
+                                    var contentRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(owner.ContentRoot));
+                                    var resourceFullPath = Path.GetFullPath(resourcePath, contentRoot);
+                                    var relative = Path.GetRelativePath(contentRoot, resourceFullPath);
+                                    if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))
+                                        Diagnostics.Add("CT2222", $"Embedded resource '{resourcePath}' escapes its source owner's content root.", embedAttribute.Source, embedAttribute.Span);
+                                    else if (!File.Exists(resourceFullPath))
+                                        Diagnostics.Add("CT2222", $"Embedded resource '{resourcePath}' does not exist under its source owner's content root.", embedAttribute.Source, embedAttribute.Span);
+                                    else
+                                    {
+                                        embeddedData = File.ReadAllBytes(resourceFullPath);
+                                        embeddedResourceIdentity = $"{owner.ModulePath}/{relative.Replace('\\', '/')}";
+                                    }
+                                }
+                                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or PathTooLongException)
+                                {
+                                    Diagnostics.Add("CT2222", $"Embedded resource '{resourcePath}' could not be read: {exception.Message}", embedAttribute.Source, embedAttribute.Span);
+                                }
+                            }
+                        }
+                    }
                     var symbol = new FieldSymbol
                     {
                         Name = field.Name,
@@ -1329,7 +1399,7 @@ internal sealed partial class CompilationModel
                         Accessibility = accessibility,
                         IsStatic = isStatic,
                         Syntax = field,
-                        Type = ResolveType(field.Type, tree),
+                        Type = resolvedFieldType,
                         IsReadonly = field.Modifiers.Contains("readonly", StringComparer.Ordinal),
                         IsConst = field.Modifiers.Contains("const", StringComparer.Ordinal),
                         IsVolatile = isVolatile,
@@ -1344,13 +1414,15 @@ internal sealed partial class CompilationModel
                         IsNativeVolatile = nativeVolatileAttribute is not null,
                         IsUsed = usedAttribute is not null,
                         IsConstInit = constInitAttribute is not null,
+                        EmbeddedData = embeddedData,
+                        EmbeddedResourceIdentity = embeddedResourceIdentity,
                         IsInterruptSafe = interruptSafeAttribute is not null,
                         BitFirst = bitFirst,
                         BitLast = bitLast,
                         RegisterAddress = registerAddress,
                         RegisterAddressParameter = registerAddressParameter,
                     };
-                    if (symbol.Type.IsNativeBuffer)
+                    if (symbol.Type.IsNativeBuffer && embedAttribute is null)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in fields.", field.Source, field.Span);
                     if (symbol.Type.Kind == CTypeKind.Opaque)
                         Diagnostics.Add("CT1242", "Opaque handles cannot be stored in fields.", field.Source, field.Span);
@@ -1776,7 +1848,7 @@ internal sealed partial class CompilationModel
         allowVoid && type == CType.Void || type.Kind is
             CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
             CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or
-            CTypeKind.Float or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
+            CTypeKind.Float or CTypeKind.Double or CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.Opaque or CTypeKind.Pointer or CTypeKind.FunctionPointer;
 
     private ImmutableArray<ParameterSymbol> DeclareParameters(ImmutableArray<ParameterSyntax> parameters, SyntaxTree tree, bool isExtern)
     {
@@ -2027,7 +2099,7 @@ internal sealed partial class CompilationModel
             if (candidate.Kind == CTypeKind.TypeParameter && candidate.Symbol is not null)
                 return context.TypeParameterConstraints.TryGetValue(candidate.Symbol.Name, out var constraint) && constraint.RequiresUnmanaged;
             if (candidate.Kind is CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
-                CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or
+                CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or
                 CTypeKind.Enum or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.FunctionPointer)
                 return true;
             if (candidate.Kind == CTypeKind.Newtype && candidate.Symbol?.UnderlyingType is { } underlying)

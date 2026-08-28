@@ -45,6 +45,12 @@ internal static class DebugPreparation
                 ["path"] = Path.GetFullPath(path),
                 ["sha256"] = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))),
             }).ToArray();
+        var hostedRun = request.Target == CTilde.CompilationTarget.Hosted ? request.RunConfiguration : null;
+        var runArguments = hostedRun?.Arguments.Select((value, index) => ProjectRunDriver.Expand(
+            value, request.RootDirectory, request.ExecutablePath, $"run.args[{index}]")).ToArray() ?? [];
+        var runEnvironment = hostedRun?.Environment.ToDictionary(entry => entry.Key, entry => ProjectRunDriver.Expand(
+            entry.Value, request.RootDirectory, request.ExecutablePath, $"run.environment.{entry.Key}"), StringComparer.Ordinal)
+            ?? new Dictionary<string, string>(StringComparer.Ordinal);
         var descriptor = new Dictionary<string, object?>
         {
             ["generator"] = $"C~ draft {CompilerContract.DraftVersion}",
@@ -55,7 +61,9 @@ internal static class DebugPreparation
             ["program"] = Path.GetFullPath(program),
             ["debugMap"] = Path.GetFullPath(request.DebugMapPath),
             ["sourceRoot"] = Path.GetFullPath(request.RootDirectory),
-            ["workingDirectory"] = Path.GetFullPath(request.RootDirectory),
+            ["workingDirectory"] = Path.GetFullPath(hostedRun?.WorkingDirectoryPath ?? request.RootDirectory),
+            ["arguments"] = runArguments,
+            ["environment"] = runEnvironment,
             ["compilerCommand"] = native.CompilerCommand,
             ["gdbCommand"] = gdbCommand,
             ["gdbPrefixArguments"] = gdbPrefix,

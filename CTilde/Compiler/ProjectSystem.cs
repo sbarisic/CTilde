@@ -12,10 +12,27 @@ public sealed record CTildeProjectConfiguration(
     ImmutableArray<string> Exclude,
     CTildeProjectBuildConfiguration Build,
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
+    ImmutableArray<CpuFeature> CpuFeatures,
+    ImmutableArray<RepositoryModuleReference> Modules,
+    CTildeProjectRunConfiguration? Run,
     bool NoRecursion,
     EspIdfPanicPolicy PanicPolicy,
     FreestandingProjectConfiguration? Freestanding,
     CosmopolitanProjectConfiguration? Cosmopolitan);
+
+public enum CTildeRunExecutor
+{
+    Host,
+    Wsl,
+}
+
+public sealed record CTildeProjectRunConfiguration(
+    CTildeRunExecutor Executor,
+    string? Command,
+    ImmutableArray<string> Arguments,
+    string WorkingDirectoryPath,
+    ImmutableDictionary<string, string> Environment,
+    ImmutableArray<int> SuccessExitCodes);
 
 public enum CosmopolitanRuntimeMode
 {
@@ -57,7 +74,23 @@ public sealed record CTildeProject(
     string ManifestPath,
     string RootDirectory,
     CTildeProjectConfiguration Configuration,
-    ImmutableArray<string> SourceFiles);
+    ImmutableArray<string> SourceFiles,
+    ImmutableDictionary<string, SourceOwnerIdentity> SourceOwners);
+
+public sealed record RepositoryModuleReference(
+    string ModulePath,
+    string Repository,
+    string Selector,
+    string? Alias,
+    ImmutableArray<string> Sources,
+    string? Vendor,
+    RepositoryModuleUpdatePolicy UpdatePolicy);
+
+public enum RepositoryModuleUpdatePolicy
+{
+    Locked,
+    Refresh,
+}
 
 public sealed class CTildeProjectException : Exception
 {
@@ -70,7 +103,7 @@ public static class CTildeProjectFile
 {
     private static readonly string[] DefaultExcludes =
     [
-        ".git/**", "**/bin/**", "**/obj/**", "**/build/**", "**/node_modules/**", "**/managed_components/**",
+        ".git/**", ".ctilde/**", "vendor/**", "**/bin/**", "**/obj/**", "**/build/**", "**/node_modules/**", "**/managed_components/**",
     ];
 
     public static CTildeProject Load(string manifestPath)
@@ -103,7 +136,9 @@ public static class CTildeProjectFile
             _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, freestanding, or cosmopolitan."),
         };
         var architecture = ParseArchitecture(document.Architecture, fullManifestPath);
+        var cpuFeatures = ParseCpuFeatures(document.CpuFeatures, fullManifestPath);
         var root = Path.GetDirectoryName(fullManifestPath)!;
+        var modules = ParseModules(document.Modules, fullManifestPath);
         var sources = ValidatePatterns(document.Sources, "sources", fullManifestPath);
         var excludes = ValidatePatterns([.. DefaultExcludes, .. document.Exclude ?? []], "exclude", fullManifestPath);
         var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -143,7 +178,10 @@ public static class CTildeProjectFile
             if (files.Contains(declaration, comparer))
                 throw new CTildeProjectException($"ESP-IDF binding declaration '{declaration}' cannot overwrite an ordinary project source in '{fullManifestPath}'.");
         files = files.Concat(bindingManifests.Select(binding => binding.DeclarationsPath).Where(File.Exists)).Distinct(comparer).OrderBy(path => path, comparer).ToImmutableArray();
+        var restoredModules = RepositoryModules.LoadLocked(root, modules);
+        files = files.Concat(restoredModules.SourceFiles).Distinct(comparer).OrderBy(path => path, comparer).ToImmutableArray();
         var build = CreateBuildConfiguration(document.Build, target, root, fullManifestPath, files);
+        var run = CreateRunConfiguration(document.Run, build, root, fullManifestPath);
         foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
@@ -154,8 +192,52 @@ public static class CTildeProjectFile
         var cosmopolitan = target == CompilationTarget.Cosmopolitan
             ? CreateCosmopolitanConfiguration(document.Cosmopolitan, fullManifestPath)
             : null;
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests,
-            document.NoRecursion ?? false, panicPolicy, freestanding, cosmopolitan), files);
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, cpuFeatures, modules, run,
+            document.NoRecursion ?? false, panicPolicy, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
+    }
+
+    public static (string RootDirectory, ImmutableArray<RepositoryModuleReference> Modules) ReadModuleReferences(string manifestPath)
+    {
+        var fullManifestPath = Path.GetFullPath(manifestPath);
+        ProjectDocument document;
+        try
+        {
+            using var stream = File.OpenRead(fullManifestPath);
+            document = JsonSerializer.Deserialize<ProjectDocument>(stream, JsonOptions) ?? throw new JsonException("Empty project manifest.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
+        {
+            throw new CTildeProjectException($"Could not read project manifest '{fullManifestPath}': {exception.Message}", exception);
+        }
+        return (Path.GetDirectoryName(fullManifestPath)!, ParseModules(document.Modules, fullManifestPath));
+    }
+
+    private static ImmutableArray<RepositoryModuleReference> ParseModules(ModuleDocument[]? documents, string manifestPath)
+    {
+        var result = ImmutableArray.CreateBuilder<RepositoryModuleReference>();
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        var aliases = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var module in documents ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(module.Path) || module.Path.StartsWith(".", StringComparison.Ordinal) || module.Path.Contains('\\') || module.Path.Split('/').Any(segment => segment.Length == 0 || segment is "." or ".."))
+                throw new CTildeProjectException($"Repository module path '{module.Path}' in '{manifestPath}' must be a canonical slash-separated module identity.");
+            if (!paths.Add(module.Path))
+                throw new CTildeProjectException($"Repository module path '{module.Path}' appears more than once in '{manifestPath}'.");
+            if (string.IsNullOrWhiteSpace(module.Repository) || string.IsNullOrWhiteSpace(module.Selector))
+                throw new CTildeProjectException($"Repository module '{module.Path}' in '{manifestPath}' requires repository and selector values.");
+            if (module.Alias is not null && (!Regex.IsMatch(module.Alias, "^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant) || !aliases.Add(module.Alias)))
+                throw new CTildeProjectException($"Repository module alias '{module.Alias}' in '{manifestPath}' is invalid or duplicated.");
+            var updatePolicy = module.UpdatePolicy switch
+            {
+                null or "locked" => RepositoryModuleUpdatePolicy.Locked,
+                "refresh" => RepositoryModuleUpdatePolicy.Refresh,
+                _ => throw new CTildeProjectException($"Repository module '{module.Path}' in '{manifestPath}' has unknown updatePolicy '{module.UpdatePolicy}'; expected locked or refresh."),
+            };
+            result.Add(new RepositoryModuleReference(module.Path, module.Repository, module.Selector, module.Alias,
+                ValidatePatterns(module.Sources is { Length: > 0 } ? module.Sources : ["**/*.ct"], "modules.sources", manifestPath),
+                module.Vendor, updatePolicy));
+        }
+        return result.ToImmutable();
     }
 
     private static CompilationArchitecture ParseArchitecture(string? value, string manifestPath) => value switch
@@ -170,6 +252,23 @@ public static class CTildeProjectFile
         "riscv64" => CompilationArchitecture.RiscV64,
         _ => throw new CTildeProjectException($"Unknown architecture '{value}' in '{manifestPath}'; expected auto, x86, x64, arm32, arm64, xtensa, riscv32, or riscv64."),
     };
+
+    private static ImmutableArray<CpuFeature> ParseCpuFeatures(string[]? values, string manifestPath)
+    {
+        var result = ImmutableArray.CreateBuilder<CpuFeature>();
+        foreach (var value in values ?? [])
+        {
+            var feature = value switch
+            {
+                "simd128" => CpuFeature.Simd128,
+                _ => throw new CTildeProjectException($"Unknown CPU feature '{value}' in '{manifestPath}'; expected simd128."),
+            };
+            if (result.Contains(feature))
+                throw new CTildeProjectException($"CPU feature '{value}' appears more than once in '{manifestPath}'.");
+            result.Add(feature);
+        }
+        return result.ToImmutable();
+    }
 
     private static EspIdfPanicPolicy ParsePanicPolicy(string? value, CompilationTarget target, string manifestPath)
     {
@@ -303,6 +402,79 @@ public static class CTildeProjectFile
 
         return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, lto,
             configuration, compiler, executable, espIdfProjectDirectory);
+    }
+
+    private static CTildeProjectRunConfiguration? CreateRunConfiguration(
+        RunDocument? document,
+        CTildeProjectBuildConfiguration build,
+        string root,
+        string manifestPath)
+    {
+        if (document is null)
+            return null;
+        var executor = document.Executor switch
+        {
+            null or "host" => CTildeRunExecutor.Host,
+            "wsl" => CTildeRunExecutor.Wsl,
+            _ => throw new CTildeProjectException($"Unknown run executor '{document.Executor}' in '{manifestPath}'; expected host or wsl."),
+        };
+        if (document.Command is not null)
+        {
+            ValidateRunTemplate(document.Command, "run.command", manifestPath);
+            if (Path.IsPathRooted(document.Command))
+                throw new CTildeProjectException($"Property 'run.command' in '{manifestPath}' must be a PATH command, project-relative path, or supported placeholder expression.");
+        }
+        var arguments = (document.Arguments ?? []).Select((value, index) =>
+        {
+            ValidateRunTemplate(value, $"run.args[{index}]", manifestPath, allowEmpty: true);
+            return value;
+        }).ToImmutableArray();
+        var workingDirectory = ExpandRunPath(document.WorkingDirectory ?? ".", "run.workingDirectory", root, build.ExecutablePath, manifestPath);
+        var environment = ImmutableDictionary.CreateBuilder<string, string>(StringComparer.Ordinal);
+        foreach (var entry in document.Environment ?? [])
+        {
+            if (!Regex.IsMatch(entry.Key, @"^[A-Za-z_][A-Za-z0-9_]*$", RegexOptions.CultureInvariant))
+                throw new CTildeProjectException($"Environment variable name '{entry.Key}' in 'run.environment' in '{manifestPath}' is invalid.");
+            if (entry.Value.Contains('\0'))
+                throw new CTildeProjectException($"Environment variable '{entry.Key}' in 'run.environment' in '{manifestPath}' contains a null character.");
+            ValidateRunTemplate(entry.Value, $"run.environment.{entry.Key}", manifestPath, allowEmpty: true);
+            environment.Add(entry.Key, entry.Value);
+        }
+        var successExitCodes = (document.SuccessExitCodes ?? [0]).ToImmutableArray();
+        if (successExitCodes.IsEmpty)
+            throw new CTildeProjectException($"Property 'run.successExitCodes' in '{manifestPath}' requires at least one exit code.");
+        if (successExitCodes.Distinct().Count() != successExitCodes.Length)
+            throw new CTildeProjectException($"Property 'run.successExitCodes' in '{manifestPath}' cannot contain duplicate exit codes.");
+        return new CTildeProjectRunConfiguration(executor, document.Command, arguments, workingDirectory,
+            environment.ToImmutable(), successExitCodes);
+    }
+
+    private static string ExpandRunPath(string value, string property, string root, string? buildOutput, string manifestPath)
+    {
+        ValidateRunTemplate(value, property, manifestPath);
+        var expanded = value.Replace("${projectRoot}", root, StringComparison.Ordinal);
+        if (expanded.Contains("${buildOutput}", StringComparison.Ordinal))
+        {
+            if (buildOutput is null)
+                throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' uses ${{buildOutput}}, but this target has no executable or image output.");
+            expanded = expanded.Replace("${buildOutput}", buildOutput, StringComparison.Ordinal);
+        }
+        var fullPath = Path.GetFullPath(Path.IsPathRooted(expanded) ? expanded : Path.Combine(root, expanded));
+        var relative = Path.GetRelativePath(root, fullPath);
+        if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' must stay within the project directory.");
+        return fullPath;
+    }
+
+    private static void ValidateRunTemplate(string value, string property, string manifestPath, bool allowEmpty = false)
+    {
+        if (!allowEmpty && string.IsNullOrWhiteSpace(value))
+            throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' cannot be empty.");
+        if (value.Contains('\0'))
+            throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' contains a null character.");
+        var remainder = Regex.Replace(value, @"\$\{(projectRoot|buildOutput)\}", string.Empty, RegexOptions.CultureInvariant);
+        if (remainder.Contains("${", StringComparison.Ordinal))
+            throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' contains an unknown or malformed placeholder; expected ${{projectRoot}} or ${{buildOutput}}.");
     }
 
     private static FreestandingProjectConfiguration CreateFreestandingConfiguration(
@@ -450,14 +622,26 @@ public static class CTildeProjectFile
     private sealed record ProjectDocument(
         [property: JsonPropertyName("target")] string? Target,
         [property: JsonPropertyName("architecture")] string? Architecture,
+        [property: JsonPropertyName("cpuFeatures")] string[]? CpuFeatures,
+        [property: JsonPropertyName("modules")] ModuleDocument[]? Modules,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,
         [property: JsonPropertyName("noRecursion")] bool? NoRecursion,
         [property: JsonPropertyName("panicPolicy")] string? PanicPolicy,
         [property: JsonPropertyName("build")] BuildDocument? Build,
+        [property: JsonPropertyName("run")] RunDocument? Run,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf,
         [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding,
         [property: JsonPropertyName("cosmopolitan")] CosmopolitanDocument? Cosmopolitan);
+
+    private sealed record ModuleDocument(
+        [property: JsonPropertyName("path")] string Path,
+        [property: JsonPropertyName("repository")] string Repository,
+        [property: JsonPropertyName("selector")] string Selector,
+        [property: JsonPropertyName("alias")] string? Alias,
+        [property: JsonPropertyName("sources")] string[]? Sources,
+        [property: JsonPropertyName("vendor")] string? Vendor,
+        [property: JsonPropertyName("updatePolicy")] string? UpdatePolicy);
 
     private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
 
@@ -484,4 +668,12 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("executable")] string? Executable,
         [property: JsonPropertyName("image")] string? Image,
         [property: JsonPropertyName("espIdfProjectDirectory")] string? EspIdfProjectDirectory);
+
+    private sealed record RunDocument(
+        [property: JsonPropertyName("executor")] string? Executor,
+        [property: JsonPropertyName("command")] string? Command,
+        [property: JsonPropertyName("args")] string[]? Arguments,
+        [property: JsonPropertyName("workingDirectory")] string? WorkingDirectory,
+        [property: JsonPropertyName("environment")] Dictionary<string, string>? Environment,
+        [property: JsonPropertyName("successExitCodes")] int[]? SuccessExitCodes);
 }

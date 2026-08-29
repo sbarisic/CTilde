@@ -122,7 +122,7 @@ Install the .NET 10 SDK and one supported native toolchain:
 - GNU-compatible ELF tools for freestanding images.
 - Cosmopolitan `cosmocc` for x86-64 APEs.
 
-Build the solution:
+Build the compiler and command-line tooling:
 
 ```powershell
 dotnet build .\CTilde.sln --nologo
@@ -209,7 +209,14 @@ See [the extension guide](editors/vscode/README.md) for installation and debugge
 
 ## Visual Studio
 
-The preview Visual Studio extension supplies TextMate and LSP editor support plus manifest-backed `.ctproj` projects. `CTilde.sln` includes the physical standard library and 12 example entries under the **C~** solution folder. They have solution configuration mappings but are excluded from Build Solution; select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest.
+The preview Visual Studio extension supplies TextMate and LSP editor support plus manifest-backed `.ctproj` projects. The root solutions are intentionally focused:
+
+- `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
+- `Editors.sln` contains the three Visual Studio extension projects.
+- `Examples.sln` contains the 12 example projects, with the three T-CAN variants grouped together.
+- `CTilde.StandardLibrary.sln` contains the physical standard-library project.
+
+The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
 
 See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.12.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
 
@@ -244,6 +251,8 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 ```powershell
 dotnet build .\CTilde.sln --nologo
 dotnet run --project .\Test\Test.csproj --no-build
+dotnet build .\Editors.sln --nologo
+dotnet run --project .\editors\visualstudio\CTilde.VisualStudio.Tests\CTilde.VisualStudio.Tests.csproj --no-build
 .\Test\Test-QemuFreestanding.ps1
 Push-Location .\editors\vscode
 npm test

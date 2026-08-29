@@ -185,15 +185,38 @@ Run("repository C~ project contracts", () =>
         True(projectText.Contains("<None Include=\"**\\*\" Exclude=\"$(CTildeProjectItemExcludes)\" />", StringComparison.Ordinal));
         True(projectText.Contains("$(CTildeProjectSystemPath)\\CTilde.targets", StringComparison.Ordinal));
     }
-    var solution = File.ReadAllText(Path.Combine(root, "CTilde.sln"));
-    foreach (var contract in contracts)
+    AssertSolutionProjects(root, "CTilde.sln",
+    [
+        "CTilde/CTilde.csproj",
+        "CTilde.Cli/CTilde.Cli.csproj",
+        "Test/Test.csproj",
+        "CTilde.LanguageServer/CTilde.LanguageServer.csproj",
+        "CTilde.DebugAdapter/CTilde.DebugAdapter.csproj",
+        "CTilde.DebugAdapter.Tests/CTilde.DebugAdapter.Tests.csproj",
+    ]);
+    AssertSolutionProjects(root, "Editors.sln",
+    [
+        "editors/visualstudio/CTilde.VisualStudio.Core/CTilde.VisualStudio.Core.csproj",
+        "editors/visualstudio/CTilde.VisualStudio/CTilde.VisualStudio.csproj",
+        "editors/visualstudio/CTilde.VisualStudio.Tests/CTilde.VisualStudio.Tests.csproj",
+    ]);
+    AssertSolutionProjects(root, "Examples.sln", relativeProjects[1..]);
+    AssertSolutionProjects(root, "CTilde.StandardLibrary.sln", relativeProjects[..1]);
+
+    var examplesSolution = File.ReadAllText(Path.Combine(root, "Examples.sln"));
+    var standardLibrarySolution = File.ReadAllText(Path.Combine(root, "CTilde.StandardLibrary.sln"));
+    foreach (var contract in contracts[1..])
     {
         var guid = contract.ProjectGuid.ToString().ToUpperInvariant();
         var relative = Path.GetRelativePath(root, contract.ProjectPath).Replace('/', '\\');
-        True(solution.Contains($"\"{relative}\", \"{{{guid}}}\"", StringComparison.Ordinal));
-        True(!solution.Contains($"{{{guid}}}.Release|Any CPU.Build.0", StringComparison.Ordinal));
-        True(!solution.Contains($"{{{guid}}}.Debug|Any CPU.Build.0", StringComparison.Ordinal));
+        True(examplesSolution.Contains($"\"{relative}\", \"{{{guid}}}\"", StringComparison.Ordinal));
+        AssertNoBuildMapping(examplesSolution, guid);
     }
+    var standardLibraryGuid = contracts[0].ProjectGuid.ToString().ToUpperInvariant();
+    AssertNoBuildMapping(standardLibrarySolution, standardLibraryGuid);
+    True(examplesSolution.Contains("{4CD54149-3858-41D8-82BC-D49F144A6B90} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{61011E83-E222-434D-9F4B-175DEAE2F1F3} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{6CFF1E49-AC3D-43B9-A008-35A85FC530DB} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
 });
 Run("cancellation and nonzero CLI outcomes", () =>
 {
@@ -348,6 +371,26 @@ static void Throws<T>(Action action) where T : Exception
     try { action(); }
     catch (T) { return; }
     throw new InvalidOperationException($"Expected {typeof(T).Name}.");
+}
+
+static void AssertSolutionProjects(string root, string solutionName, IReadOnlyCollection<string> expectedProjects)
+{
+    var actualProjects = File.ReadLines(Path.Combine(root, solutionName))
+        .Where(line => line.StartsWith("Project(", StringComparison.Ordinal))
+        .Select(line => line.Split("\", \"", StringSplitOptions.None))
+        .Where(fields => fields.Length == 3)
+        .Select(fields => fields[1].Replace('\\', '/'))
+        .Where(path => path.EndsWith(".csproj", StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".ctproj", StringComparison.OrdinalIgnoreCase))
+        .OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+    var expected = expectedProjects.OrderBy(path => path, StringComparer.OrdinalIgnoreCase);
+    Equal(string.Join("|", expected), string.Join("|", actualProjects));
+}
+
+static void AssertNoBuildMapping(string solution, string projectGuid)
+{
+    True(!solution.Split('\n').Any(line => line.Contains($"{{{projectGuid}}}.", StringComparison.Ordinal)
+        && line.Contains(".Build.0 =", StringComparison.Ordinal)));
 }
 
 static IReadOnlyDictionary<string, string> TextMateClassificationMappings(System.Xml.Linq.XDocument theme)

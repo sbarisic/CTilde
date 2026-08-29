@@ -25,7 +25,7 @@
 "State"=dword:00010002
 
 [$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ thrown exceptions]
-"State"=dword:00010001
+"State"=dword:00010000
 [$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ unhandled exceptions]
 "State"=dword:00010002
 [$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ fatal runtime events]

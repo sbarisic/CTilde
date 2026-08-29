@@ -63,6 +63,10 @@ try {
         $adapterRegistration -notmatch [regex]::Escape('Tools\DebugAdapter\CTilde.DebugAdapter.exe')) {
         throw 'The packaged Debug Adapter Host registration does not contain the C~ engine, exception category, and adapter path.'
     }
+    if ($adapterRegistration -notmatch [regex]::Escape("C~ thrown exceptions]`r`n`"State`"=dword:00010000") -and
+        $adapterRegistration -notmatch [regex]::Escape("C~ thrown exceptions]`n`"State`"=dword:00010000")) {
+        throw 'The packaged Debug Adapter Host registration enables caught C~ exceptions by default.'
+    }
     if (@($archive.Entries | Where-Object { $_.FullName -like 'Tools/DebugAdapter/*/CTilde.DebugAdapter.exe' }).Count -ne 0) {
         throw 'The packaged debug adapter contains duplicated culture-directory executables.'
     }

@@ -2,6 +2,27 @@ namespace CTilde.Cli;
 
 internal static class EspIdfEnvironment
 {
+    public static string? ResolveIdfPath(string? configuredPath)
+    {
+        foreach (var candidate in new[] { configuredPath, Environment.GetEnvironmentVariable("IDF_PATH") })
+            if (!string.IsNullOrWhiteSpace(candidate) && Directory.Exists(candidate))
+                return Path.GetFullPath(candidate);
+        if (!OperatingSystem.IsWindows())
+            return null;
+        foreach (var root in CandidateToolsRoots())
+        {
+            if (!Directory.Exists(root))
+                continue;
+            foreach (var profile in EnumerateWindowsProfiles(root))
+            {
+                var candidate = ReadProfileVariable(profile, "IDF_PATH");
+                if (!string.IsNullOrWhiteSpace(candidate) && Directory.Exists(candidate))
+                    return Path.GetFullPath(candidate);
+            }
+        }
+        return null;
+    }
+
     public static string? FindWindowsProfile(string idfPath)
     {
         if (!OperatingSystem.IsWindows())
@@ -10,8 +31,7 @@ internal static class EspIdfEnvironment
         {
             if (!Directory.Exists(root))
                 continue;
-            foreach (var profile in Directory.EnumerateFiles(root, "Microsoft.*.PowerShell_profile.ps1", SearchOption.TopDirectoryOnly)
-                         .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            foreach (var profile in EnumerateWindowsProfiles(root))
             {
                 var configuredIdfPath = ReadProfileVariable(profile, "IDF_PATH");
                 if (configuredIdfPath is not null && PathsEqual(configuredIdfPath, idfPath))
@@ -45,6 +65,10 @@ internal static class EspIdfEnvironment
             yield return @"C:\Espressif\tools";
         yield return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".espressif");
     }
+
+    private static IEnumerable<string> EnumerateWindowsProfiles(string root) =>
+        Directory.EnumerateFiles(root, "Microsoft.*.PowerShell_profile.ps1", SearchOption.TopDirectoryOnly)
+            .OrderByDescending(path => path, StringComparer.OrdinalIgnoreCase);
 
     private static string? ReadProfileVariable(string profile, string name)
     {

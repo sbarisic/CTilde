@@ -32,10 +32,16 @@ internal sealed class CTildeLaunchProvider : DebugLaunchProviderBase
         return base.LaunchAsync(launchOptions);
     }
 
-    public override async Task<IReadOnlyList<IDebugLaunchSettings>> QueryDebugTargetsAsync(DebugLaunchOptions launchOptions)
+    public override Task<IReadOnlyList<IDebugLaunchSettings>> QueryDebugTargetsAsync(DebugLaunchOptions launchOptions)
     {
-        var contract = CTildeProjectContract.Load(ConfiguredProject.UnconfiguredProject.FullPath);
-        var preparation = await CTildeDebugPreparationRunner.PrepareAsync(contract, CancellationToken.None);
+        var projectPath = ConfiguredProject.UnconfiguredProject.FullPath;
+        return Task.Run(() => CreateDebugTargetsAsync(projectPath, launchOptions));
+    }
+
+    private static async Task<IReadOnlyList<IDebugLaunchSettings>> CreateDebugTargetsAsync(string projectPath, DebugLaunchOptions launchOptions)
+    {
+        var contract = CTildeProjectContract.Load(projectPath);
+        var preparation = await CTildeDebugPreparationRunner.PrepareAsync(contract, CancellationToken.None).ConfigureAwait(false);
         var options = CTildeToolPaths.Current;
         var payload = JsonConvert.SerializeObject(new
         {

@@ -283,10 +283,12 @@ Run("Visual Studio debug launch registration", () =>
     True(project.Contains("Tools\\DebugAdapter", StringComparison.Ordinal));
     True(project.Contains("<AssemblyVersion>0.12.0.0</AssemblyVersion>", StringComparison.Ordinal));
     var registration = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "debug-adapter.pkgdef"));
+    var normalizedRegistration = registration.Replace("\r\n", "\n", StringComparison.Ordinal);
     True(registration.Contains("{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}", StringComparison.OrdinalIgnoreCase));
     True(registration.Contains("{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}", StringComparison.OrdinalIgnoreCase));
     True(registration.Contains("Tools\\DebugAdapter\\CTilde.DebugAdapter.exe", StringComparison.Ordinal));
     True(registration.Contains("\"Attach\"=dword:00000000", StringComparison.Ordinal));
+    True(normalizedRegistration.Contains("C~ thrown exceptions]\n\"State\"=dword:00010000", StringComparison.Ordinal));
     var props = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.props"));
     var targets = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.targets"));
     True(props.Contains("<DebuggerFlavor>CTilde</DebuggerFlavor>", StringComparison.Ordinal));

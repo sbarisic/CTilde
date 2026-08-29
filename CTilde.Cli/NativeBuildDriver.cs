@@ -658,10 +658,10 @@ internal static class EspIdfBuildDriver
                 process = activeRequest;
             else
             {
-                var idfPath = request.EspIdfPath ?? Environment.GetEnvironmentVariable("IDF_PATH");
-                if (string.IsNullOrWhiteSpace(idfPath) || !Directory.Exists(idfPath))
+                var idfPath = EspIdfEnvironment.ResolveIdfPath(request.EspIdfPath);
+                if (idfPath is null)
                     throw new NativeBuildException("ESP-IDF tools are not active. Open an ESP-IDF terminal or pass --idf-path.");
-                process = CreateActivatedRequest(Path.GetFullPath(idfPath), project, arguments, qemuDirectory);
+                process = CreateActivatedRequest(idfPath, project, arguments, qemuDirectory);
             }
         }
         if (!string.IsNullOrWhiteSpace(qemuDirectory))
@@ -705,8 +705,8 @@ internal static class EspIdfBuildDriver
 
     private static string QemuToolsInstallCommand(BuildRequest request)
     {
-        var idfPath = request.EspIdfPath ?? Environment.GetEnvironmentVariable("IDF_PATH");
-        if (!string.IsNullOrWhiteSpace(idfPath))
+        var idfPath = EspIdfEnvironment.ResolveIdfPath(request.EspIdfPath);
+        if (idfPath is not null)
         {
             var script = Path.Combine(Path.GetFullPath(idfPath), "tools", "idf_tools.py");
             return OperatingSystem.IsWindows()

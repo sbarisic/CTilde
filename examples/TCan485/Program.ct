@@ -217,7 +217,14 @@ public static class Program
 
     private static unsafe void RunManagedSelfTests()
     {
-        Console.WriteLine("C~ ESP-IDF hardware test");
+        static if (Target.Environment == TargetEnvironment.Qemu)
+        {
+            Console.WriteLine("C~ ESP-IDF QEMU test");
+        }
+        else
+        {
+            Console.WriteLine("C~ ESP-IDF hardware test");
+        }
 
         Probe probe = new DerivedProbe();
         Console.Write("virtual: ");
@@ -242,14 +249,24 @@ public static class Program
         else
             Console.WriteLine("TIMER64_FAILED");
 
-        long generatedTimer = NativeTimer.GetTimeMicroseconds();
-        HardwareRandom.NextUInt32();
-        NativeBuffer<byte> randomBytes = stackalloc byte[8];
-        HardwareRandom.Fill(randomBytes);
-        if (generatedTimer >= 0L && randomBytes.Length == 8u)
-            Console.WriteLine("generated bindings: ok");
+        static if (Target.Environment == TargetEnvironment.Qemu)
+        {
+            if (EspTimer.GetTimeMicroseconds() >= 0L)
+                Console.WriteLine("qemu timer: ok");
+            else
+                Console.WriteLine("QEMU_TIMER_FAILED");
+        }
         else
-            Console.WriteLine("GENERATED_BINDINGS_FAILED");
+        {
+            long generatedTimer = NativeTimer.GetTimeMicroseconds();
+            HardwareRandom.NextUInt32();
+            NativeBuffer<byte> randomBytes = stackalloc byte[8];
+            HardwareRandom.Fill(randomBytes);
+            if (generatedTimer >= 0L && randomBytes.Length == 8u)
+                Console.WriteLine("generated bindings: ok");
+            else
+                Console.WriteLine("GENERATED_BINDINGS_FAILED");
+        }
 
         NativeBuffer<byte> nativeBuffer = stackalloc byte[1];
         if (NativeBufferApi.Fill(nativeBuffer) == 42U && nativeBuffer[0] == (byte)42)
@@ -324,25 +341,45 @@ public static class Program
     [EntryPoint]
     public static unsafe void Main()
     {
-        EspError configureError = Ws2812.Configure(Ws2812Pin, 1u);
-        if (!configureError.IsSuccess)
+        static if (Target.Environment == TargetEnvironment.Qemu)
         {
-            Console.Write("esp error: ");
-            Console.WriteLine(configureError.GetName());
+            Console.Write("target profile: ");
+            Console.WriteLine((int)Target.Profile);
+            Console.Write("target architecture: ");
+            Console.WriteLine((int)Target.Architecture);
+            Console.WriteLine("target environment: qemu");
+            [NoAlloc]
+            asm { nop }
+            Console.WriteLine("inline assembly: ok");
+            RunManagedSelfTests();
+            Console.Write("free heap: ");
+            Console.WriteLine(EspSystem.GetFreeHeapSize());
+            Console.Write("tick: ");
+            Console.WriteLine(FreeRtos.GetTickCount());
+            Console.WriteLine("CTILDE_ESP_QEMU_OK");
             return;
         }
-        EspError clearError = Ws2812.Clear();
-        if (!clearError.IsSuccess)
+        else
         {
-            Console.WriteLine("WS2812_CONFIG_FAILED");
-            return;
-        }
-        Console.WriteLine("esp error: ESP_OK");
+            EspError configureError = Ws2812.Configure(Ws2812Pin, 1u);
+            if (!configureError.IsSuccess)
+            {
+                Console.Write("esp error: ");
+                Console.WriteLine(configureError.GetName());
+                return;
+            }
+            EspError clearError = Ws2812.Clear();
+            if (!clearError.IsSuccess)
+            {
+                Console.WriteLine("WS2812_CONFIG_FAILED");
+                return;
+            }
+            Console.WriteLine("esp error: ESP_OK");
 
-        Ws2812.SetPixel(0u, 16u, 16u, 16u);
-        Ws2812.Refresh();
+            Ws2812.SetPixel(0u, 16u, 16u, 16u);
+            Ws2812.Refresh();
 
-        RunManagedSelfTests();
+            RunManagedSelfTests();
 
         Console.Write("free heap: ");
         Console.WriteLine(EspSystem.GetFreeHeapSize());
@@ -357,25 +394,26 @@ public static class Program
 
         WifiDemo.Run();
 
-        Console.WriteLine("Demo completed! Entering loop");
-        uint count = 0u;
-        bool ledOn = false;
-        while (true)
-        {
-            ledOn = !ledOn;
-            if (ledOn)
+            Console.WriteLine("Demo completed! Entering loop");
+            uint count = 0u;
+            bool ledOn = false;
+            while (true)
             {
-                Ws2812.SetPixel(0u, 8u, 0u, 16u);
-                Console.WriteLine("ws2812: on");
+                ledOn = !ledOn;
+                if (ledOn)
+                {
+                    Ws2812.SetPixel(0u, 8u, 0u, 16u);
+                    Console.WriteLine("ws2812: on");
+                }
+                else
+                {
+                    Ws2812.SetPixel(0u, 0u, 0u, 8u);
+                    Console.WriteLine("ws2812: off");
+                }
+                Ws2812.Refresh();
+                FreeRtos.DelayMilliseconds(500u);
+                count++;
             }
-            else
-            {
-                Ws2812.SetPixel(0u, 0u, 0u, 8u);
-                Console.WriteLine("ws2812: off");
-            }
-            Ws2812.Refresh();
-            FreeRtos.DelayMilliseconds(500u);
-            count++;
         }
     }
 }

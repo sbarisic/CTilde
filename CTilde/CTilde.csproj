@@ -8,6 +8,7 @@
     <RootNamespace>CTilde</RootNamespace>
     <AssemblyName>CTilde.Compiler</AssemblyName>
     <PackageId>CTilde.Compiler</PackageId>
+    <Version>0.11.0</Version>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
   <ItemGroup>

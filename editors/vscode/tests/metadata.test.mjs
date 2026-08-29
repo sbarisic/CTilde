@@ -130,8 +130,18 @@ test("project schema includes native build configuration", async () => {
   assert.deepEqual(build.properties.configuration.enum, ["debug", "release"]);
   assert.equal(build.properties.compiler.default, "auto");
   assert.equal(build.properties.espIdfProjectDirectory.default, ".");
+  assert.deepEqual(schema.properties.kind.enum, ["application", "standard-library"]);
+  assert.equal(schema.properties.kind.default, "application");
+  assert.equal(schema.properties.hosted.additionalProperties, false);
+  assert.equal(schema.properties.hosted.properties.nativeSources.uniqueItems, true);
+  assert.ok(schema.allOf.some(rule => rule.if?.properties?.kind?.const === "standard-library" &&
+    rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("build"))));
   assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
   assert.ok(schema.properties.target.enum.includes("cosmopolitan"));
+  assert.ok(schema.properties.target.enum.includes("esp32_qemu"));
+  assert.ok(schema.properties.target.enum.includes("esp32c3_qemu"));
+  assert.ok(schema.allOf.some(rule => rule.if?.properties?.target?.const === "esp32_qemu" && rule.then?.properties?.architecture?.const === "xtensa"));
+  assert.ok(schema.allOf.some(rule => rule.if?.properties?.target?.const === "esp32c3_qemu" && rule.then?.properties?.architecture?.const === "riscv32"));
   assert.deepEqual(schema.properties.cosmopolitan.properties.mode.enum, ["default", "tiny", "debug"]);
   const run = schema.properties.run;
   assert.deepEqual(run.properties.executor.enum, ["host", "wsl"]);

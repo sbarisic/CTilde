@@ -1,0 +1,106 @@
+<Project>
+  <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.props" />
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <Version>0.11.0</Version>
+    <AssemblyName>CTilde.VisualStudio</AssemblyName>
+    <RootNamespace>CTilde.VisualStudio</RootNamespace>
+    <GeneratePkgDefFile>true</GeneratePkgDefFile>
+    <RegisterWithCodebase>true</RegisterWithCodebase>
+    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
+    <IncludeDebugSymbolsInVSIXContainer>false</IncludeDebugSymbolsInVSIXContainer>
+    <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
+    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <CreateVsixContainer>true</CreateVsixContainer>
+    <DeployExtension>false</DeployExtension>
+    <StartAction>Program</StartAction>
+    <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
+    <StartArguments>/rootSuffix Exp</StartArguments>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CTilde.VisualStudio.Core/CTilde.VisualStudio.Core.csproj" />
+    <PackageReference Include="Microsoft.VisualStudio.SDK" Version="17.14.40265" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.LanguageServer.Client" Version="17.14.60" ExcludeAssets="runtime" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.VisualStudio.ProjectSystem" Version="17.9.380" ExcludeAssets="runtime" />
+    <PackageReference Include="Microsoft.VisualStudio.ProjectSystem.SDK" Version="17.9.380" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VisualStudio.ProjectSystem.Analyzers" Version="17.9.380" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.VSSDK.BuildTools" Version="17.14.2142" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.ComponentModel.Composition" />
+    <Reference Include="System.Design" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="source.extension.vsixmanifest" />
+    <VSCTCompile Include="Commands.vsct">
+      <ResourceName>Menus.ctmenu</ResourceName>
+    </VSCTCompile>
+    <Content Include="languages.pkgdef">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
+    <Content Include="Grammars/ctilde.tmLanguage.tmTheme">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+      <VSIXSubPath>Grammars</VSIXSubPath>
+    </Content>
+    <Content Include="LICENSE"><IncludeInVSIX>true</IncludeInVSIX></Content>
+    <Content Include="../README.md" Link="Documentation/README.md"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Documentation</VSIXSubPath></Content>
+    <Content Include="../CHANGELOG.md" Link="Documentation/CHANGELOG.md"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Documentation</VSIXSubPath></Content>
+    <Content Include="../SUPPORT.md" Link="Documentation/SUPPORT.md"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Documentation</VSIXSubPath></Content>
+    <Content Include="../../vscode/LICENSE" Link="Documentation/LICENSE"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Documentation</VSIXSubPath></Content>
+    <Content Include="../../vscode/THIRD-PARTY-NOTICES.md" Link="Documentation/THIRD-PARTY-NOTICES.md"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Documentation</VSIXSubPath></Content>
+    <Content Include="../../vscode/images/ctilde-icon.png" Link="Resources/ctilde-icon.png"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Resources</VSIXSubPath></Content>
+    <Content Include="../../vscode/images/marketplace-hero.png" Link="Resources/marketplace-hero.png"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Resources</VSIXSubPath></Content>
+    <Content Include="../../vscode/syntaxes/ctilde.tmLanguage.json" Link="Grammars/ctilde.tmLanguage.json"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Grammars</VSIXSubPath></Content>
+    <Content Include="../../vscode/language-configuration.json" Link="Grammars/language-configuration.json"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Grammars</VSIXSubPath></Content>
+    <Content Include="../../vscode/schemas/*.json" Link="Schemas/%(Filename)%(Extension)"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Schemas</VSIXSubPath></Content>
+    <Content Include="ProjectSystem/CTilde.props" Link="ProjectSystem/CTilde.props"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>ProjectSystem</VSIXSubPath></Content>
+    <Content Include="ProjectSystem/CTilde.targets" Link="ProjectSystem/CTilde.targets"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>ProjectSystem</VSIXSubPath></Content>
+    <None Include="Templates/HostedConsole/**" />
+    <None Include="Build-Template.ps1" />
+  </ItemGroup>
+  <ItemGroup>
+    <VSIXSourceItem Include="../README.md" VSIXSubPath="Documentation" />
+    <VSIXSourceItem Include="../CHANGELOG.md" VSIXSubPath="Documentation" />
+    <VSIXSourceItem Include="../SUPPORT.md" VSIXSubPath="Documentation" />
+    <VSIXSourceItem Include="../../vscode/LICENSE" VSIXSubPath="Documentation" />
+    <VSIXSourceItem Include="../../vscode/THIRD-PARTY-NOTICES.md" VSIXSubPath="Documentation" />
+    <VSIXSourceItem Include="../../vscode/images/ctilde-icon.png" VSIXSubPath="Resources" />
+    <VSIXSourceItem Include="../../vscode/images/marketplace-hero.png" VSIXSubPath="Resources" />
+    <VSIXSourceItem Include="../../vscode/syntaxes/ctilde.tmLanguage.json" VSIXSubPath="Grammars" />
+    <VSIXSourceItem Include="../../vscode/language-configuration.json" VSIXSubPath="Grammars" />
+    <VSIXSourceItem Include="Grammars/ctilde.tmLanguage.tmTheme" VSIXSubPath="Grammars" />
+    <VSIXSourceItem Include="../../vscode/schemas/*.json" VSIXSubPath="Schemas" />
+    <VSIXSourceItem Include="ProjectSystem/CTilde.props" VSIXSubPath="ProjectSystem" />
+    <VSIXSourceItem Include="ProjectSystem/CTilde.targets" VSIXSubPath="ProjectSystem" />
+    <VSIXSourceItem Include="$(PkgMicrosoft_VisualStudio_LanguageServer_Client)/lib/net472/Microsoft.VisualStudio.LanguageServer.Client.dll" />
+  </ItemGroup>
+  <Target Name="PackageHostedTemplate" BeforeTargets="GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup><HostedTemplateZip>$(IntermediateOutputPath)Templates\CTilde.HostedConsole.zip</HostedTemplateZip></PropertyGroup>
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\Build-Template.ps1&quot; -Source &quot;$(MSBuildProjectDirectory)\Templates\HostedConsole&quot; -Icon &quot;$(MSBuildProjectDirectory)\..\..\vscode\images\ctilde-icon.png&quot; -Destination &quot;$(HostedTemplateZip)&quot;" />
+    <ItemGroup><VSIXSourceItem Include="$(HostedTemplateZip)" VsixSubPath="ProjectTemplates\CTilde" /></ItemGroup>
+  </Target>
+  <Target Name="PublishBundledTools" BeforeTargets="GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">
+    <PropertyGroup>
+      <BundledToolsRoot>$(IntermediateOutputPath)BundledTools</BundledToolsRoot>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.Cli\CTilde.Cli.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\CompilerBuild&quot; -o &quot;$(BundledToolsRoot)\Compiler&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.LanguageServer\CTilde.LanguageServer.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\LanguageServerBuild&quot; -o &quot;$(BundledToolsRoot)\LanguageServer&quot;" />
+    <ItemGroup>
+      <VSIXSourceItem Include="$(BundledToolsRoot)\Compiler\**\*" VsixSubPath="Tools\Compiler\%(RecursiveDir)" />
+      <VSIXSourceItem Include="$(BundledToolsRoot)\LanguageServer\**\*" VsixSubPath="Tools\LanguageServer\%(RecursiveDir)" />
+    </ItemGroup>
+  </Target>
+  <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />
+  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets" Condition="Exists('$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets')" />
+</Project>

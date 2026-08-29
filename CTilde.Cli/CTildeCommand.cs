@@ -8,6 +8,8 @@ internal static class CTildeCommand
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        if (args.Length > 0 && args[0] == "clean")
+            return CleanCommand.Run(args);
         if (args.Length > 0 && args[0] is "restore" or "update" or "vendor")
             return RunModuleCommand(args);
         if (!CommandLineOptions.TryParse(args, out var options, out var parseError, out var showHelp))
@@ -29,6 +31,19 @@ internal static class CTildeCommand
         {
             if (options!.InputDirectory is not null)
                 return CompileDirectory(options);
+
+            if (options.ProjectManifest is not null)
+            {
+                CTildeProject project;
+                try { project = CTildeProjectFile.Load(options.ProjectManifest); }
+                catch (CTildeProjectException exception)
+                {
+                    Console.Error.WriteLine($"ctilde: {exception.Message}");
+                    return 1;
+                }
+                if (project.Configuration.Kind == CTildeProjectKind.StandardLibrary)
+                    return ValidateStandardLibrary(options, project);
+            }
 
             BuildRequest request;
             try
@@ -101,13 +116,47 @@ internal static class CTildeCommand
         }
     }
 
+    private static int ValidateStandardLibrary(CommandLineOptions options, CTildeProject project)
+    {
+        if (options.Run || options.PrepareDebug is not null || options.GenerateBindings || options.VerifyBindings)
+            return UsageError("Standard-library projects support only --check or --build.");
+        if (!options.CheckOnly && !options.Build)
+            return UsageError("A standard-library project requires --check or --build.");
+        if (options.Inputs.Count != 0 || options.InputDirectory is not null || options.TargetSpecified ||
+            options.Output is not null || options.OutputDirectory is not null || options.HeaderOutput is not null ||
+            options.SymbolMap is not null || options.NativeOutput is not null || options.Configuration is not null ||
+            options.Compiler is not null || options.Lto || options.DebugInfo || options.DebugMemory is not null)
+            return UsageError("Standard-library validation cannot be combined with application build options.");
+
+        try
+        {
+            var failed = false;
+            foreach (var result in StandardLibraryProjectService.Validate(project))
+            {
+                Console.Out.WriteLine($"C~ standard library: validating {result.Variant}");
+                foreach (var diagnostic in result.Diagnostics)
+                    Console.Error.WriteLine(diagnostic);
+                if (result.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
+                    failed = true;
+                else
+                    Console.Out.WriteLine($"C~ standard library: {result.Variant} passed");
+            }
+            return failed ? 1 : 0;
+        }
+        catch (Exception exception) when (exception is CTildeProjectException or IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
+        {
+            Console.Error.WriteLine($"ctilde: {exception.Message}");
+            return 1;
+        }
+    }
+
     private static CompilationOutcome Compile(BuildRequest request)
     {
         try
         {
             if (request.Trace)
             {
-                Console.Error.WriteLine($"trace: target {request.Target switch { CompilationTarget.EspIdf => "esp-idf", CompilationTarget.Freestanding => "freestanding", CompilationTarget.Cosmopolitan => "cosmopolitan", _ => "hosted" }}");
+                Console.Error.WriteLine($"trace: target {TargetName(request)}");
                 Console.Error.WriteLine($"trace: reading {request.Inputs.Count} source file(s)");
                 if (request.ManifestPath is not null)
                     Console.Error.WriteLine($"trace: loaded project {request.ManifestPath}");
@@ -133,7 +182,7 @@ internal static class CTildeCommand
             }).ToArray();
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
                 request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
-                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []]));
+                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -347,14 +396,25 @@ internal static class CTildeCommand
         return 2;
     }
 
+    private static string TargetName(BuildRequest request) => request.Target switch
+    {
+        CompilationTarget.EspIdf when request.Environment == TargetEnvironment.Qemu && request.EspIdfChip == CTilde.EspIdfChip.Esp32 => "esp32_qemu",
+        CompilationTarget.EspIdf when request.Environment == TargetEnvironment.Qemu => "esp32c3_qemu",
+        CompilationTarget.EspIdf => "esp-idf",
+        CompilationTarget.Freestanding => "freestanding",
+        CompilationTarget.Cosmopolitan => "cosmopolitan",
+        _ => "hosted",
+    };
+
     private static void PrintUsage()
     {
-        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--cpu-feature simd128] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
-        Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|freestanding|cosmopolitan] [native build options] [--trace]");
+        Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--cpu-feature simd128] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
+        Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] --build|--run [native build options] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");
-        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
+        Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("       ctilde restore|update|vendor --project <ctilde.json>");
+        Console.Error.WriteLine("       ctilde clean --project <ctilde.json> [--trace]");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");

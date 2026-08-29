@@ -202,9 +202,10 @@ internal static partial class ConformanceTests
             var completions = service.GetCompletions("math-completion.ct", completionPosition);
             var piCompletion = completions.Single(item => item.Label == "Pi" && item.Kind == LanguageCompletionKind.Field);
             Assert(piCompletion.DocumentationId is not null && service.GetDocumentation(piCompletion.DocumentationId)?.Summary.Contains("single-precision value", StringComparison.Ordinal) == true, "Math.Pi documentation was unavailable.");
-            var sqrtCompletions = completions.Where(item => item.Label == "Sqrt").ToArray();
-            Assert(sqrtCompletions.Length == 2 && sqrtCompletions.All(item => item.DocumentationId is not null && service.GetDocumentation(item.DocumentationId)?.Summary.Contains("square root", StringComparison.Ordinal) == true),
-                "The float and double Math.Sqrt documentation was unavailable.");
+            var sqrtCompletion = completions.Single(item => item.Label == "Sqrt" && item.Kind == LanguageCompletionKind.Method);
+            Assert(sqrtCompletion.OverloadCount == 2 && sqrtCompletion.DocumentationId is not null &&
+                service.GetDocumentation(sqrtCompletion.DocumentationId)?.Summary.Contains("square root", StringComparison.Ordinal) == true,
+                "The collapsed Math.Sqrt completion or its representative documentation was unavailable.");
             var sqrtPosition = editorSource.IndexOf("Sqrt", StringComparison.Ordinal) + 1;
             Assert(service.GetDefinition("math-editor.ct", sqrtPosition)?.FilePath == "stdlib/System/Math.ct", "Math.Sqrt did not navigate to its embedded declaration.");
 

@@ -7,6 +7,13 @@ set(CTILDE_BINDING_REQUIRES)
 include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_sources.cmake" OPTIONAL)
 include("${CMAKE_CURRENT_LIST_DIR}/generated/ctilde_bindings.cmake" OPTIONAL)
 
+# The QEMU program statically eliminates every hardware-only C~ branch.  Do
+# not retain the all-target binding translation unit here: its Wi-Fi symbols
+# pull in ESP32-C3 ADC calibration, which QEMU does not emulate.
+if("$ENV{CTILDE_TARGET_ENVIRONMENT}" STREQUAL "qemu")
+    set(CTILDE_BINDING_SOURCES)
+endif()
+
 set(CTILDE_PRIVATE_REQUIRES
     esp_driver_gpio
     esp_driver_gptimer
@@ -14,7 +21,7 @@ set(CTILDE_PRIVATE_REQUIRES
     esp_timer
     freertos
     led_strip)
-if(NOT DEFINED ENV{CTILDE_FATAL_RUNTIME_BUILD})
+if(NOT DEFINED ENV{CTILDE_FATAL_RUNTIME_BUILD} AND NOT "$ENV{CTILDE_TARGET_ENVIRONMENT}" STREQUAL "qemu")
     list(APPEND CTILDE_PRIVATE_REQUIRES esp_gdbstub)
 endif()
 

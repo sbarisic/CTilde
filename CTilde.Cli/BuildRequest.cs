@@ -43,11 +43,18 @@ internal sealed record BuildRequest(
     CosmopolitanRuntimeMode CosmopolitanMode = CosmopolitanRuntimeMode.Default,
     IReadOnlyList<CpuFeature>? CpuFeatures = null,
     IReadOnlyDictionary<string, SourceOwnerIdentity>? SourceOwners = null,
-    CTildeProjectRunConfiguration? RunConfiguration = null)
+    CTildeProjectRunConfiguration? RunConfiguration = null,
+    TargetEnvironment Environment = TargetEnvironment.Native,
+    EspIdfChip? EspIdfChip = null,
+    HostedProjectConfiguration? Hosted = null)
 {
+    public string EspIdfBuildDirectory => Environment == TargetEnvironment.Qemu
+        ? Path.Combine(EspIdfProjectDirectory!, "build", EspIdfChip == CTilde.EspIdfChip.Esp32 ? "esp32_qemu" : "esp32c3_qemu")
+        : Path.Combine(EspIdfProjectDirectory!, "build");
+
     public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan
         ? Path.GetDirectoryName(ExecutablePath!)!
-        : Path.Combine(EspIdfProjectDirectory!, "build");
+        : EspIdfBuildDirectory;
 
     public IReadOnlyList<string> GeneratedSourcePaths => CLayout == GeneratedCLayout.Unity
         ? [GeneratedCPath!]
@@ -73,8 +80,8 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--project cannot be combined with input files, --compile-directory, or --target.");
 
         var project = CTildeProjectFile.Load(options.ProjectManifest!);
-        var build = project.Configuration.Build;
-        ValidateTargetOptions(options, project.Configuration.Target);
+        var build = project.Configuration.Build ?? throw new CommandLineException("Standard-library projects are validated before build-request resolution.");
+        ValidateTargetOptions(options, project.Configuration.Target, project.Configuration.Environment);
         var layout = options.CLayout ?? build.CLayout;
         if (layout == GeneratedCLayout.Modules && options.Output is not null)
             throw new CommandLineException("-o cannot be combined with modular project output; use --output-directory.");
@@ -115,12 +122,12 @@ internal static class BuildRequestResolver
         var debugTarget = options.PrepareDebug is null ? null : Path.GetFullPath(options.DebugTarget ??
             (project.Configuration.Target == CompilationTarget.Hosted
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
-                : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
+                : Path.Combine(EspBuildDirectory(idfProject!, project.Configuration.Environment, project.Configuration.EspIdfChip), ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable,
             project.Configuration.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
             symbolMap, debugMap, debugTarget);
         var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
-            project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject);
+            project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject, project.Configuration.Environment, project.Configuration.EspIdfChip);
         if (project.Configuration.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
             throw new CommandLineException("Draft 0.25 Cosmopolitan projects require architecture 'x64'.");
         var freestanding = project.Configuration.Target == CompilationTarget.Freestanding
@@ -136,14 +143,14 @@ internal static class BuildRequestResolver
             options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding,
             options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default,
             options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
-            project.SourceOwners, project.Configuration.Run);
+            project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
     {
         if (options.Inputs.Count == 0)
             throw new CommandLineException("At least one .ct input file is required.");
-        ValidateTargetOptions(options, options.Target);
+        ValidateTargetOptions(options, options.Target, options.Environment);
         if (!options.CheckOnly && !options.Build && options.PrepareDebug is null && options.CLayout != GeneratedCLayout.Modules && string.IsNullOrWhiteSpace(options.Output))
             throw new CommandLineException("-o is required unless --check or --build is used.");
         if ((options.Build || options.PrepareDebug == "launch") && options.Target == CompilationTarget.EspIdf &&
@@ -192,11 +199,11 @@ internal static class BuildRequestResolver
         var debugTarget = options.PrepareDebug is null ? null : Path.GetFullPath(options.DebugTarget ??
             (options.Target == CompilationTarget.Hosted
                 ? Path.Combine(Path.GetDirectoryName(executable!)!, ".ctilde", "ctilde-debug-target.json")
-                : Path.Combine(idfProject!, "build", ".ctilde", "ctilde-debug-target.json")));
+                : Path.Combine(EspBuildDirectory(idfProject!, options.Environment, options.EspIdfChip), ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable,
             options.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
             symbolMap, debugMap, debugTarget);
-        var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject);
+        var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject, options.Environment, options.EspIdfChip);
         if (options.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
             throw new CommandLineException("Draft 0.25 Cosmopolitan builds require --architecture x64.");
         var freestanding = options.Target == CompilationTarget.Freestanding
@@ -208,7 +215,8 @@ internal static class BuildRequestResolver
             configuration, options.Compiler ?? "auto",
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
-            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures);
+            null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures,
+            null, null, options.Environment, options.EspIdfChip);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
@@ -241,14 +249,24 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--debug-target requires --prepare-debug.");
         if (options.PrepareDebug is not null && options.Build)
             throw new CommandLineException("--prepare-debug already performs the required build and cannot be combined with --build.");
+        if (options.PrepareDebug == "attach" && options.Environment == TargetEnvironment.Qemu)
+            throw new CommandLineException("QEMU targets support --prepare-debug launch only in v1; start a new debug Launch instead of attaching.");
         if (options.CLayout == GeneratedCLayout.Modules && options.Output is not null)
             throw new CommandLineException("-o cannot be combined with --c-layout modules; use --output-directory.");
         if (options.CLayout == GeneratedCLayout.Unity && options.OutputDirectory is not null)
             throw new CommandLineException("--output-directory requires --c-layout modules.");
     }
 
-    private static CompilationArchitecture ResolveArchitecture(CompilationArchitecture requested, CompilationTarget target, string compiler, string? idfProject)
+    private static CompilationArchitecture ResolveArchitecture(CompilationArchitecture requested, CompilationTarget target, string compiler, string? idfProject,
+        TargetEnvironment environment, EspIdfChip? espIdfChip)
     {
+        if (environment == TargetEnvironment.Qemu)
+        {
+            var required = espIdfChip == CTilde.EspIdfChip.Esp32 ? CompilationArchitecture.Xtensa : CompilationArchitecture.RiscV32;
+            if (requested != CompilationArchitecture.Auto && requested != required)
+                throw new CommandLineException($"The selected QEMU target requires architecture '{(required == CompilationArchitecture.Xtensa ? "xtensa" : "riscv32")}'.");
+            return required;
+        }
         if (requested != CompilationArchitecture.Auto)
             return requested;
         if (target == CompilationTarget.Hosted)
@@ -283,7 +301,11 @@ internal static class BuildRequestResolver
         return CompilationArchitecture.Auto;
     }
 
-    private static void ValidateTargetOptions(CommandLineOptions options, CompilationTarget target)
+    private static string EspBuildDirectory(string idfProject, TargetEnvironment environment, EspIdfChip? chip) => environment == TargetEnvironment.Qemu
+        ? Path.Combine(idfProject, "build", chip == CTilde.EspIdfChip.Esp32 ? "esp32_qemu" : "esp32c3_qemu")
+        : Path.Combine(idfProject, "build");
+
+    private static void ValidateTargetOptions(CommandLineOptions options, CompilationTarget target, TargetEnvironment environment)
     {
         if (target != CompilationTarget.EspIdf && options.PanicPolicySpecified)
             throw new CommandLineException("--panic-policy is valid only for ESP-IDF builds.");
@@ -305,7 +327,9 @@ internal static class BuildRequestResolver
             throw new CommandLineException("Debug preparation is not available for Cosmopolitan builds in Draft 0.25; use the retained .dbg carrier with a native debugger.");
         if (target != CompilationTarget.EspIdf && options.SerialPort is not null)
             throw new CommandLineException("--serial-port is valid only for ESP-IDF debugging.");
-        if (target == CompilationTarget.EspIdf && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))
+        if (target == CompilationTarget.EspIdf && environment == TargetEnvironment.Qemu && options.PrepareDebug == "attach")
+            throw new CommandLineException("QEMU targets support --prepare-debug launch only in v1; start a new debug Launch instead of attaching.");
+        if (target == CompilationTarget.EspIdf && environment == TargetEnvironment.Native && options.PrepareDebug is not null && string.IsNullOrWhiteSpace(options.SerialPort))
             throw new CommandLineException("ESP-IDF debug preparation requires --serial-port.");
         if (target == CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings) && options.ProjectManifest is null)
             throw new CommandLineException("ESP-IDF binding generation requires --project.");

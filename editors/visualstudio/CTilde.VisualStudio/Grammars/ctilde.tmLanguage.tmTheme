@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>name</key>
+    <string>C~ Visual Studio Classifications</string>
+    <key>settings</key>
+    <array>
+      <dict>
+        <key>scope</key>
+        <string>storage.modifier, storage.type.builtin, storage.type.inferred, storage.type.declaration, storage.type.class, storage.type.struct, storage.type.union, storage.type.enum, storage.type.ctilde, keyword.declaration, keyword.other.accessor, keyword.other.calling-convention, keyword.other.constraint, keyword.operator.new, keyword.operator.type, constant.language, variable.language</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>keyword</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>keyword.control, keyword.control.import</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>keyword - control</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>entity.name.type, support.type, support.class</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>type</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>entity.name.function, support.function</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>method name</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>variable.parameter</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>parameter name</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>variable.other, variable.language.assembly-result, support.variable</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>local name</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>entity.name.namespace, support.type.namespace</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>identifier</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>string, punctuation.definition.string, constant.character.escape</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>string</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>constant.numeric</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>number</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>keyword.operator</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>operator</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>comment, punctuation.definition.comment, entity.name.tag.documentation, entity.other.attribute-name.documentation</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>comment</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>punctuation</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>punctuation</string>
+        </dict>
+      </dict>
+      <dict>
+        <key>scope</key>
+        <string>meta.embedded.block.asm, variable, entity</string>
+        <key>settings</key>
+        <dict>
+          <key>vsclassificationtype</key>
+          <string>identifier</string>
+        </dict>
+      </dict>
+    </array>
+    <key>uuid</key>
+    <string>D3C67BF0-E22D-4F8A-8E4D-8B10410F4B5B</string>
+  </dict>
+</plist>

@@ -29,23 +29,44 @@ internal static class StandardLibrary
         includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
         {
-            var files = key.Target == CompilationTarget.Freestanding
-                ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
-                : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
-            if ((key.Vectors & StandardVectorTypes.Vec2) != 0)
-                files.Add("Vec2.ct");
-            if ((key.Vectors & StandardVectorTypes.Vec3) != 0)
-                files.Add("Vec3.ct");
-            if ((key.Vectors & StandardVectorTypes.Vec4) != 0)
-                files.Add("Vec4.ct");
-            if ((key.Vectors & StandardVectorTypes.Simd) != 0)
-                files.Add("Simd.ct");
-            if (key.HostedIo)
-                files.Add("HostedIO.ct");
-            if (key.Target == CompilationTarget.EspIdf)
-                files.Add("EspIdf.ct");
-            return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo);
+            var files = FilesFor(key.Target, key.HostedIo, key.Vectors);
+            return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo, null, null, applyTransforms: true);
         });
+    }
+
+    internal static ImmutableArray<SyntaxTree> GetPhysicalSyntaxTrees(
+        string sourceRoot,
+        CompilationTarget target,
+        bool includeNativeIntegers,
+        bool includeNativeUtf8,
+        bool includeHostedIo,
+        StandardVectorTypes vectors,
+        IReadOnlyDictionary<string, string>? overrides = null,
+        bool applyTransforms = true)
+    {
+        includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
+        return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors), includeNativeIntegers, includeNativeUtf8,
+            includeHostedIo, Path.GetFullPath(sourceRoot), overrides, applyTransforms);
+    }
+
+    private static IReadOnlyList<string> FilesFor(CompilationTarget target, bool includeHostedIo, StandardVectorTypes vectors)
+    {
+        var files = target == CompilationTarget.Freestanding
+            ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
+            : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+        if ((vectors & StandardVectorTypes.Vec2) != 0)
+            files.Add("Vec2.ct");
+        if ((vectors & StandardVectorTypes.Vec3) != 0)
+            files.Add("Vec3.ct");
+        if ((vectors & StandardVectorTypes.Vec4) != 0)
+            files.Add("Vec4.ct");
+        if ((vectors & StandardVectorTypes.Simd) != 0)
+            files.Add("Simd.ct");
+        if (includeHostedIo)
+            files.Add("HostedIO.ct");
+        if (target == CompilationTarget.EspIdf)
+            files.Add("EspIdf.ct");
+        return files;
     }
 
     public static StandardVectorTypes RequiredVectors(IEnumerable<SyntaxTree> trees)
@@ -107,25 +128,45 @@ internal static class StandardLibrary
         })];
     }
 
-    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(IReadOnlyList<string> files, bool includeNativeIntegers = false, bool includeNativeUtf8 = false, bool includeHostedIo = false)
+    private static ImmutableArray<SyntaxTree> LoadSyntaxTrees(
+        IReadOnlyList<string> files,
+        bool includeNativeIntegers,
+        bool includeNativeUtf8,
+        bool includeHostedIo,
+        string? sourceRoot,
+        IReadOnlyDictionary<string, string>? overrides,
+        bool applyTransforms)
     {
         var assembly = typeof(StandardLibrary).Assembly;
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>(files.Count);
 
         foreach (var file in files)
         {
-            var resourceName = $"CTilde.StandardLibrary.{file}";
-            using var stream = assembly.GetManifestResourceStream(resourceName) ??
-                throw new InvalidOperationException($"The embedded standard-library resource '{resourceName}' is missing.");
-            using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true);
-            var text = reader.ReadToEnd();
-            if (file == "Console.ct" && includeNativeIntegers)
+            string text;
+            string path;
+            if (sourceRoot is null)
+            {
+                var resourceName = $"CTilde.StandardLibrary.{file}";
+                using var stream = assembly.GetManifestResourceStream(resourceName) ??
+                    throw new InvalidOperationException($"The embedded standard-library resource '{resourceName}' is missing.");
+                using var reader = new StreamReader(stream, new UTF8Encoding(false, true), detectEncodingFromByteOrderMarks: true);
+                text = reader.ReadToEnd();
+                path = $"stdlib/System/{file}";
+            }
+            else
+            {
+                path = Path.Combine(sourceRoot, file == "EspIdf.ct" ? Path.Combine("Esp", "Idf", file) : Path.Combine("System", file));
+                text = overrides is not null && overrides.TryGetValue(Path.GetFullPath(path), out var openText)
+                    ? openText
+                    : File.ReadAllText(path, new UTF8Encoding(false, true));
+            }
+            if (applyTransforms && file == "Console.ct" && includeNativeIntegers)
                 text = text.Replace("    // CTILDE_NATIVE_INTEGER_OVERLOADS", NativeIntegerConsoleOverloads, StringComparison.Ordinal);
-            if (file == "Console.ct" && includeHostedIo)
+            if (applyTransforms && file == "Console.ct" && includeHostedIo)
                 text = text.Replace("    // CTILDE_HOSTED_INPUT_MEMBERS", HostedConsoleInputMembers, StringComparison.Ordinal);
-            if (file == "Memory.ct" && includeNativeUtf8)
+            if (applyTransforms && file == "Memory.ct" && includeNativeUtf8)
                 text = text.Replace("// CTILDE_NATIVE_UTF8_DECLARATION", NativeUtf8Declaration, StringComparison.Ordinal);
-            trees.Add(SyntaxTree.ParseStandardLibrary(SourceText.From(text, $"stdlib/System/{file}")));
+            trees.Add(SyntaxTree.ParseStandardLibrary(SourceText.From(text, path)));
         }
 
         return trees.ToImmutable();

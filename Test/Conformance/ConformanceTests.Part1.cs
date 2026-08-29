@@ -150,8 +150,30 @@ internal static partial class ConformanceTests
             var service = LanguageServiceSnapshot.Create([tree]);
             var completionPosition = source.IndexOf("Console.", StringComparison.Ordinal) + "Console.".Length;
             var completions = service.GetCompletions("editor.ct", completionPosition);
-            Assert(completions.Any(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method), "Console member completion did not include WriteLine.");
+            var writeLine = completions.Single(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method);
+            Assert(writeLine.OverloadCount > 1, "Console overload completion did not report its overload count.");
             Assert(completions.All(item => item.ReplacementSpan.Start == completionPosition), "Empty member completion used the wrong replacement span.");
+
+            const string incompleteSource = "using System; namespace Demo; public class Sibling { } public static class Scene { public static void Build() { Console.Wri\nSibling value = new Sibling(); } }";
+            var incompleteService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(incompleteSource, "scene.ct")]);
+            var incompletePosition = incompleteSource.IndexOf("Console.Wri", StringComparison.Ordinal) + "Console.Wri".Length;
+            var incompleteCompletions = incompleteService.GetCompletions("scene.ct", incompletePosition);
+            Assert(incompleteCompletions.Count(item => item.Label == "WriteLine") == 1, "Incomplete member access before another statement did not produce one WriteLine completion.");
+            Assert(incompleteCompletions.Single(item => item.Label == "WriteLine").OverloadCount == writeLine.OverloadCount,
+                "Incomplete member access lost overload information.");
+
+            const string chainedSource = "namespace Demo; public class Sibling { } public static class Scene { public static void Build() { System . Console . Wri\nSibling value = new Sibling(); } }";
+            var chainedService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(chainedSource, "chained.ct")]);
+            var chainedPosition = chainedSource.IndexOf("Wri", StringComparison.Ordinal) + "Wri".Length;
+            var chainedCompletions = chainedService.GetCompletions("chained.ct", chainedPosition);
+            Assert(chainedCompletions.Count(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method) == 1,
+                "Whitespace and a chained receiver prevented recovered member completion.");
+
+            const string signatureSource = "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(1); } }";
+            var signatureService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(signatureSource, "signature.ct")]);
+            var signaturePosition = signatureSource.IndexOf("WriteLine(", StringComparison.Ordinal) + "WriteLine(".Length;
+            var signatureHelp = signatureService.GetSignatureHelp("signature.ct", signaturePosition);
+            Assert(signatureHelp?.Signatures.Length == writeLine.OverloadCount, "Collapsed completion did not preserve every overload in signature help.");
 
             const string deferSource = "public static class Program { [EntryPoint] public static void Main() { de } }";
             var deferService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(deferSource, "defer-completion.ct")]);
@@ -309,17 +331,19 @@ internal static partial class ConformanceTests
         {
             var directory = Path.Combine(Path.GetTempPath(), "ctilde-project-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
             Directory.CreateDirectory(Path.Combine(directory, "src", "generated"));
+            Directory.CreateDirectory(Path.Combine(directory, "native"));
             try
             {
-                File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"],\"build\":{\"generatedC\":\"out/program.c\",\"generatedHeader\":\"out/exports.h\",\"configuration\":\"release\",\"compiler\":\"auto\",\"executable\":\"out/program.exe\"}}");
+                File.WriteAllText(Path.Combine(directory, "ctilde.json"), "{\"target\":\"hosted\",\"sources\":[\"src/**/*.ct\"],\"exclude\":[\"src/generated/**\"],\"hosted\":{\"nativeSources\":[\"native/shim.c\"]},\"build\":{\"generatedC\":\"out/program.c\",\"generatedHeader\":\"out/exports.h\",\"configuration\":\"release\",\"compiler\":\"auto\",\"executable\":\"out/program.exe\"}}");
                 File.WriteAllText(Path.Combine(directory, "src", "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(Math.Sqrt(9.0f)); } }");
                 File.WriteAllText(Path.Combine(directory, "src", "Library.ct"), "public class Library { }");
                 File.WriteAllText(Path.Combine(directory, "src", "generated", "Ignored.ct"), "public class Ignored { }");
+                File.WriteAllText(Path.Combine(directory, "native", "shim.c"), "int ctilde_test_shim(void) { return 42; }");
                 var project = CTildeProjectFile.Load(Path.Combine(directory, "ctilde.json"));
                 Assert(project.SourceFiles.Length == 2, "Project source globs or exclusions were not applied.");
                 Assert(project.SourceFiles.SequenceEqual(project.SourceFiles.OrderBy(path => path, OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)), "Project sources were not deterministic.");
                 Assert(CTildeProjectFile.FindNearest(Path.Combine(directory, "src", "Program.ct")) == project.ManifestPath, "Nearest project discovery failed.");
-                Assert(project.Configuration.Build.Configuration == CTildeNativeBuildConfiguration.Release, "Project native configuration was not loaded.");
+                Assert(project.Configuration.Build!.Configuration == CTildeNativeBuildConfiguration.Release, "Project native configuration was not loaded.");
                 Assert(project.Configuration.Build.GeneratedCPath == Path.Combine(directory, "out", "program.c"), "Project generated-C path was not resolved.");
 
                 var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
@@ -329,6 +353,8 @@ internal static partial class ConformanceTests
                 var build = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
                 Assert(build.ExitCode == 0, $"Project native build failed: {build.StandardOutput}{build.StandardError}");
                 Assert(File.Exists(Path.Combine(directory, "out", "program.c")) && File.Exists(Path.Combine(directory, "out", "exports.h")) && File.Exists(Path.Combine(directory, "out", "program.exe")), "Project native build outputs were missing.");
+                var cached = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build", "--trace"]);
+                Assert(cached.ExitCode == 0 && cached.StandardError.Contains("reused native object", StringComparison.Ordinal), "Hosted native object caching was not reused.");
                 var executable = Path.Combine(directory, "out", "program.exe");
                 var configuredCompiler = Environment.GetEnvironmentVariable("CTILDE_CC");
                 var builtProgram = configuredCompiler?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true
@@ -350,6 +376,107 @@ internal static partial class ConformanceTests
                 try { CTildeProjectFile.Load(Path.Combine(directory, "invalid.json")); }
                 catch (CTildeProjectException) { invalidRejected = true; }
                 Assert(invalidRejected, "A project build output escaping the project directory was accepted.");
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+
+        suite.Run("project kind hosted native sources and standard library", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-project-kind-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(Path.Combine(directory, "native"));
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+                File.WriteAllText(Path.Combine(directory, "native", "shim.c"), "int shim(void) { return 0; }");
+                var manifest = Path.Combine(directory, "ctilde.json");
+                File.WriteAllText(manifest, "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"native/shim.c\"]}}");
+                var application = CTildeProjectFile.Load(manifest);
+                Assert(application.Configuration.Kind == CTildeProjectKind.Application, "The default project kind changed.");
+                Assert(application.Configuration.Hosted?.NativeSources.SequenceEqual([Path.Combine(directory, "native", "shim.c")]) == true,
+                    "Hosted native sources were not resolved.");
+
+                foreach (var invalidHosted in new[]
+                {
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"native/shim.c\",\"native/shim.c\"]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"native/missing.c\"]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"Program.ct\"]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"../outside.c\"]}}",
+                })
+                {
+                    File.WriteAllText(manifest, invalidHosted);
+                    var rejected = false;
+                    try { CTildeProjectFile.Load(manifest); }
+                    catch (CTildeProjectException) { rejected = true; }
+                    Assert(rejected, "An invalid hosted native source was accepted.");
+                }
+
+                File.WriteAllText(manifest, "{\"kind\":\"standard-library\",\"sources\":[\"Program.ct\"],\"target\":\"hosted\"}");
+                var restricted = false;
+                try { CTildeProjectFile.Load(manifest); }
+                catch (CTildeProjectException) { restricted = true; }
+                Assert(restricted, "A standard-library manifest accepted application settings.");
+
+                var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
+                var library = CTildeProjectFile.Load(Path.Combine(repositoryRoot, "CTilde", "StandardLibrary", "ctilde.json"));
+                Assert(library.Configuration.Kind == CTildeProjectKind.StandardLibrary && library.Configuration.Build is null,
+                    "The physical standard-library manifest did not load as a non-emitting project.");
+                var validation = StandardLibraryProjectService.Validate(library);
+                Assert(validation.Select(result => result.Variant).SequenceEqual([
+                    "hosted-baseline", "hosted-full", "cosmopolitan-full", "esp-idf-full", "freestanding-baseline", "freestanding-full"]),
+                    "The standard-library validation matrix changed or became nondeterministic.");
+                Assert(validation.All(result => !result.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)),
+                    string.Join(Environment.NewLine, validation.SelectMany(result => result.Diagnostics)));
+            }
+            finally
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        });
+
+        suite.Run("ESP-IDF QEMU environment and debug stub", () =>
+        {
+            const string source = "using System; using System.Runtime; public static class Program { [EntryPoint] public static void Main() { } }";
+            var native = Emit(source, new CompilationOptions(CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                DebugInformation: DebugInformationMode.Instrumented));
+            var qemu = Emit(source, new CompilationOptions(CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                DebugInformation: DebugInformationMode.Instrumented, Environment: TargetEnvironment.Qemu));
+            const string nativeSelection = "using System.Runtime; public static class Program { [EntryPoint] public static void Main() { static if (Target.Environment == TargetEnvironment.Qemu) { MissingOnNative(); } } }";
+            const string qemuSelection = "using System.Runtime; public static class Program { [EntryPoint] public static void Main() { static if (Target.Environment == TargetEnvironment.Native) { MissingOnQemu(); } } }";
+            Assert(!Compile(nativeSelection, new CompilationOptions(CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa)).GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Native ESP target did not eliminate the QEMU static branch.");
+            Assert(!Compile(qemuSelection, new CompilationOptions(CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa, Environment: TargetEnvironment.Qemu)).GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "QEMU target did not eliminate the native static branch.");
+            Assert(native.Contains("esp_cpu_dbgr_break", StringComparison.Ordinal) && native.Contains("esp_gdbstub_putchar", StringComparison.Ordinal), "Native ESP debug stub changed unexpectedly.");
+            Assert(!qemu.Contains("esp_cpu_dbgr_break", StringComparison.Ordinal) && !qemu.Contains("esp_gdbstub_putchar", StringComparison.Ordinal), "QEMU output retained the UART runtime GDB stub.");
+            Assert(qemu.Contains("ct_debug_qemu_ready", StringComparison.Ordinal) && qemu.Contains("ct_debug_qemu_trap", StringComparison.Ordinal), "QEMU output did not expose native-GDB bootstrap and trap probes.");
+            Assert(!qemu.Contains("INT64_C(15000000)", StringComparison.Ordinal), "QEMU output retained the physical debugger startup wait.");
+
+            var invalid = Compile(source, new CompilationOptions(CompilationTarget.Hosted, Environment: TargetEnvironment.Qemu));
+            Assert(invalid.GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4121"), "A hosted QEMU environment was accepted.");
+        });
+
+        suite.Run("ESP-IDF QEMU project aliases", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-qemu-target-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+            try
+            {
+                File.WriteAllText(Path.Combine(directory, "esp32.json"), "{\"target\":\"esp32_qemu\",\"sources\":[\"Program.ct\"],\"build\":{\"espIdfProjectDirectory\":\".\"}}");
+                File.WriteAllText(Path.Combine(directory, "esp32c3.json"), "{\"target\":\"esp32c3_qemu\",\"sources\":[\"Program.ct\"],\"build\":{\"espIdfProjectDirectory\":\".\"}}");
+                var esp32 = CTildeProjectFile.Load(Path.Combine(directory, "esp32.json")).Configuration;
+                var esp32c3 = CTildeProjectFile.Load(Path.Combine(directory, "esp32c3.json")).Configuration;
+                Assert(esp32.Target == CompilationTarget.EspIdf && esp32.Environment == TargetEnvironment.Qemu && esp32.EspIdfChip == EspIdfChip.Esp32 && esp32.Architecture == CompilationArchitecture.Xtensa,
+                    "esp32_qemu did not resolve to ESP-IDF/QEMU/ESP32/Xtensa.");
+                Assert(esp32c3.Target == CompilationTarget.EspIdf && esp32c3.Environment == TargetEnvironment.Qemu && esp32c3.EspIdfChip == EspIdfChip.Esp32C3 && esp32c3.Architecture == CompilationArchitecture.RiscV32,
+                    "esp32c3_qemu did not resolve to ESP-IDF/QEMU/ESP32-C3/RISC-V 32.");
+
+                File.WriteAllText(Path.Combine(directory, "mismatch.json"), "{\"target\":\"esp32_qemu\",\"architecture\":\"riscv32\",\"sources\":[\"Program.ct\"],\"build\":{\"espIdfProjectDirectory\":\".\"}}");
+                var rejected = false;
+                try { CTildeProjectFile.Load(Path.Combine(directory, "mismatch.json")); }
+                catch (CTildeProjectException exception) { rejected = exception.Message.Contains("requires architecture 'xtensa'", StringComparison.Ordinal); }
+                Assert(rejected, "A mismatched QEMU alias architecture was accepted.");
             }
             finally
             {

@@ -8,6 +8,12 @@ public enum TargetProfile
     Cosmopolitan
 }
 
+public enum TargetEnvironment
+{
+    Native,
+    Qemu
+}
+
 public enum Runtime
 {
     Allocate,
@@ -45,6 +51,12 @@ public static class Target
     [NoBlock]
     [NoRuntime]
     public static TargetProfile Profile { get { return TargetProfile.Hosted; } }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TargetEnvironment Environment { get { return TargetEnvironment.Native; } }
 
     [NoAlloc]
     [NoThrow]

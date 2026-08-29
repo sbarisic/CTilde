@@ -1,0 +1,13 @@
+{
+  "target": "hosted",
+  "sources": ["*.ct"],
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "build/generated/modules",
+    "generatedHeader": "build/generated/ctilde_exports.h",
+    "symbolMap": "build/generated/ctilde_symbols.json",
+    "configuration": "debug",
+    "compiler": "auto",
+    "executable": "build/$safeprojectname$.exe"
+  }
+}

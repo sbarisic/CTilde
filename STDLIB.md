@@ -4,6 +4,8 @@
 
 This document is the canonical standard-library reference for C~ Draft 0.34 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF load the APIs for their target profile. Freestanding loads only the object and storage core, `Memory`, target queries, SIMD, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, process services, managed threads, ESP-IDF APIs, hosted I/O, or libm-backed math.
 
+The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in `CTilde.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
+
 The Cosmopolitan profile reuses the hosted object, exception, console, environment, math, file-I/O, threading, and TLS surface through Cosmopolitan's portable POSIX facade. It does not expose ESP-IDF, MMIO/register, freestanding runtime-role, or dynamic-library APIs. Draft 0.24 has measured managed strings/arrays, ARC, exceptions, `defer`, console, file output, threads, mutexes, initialization, and shutdown on WSL/Linux and Windows.
 
 `System.Runtime.Target` exposes compiler constants for `Profile`, `Architecture`, and byte-sized `PointerSize`. `System.Runtime.Mmio` provides exact-width `Read`, `Write`, `ReadRelaxed`, `WriteRelaxed`, and `Barrier` intrinsics for fixed-width integers and enums. Ordered accesses use a full target I/O barrier before and after the volatile access; relaxed accesses emit only the access.

@@ -111,7 +111,7 @@ public static class Program
 
 SIMD values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` to select validated x86 or Arm intrinsic lowering.
 
-The [feature example](examples/Features.ct) covers more syntax. The [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
+The [feature example](examples/Features/Program.ct) covers more syntax. The [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
 
 ## Build the compiler
 
@@ -131,8 +131,8 @@ dotnet build .\CTilde.sln --nologo
 The compiler can stop after C emission:
 
 ```powershell
-dotnet run --project .\CTilde.Cli -- .\examples\Hello.ct -o .\build\hello.c
-gcc -std=gnu23 -Wall -Wextra -Werror -o .\build\hello .\build\hello.c
+dotnet run --project .\CTilde.Cli -- --project .\examples\Hello\ctilde.json --build
+.\examples\Hello\build\Hello.exe
 ```
 
 GCC releases that lack the final C23 option can use `-std=gnu2x`.
@@ -168,6 +168,8 @@ ctilde --project .\ctilde.json --run
 
 `--run` rebuilds first and starts the configured command only after a successful build. The runner uses argument arrays without shell evaluation. It supports host and WSL executors plus `${projectRoot}` and `${buildOutput}` placeholders.
 
+Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
+
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
 ```powershell
@@ -184,10 +186,12 @@ Commit `ctilde.lock.json`. Keep the machine-local `ctilde.local.json` file untra
 | --- | --- | --- |
 | `hosted` | Windows, Linux, and macOS programs | [LANGUAGE.md](LANGUAGE.md) |
 | `esp-idf` | ESP32-family firmware and generated bindings | [T-CAN485 guide](examples/TCan485/README.md) |
+| `esp32_qemu` | Classic ESP32 firmware built for ESP-IDF QEMU | [T-CAN485 guide](examples/TCan485/README.md) |
+| `esp32c3_qemu` | ESP32-C3 firmware built for ESP-IDF QEMU | [T-CAN485 guide](examples/TCan485/README.md) |
 | `freestanding` | Explicit-runtime ELF images | [Freestanding guide](examples/Freestanding/README.md) |
 | `cosmopolitan` | x86-64 Actually Portable Executables | [COSMOPOLITAN.md](COSMOPOLITAN.md) |
 
-The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboot kernel and runs it through WSL. ESP-IDF projects can generate checked C~ declarations and private C adapters from allowlisted public headers.
+The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboot kernel and runs it through WSL. The ESP QEMU aliases retain the ESP-IDF compilation profile while selecting an emulated execution environment and fixed chip architecture. ESP-IDF projects can generate checked C~ declarations and private C adapters from allowlisted public headers.
 
 ## Native interop and ownership
 
@@ -202,6 +206,12 @@ Null access, bounds errors, invalid casts, integer division by zero, checked siz
 The extension provides compiler diagnostics, semantic highlighting, completion, navigation, project tasks, and C~-aware debugging. It also adds **C~: Run Project** for manifest-driven rebuild-and-run workflows.
 
 See [the extension guide](editors/vscode/README.md) for installation and debugger requirements. The extension bundles the framework-dependent compiler and language server. It requires a .NET 10 runtime.
+
+## Visual Studio
+
+The preview Visual Studio extension supplies TextMate and LSP editor support plus manifest-backed `.ctproj` projects. `CTilde.sln` includes the physical standard library and 12 example entries under the **C~** solution folder. They have solution configuration mappings but are excluded from Build Solution; select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest.
+
+See [the Visual Studio extension guide](editors/visualstudio/README.md). Debugging remains a VS Code-only feature in version 0.11.0.
 
 ## Compiler API
 

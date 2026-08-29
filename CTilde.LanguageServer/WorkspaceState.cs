@@ -9,6 +9,8 @@ internal sealed class WorkspaceState
     private readonly Dictionary<string, OpenDocument> _documents = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CachedProject> _projects = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
     private readonly HashSet<string> _workspaceRoots = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _explicitProjects = new(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+    private string? _activeManifest;
     private long _revision;
 
     public event Func<Task>? AnalysisChanged;
@@ -26,6 +28,8 @@ internal sealed class WorkspaceState
             else if (!string.IsNullOrWhiteSpace(rootUri))
                 _workspaceRoots.Add(UriHelpers.ToPath(rootUri));
             _projects.Clear();
+            _explicitProjects.Clear();
+            _activeManifest = null;
             _revision++;
         }
     }
@@ -102,12 +106,44 @@ internal sealed class WorkspaceState
         SignalChanged();
     }
 
+    public void SetProjectContexts(CTildeProjectContextsParams parameters)
+    {
+        lock (_gate)
+        {
+            _explicitProjects.Clear();
+            foreach (var project in parameters.Projects)
+            {
+                var projectPath = UriHelpers.ToPath(project.ProjectUri);
+                var manifestPath = UriHelpers.ToPath(project.ManifestUri);
+                _explicitProjects[projectPath] = manifestPath;
+            }
+            _activeManifest = string.IsNullOrWhiteSpace(parameters.ActiveManifestUri) ? null : UriHelpers.ToPath(parameters.ActiveManifestUri);
+            _projects.Clear();
+            _revision++;
+        }
+        SignalChanged();
+    }
+
+    public void SetActiveProject(string? manifestUri)
+    {
+        lock (_gate)
+        {
+            var next = string.IsNullOrWhiteSpace(manifestUri) ? null : UriHelpers.ToPath(manifestUri);
+            if (PathComparer.Equals(_activeManifest, next))
+                return;
+            _activeManifest = next;
+            _projects.Clear();
+            _revision++;
+        }
+        SignalChanged();
+    }
+
     public ProjectSnapshot GetProject(string uri)
     {
         lock (_gate)
         {
             var path = UriHelpers.ToPath(uri);
-            var manifest = CTildeProjectFile.FindNearest(path);
+            var manifest = ResolveManifest(path);
             CTildeProject? project = null;
             if (manifest is not null)
             {
@@ -121,8 +157,10 @@ internal sealed class WorkspaceState
             var sourceFiles = included ? project!.SourceFiles : [Path.GetFullPath(path)];
             var target = project?.Configuration.Target ?? CompilationTarget.Hosted;
             var architecture = project?.Configuration.Architecture ?? CompilationArchitecture.Auto;
-            var snapshot = CreateSnapshot(key, sourceFiles, target, architecture, project?.Configuration.NoRecursion ?? false,
-                project?.Configuration.PanicPolicy ?? EspIdfPanicPolicy.Abort, project?.RootDirectory, project is null ? null : BindingProjectError(project), BindingPaths(project));
+            var snapshot = project?.Configuration.Kind == CTildeProjectKind.StandardLibrary
+                ? CreateStandardLibrarySnapshot(project, path, key)
+                : CreateSnapshot(key, sourceFiles, target, architecture, project?.Configuration.Environment ?? TargetEnvironment.Native, project?.Configuration.NoRecursion ?? false,
+                    project?.Configuration.PanicPolicy ?? EspIdfPanicPolicy.Abort, project?.RootDirectory, project is null ? null : BindingProjectError(project), BindingPaths(project));
             _projects[key] = new CachedProject(snapshot);
             return snapshot;
         }
@@ -134,6 +172,8 @@ internal sealed class WorkspaceState
         {
             foreach (var document in _documents.Values)
                 _ = GetProject(document.Uri);
+            foreach (var manifest in _explicitProjects.Values.Distinct(PathComparer))
+                AddWorkspaceProject(manifest);
             foreach (var root in _workspaceRoots.Where(Directory.Exists))
             {
                 IEnumerable<string> manifests;
@@ -141,16 +181,57 @@ internal sealed class WorkspaceState
                 catch (Exception exception) when (exception is IOException or UnauthorizedAccessException) { continue; }
                 foreach (var manifest in manifests.Where(path => !IsIgnored(path)))
                 {
-                    CTildeProject project;
-                    try { project = CTildeProjectFile.Load(manifest); }
-                    catch (CTildeProjectException) { continue; }
-                    if (_projects.ContainsKey(project.ManifestPath))
-                        continue;
-                    _projects[project.ManifestPath] = new CachedProject(CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, project.Configuration.Architecture,
-                        project.Configuration.NoRecursion, project.Configuration.PanicPolicy, project.RootDirectory, BindingProjectError(project), BindingPaths(project)));
+                    AddWorkspaceProject(manifest);
                 }
             }
             return [.. _projects.Values.Select(value => value.Snapshot).DistinctBy(value => value.Key)];
+        }
+    }
+
+    private void AddWorkspaceProject(string manifest)
+    {
+        CTildeProject project;
+        try { project = CTildeProjectFile.Load(manifest); }
+        catch (CTildeProjectException) { return; }
+        if (_projects.ContainsKey(project.ManifestPath))
+            return;
+        var snapshot = project.Configuration.Kind == CTildeProjectKind.StandardLibrary
+            ? CreateStandardLibrarySnapshot(project, project.SourceFiles[0], project.ManifestPath)
+            : CreateSnapshot(project.ManifestPath, project.SourceFiles, project.Configuration.Target, project.Configuration.Architecture, project.Configuration.Environment,
+                project.Configuration.NoRecursion, project.Configuration.PanicPolicy, project.RootDirectory, BindingProjectError(project), BindingPaths(project));
+        _projects[project.ManifestPath] = new CachedProject(snapshot);
+    }
+
+    private string? ResolveManifest(string path)
+    {
+        if (_activeManifest is not null && ManifestContains(_activeManifest, path))
+            return _activeManifest;
+        var candidates = _explicitProjects.Values.Distinct(PathComparer).Where(manifest => ManifestContains(manifest, path)).ToArray();
+        if (candidates.Length == 1)
+            return candidates[0];
+        if (candidates.Length > 1)
+            return candidates.FirstOrDefault(candidate => Path.GetFileName(candidate).Equals("ctilde.json", StringComparison.OrdinalIgnoreCase)) ?? candidates[0];
+        return CTildeProjectFile.FindNearest(path);
+    }
+
+    private static bool ManifestContains(string manifest, string path)
+    {
+        try { return CTildeProjectFile.Load(manifest).SourceFiles.Contains(Path.GetFullPath(path), PathComparer); }
+        catch (CTildeProjectException) { return false; }
+    }
+
+    private ProjectSnapshot CreateStandardLibrarySnapshot(CTildeProject project, string documentPath, string key)
+    {
+        var overrides = _documents.Values.ToDictionary(document => Path.GetFullPath(document.Path), document => document.Text, PathComparer);
+        try
+        {
+            var service = LanguageServiceSnapshot.CreateStandardLibraryProject(project.RootDirectory, documentPath, overrides);
+            return new ProjectSnapshot(key, project.SourceFiles, service.Options.Target, service.Options.Architecture, false,
+                EspIdfPanicPolicy.Abort, service, null, _revision);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
+        {
+            return CreateStandalone(documentPath, CompilationTarget.Hosted, exception.Message);
         }
     }
 
@@ -173,7 +254,7 @@ internal sealed class WorkspaceState
     }
 
     private ProjectSnapshot CreateStandalone(string path, CompilationTarget target, string error) => CreateSnapshot($"standalone:{path}:{target}", [path], target,
-        CompilationArchitecture.Auto, false, EspIdfPanicPolicy.Abort, Path.GetDirectoryName(Path.GetFullPath(path)), error, null);
+        CompilationArchitecture.Auto, TargetEnvironment.Native, false, EspIdfPanicPolicy.Abort, Path.GetDirectoryName(Path.GetFullPath(path)), error, null);
 
     private static IReadOnlySet<string>? BindingPaths(CTildeProject? project) => project?.Configuration.BindingManifests
         .Select(manifest => manifest.DeclarationsPath).ToHashSet(PathComparer);
@@ -198,7 +279,7 @@ internal sealed class WorkspaceState
         return null;
     }
 
-    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, CompilationArchitecture architecture, bool noRecursion,
+    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target, CompilationArchitecture architecture, TargetEnvironment environment, bool noRecursion,
         EspIdfPanicPolicy panicPolicy, string? sourceIdentityRoot, string? projectError, IReadOnlySet<string>? bindingPaths)
     {
         var trees = ImmutableArray.CreateBuilder<SyntaxTree>();
@@ -217,7 +298,7 @@ internal sealed class WorkspaceState
             }
         }
         var service = LanguageServiceSnapshot.Create(trees, new CompilationOptions(target, Architecture: architecture, NoRecursion: noRecursion,
-            SourceIdentityRoot: sourceIdentityRoot, PanicPolicy: panicPolicy));
+            SourceIdentityRoot: sourceIdentityRoot, PanicPolicy: panicPolicy, Environment: environment));
         return new ProjectSnapshot(key, sourceFiles, target, architecture, noRecursion, panicPolicy, service, projectError, _revision);
     }
 

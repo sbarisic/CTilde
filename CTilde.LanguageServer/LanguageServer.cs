@@ -31,7 +31,7 @@ internal sealed class LanguageServer
                 true, true, true, true,
                 new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true)),
                 new SemanticTokensOptions(new SemanticTokensLegend(SemanticTokenTypes, SemanticTokenModifiers), true, false)),
-            new ServerInfo("C~ Language Server", "0.10.1"));
+            new ServerInfo("C~ Language Server", "0.11.0"));
     }
 
     [JsonRpcMethod("initialized", UseSingleObjectParameterDeserialization = true)]
@@ -75,6 +75,12 @@ internal sealed class LanguageServer
     [JsonRpcMethod("workspace/didChangeWatchedFiles", UseSingleObjectParameterDeserialization = true)]
     public void DidChangeWatchedFiles(DidChangeWatchedFilesParams parameters) => _workspace.FilesChanged();
 
+    [JsonRpcMethod("ctilde/didChangeProjects", UseSingleObjectParameterDeserialization = true)]
+    public void DidChangeProjects(CTildeProjectContextsParams parameters) => _workspace.SetProjectContexts(parameters);
+
+    [JsonRpcMethod("ctilde/didChangeActiveProject", UseSingleObjectParameterDeserialization = true)]
+    public void DidChangeActiveProject(CTildeActiveProjectParams parameters) => _workspace.SetActiveProject(parameters.ManifestUri);
+
     [JsonRpcMethod("textDocument/completion", UseSingleObjectParameterDeserialization = true)]
     public CompletionList Completion(CompletionParams parameters, CancellationToken cancellationToken)
     {
@@ -83,7 +89,7 @@ internal sealed class LanguageServer
         var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
         var offset = PositionToOffset(project, path, parameters.Position);
         var items = project.LanguageService.GetCompletions(path, offset).Select(item => new CompletionItem(
-            item.Label, CompletionKind(item.Kind), item.Detail, item.SortText, item.Label,
+            item.Label, CompletionKind(item.Kind), CompletionDetail(item), item.SortText, item.Label,
             new TextEdit(ToRange(project, path, item.ReplacementSpan), item.InsertText),
             Data: item.DocumentationId is null ? null : new CompletionItemData(parameters.TextDocument.Uri, item.DocumentationId, project.Revision))).ToArray();
         return new CompletionList(false, items);
@@ -279,6 +285,10 @@ internal sealed class LanguageServer
         LanguageCompletionKind.Namespace => 9,
         _ => 1,
     };
+
+    private static string CompletionDetail(LanguageCompletion completion) => completion.OverloadCount > 1
+        ? $"{completion.Detail} (+{completion.OverloadCount - 1} overloads)"
+        : completion.Detail;
 
     private static int SymbolKind(LanguageSymbolKind kind) => kind switch
     {

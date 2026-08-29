@@ -14,7 +14,12 @@
     <Compile Include="Conformance/**/*.cs" />
     <ProjectReference Include="../CTilde/CTilde.csproj" />
     <ProjectReference Include="../CTilde.Cli/CTilde.Cli.csproj" ReferenceOutputAssembly="false" />
-    <Content Include="../examples/*.ct" Link="Examples/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/Hello/*.ct" Link="Examples/Hello/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/Exceptions/*.ct" Link="Examples/Exceptions/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/Features/*.ct" Link="Examples/Features/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/Features/native/*.c" Link="Examples/Features/native/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/InlineAssemblyWindows/*.ct" Link="Examples/InlineAssemblyWindows/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/ObjectModel/*.ct" Link="Examples/ObjectModel/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../examples/HostedIo/*.ct" Link="Examples/HostedIo/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Snapshots/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>

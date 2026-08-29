@@ -1,0 +1,8 @@
+{
+  "target": "hosted",
+  "sources": ["Program.ct"],
+  "hosted": {
+    "nativeSources": ["native/feature_shim.c"]
+  },
+  "build": { "configuration": "release" }
+}

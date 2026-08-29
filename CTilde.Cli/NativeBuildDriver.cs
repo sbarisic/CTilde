@@ -159,7 +159,7 @@ internal static class HostedBuildDriver
         if (request.Lto)
             common.Add("/GL");
         var objects = new List<string>();
-        foreach (var source in request.GeneratedSourcePaths)
+        foreach (var source in request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []))
         {
             var objectPath = CachedObjectPath(request, compiler, source, string.Join('\n', common), ".obj");
             objects.Add(objectPath);
@@ -211,7 +211,8 @@ internal static class HostedBuildDriver
             configuration.Add("-fvar-tracking-assignments");
         var common = new List<string> { "-std=gnu23" };
         common.AddRange(configuration);
-        var usesPthreads = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
+        var hostedSources = request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []).ToArray();
+        var usesPthreads = hostedSources.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
         if (usesPthreads)
             common.Add("-pthread");
         if (request.Lto)
@@ -219,7 +220,7 @@ internal static class HostedBuildDriver
         common.AddRange(["-Wall", "-Wextra", "-Werror"]);
 
         var objects = new List<string>();
-        foreach (var originalSource in request.GeneratedSourcePaths)
+        foreach (var originalSource in hostedSources)
         {
             var objectPath = CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
             objects.Add(objectPath);
@@ -589,6 +590,11 @@ internal static class EspIdfBuildDriver
 
     public static async Task PrepareDebugLaunchAsync(BuildRequest request, CancellationToken cancellationToken)
     {
+        if (request.Environment == TargetEnvironment.Qemu)
+        {
+            ValidateQemuTooling(request);
+            return;
+        }
         var project = request.EspIdfProjectDirectory!;
         ValidateDebugConfiguration(project);
         var process = CreateIdfRequest(request, ["-p", request.SerialPort!, "flash"]);
@@ -623,9 +629,20 @@ internal static class EspIdfBuildDriver
             throw new NativeBuildException("ESP-IDF panic policy 'halt' requires CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y in the effective sdkconfig.");
     }
 
-    private static NativeProcessRequest CreateIdfRequest(BuildRequest request, IReadOnlyList<string> arguments)
+    internal static NativeProcessRequest CreateQemuLaunchRequest(BuildRequest request) => CreateIdfRequest(request, ["qemu", "--gdb"]);
+
+    internal static NativeProcessRequest CreateIdfRequest(BuildRequest request, IReadOnlyList<string> arguments)
     {
         var project = request.EspIdfProjectDirectory!;
+        var qemuDirectory = request.Environment == TargetEnvironment.Qemu
+            ? Path.GetDirectoryName(FindQemuExecutable(request) ?? string.Empty)
+            : null;
+        if (request.Environment == TargetEnvironment.Qemu)
+        {
+            var target = request.EspIdfChip == CTilde.EspIdfChip.Esp32 ? "esp32" : "esp32c3";
+            var sdkconfig = Path.Combine(project, $"sdkconfig.{(target == "esp32" ? "esp32_qemu" : "esp32c3_qemu")}");
+            arguments = ["-B", request.EspIdfBuildDirectory, "-D", $"IDF_TARGET={target}", "-D", $"SDKCONFIG={sdkconfig}", .. arguments];
+        }
         var idfCommand = NativeToolDiscovery.FindOnPath("idf.py");
         NativeProcessRequest process;
         if (idfCommand is not null)
@@ -644,10 +661,61 @@ internal static class EspIdfBuildDriver
                 var idfPath = request.EspIdfPath ?? Environment.GetEnvironmentVariable("IDF_PATH");
                 if (string.IsNullOrWhiteSpace(idfPath) || !Directory.Exists(idfPath))
                     throw new NativeBuildException("ESP-IDF tools are not active. Open an ESP-IDF terminal or pass --idf-path.");
-                process = CreateActivatedRequest(Path.GetFullPath(idfPath), project, arguments);
+                process = CreateActivatedRequest(Path.GetFullPath(idfPath), project, arguments, qemuDirectory);
             }
         }
+        if (!string.IsNullOrWhiteSpace(qemuDirectory))
+        {
+            var environment = process.Environment?.ToDictionary(entry => entry.Key, entry => entry.Value, StringComparer.OrdinalIgnoreCase)
+                ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            environment["PATH"] = qemuDirectory + Path.PathSeparator + (Environment.GetEnvironmentVariable("PATH") ?? string.Empty);
+            environment["CTILDE_TARGET_ENVIRONMENT"] = "qemu";
+            process = process with { Environment = environment };
+        }
         return process;
+    }
+
+    private static void ValidateQemuTooling(BuildRequest request)
+    {
+        var executable = request.EspIdfChip == CTilde.EspIdfChip.Esp32 ? "qemu-system-xtensa" : "qemu-system-riscv32";
+        if (FindQemuExecutable(request) is not null)
+            return;
+        throw new NativeBuildException($"ESP-IDF QEMU tool '{executable}' is not installed. Run: {QemuToolsInstallCommand(request)}");
+    }
+
+    private static string? FindQemuExecutable(BuildRequest request)
+    {
+        var executable = request.EspIdfChip == CTilde.EspIdfChip.Esp32 ? "qemu-system-xtensa" : "qemu-system-riscv32";
+        var names = OperatingSystem.IsWindows() ? new[] { executable + ".exe", executable } : new[] { executable };
+        foreach (var name in names)
+            if (NativeToolDiscovery.FindOnPath(name) is { } path)
+                return path;
+        var comparison = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+        foreach (var root in EspIdfEnvironment.ToolsRoots(request.EspIdfPath))
+        {
+            if (!Directory.Exists(root))
+                continue;
+            var path = Directory.EnumerateFiles(root, "*", SearchOption.AllDirectories)
+                .FirstOrDefault(candidate => names.Contains(Path.GetFileName(candidate), comparison));
+            if (path is not null)
+                return path;
+        }
+        return null;
+    }
+
+    private static string QemuToolsInstallCommand(BuildRequest request)
+    {
+        var idfPath = request.EspIdfPath ?? Environment.GetEnvironmentVariable("IDF_PATH");
+        if (!string.IsNullOrWhiteSpace(idfPath))
+        {
+            var script = Path.Combine(Path.GetFullPath(idfPath), "tools", "idf_tools.py");
+            return OperatingSystem.IsWindows()
+                ? $"python \"{script}\" install qemu-xtensa qemu-riscv32"
+                : $"python {ShellQuote(script)} install qemu-xtensa qemu-riscv32";
+        }
+        return OperatingSystem.IsWindows()
+            ? "python \"$env:IDF_PATH\\tools\\idf_tools.py\" install qemu-xtensa qemu-riscv32"
+            : "python \"$IDF_PATH/tools/idf_tools.py\" install qemu-xtensa qemu-riscv32";
     }
 
     private static NativeProcessRequest? CreateActiveEnvironmentRequest(string project, string? requestedIdfPath, IReadOnlyList<string> arguments)
@@ -676,7 +744,7 @@ internal static class EspIdfBuildDriver
         return new NativeProcessRequest(python, [idfCommand, .. arguments], project);
     }
 
-    private static NativeProcessRequest CreateActivatedRequest(string idfPath, string project, IReadOnlyList<string> arguments)
+    private static NativeProcessRequest CreateActivatedRequest(string idfPath, string project, IReadOnlyList<string> arguments, string? additionalPath = null)
     {
         if (OperatingSystem.IsWindows())
         {
@@ -686,7 +754,10 @@ internal static class EspIdfBuildDriver
                 throw new NativeBuildException($"ESP-IDF activation script was not found: {exportScript}");
             var windowsIdfArguments = string.Join(' ', arguments.Select(argument => $"'{PowerShellQuote(argument)}'"));
             var activation = eimProfile ?? exportScript;
-            var script = $"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; . '{PowerShellQuote(activation)}' 6>$null; & idf.py {windowsIdfArguments}; exit $LASTEXITCODE";
+            var pathSetup = string.IsNullOrWhiteSpace(additionalPath)
+                ? string.Empty
+                : $" $env:PATH='{PowerShellQuote(additionalPath)};'+$env:PATH;";
+            var script = $"$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; . '{PowerShellQuote(activation)}' 6>$null;{pathSetup} & idf.py {windowsIdfArguments}; exit $LASTEXITCODE";
             var encoded = Convert.ToBase64String(Encoding.Unicode.GetBytes(script));
             return new NativeProcessRequest("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded], project);
         }
@@ -696,7 +767,8 @@ internal static class EspIdfBuildDriver
             throw new NativeBuildException($"ESP-IDF activation script was not found: {export}");
         var shell = NativeToolDiscovery.FindOnPath("bash") ?? throw new NativeBuildException("bash is required to activate ESP-IDF.");
         var idfArguments = string.Join(' ', arguments.Select(ShellQuote));
-        return new NativeProcessRequest(shell, ["-lc", $"source {ShellQuote(export)} >/dev/null && exec idf.py {idfArguments}"], project);
+        var shellPathSetup = string.IsNullOrWhiteSpace(additionalPath) ? string.Empty : $"export PATH={ShellQuote(additionalPath)}:$PATH && ";
+        return new NativeProcessRequest(shell, ["-lc", $"source {ShellQuote(export)} >/dev/null && {shellPathSetup}exec idf.py {idfArguments}"], project);
     }
 
     private static string PowerShellQuote(string value) => value.Replace("'", "''", StringComparison.Ordinal);

@@ -22,6 +22,18 @@ public enum CompilationArchitecture
     RiscV64,
 }
 
+public enum TargetEnvironment
+{
+    Native,
+    Qemu,
+}
+
+public enum EspIdfChip
+{
+    Esp32,
+    Esp32C3,
+}
+
 public enum DebugInformationMode
 {
     None,
@@ -57,4 +69,5 @@ public sealed record CompilationOptions(
     bool NoRecursion = false,
     string? SourceIdentityRoot = null,
     EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
-    ImmutableArray<CpuFeature> CpuFeatures = default);
+    ImmutableArray<CpuFeature> CpuFeatures = default,
+    TargetEnvironment Environment = TargetEnvironment.Native);

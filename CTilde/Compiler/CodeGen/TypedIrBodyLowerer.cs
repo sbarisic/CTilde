@@ -191,10 +191,8 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 ValidateConstructorAssignments();
                 if (_method.ContainingType.Kind == DeclaredTypeKind.Struct && _method.ContainingType.Type.ContainsManagedReferences)
-                {
                     body.WriteLine("ct_cleanup_disarm(&ct_cleanup_struct_constructor);");
-                    body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
-                }
+                body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
                 body.WriteLine(_method.ContainingType.Kind == DeclaredTypeKind.Struct ? "return ct_value;" : "return ct_self;");
             }
             else if (_method.ReturnType == CType.Void && (_property is null || !_isGetter))

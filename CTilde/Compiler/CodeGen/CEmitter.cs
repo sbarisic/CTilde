@@ -54,6 +54,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
+    private readonly TargetEnvironment _environment;
     private readonly string? _sourceRoot;
     private readonly string? _sourceIdentityRoot;
     private readonly EspIdfPanicPolicy _panicPolicy;
@@ -75,12 +76,14 @@ internal sealed partial class CEmitter : ILoweringServices
         DebugInformationMode debugInformation = DebugInformationMode.None,
         DebugMemoryMode debugMemory = DebugMemoryMode.Off,
         string? sourceIdentityRoot = null,
-        EspIdfPanicPolicy panicPolicy = EspIdfPanicPolicy.Abort)
+        EspIdfPanicPolicy panicPolicy = EspIdfPanicPolicy.Abort,
+        TargetEnvironment environment = TargetEnvironment.Native)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
         _target = target;
         _architecture = architecture;
+        _environment = environment;
         _sourceRoot = sourceRoot;
         _sourceIdentityRoot = sourceIdentityRoot;
         _panicPolicy = panicPolicy;
@@ -120,6 +123,7 @@ internal sealed partial class CEmitter : ILoweringServices
 
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public TargetEnvironment Environment => _environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
 
     public CompilationModel Model { get; }
@@ -131,6 +135,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool EmitDebugObjects => EmitDebugInstrumentation && _debugMemory != DebugMemoryMode.Off;
     private bool EmitDebugGuards => EmitDebugInstrumentation && _debugMemory == DebugMemoryMode.Guarded;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
+    private bool IsQemu => IsEspIdf && _environment == TargetEnvironment.Qemu;
     private bool IsFreestanding => _target == CompilationTarget.Freestanding;
 
     private string SourceIdentity(MethodSymbol method)
@@ -991,8 +996,9 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["throw"] = "ct_debug_throw_hook",
                 ["fatal"] = "ct_debug_fatal_hook",
                 ["control"] = EmitDebugInstrumentation ? "ct_debug_control" : null,
-                ["trap"] = EmitDebugInstrumentation ? "ct_debug_trap" : null,
+                ["trap"] = EmitDebugInstrumentation ? IsQemu ? "ct_debug_qemu_trap" : "ct_debug_trap" : null,
                 ["startup"] = EmitDebugInstrumentation && IsEspIdf ? "ct_debug_startup_probe" : null,
+                ["ready"] = EmitDebugInstrumentation && IsQemu ? "ct_debug_qemu_ready" : null,
             },
             ["runtimeControl"] = EmitDebugInstrumentation ? new Dictionary<string, object?>
             {

@@ -300,7 +300,14 @@ public sealed partial class LanguageServiceSnapshot
     private static bool IsSingleLine(SourceText source, TextSpan span) =>
         source.GetLocation(new TextSpan(span.Start, 0)).Line == source.GetLocation(new TextSpan(span.End, 0)).Line;
 
-    private static bool IsStandardLibrary(string? filePath) => filePath is not null && filePath.Replace('\\', '/').StartsWith("stdlib/", StringComparison.Ordinal);
+    private static bool IsStandardLibrary(string? filePath)
+    {
+        if (filePath is null)
+            return false;
+        var normalized = filePath.Replace('\\', '/');
+        return normalized.StartsWith("stdlib/", StringComparison.Ordinal) ||
+            normalized.Contains("/StandardLibrary/", StringComparison.OrdinalIgnoreCase);
+    }
 
     private readonly record struct ClassifiedToken(TextSpan Span, LanguageSemanticTokenKind Kind, LanguageSemanticTokenModifiers Modifiers);
 }

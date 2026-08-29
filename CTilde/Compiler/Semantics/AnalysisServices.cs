@@ -48,6 +48,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public bool EmitDebugInstrumentation => false;
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public TargetEnvironment Environment => Model.Environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
 
     public IEnumerable<string> DynamicGeneratedSymbols =>

@@ -33,9 +33,9 @@ internal static class FreestandingValidator
         var reachable = model.Effects.ReachableMethods(roots);
         model.FreestandingHeapRequired = reachable.Any(method => (model.Effects.GetEffects(method) & EffectKind.Allocates) != 0);
 
-        if (model.FreestandingRuntimeRequired)
+        if (model.RequireRuntimeImplementations && model.FreestandingRuntimeRequired)
             Require(model, RuntimeImplementationRole.Panic);
-        if (model.FreestandingHeapRequired)
+        if (model.RequireRuntimeImplementations && model.FreestandingHeapRequired)
         {
             Require(model, RuntimeImplementationRole.Allocate);
             Require(model, RuntimeImplementationRole.Free);

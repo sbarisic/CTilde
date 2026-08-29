@@ -423,7 +423,7 @@ internal static partial class ConformanceTests
             if (captureBlock && line == "};")
                 captureBlock = false;
         }
-        return Normalize(result.ToString()).Replace("E:/Projects/CTilde/examples/ObjectModel.ct", "test.ct", StringComparison.Ordinal);
+        return Normalize(result.ToString()).Replace("E:/Projects/CTilde/examples/ObjectModel/Program.ct", "test.ct", StringComparison.Ordinal);
     }
 
     static void Assert(bool condition, string message)

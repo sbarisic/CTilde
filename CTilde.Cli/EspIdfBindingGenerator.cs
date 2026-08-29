@@ -241,7 +241,7 @@ internal static class EspIdfBindingGenerator
     }
 
     private static string CachePath(BuildRequest request) =>
-        Path.Combine(request.EspIdfProjectDirectory!, "build", ".ctilde", "bindings", "state.json");
+        Path.Combine(request.EspIdfBuildDirectory, ".ctilde", "bindings", "state.json");
 
     private static string HashFile(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
 
@@ -279,7 +279,7 @@ internal static class EspIdfBindingGenerator
 
     private static CompileContext ReadCompileContext(BuildRequest request, string probeSource)
     {
-        var compileCommands = Path.Combine(request.EspIdfProjectDirectory!, "build", "compile_commands.json");
+        var compileCommands = Path.Combine(request.EspIdfBuildDirectory, "compile_commands.json");
         if (!File.Exists(compileCommands))
             throw new NativeBuildException($"ESP-IDF did not produce compile commands: {compileCommands}");
         using var document = JsonDocument.Parse(File.ReadAllText(compileCommands));
@@ -306,7 +306,7 @@ internal static class EspIdfBindingGenerator
             : SplitCommandLine(entryValue.GetProperty("command").GetString()!);
         var directory = entryValue.GetProperty("directory").GetString()!;
         var includeDirectories = ExtractIncludeDirectories(arguments, directory);
-        var projectDescription = Path.Combine(request.EspIdfProjectDirectory!, "build", "project_description.json");
+        var projectDescription = Path.Combine(request.EspIdfBuildDirectory, "project_description.json");
         using var description = JsonDocument.Parse(File.ReadAllText(projectDescription));
         var target = description.RootElement.GetProperty("target").GetString()!;
         var version = description.RootElement.GetProperty("version").GetString() ?? "unknown";
@@ -557,7 +557,7 @@ internal static class EspIdfBindingGenerator
 
     private static async Task ValidateAdapterAsync(string clang, CompileContext compile, GeneratedBinding output, BuildRequest request, CancellationToken cancellationToken)
     {
-        var directory = Path.Combine(request.EspIdfProjectDirectory!, "build", ".ctilde", "bindings");
+        var directory = Path.Combine(request.EspIdfBuildDirectory, ".ctilde", "bindings");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, $"validate-{SHA256.HashData(Encoding.UTF8.GetBytes(output.Adapter)).AsSpan(0, 6).ToArray().ToHex()}.c");
         WriteAtomically(path, output.Adapter);
@@ -588,7 +588,7 @@ internal static class EspIdfBindingGenerator
         if (adapters.Length == 0)
             return new Dictionary<string, string[]>(StringComparer.Ordinal);
 
-        var directory = Path.Combine(request.EspIdfProjectDirectory!, "build", ".ctilde", "bindings");
+        var directory = Path.Combine(request.EspIdfBuildDirectory, ".ctilde", "bindings");
         Directory.CreateDirectory(directory);
         var source = Path.Combine(directory, "inspect-adapters.c");
         var headers = manifests.SelectMany(manifest => manifest.Imports).Select(import => import.Header).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);

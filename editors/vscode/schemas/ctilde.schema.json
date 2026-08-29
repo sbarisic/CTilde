@@ -7,11 +7,19 @@
     "sources"
   ],
   "properties": {
+    "kind": {
+      "type": "string",
+      "enum": ["application", "standard-library"],
+      "default": "application",
+      "description": "Project behavior. Standard-library projects validate physical library sources and do not produce an executable."
+    },
     "target": {
       "type": "string",
       "enum": [
         "hosted",
         "esp-idf",
+        "esp32_qemu",
+        "esp32c3_qemu",
         "freestanding",
         "cosmopolitan"
       ],
@@ -81,6 +89,18 @@
         "minLength": 1
       },
       "description": "Source globs removed after the sources patterns are evaluated."
+    },
+    "hosted": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Hosted-only native inputs linked with generated C.",
+      "properties": {
+        "nativeSources": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.c$" }
+        }
+      }
     },
     "espIdf": {
       "type": "object",
@@ -243,5 +263,49 @@
         }
       }
     }
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "target": { "const": "esp32_qemu" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": { "architecture": { "const": "xtensa" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "target": { "const": "esp32c3_qemu" } },
+        "required": ["target"]
+      },
+      "then": {
+        "properties": { "architecture": { "const": "riscv32" } }
+      }
+    },
+    {
+      "if": {
+        "properties": { "kind": { "const": "standard-library" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["target"] },
+            { "required": ["architecture"] },
+            { "required": ["cpuFeatures"] },
+            { "required": ["modules"] },
+            { "required": ["noRecursion"] },
+            { "required": ["panicPolicy"] },
+            { "required": ["build"] },
+            { "required": ["run"] },
+            { "required": ["hosted"] },
+            { "required": ["espIdf"] },
+            { "required": ["freestanding"] },
+            { "required": ["cosmopolitan"] }
+          ]
+        }
+      }
+    }
+  ]
 }

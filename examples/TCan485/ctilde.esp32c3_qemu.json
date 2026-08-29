@@ -1,0 +1,11 @@
+{
+  "target": "esp32c3_qemu",
+  "sources": ["Program.ct", "WifiDemo.ct", "WifiSettings.ct"],
+  "espIdf": { "bindings": ["Bindings/esp-idf.bindings.json"] },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": "."
+  }
+}

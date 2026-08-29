@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<VSTemplate Version="3.0.0" Type="Project" xmlns="http://schemas.microsoft.com/developer/vstemplate/2005">
+  <TemplateData>
+    <Name>C~ Hosted Console Application</Name>
+    <Description>A hosted C~ console project backed by ctilde.json.</Description>
+    <Icon>ctilde-icon.png</Icon>
+    <ProjectType>CTilde</ProjectType>
+    <SortOrder>10</SortOrder>
+    <TemplateID>CTilde.HostedConsole.0.11</TemplateID>
+    <CreateNewFolder>true</CreateNewFolder>
+    <DefaultName>CTildeConsole</DefaultName>
+    <ProvideDefaultName>true</ProvideDefaultName>
+    <CreateInPlace>true</CreateInPlace>
+  </TemplateData>
+  <TemplateContent>
+    <Project File="CTildeConsole.ctproj" ReplaceParameters="true">
+      <ProjectItem ReplaceParameters="true" OpenInEditor="true">Program.ct</ProjectItem>
+      <ProjectItem ReplaceParameters="true">ctilde.json</ProjectItem>
+    </Project>
+  </TemplateContent>
+</VSTemplate>

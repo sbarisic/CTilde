@@ -209,6 +209,11 @@ orleans.codegen.cs
 /examples/TCan485/main/generated/
 
 # Hosted I/O example output
+/examples/Hello/build/
+/examples/Exceptions/build/
+/examples/Features/build/
+/examples/InlineAssemblyWindows/build/
+/examples/ObjectModel/build/
 /examples/HostedIo/build/
 /examples/HostedIo/program.c
 /examples/HostedIo/program

@@ -825,8 +825,15 @@ internal sealed partial class CEmitter
             writer.WriteLine("    (void)setvbuf(stdout, NULL, _IONBF, 0);");
             writer.WriteLine("    (void)setvbuf(stderr, NULL, _IONBF, 0);");
             if (EmitDebugInstrumentation)
-                writer.WriteLine("    ct_debug_wait_for_client();\n    ct_debug_startup_probe();");
+            {
+                if (IsQemu)
+                    writer.WriteLine("    ct_debug_qemu_ready();");
+                else
+                    writer.WriteLine("    ct_debug_wait_for_client();\n    ct_debug_startup_probe();");
+            }
             writer.WriteLine("    ct_runtime_initialize(NULL);");
+            if (EmitDebugInstrumentation && IsQemu)
+                writer.WriteLine("    ct_debug_startup_probe();");
             if (Model.EntryPoint is not null)
                 writer.WriteLine($"    {Model.EntryPoint.CName}();");
             writer.WriteLine("    ct_runtime_shutdown();");

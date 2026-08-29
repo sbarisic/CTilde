@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -39,8 +39,10 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     const dotOffset = source.indexOf("Console.") + "Console.".length;
     const dotPosition = positionAt(source, dotOffset);
     const completion = await client.request("textDocument/completion", { textDocument: { uri }, position: dotPosition });
+    assert.equal(completion.items.filter(item => item.label === "WriteLine").length, 1);
     const writeLineCompletion = completion.items.find(item => item.label === "WriteLine");
     assert.ok(writeLineCompletion);
+    assert.match(writeLineCompletion.detail, /\(\+\d+ overloads\)$/);
     assert.equal(writeLineCompletion.documentation, undefined);
     const resolvedWriteLine = await client.request("completionItem/resolve", writeLineCompletion);
     assert.match(resolvedWriteLine.documentation.value, /managed string followed by a line terminator|line terminator/);
@@ -100,6 +102,67 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
     const canceledRequest = client.requestCancelable("textDocument/semanticTokens/full", { textDocument: { uri } });
     client.notify("$/cancelRequest", { id: canceledRequest.id });
     await assert.rejects(canceledRequest.promise);
+
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("language server resolves a non-main document through its loaded project and recovers incomplete member completion", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-multi-project-"));
+  const helloDirectory = path.join(directory, "Hello");
+  const hostedDirectory = path.join(directory, "HostedIo");
+  await mkdir(helloDirectory);
+  await mkdir(hostedDirectory);
+  const helloManifest = path.join(helloDirectory, "ctilde.json");
+  const hostedManifest = path.join(hostedDirectory, "ctilde.json");
+  const scenePath = path.join(hostedDirectory, "Scene.ct");
+  const siblingPath = path.join(hostedDirectory, "Sibling.ct");
+  const sceneUri = pathToFileURL(scenePath).href;
+  const validScene = "using System; namespace Hosted; public static class Scene { public static void Build() { Console.WriteLine(); Sibling value = new Sibling(); } }";
+  const incompleteScene = validScene.replace("Console.WriteLine();", "Console.Wri\n");
+  await writeFile(helloManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(path.join(helloDirectory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+  await writeFile(hostedManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(path.join(hostedDirectory, "Program.ct"), "namespace Hosted; public static class Program { [EntryPoint] public static void Main() { Scene.Build(); } }");
+  await writeFile(siblingPath, "namespace Hosted; public class Sibling { }");
+  await writeFile(scenePath, validScene);
+
+  const client = new LspClient(serverDll);
+  try {
+    const initialized = await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "multi-project-fixture" }],
+      capabilities: {}
+    });
+    client.notify("initialized", {});
+    client.notify("ctilde/didChangeProjects", {
+      projects: [
+        { projectUri: pathToFileURL(path.join(helloDirectory, "Hello.ctproj")).href, manifestUri: pathToFileURL(helloManifest).href },
+        { projectUri: pathToFileURL(path.join(hostedDirectory, "HostedIo.ctproj")).href, manifestUri: pathToFileURL(hostedManifest).href }
+      ],
+      activeManifestUri: pathToFileURL(helloManifest).href
+    });
+    client.notify("textDocument/didOpen", { textDocument: { uri: sceneUri, languageId: "ctilde", version: 1, text: validScene } });
+
+    const siblingOffset = validScene.indexOf("Sibling value") + 1;
+    const definition = await client.request("textDocument/definition", { textDocument: { uri: sceneUri }, position: positionAt(validScene, siblingOffset) });
+    assert.equal(path.normalize(fileURLToPath(definition.uri)).toLowerCase(), path.normalize(await realpath(siblingPath)).toLowerCase());
+    const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri: sceneUri } });
+    const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, validScene);
+    assert.ok(decoded.some(token => token.text === "Sibling" && token.type === "class"));
+
+    client.notify("textDocument/didChange", { textDocument: { uri: sceneUri, version: 2 }, contentChanges: [{ text: incompleteScene }] });
+    const completionOffset = incompleteScene.indexOf("Console.Wri") + "Console.Wri".length;
+    const completion = await client.request("textDocument/completion", { textDocument: { uri: sceneUri }, position: positionAt(incompleteScene, completionOffset) });
+    const writeLines = completion.items.filter(item => item.label === "WriteLine");
+    assert.equal(writeLines.length, 1);
+    assert.match(writeLines[0].detail, /\(\+\d+ overloads\)$/);
 
     await client.request("shutdown");
     client.notify("exit");
@@ -345,6 +408,71 @@ test("hosted I/O documentation and target filtering", async () => {
   } finally {
     client.dispose();
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("explicit same-root project contexts follow the active manifest", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-context-"));
+  const programPath = path.join(directory, "Program.ct");
+  const hostedManifest = path.join(directory, "ctilde.json");
+  const freestandingManifest = path.join(directory, "ctilde.freestanding.json");
+  const uri = pathToFileURL(programPath).href;
+  const source = "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(42); } }";
+  await writeFile(hostedManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(freestandingManifest, JSON.stringify({ target: "freestanding", architecture: "x64", sources: ["*.ct"] }));
+  await writeFile(programPath, source);
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", { processId: process.pid, rootUri: pathToFileURL(directory).href, capabilities: {} });
+    client.notify("initialized", {});
+    client.notify("ctilde/didChangeProjects", {
+      projects: [
+        { projectUri: pathToFileURL(path.join(directory, "Hosted.ctproj")).href, manifestUri: pathToFileURL(hostedManifest).href },
+        { projectUri: pathToFileURL(path.join(directory, "Freestanding.ctproj")).href, manifestUri: pathToFileURL(freestandingManifest).href }
+      ],
+      activeManifestUri: pathToFileURL(freestandingManifest).href
+    });
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+    const freestanding = await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === uri && value.diagnostics.some(item => item.severity === 1));
+    assert.ok(freestanding.diagnostics.some(item => item.code === "CT1107" || item.code === "CT4115"));
+
+    client.notify("ctilde/didChangeActiveProject", { manifestUri: pathToFileURL(hostedManifest).href });
+    const hosted = await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === uri && value.diagnostics.length === 0);
+    assert.deepEqual(hosted.diagnostics, []);
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("physical standard-library projects navigate without embedded duplicates", async () => {
+  const directory = path.resolve(extensionRoot, "..", "..", "CTilde", "StandardLibrary");
+  const programPath = path.join(directory, "System", "Vec2.ct");
+  const uri = pathToFileURL(programPath).href;
+  const source = await readFile(programPath, "utf8");
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "standard-library" }],
+      capabilities: {}
+    });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
+    const diagnostics = await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === uri);
+    assert.deepEqual(diagnostics.diagnostics.filter(item => item.severity === 1), []);
+    const mathOffset = source.indexOf("Math.Sqrt") + 1;
+    const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, mathOffset) });
+    assert.equal(fileURLToPath(definition.uri), path.join(directory, "System", "Math.ct"));
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
   }
 });
 

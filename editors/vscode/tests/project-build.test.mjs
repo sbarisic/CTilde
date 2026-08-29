@@ -67,6 +67,12 @@ test("task arguments apply only target-appropriate machine settings", () => {
   assert.deepEqual(
     compilerArguments(launch, manifest, "bindings", "esp-idf", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-7),
     ["--project", manifest, "--generate-bindings", "--idf-path", "idf", "--esp-clang", "esp-clang"]);
+  assert.deepEqual(
+    compilerArguments(launch, manifest, "build", "esp32_qemu", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-7),
+    ["--project", manifest, "--build", "--idf-path", "idf", "--esp-clang", "esp-clang"]);
+  assert.deepEqual(
+    compilerArguments(launch, manifest, "build", "esp32c3_qemu", { nativeCompiler: "clang", idfPath: "idf", espClangPath: "esp-clang" }).slice(-7),
+    ["--project", manifest, "--build", "--idf-path", "idf", "--esp-clang", "esp-clang"]);
 });
 
 test("task project and nearest-manifest resolution are deterministic", () => {

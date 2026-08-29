@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable">
+  <Extern href="stdidcmd.h" />
+  <Extern href="vsshlids.h" />
+  <Commands package="guidCTildePackage">
+    <Groups>
+      <Group guid="guidCTildeCommandSet" id="CTildeToolsGroup" priority="0x0600"><Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS" /></Group>
+    </Groups>
+    <Buttons>
+      <Button guid="guidCTildeCommandSet" id="cmdidCheck" priority="0x0100" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Check C~ Project</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidBuild" priority="0x0110" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Build C~ Project</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidClean" priority="0x0120" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Clean C~ Project</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidRebuild" priority="0x0130" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Rebuild C~ Project</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidRun" priority="0x0140" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Run C~ Project</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidCancel" priority="0x0150" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Cancel C~ Operation</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidRestartServer" priority="0x0200" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Restart C~ Language Server</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidShowOutput" priority="0x0210" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Show C~ Output</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidCreateProject" priority="0x0300" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Create Visual Studio Project from C~ Manifest...</ButtonText></Strings></Button>
+    </Buttons>
+  </Commands>
+  <Symbols>
+    <GuidSymbol name="guidCTildePackage" value="{94c2125f-423b-49ed-a929-2cb765cde05a}" />
+    <GuidSymbol name="guidCTildeCommandSet" value="{235dfa97-a3cf-4627-975b-851e22e0ca63}">
+      <IDSymbol name="CTildeToolsGroup" value="0x1000" />
+      <IDSymbol name="cmdidCheck" value="0x0100" /><IDSymbol name="cmdidBuild" value="0x0101" /><IDSymbol name="cmdidClean" value="0x0102" />
+      <IDSymbol name="cmdidRebuild" value="0x0103" /><IDSymbol name="cmdidRun" value="0x0104" /><IDSymbol name="cmdidCancel" value="0x0105" />
+      <IDSymbol name="cmdidRestartServer" value="0x0106" /><IDSymbol name="cmdidShowOutput" value="0x0107" /><IDSymbol name="cmdidCreateProject" value="0x0108" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

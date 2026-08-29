@@ -6,7 +6,7 @@ internal static partial class ConformanceTests
     {
         suite.Run("feature C symbol snapshot", () =>
         {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features.ct"));
+            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "Features", "Program.ct"));
             var compilation = Compile(source);
             using var writer = new StringWriter();
             Assert(compilation.EmitSymbolMap(writer).Success, "Feature symbol-map emission failed.");
@@ -20,7 +20,7 @@ internal static partial class ConformanceTests
 
         suite.Run("object ABI snapshot", () =>
         {
-            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel.ct"));
+            var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel", "Program.ct"));
             var projection = ProjectObjectAbi(Emit(source));
             var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt")));
             Assert(projection == expected, $"Generated object ABI snapshot changed.{Environment.NewLine}{projection}");

@@ -1,0 +1,17 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <CTildeManifest Condition="'$(CTildeManifest)' == ''">ctilde.json</CTildeManifest>
+    <DebuggerFlavor>CTilde</DebuggerFlavor>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectConfiguration Include="Debug|AnyCPU"><Configuration>Debug</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|AnyCPU"><Configuration>Release</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+    <ProjectCapability Include="CTilde" />
+    <ProjectCapability Include="UseFileGlobs" />
+    <ProjectCapability Include="OpenProjectFile" />
+    <ProjectCapability Include="HandlesOwnReload" />
+    <ProjectCapability Include="ProjectConfigurationsDeclaredAsItems" />
+  </ItemGroup>
+</Project>

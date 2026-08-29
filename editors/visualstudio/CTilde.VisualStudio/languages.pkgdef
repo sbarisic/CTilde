@@ -1,0 +1,11 @@
+[$RootKey$\TextMate\Repositories]
+"CTilde"="$PackageFolder$\Grammars"
+
+[$RootKey$\TextMate\LanguageConfiguration\GrammarMapping]
+"source.ctilde"="$PackageFolder$\Grammars\language-configuration.json"
+
+[$RootKey$\TextMate\LanguageConfiguration\ContentTypeMapping]
+"ctilde"="$PackageFolder$\Grammars\language-configuration.json"
+
+[$RootKey$\ShellFileAssociations\.ct]
+"DefaultIconMoniker"="KnownMonikers.CodeFile"

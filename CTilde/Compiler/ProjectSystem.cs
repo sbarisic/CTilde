@@ -5,18 +5,28 @@ using System.Text.RegularExpressions;
 
 namespace CTilde;
 
+public enum CTildeProjectKind
+{
+    Application,
+    StandardLibrary,
+}
+
 public sealed record CTildeProjectConfiguration(
+    CTildeProjectKind Kind,
     CompilationTarget Target,
     CompilationArchitecture Architecture,
+    TargetEnvironment Environment,
+    EspIdfChip? EspIdfChip,
     ImmutableArray<string> Sources,
     ImmutableArray<string> Exclude,
-    CTildeProjectBuildConfiguration Build,
+    CTildeProjectBuildConfiguration? Build,
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
     ImmutableArray<CpuFeature> CpuFeatures,
     ImmutableArray<RepositoryModuleReference> Modules,
     CTildeProjectRunConfiguration? Run,
     bool NoRecursion,
     EspIdfPanicPolicy PanicPolicy,
+    HostedProjectConfiguration? Hosted,
     FreestandingProjectConfiguration? Freestanding,
     CosmopolitanProjectConfiguration? Cosmopolitan);
 
@@ -42,6 +52,8 @@ public enum CosmopolitanRuntimeMode
 }
 
 public sealed record CosmopolitanProjectConfiguration(CosmopolitanRuntimeMode Mode);
+
+public sealed record HostedProjectConfiguration(ImmutableArray<string> NativeSources);
 
 public sealed record FreestandingProjectConfiguration(
     string? LinkerScriptPath,
@@ -127,15 +139,40 @@ public static class CTildeProjectFile
         if (document?.Sources is not { Length: > 0 })
             throw new CTildeProjectException($"Project manifest '{fullManifestPath}' requires a non-empty 'sources' array.");
 
+        var kind = document.Kind switch
+        {
+            null or "application" => CTildeProjectKind.Application,
+            "standard-library" => CTildeProjectKind.StandardLibrary,
+            _ => throw new CTildeProjectException($"Unknown project kind '{document.Kind}' in '{fullManifestPath}'; expected application or standard-library."),
+        };
+        if (kind == CTildeProjectKind.StandardLibrary)
+            ValidateStandardLibraryDocument(document, fullManifestPath);
+
         var target = document.Target switch
         {
             null or "hosted" => CompilationTarget.Hosted,
             "esp-idf" => CompilationTarget.EspIdf,
+            "esp32_qemu" => CompilationTarget.EspIdf,
+            "esp32c3_qemu" => CompilationTarget.EspIdf,
             "freestanding" => CompilationTarget.Freestanding,
             "cosmopolitan" => CompilationTarget.Cosmopolitan,
-            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, freestanding, or cosmopolitan."),
+            _ => throw new CTildeProjectException($"Unknown target '{document.Target}' in '{fullManifestPath}'; expected hosted, esp-idf, esp32_qemu, esp32c3_qemu, freestanding, or cosmopolitan."),
+        };
+        var environment = document.Target is "esp32_qemu" or "esp32c3_qemu" ? TargetEnvironment.Qemu : TargetEnvironment.Native;
+        EspIdfChip? espIdfChip = document.Target switch
+        {
+            "esp32_qemu" => EspIdfChip.Esp32,
+            "esp32c3_qemu" => EspIdfChip.Esp32C3,
+            _ => null,
         };
         var architecture = ParseArchitecture(document.Architecture, fullManifestPath);
+        if (espIdfChip is not null)
+        {
+            var requiredArchitecture = espIdfChip == EspIdfChip.Esp32 ? CompilationArchitecture.Xtensa : CompilationArchitecture.RiscV32;
+            if (architecture != CompilationArchitecture.Auto && architecture != requiredArchitecture)
+                throw new CTildeProjectException($"Target '{document.Target}' in '{fullManifestPath}' requires architecture '{ArchitectureName(requiredArchitecture)}'.");
+            architecture = requiredArchitecture;
+        }
         var cpuFeatures = ParseCpuFeatures(document.CpuFeatures, fullManifestPath);
         var root = Path.GetDirectoryName(fullManifestPath)!;
         var modules = ParseModules(document.Modules, fullManifestPath);
@@ -164,8 +201,18 @@ public static class CTildeProjectFile
         if (files.IsEmpty)
             throw new CTildeProjectException($"Project manifest '{fullManifestPath}' did not match any .ct source files.");
 
+        if (kind == CTildeProjectKind.StandardLibrary)
+        {
+            return new CTildeProject(fullManifestPath, root,
+                new CTildeProjectConfiguration(kind, CompilationTarget.Hosted, CompilationArchitecture.Auto, TargetEnvironment.Native, null,
+                    sources, excludes, null, [], [], [], null, false, EspIdfPanicPolicy.Abort, null, null, null),
+                files, ImmutableDictionary<string, SourceOwnerIdentity>.Empty);
+        }
+
         if (target != CompilationTarget.EspIdf && document.EspIdf is not null)
             throw new CTildeProjectException($"Property 'espIdf' in '{fullManifestPath}' is valid only for ESP-IDF projects.");
+        if (target != CompilationTarget.Hosted && document.Hosted is not null)
+            throw new CTildeProjectException($"Property 'hosted' in '{fullManifestPath}' is valid only for hosted projects.");
         if (target != CompilationTarget.Freestanding && document.Freestanding is not null)
             throw new CTildeProjectException($"Property 'freestanding' in '{fullManifestPath}' is valid only for freestanding projects.");
         if (target != CompilationTarget.Cosmopolitan && document.Cosmopolitan is not null)
@@ -186,14 +233,36 @@ public static class CTildeProjectFile
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
         var panicPolicy = ParsePanicPolicy(document.PanicPolicy, target, fullManifestPath);
+        var hosted = target == CompilationTarget.Hosted
+            ? CreateHostedConfiguration(document.Hosted, root, fullManifestPath)
+            : null;
         var freestanding = target == CompilationTarget.Freestanding
             ? CreateFreestandingConfiguration(document.Freestanding, root, fullManifestPath)
             : null;
         var cosmopolitan = target == CompilationTarget.Cosmopolitan
             ? CreateCosmopolitanConfiguration(document.Cosmopolitan, fullManifestPath)
             : null;
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(target, architecture, sources, excludes, build, bindingManifests, cpuFeatures, modules, run,
-            document.NoRecursion ?? false, panicPolicy, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(kind, target, architecture, environment, espIdfChip, sources, excludes, build, bindingManifests, cpuFeatures, modules, run,
+            document.NoRecursion ?? false, panicPolicy, hosted, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
+    }
+
+    private static void ValidateStandardLibraryDocument(ProjectDocument document, string manifestPath)
+    {
+        var unsupported = new List<string>();
+        if (document.Target is not null) unsupported.Add("target");
+        if (document.Architecture is not null) unsupported.Add("architecture");
+        if (document.CpuFeatures is not null) unsupported.Add("cpuFeatures");
+        if (document.Modules is not null) unsupported.Add("modules");
+        if (document.NoRecursion is not null) unsupported.Add("noRecursion");
+        if (document.PanicPolicy is not null) unsupported.Add("panicPolicy");
+        if (document.Build is not null) unsupported.Add("build");
+        if (document.Run is not null) unsupported.Add("run");
+        if (document.Hosted is not null) unsupported.Add("hosted");
+        if (document.EspIdf is not null) unsupported.Add("espIdf");
+        if (document.Freestanding is not null) unsupported.Add("freestanding");
+        if (document.Cosmopolitan is not null) unsupported.Add("cosmopolitan");
+        if (unsupported.Count != 0)
+            throw new CTildeProjectException($"Standard-library manifest '{manifestPath}' supports only kind, sources, and exclude; remove {string.Join(", ", unsupported)}.");
     }
 
     public static (string RootDirectory, ImmutableArray<RepositoryModuleReference> Modules) ReadModuleReferences(string manifestPath)
@@ -251,6 +320,13 @@ public static class CTildeProjectFile
         "riscv32" => CompilationArchitecture.RiscV32,
         "riscv64" => CompilationArchitecture.RiscV64,
         _ => throw new CTildeProjectException($"Unknown architecture '{value}' in '{manifestPath}'; expected auto, x86, x64, arm32, arm64, xtensa, riscv32, or riscv64."),
+    };
+
+    private static string ArchitectureName(CompilationArchitecture architecture) => architecture switch
+    {
+        CompilationArchitecture.Xtensa => "xtensa",
+        CompilationArchitecture.RiscV32 => "riscv32",
+        _ => architecture.ToString().ToLowerInvariant(),
     };
 
     private static ImmutableArray<CpuFeature> ParseCpuFeatures(string[]? values, string manifestPath)
@@ -505,6 +581,16 @@ public static class CTildeProjectFile
         return new FreestandingProjectConfiguration(linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions);
     }
 
+    private static HostedProjectConfiguration CreateHostedConfiguration(
+        HostedDocument? document,
+        string root,
+        string manifestPath)
+    {
+        var nativeSources = ResolveExistingFiles(document?.NativeSources ?? [], "hosted.nativeSources", root, manifestPath,
+            path => Path.GetExtension(path).Equals(".c", StringComparison.OrdinalIgnoreCase));
+        return new HostedProjectConfiguration(nativeSources);
+    }
+
     private static CosmopolitanProjectConfiguration CreateCosmopolitanConfiguration(
         CosmopolitanDocument? document,
         string manifestPath)
@@ -620,6 +706,7 @@ public static class CTildeProjectFile
     };
 
     private sealed record ProjectDocument(
+        [property: JsonPropertyName("kind")] string? Kind,
         [property: JsonPropertyName("target")] string? Target,
         [property: JsonPropertyName("architecture")] string? Architecture,
         [property: JsonPropertyName("cpuFeatures")] string[]? CpuFeatures,
@@ -630,6 +717,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("panicPolicy")] string? PanicPolicy,
         [property: JsonPropertyName("build")] BuildDocument? Build,
         [property: JsonPropertyName("run")] RunDocument? Run,
+        [property: JsonPropertyName("hosted")] HostedDocument? Hosted,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf,
         [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding,
         [property: JsonPropertyName("cosmopolitan")] CosmopolitanDocument? Cosmopolitan);
@@ -644,6 +732,8 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("updatePolicy")] string? UpdatePolicy);
 
     private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
+
+    private sealed record HostedDocument([property: JsonPropertyName("nativeSources")] string[]? NativeSources);
 
     private sealed record FreestandingDocument(
         [property: JsonPropertyName("linkerScript")] string? LinkerScript,

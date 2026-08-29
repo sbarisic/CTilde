@@ -22,11 +22,16 @@ internal sealed partial class CompilationModel
     private IReadOnlyDictionary<string, CType> _activeTypeParameters = ImmutableDictionary<string, CType>.Empty;
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
+    private readonly TargetEnvironment _environment;
 
-    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture, ImmutableArray<CpuFeature> cpuFeatures = default)
+    public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture,
+        ImmutableArray<CpuFeature> cpuFeatures = default, TargetEnvironment environment = TargetEnvironment.Native,
+        bool requireEntryPoint = true, bool requireRuntimeImplementations = true)
     {
         _target = target;
         _architecture = architecture;
+        _environment = environment;
+        RequireRuntimeImplementations = requireRuntimeImplementations;
         CpuFeatures = (cpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : cpuFeatures).ToImmutableHashSet();
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
@@ -41,7 +46,8 @@ internal sealed partial class CompilationModel
         ValidateRecursivePointerExposure();
         ValidateExternalSymbols();
         ValidateNativeSections();
-        ValidateEntryPoint();
+        if (requireEntryPoint)
+            ValidateEntryPoint();
         ValidateRuntimeImplementations();
     }
 
@@ -49,6 +55,8 @@ internal sealed partial class CompilationModel
     public ImmutableArray<SyntaxTree> UserSyntaxTrees { get; }
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
+    public TargetEnvironment Environment => _environment;
+    internal bool RequireRuntimeImplementations { get; }
     public ImmutableHashSet<CpuFeature> CpuFeatures { get; }
     public DiagnosticBag Diagnostics { get; }
     public List<BoundStaticAssertion> StaticAssertions { get; } = [];

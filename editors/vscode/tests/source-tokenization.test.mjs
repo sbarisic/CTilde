@@ -123,9 +123,9 @@ test("XML documentation comments expose comment, tag, and attribute scopes", () 
 test("representative repository sources finish in the root grammar state", async () => {
   const sourceFiles = [
     "examples/QemuFreestanding/src/Kernel.ct",
-    "examples/Features.ct",
-    "examples/ObjectModel.ct",
-    "examples/Exceptions.ct",
+    "examples/Features/Program.ct",
+    "examples/ObjectModel/Program.ct",
+    "examples/Exceptions/Program.ct",
     "examples/HostedIo/Program.ct",
     ...await collectCtFiles(path.join(repositoryRoot, "CTilde", "StandardLibrary")),
     ...await collectCtFiles(path.join(repositoryRoot, "examples", "TCan485"))

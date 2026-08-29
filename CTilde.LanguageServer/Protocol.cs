@@ -72,6 +72,9 @@ internal sealed record WorkspaceFoldersChangeEvent(WorkspaceFolder[] Added, Work
 internal sealed record DidChangeWatchedFilesParams(FileEvent[] Changes);
 internal sealed record FileEvent(string Uri, int Type);
 internal sealed record StandardLibraryTextParams(string Uri);
+internal sealed record CTildeProjectContext(string ProjectUri, string ManifestUri);
+internal sealed record CTildeProjectContextsParams(CTildeProjectContext[] Projects, string? ActiveManifestUri);
+internal sealed record CTildeActiveProjectParams(string? ManifestUri);
 internal sealed record ShowMessageParams(int Type, string Message);
 
 internal static class UriHelpers

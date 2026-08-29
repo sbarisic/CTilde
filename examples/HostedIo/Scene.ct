@@ -6,6 +6,7 @@ public static class Scene
 {
     public static HittableList CreateFinal(uint sceneSeed)
     {
+        Console.WriteLine("Create final!");
         RandomGenerator random = new RandomGenerator(sceneSeed);
         HittableList world = new HittableList();
         Material ground = new Lambertian(new Vec3(0.5f, 0.5f, 0.5f));

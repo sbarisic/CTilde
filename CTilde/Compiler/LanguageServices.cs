@@ -19,7 +19,8 @@ public sealed record LanguageCompletion(
     string InsertText,
     TextSpan ReplacementSpan,
     string SortText,
-    string? DocumentationId = null);
+    string? DocumentationId = null,
+    int OverloadCount = 1);
 
 public sealed record LanguageDocumentedSignature(string Signature, LanguageDocumentation? Documentation);
 
@@ -73,18 +74,23 @@ public sealed partial class LanguageServiceSnapshot
     private readonly Dictionary<string, ImmutableArray<BoundSemanticEntry>> _semanticEntries;
     private readonly StringComparer _pathComparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    private LanguageServiceSnapshot(IEnumerable<SyntaxTree> syntaxTrees, CompilationOptions options)
+    private LanguageServiceSnapshot(
+        IEnumerable<SyntaxTree> syntaxTrees,
+        CompilationOptions options,
+        ImmutableArray<SyntaxTree>? standardLibraryOverride = null,
+        bool requireEntryPoint = true)
     {
         _userTrees = syntaxTrees.ToImmutableArray();
         Options = options;
         var nativeIntegers = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
         var nativeUtf8 = _userTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
-        _allTrees = StandardLibrary.GetSyntaxTrees(
-            options.Target,
-            nativeIntegers,
-            nativeUtf8,
-            options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan,
-            StandardVectorTypes.All).AddRange(_userTrees);
+        _allTrees = (standardLibraryOverride ?? StandardLibrary.GetSyntaxTrees(
+                options.Target,
+                nativeIntegers,
+                nativeUtf8,
+                options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan,
+                StandardVectorTypes.All))
+            .AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)
             declarationDiagnostics.AddRange(tree.Diagnostics);
@@ -101,7 +107,8 @@ public sealed partial class LanguageServiceSnapshot
                 _ => CompilationArchitecture.Auto,
             }
             : options.Architecture;
-        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture, options.CpuFeatures);
+        _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture, options.CpuFeatures,
+            options.Environment, requireEntryPoint);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
@@ -135,6 +142,24 @@ public sealed partial class LanguageServiceSnapshot
         return new LanguageServiceSnapshot(syntaxTrees, options ?? new CompilationOptions());
     }
 
+    public static LanguageServiceSnapshot CreateStandardLibraryProject(
+        string sourceRoot,
+        string documentPath,
+        IReadOnlyDictionary<string, string>? sourceOverrides = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceRoot);
+        ArgumentException.ThrowIfNullOrWhiteSpace(documentPath);
+        var normalized = Path.GetFullPath(documentPath).Replace('\\', '/');
+        var target = normalized.Contains("/Esp/Idf/", StringComparison.OrdinalIgnoreCase)
+            ? CompilationTarget.EspIdf
+            : normalized.EndsWith("/MemoryFreestanding.ct", StringComparison.OrdinalIgnoreCase)
+                ? CompilationTarget.Freestanding
+                : CompilationTarget.Hosted;
+        var architecture = target == CompilationTarget.Freestanding ? CompilationArchitecture.X64 : CompilationArchitecture.Auto;
+        var trees = StandardLibraryProjectService.LoadEditorTrees(sourceRoot, documentPath, sourceOverrides);
+        return new LanguageServiceSnapshot([], new CompilationOptions(target, Architecture: architecture), trees, requireEntryPoint: false);
+    }
+
     public ImmutableArray<LanguageCompletion> GetCompletions(string filePath, int position)
     {
         if (!TryGetTree(filePath, out var tree))
@@ -142,7 +167,7 @@ public sealed partial class LanguageServiceSnapshot
         position = Math.Clamp(position, 0, tree.Text.Length);
         var replacement = IdentifierSpan(tree.Text.Text, position);
         var context = CreateContext(tree, position);
-        var member = FindMemberAccess(context, replacement.Start);
+        var member = FindMemberAccess(context, replacement);
         var results = new List<LanguageCompletion>();
         if (member is not null)
             AddMemberCompletions(results, context, member, replacement);
@@ -162,10 +187,24 @@ public sealed partial class LanguageServiceSnapshot
             foreach (var operand in assembly.Operands)
                 results.Add(new LanguageCompletion(operand.Name, LanguageCompletionKind.Variable, "assembly-function operand", operand.Name, replacement, "0"));
         }
-        return [.. results
+        var distinct = results
             .Where(item => replacement.Length == 0 || item.Label.StartsWith(tree.Text.Slice(replacement), StringComparison.OrdinalIgnoreCase))
             .GroupBy(item => (item.Label, item.Detail, item.Kind))
             .Select(group => group.First())
+            .ToArray();
+        var collapsedMethods = distinct
+            .Where(item => item.Kind == LanguageCompletionKind.Method)
+            .GroupBy(item => item.Label, StringComparer.Ordinal)
+            .Select(group => group
+                .OrderBy(item => item.SortText, StringComparer.Ordinal)
+                .ThenBy(item => item.Detail, StringComparer.Ordinal)
+                .First() with
+            {
+                OverloadCount = group.Count(),
+            });
+        return [.. distinct
+            .Where(item => item.Kind != LanguageCompletionKind.Method)
+            .Concat(collapsedMethods)
             .OrderBy(item => item.SortText, StringComparer.Ordinal)
             .ThenBy(item => item.Label, StringComparer.Ordinal)
             .ThenBy(item => item.Detail, StringComparer.Ordinal)];
@@ -650,6 +689,11 @@ public sealed partial class LanguageServiceSnapshot
                 }
                 return new(null, _model.ResolveNamedType(name.Name, context.Tree));
             case MemberAccessExpressionSyntax member:
+                var qualifiedType = QualifiedName(member) is { } qualifiedName
+                    ? _model.ResolveNamedType(qualifiedName, context.Tree)
+                    : null;
+                if (qualifiedType is not null)
+                    return new(null, qualifiedType);
                 var receiver = InferExpression(context, member.Receiver);
                 if (receiver.StaticType is not null)
                 {
@@ -659,8 +703,7 @@ public sealed partial class LanguageServiceSnapshot
                     var staticProperty = Hierarchy(receiver.StaticType).SelectMany(type => type.Properties).FirstOrDefault(candidate => candidate.Name == member.Name && candidate.IsStatic);
                     if (staticProperty is not null)
                         return new(staticProperty.Type, null);
-                    var qualified = QualifiedName(member);
-                    return new(null, qualified is null ? null : _model.ResolveNamedType(qualified, context.Tree));
+                    return new(null, null);
                 }
                 if (receiver.Type?.Kind is CTypeKind.String or CTypeKind.Array && member.Name == "Length")
                     return new(CType.Int, null);
@@ -728,12 +771,79 @@ public sealed partial class LanguageServiceSnapshot
         _ => [],
     };
 
-    private MemberAccessExpressionSyntax? FindMemberAccess(DocumentContext context, int replacementStart) => context.Nodes
-        .OfType<MemberAccessExpressionSyntax>()
-        .Where(member => member.Receiver.Span.End < replacementStart || member.Receiver.Span.End < context.Position)
-        .Where(member => member.Span.Start <= replacementStart && member.Span.End >= replacementStart)
-        .OrderBy(member => member.Span.Length)
-        .FirstOrDefault();
+    private MemberAccessExpressionSyntax? FindMemberAccess(DocumentContext context, TextSpan replacement)
+    {
+        var parsed = context.Nodes
+            .OfType<MemberAccessExpressionSyntax>()
+            .Where(member => member.Receiver.Span.End < replacement.Start || member.Receiver.Span.End < context.Position)
+            .Where(member => member.Span.Start <= replacement.Start && member.Span.End >= replacement.Start)
+            .OrderBy(member => member.Span.Length)
+            .FirstOrDefault();
+        if (parsed is not null)
+            return parsed;
+
+        var text = context.Tree.Text.Text;
+        var dot = replacement.Start - 1;
+        while (dot >= 0 && char.IsWhiteSpace(text[dot]))
+            dot--;
+        if (dot < 0 || text[dot] != '.')
+            return null;
+
+        var receiver = context.Nodes
+            .OfType<ExpressionSyntax>()
+            .Where(expression => expression.Span.End <= dot)
+            .Where(expression => IsWhitespace(text, expression.Span.End, dot))
+            .OrderByDescending(expression => expression.Span.Length)
+            .FirstOrDefault() ?? TextualReceiver(context.Tree.Text, dot);
+        if (receiver is null)
+            return null;
+
+        var name = context.Tree.Text.Slice(replacement);
+        return new MemberAccessExpressionSyntax(context.Tree.Text, TextSpan.FromBounds(receiver.Span.Start, replacement.End), receiver, name);
+    }
+
+    private static ExpressionSyntax? TextualReceiver(SourceText source, int dot)
+    {
+        var text = source.Text;
+        var segments = new Stack<(string Name, TextSpan Span)>();
+        var end = dot;
+        while (end > 0)
+        {
+            while (end > 0 && char.IsWhiteSpace(text[end - 1]))
+                end--;
+            var start = end;
+            while (start > 0 && IsIdentifierPart(text[start - 1]))
+                start--;
+            if (start == end)
+                break;
+            segments.Push((text[start..end], TextSpan.FromBounds(start, end)));
+            var separator = start;
+            while (separator > 0 && char.IsWhiteSpace(text[separator - 1]))
+                separator--;
+            if (separator == 0 || text[separator - 1] != '.')
+                break;
+            end = separator - 1;
+        }
+        if (!segments.TryPop(out var first))
+            return null;
+        ExpressionSyntax receiver = first.Name switch
+        {
+            "this" => new ThisExpressionSyntax(source, first.Span),
+            "base" => new BaseExpressionSyntax(source, first.Span),
+            _ => new NameExpressionSyntax(source, first.Span, first.Name),
+        };
+        while (segments.TryPop(out var segment))
+            receiver = new MemberAccessExpressionSyntax(source, TextSpan.FromBounds(receiver.Span.Start, segment.Span.End), receiver, segment.Name);
+        return receiver;
+    }
+
+    private static bool IsWhitespace(string text, int start, int end)
+    {
+        for (var index = start; index < end; index++)
+            if (!char.IsWhiteSpace(text[index]))
+                return false;
+        return true;
+    }
 
     private static SyntaxToken? IdentifierTokenAt(SyntaxTree tree, int position) => tree.Tokens
         .Where(token => token.Kind == SyntaxKind.IdentifierToken && !token.IsMissing)

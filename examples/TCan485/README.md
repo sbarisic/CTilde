@@ -12,6 +12,15 @@ From PowerShell:
 
 The first command establishes any missing CMake fragments and binding context. Later builds preserve the ESP-IDF build directory, reuse the binding cache, write only content-changed generated modules, and let Ninja compile the affected objects and relink. `Build.ps1` reads the active chip from `build/project_description.json` and `sdkconfig`; it runs `set-target` only for an uninitialized project, a requested target change, or explicit `-Clean`. It uses a current built CLI DLL when available and otherwise falls back to `dotnet run`.
 
+The QEMU manifests exercise the managed/compiler runtime without touching board peripherals:
+
+```powershell
+ctilde --project .\ctilde.esp32_qemu.json --build --idf-path C:\esp\v6.0.2\esp-idf
+ctilde --project .\ctilde.esp32c3_qemu.json --build --idf-path C:\esp\v6.0.2\esp-idf
+```
+
+These aliases force ESP32/Xtensa and ESP32-C3/RISC-V 32, use `build/esp32_qemu` and `build/esp32c3_qemu`, and keep target-specific `sdkconfig` and component lock files. Their `static if (Target.Environment == TargetEnvironment.Qemu)` branch runs deterministic managed-runtime, ARC, exception, task/TLS, callback, timer, and supported assembly checks, prints `CTILDE_ESP_QEMU_OK`, and returns. It never executes RMT, Wi-Fi, CAN, USB, watchdog, hardware RNG, or board-specific memory access. QEMU therefore validates compiler/runtime behavior, not T-CAN485 peripheral compatibility.
+
 `-Flash` uploads at 921600 baud by default and retries once at 460800 if the fast upload fails. Override it with `-FlashBaud`. `-Monitor` continues to use the firmware's configured 460800 console rate. The ignored binding cache is `build/.ctilde/bindings`; use `-Clean` for a full target rebuild, or remove only that cache when diagnosing binding invalidation. `--trace` output identifies cache hits and misses, unchanged outputs, and phase timings.
 
 The repeatable physical acceptance runner uses the connected board defaults and restores the ordinary Release image on every exit path:
@@ -72,6 +81,8 @@ CONFIG_COMPILER_OPTIMIZATION_DEBUG=y
 ```
 
 Set `ctilde.debugger.serialPort` to the board port. This example uses 460800 baud for both the ESP-IDF console and the debugger; any external serial monitor must use the same rate. Debug Launch validates this configuration, builds and flashes a version-3 instrumented image, then connects during its 15-second pre-initialization gate. The checked-in Launch configuration uses guarded ARC diagnostics. Source, function, log, and exception breakpoints use logical probes and do not consume the ESP32's two instruction-breakpoint slots; hardware data watchpoints remain limited by the target. Debug Attach reuses matching ELF and debug-map artifacts. The adapter keeps the serial port in a small ESP-IDF-Python bridge for the complete session. The runtime stub therefore consumes UART input during debugging, so do not run an interactive monitor on the same port at the same time. C~ console writes made after attachment appear in VS Code's Debug Console. Pressing Stop clears logical and hardware debugger state and continues the current firmware; after the session ends, output returns to the ordinary UART console.
+
+For either QEMU manifest, Debug Launch uses QEMU's TCP GDB server at `127.0.0.1:3333`; no serial port or UART GDB stub is involved. Install the ESP-IDF-managed emulator packages first. In PowerShell, run `python "$env:IDF_PATH\tools\idf_tools.py" install qemu-xtensa qemu-riscv32`. In a POSIX shell, run `python "$IDF_PATH/tools/idf_tools.py" install qemu-xtensa qemu-riscv32`. When `--idf-path` is supplied, the compiler diagnostic prints the resolved absolute script path. The adapter reports a port conflict before launch, forwards emulator output, and owns cleanup. QEMU Attach is not supported in v1.
 
 ## Hardware evidence
 

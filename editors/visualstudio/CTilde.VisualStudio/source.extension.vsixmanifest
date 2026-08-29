@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Id="sbarisic.ctilde-visualstudio" Version="0.11.0" Language="en-US" Publisher="sbarisic" />
+    <DisplayName>C~ for Visual Studio</DisplayName>
+    <Description xml:space="preserve">Preview C~ language support with IntelliSense, diagnostics, manifest-backed projects, builds, and external-console runs.</Description>
+    <MoreInfo>https://ctilde.sbarisic.com</MoreInfo>
+    <License>LICENSE</License>
+    <GettingStartedGuide>Documentation/README.md</GettingStartedGuide>
+    <ReleaseNotes>Documentation/CHANGELOG.md</ReleaseNotes>
+    <Icon>Resources/ctilde-icon.png</Icon>
+    <PreviewImage>Resources/marketplace-hero.png</PreviewImage>
+    <Tags>C~, CTilde, language, IntelliSense, compiler, systems programming, ESP-IDF</Tags>
+    <Preview>true</Preview>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Community" Version="[17.14,)">
+      <ProductArchitecture>amd64</ProductArchitecture>
+    </InstallationTarget>
+  </Installation>
+  <Dependencies>
+    <Dependency Id="Microsoft.Framework.NDP" DisplayName="Microsoft .NET Framework" d:Source="Manual" Version="[4.7.2,)" />
+  </Dependencies>
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.MefComponent" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%|" />
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="Project" d:ProjectName="%CurrentProject%" Path="|%CurrentProject%;PkgdefProjectOutputGroup|" />
+    <Asset Type="Microsoft.VisualStudio.VsPackage" d:Source="File" Path="languages.pkgdef" />
+    <Asset Type="Microsoft.VisualStudio.ProjectTemplate" d:Source="File" Path="ProjectTemplates" />
+  </Assets>
+  <Prerequisites>
+    <Prerequisite Id="Microsoft.VisualStudio.Component.CoreEditor" Version="[17.14,)" DisplayName="Visual Studio core editor" />
+  </Prerequisites>
+</PackageManifest>

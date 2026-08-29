@@ -83,7 +83,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <freertos/FreeRTOS.h>");
             writer.WriteLine("#include <freertos/task.h>");
         }
-        if (EmitDebugInstrumentation && IsEspIdf)
+        if (EmitDebugInstrumentation && IsEspIdf && !IsQemu)
             writer.WriteLine("#include <esp_cpu.h>");
         if (IsFreestanding)
         {
@@ -199,7 +199,13 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_debug_method_leave(void* value);");
             writer.WriteLine("static void ct_debug_runtime_event(uint32_t reason, uint32_t mask, ct_object* object, uint32_t value, const char* code, const char* file, int32_t line);");
             if (IsEspIdf)
-                writer.WriteLine("void ct_debug_wait_for_client(void);\nvoid ct_debug_startup_probe(void);");
+            {
+                writer.WriteLine("void ct_debug_startup_probe(void);");
+                if (IsQemu)
+                    writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_qemu_ready(void);");
+                else
+                    writer.WriteLine("void ct_debug_wait_for_client(void);");
+            }
             if (EmitDebugObjects)
             {
                 writer.WriteLine("static void ct_debug_object_initialized(ct_object* object);");
@@ -488,7 +494,7 @@ internal sealed partial class CEmitter
         {
             // Console and process services are intentionally absent.
         }
-        else if (IsEspIdf && EmitDebugInstrumentation)
+        else if (IsEspIdf && EmitDebugInstrumentation && !IsQemu)
         {
             writer.WriteLine("extern void esp_gdbstub_putchar(int value);");
             writer.WriteLine("extern void esp_gdbstub_flush(void);");
@@ -1110,9 +1116,11 @@ internal sealed partial class CEmitter
             writer.WriteLine("    ct_debug_runtime_summary.LiveObjectCount = 0u; ct_debug_runtime_summary.TotalAllocations = 0u; ct_debug_runtime_summary.TotalFinalReleases = 0u; ct_debug_runtime_summary.QuarantineBlocks = 0u; ct_debug_runtime_summary.QuarantineBytes = 0u;");
         writer.WriteLine("    ct_debug_runtime_summary.CurrentSite = ct_debug_control.CurrentSite;");
         writer.WriteLine("}");
-        writer.WriteLine("static CT_DEBUG_NOINLINE void ct_debug_trap(void)");
+        writer.WriteLine(IsQemu ? "CT_DEBUG_NOINLINE void ct_debug_qemu_trap(void)" : "static CT_DEBUG_NOINLINE void ct_debug_trap(void)");
         writer.WriteLine("{");
-        if (IsEspIdf)
+        if (IsQemu)
+            writer.WriteLine("    ct_debug_probe_sink ^= (uintptr_t)1u;");
+        else if (IsEspIdf)
             writer.WriteLine("    esp_cpu_dbgr_break();");
         else
         {
@@ -1126,7 +1134,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_keep(void* storage) { ct_debug_probe_sink ^= (uintptr_t)storage; }");
         writer.WriteLine("static void ct_debug_stop_acquire(void) { uint32_t expected; do { expected = 0u; } while (!ct_atomic_compare_exchange_relaxed(&ct_debug_stop_lock, &expected, 1u)); ct_atomic_acquire_fence(); }");
         writer.WriteLine("static void ct_debug_stop_release(void) { ct_atomic_store_release(&ct_debug_stop_lock, 0u); }");
-        if (IsEspIdf)
+        if (IsEspIdf && !IsQemu)
         {
             writer.WriteLine("extern void esp_gdbstub_putchar(int value);");
             writer.WriteLine("extern void esp_gdbstub_flush(void);");
@@ -1151,12 +1159,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    if (!stop) return;");
         writer.WriteLine("    ct_debug_stop_acquire(); ct_debug_control.StepMode = 0u; ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = site; ct_debug_control.CurrentReason = CT_DEBUG_REASON_SITE; ct_debug_control.CurrentObject = 0u; ct_debug_control.CurrentValue = state->DebugDepth; ct_debug_control.CurrentCode = 0u; ct_debug_control.CurrentFile = 0u; ct_debug_control.CurrentLine = 0;");
-        writer.WriteLine("    ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine($"    ct_debug_refresh_runtime_summary(); {(IsQemu ? "ct_debug_qemu_trap" : "ct_debug_trap")}(); ct_debug_stop_release();");
         writer.WriteLine("}");
         writer.WriteLine("static void ct_debug_runtime_event(uint32_t reason, uint32_t mask, ct_object* object, uint32_t value, const char* code, const char* file, int32_t line)");
         writer.WriteLine("{");
         writer.WriteLine("    if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & mask) == 0u) return;");
-        writer.WriteLine("    ct_thread_state* state = ct_thread_current(); ct_debug_stop_acquire(); ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state == NULL || state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = state == NULL ? UINT32_MAX : state->DebugCurrentSite; ct_debug_control.CurrentReason = reason; ct_debug_control.CurrentObject = (uintptr_t)(void*)object; ct_debug_control.CurrentValue = value; ct_debug_control.CurrentCode = (uintptr_t)(const void*)code; ct_debug_control.CurrentFile = (uintptr_t)(const void*)file; ct_debug_control.CurrentLine = line; ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release();");
+        writer.WriteLine($"    ct_thread_state* state = ct_thread_current(); ct_debug_stop_acquire(); ct_debug_control.CurrentThread = (uintptr_t)(void*)state; ct_debug_control.CurrentActivation = state == NULL || state->DebugFrameTop == NULL ? 0u : state->DebugFrameTop->Activation; ct_debug_control.CurrentSite = state == NULL ? UINT32_MAX : state->DebugCurrentSite; ct_debug_control.CurrentReason = reason; ct_debug_control.CurrentObject = (uintptr_t)(void*)object; ct_debug_control.CurrentValue = value; ct_debug_control.CurrentCode = (uintptr_t)(const void*)code; ct_debug_control.CurrentFile = (uintptr_t)(const void*)file; ct_debug_control.CurrentLine = line; ct_debug_refresh_runtime_summary(); {(IsQemu ? "ct_debug_qemu_trap" : "ct_debug_trap")}(); ct_debug_stop_release();");
         writer.WriteLine("}");
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_throw_hook(ct_object* exception, const char* code, const char* file, int line, uint32_t unhandled) { ct_debug_probe_sink = (uintptr_t)(void*)exception ^ (uintptr_t)(unsigned int)line ^ (uintptr_t)unhandled; ct_debug_runtime_event(CT_DEBUG_REASON_THROW, unhandled != 0u ? CT_DEBUG_EVENT_UNHANDLED : CT_DEBUG_EVENT_THROW, exception, unhandled, code, file, line); }");
         writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_fatal_hook(const char* code, const char* file, int line) { ct_debug_probe_sink = (uintptr_t)(unsigned int)line; ct_debug_runtime_event(CT_DEBUG_REASON_FATAL, CT_DEBUG_EVENT_FATAL, NULL, 0u, code, file, line); }");
@@ -1168,12 +1176,17 @@ internal sealed partial class CEmitter
         }
         if (IsEspIdf)
         {
-            writer.WriteLine("void ct_debug_startup_probe(void) { if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & CT_DEBUG_EVENT_STARTUP) == 0u) return; ct_debug_stop_acquire(); ct_debug_control.CurrentThread = 0u; ct_debug_control.CurrentActivation = 0u; ct_debug_control.CurrentSite = UINT32_MAX; ct_debug_control.CurrentReason = CT_DEBUG_REASON_STARTUP; ct_debug_refresh_runtime_summary(); ct_debug_trap(); ct_debug_stop_release(); }");
-            writer.WriteLine("void ct_debug_wait_for_client(void)");
-            writer.WriteLine("{");
-            writer.WriteLine("    int64_t start = ct_esp_timer_get_time_us();");
-            writer.WriteLine("    while (ct_debug_control.StartupReleased == 0u && ct_esp_timer_get_time_us() - start < INT64_C(15000000)) ct_esp_delay_ms(UINT32_C(10));");
-            writer.WriteLine("}");
+            writer.WriteLine($"void ct_debug_startup_probe(void) {{ if (ct_debug_control.SessionActive == 0u || (ct_debug_control.EventMask & CT_DEBUG_EVENT_STARTUP) == 0u) return; ct_debug_stop_acquire(); ct_debug_control.CurrentThread = 0u; ct_debug_control.CurrentActivation = 0u; ct_debug_control.CurrentSite = UINT32_MAX; ct_debug_control.CurrentReason = CT_DEBUG_REASON_STARTUP; ct_debug_refresh_runtime_summary(); {(IsQemu ? "ct_debug_qemu_trap" : "ct_debug_trap")}(); ct_debug_stop_release(); }}");
+            if (IsQemu)
+                writer.WriteLine("CT_DEBUG_NOINLINE void ct_debug_qemu_ready(void) { ct_debug_probe_sink ^= (uintptr_t)2u; }");
+            else
+            {
+                writer.WriteLine("void ct_debug_wait_for_client(void)");
+                writer.WriteLine("{");
+                writer.WriteLine("    int64_t start = ct_esp_timer_get_time_us();");
+                writer.WriteLine("    while (ct_debug_control.StartupReleased == 0u && ct_esp_timer_get_time_us() - start < INT64_C(15000000)) ct_esp_delay_ms(UINT32_C(10));");
+                writer.WriteLine("}");
+            }
         }
     }
 

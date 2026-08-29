@@ -4,6 +4,13 @@ using System.Text.Json;
 
 namespace CTilde.Cli;
 
+internal enum DebugStubKind
+{
+    HostedNative,
+    EspUartGdbStub,
+    EspQemuNativeGdb,
+}
+
 internal static class DebugPreparation
 {
     public static void WriteDescriptor(BuildRequest request, NativeBuildOutcome native)
@@ -51,12 +58,21 @@ internal static class DebugPreparation
         var runEnvironment = hostedRun?.Environment.ToDictionary(entry => entry.Key, entry => ProjectRunDriver.Expand(
             entry.Value, request.RootDirectory, request.ExecutablePath, $"run.environment.{entry.Key}"), StringComparer.Ordinal)
             ?? new Dictionary<string, string>(StringComparer.Ordinal);
+        var stub = SelectStub(request);
         var descriptor = new Dictionary<string, object?>
         {
             ["generator"] = $"C~ draft {CompilerContract.DraftVersion}",
             ["version"] = CompilerContract.DebugMetadataVersion,
             ["runtimeAbi"] = CompilerContract.RuntimeAbiVersion,
             ["target"] = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf",
+            ["targetEnvironment"] = request.Environment == CTilde.TargetEnvironment.Qemu ? "qemu" : "native",
+            ["debugStub"] = StubName(stub),
+            ["debugTransport"] = stub switch
+            {
+                DebugStubKind.HostedNative => "local-mi",
+                DebugStubKind.EspUartGdbStub => "uart-remote-gdb",
+                _ => "tcp-remote-gdb",
+            },
             ["backend"] = backend,
             ["program"] = Path.GetFullPath(program),
             ["debugMap"] = Path.GetFullPath(request.DebugMapPath),
@@ -76,11 +92,39 @@ internal static class DebugPreparation
             ["memoryDiagnostics"] = request.DebugMemory.ToString().ToLowerInvariant(),
             ["sources"] = sources,
         };
+        if (request.Environment == CTilde.TargetEnvironment.Qemu)
+        {
+            var launch = EspIdfBuildDriver.CreateQemuLaunchRequest(request);
+            descriptor["launch"] = new Dictionary<string, object?>
+            {
+                ["fileName"] = launch.FileName,
+                ["arguments"] = launch.Arguments,
+                ["workingDirectory"] = launch.WorkingDirectory,
+                ["environment"] = launch.Environment ?? new Dictionary<string, string>(),
+                ["ownsProcess"] = true,
+            };
+            descriptor["gdbHost"] = "127.0.0.1";
+            descriptor["gdbPort"] = 3333;
+        }
         WriteAtomically(request.DebugTargetPath!, JsonSerializer.Serialize(descriptor,
             new JsonSerializerOptions { WriteIndented = true }) + "\n");
         if (request.Trace)
             Console.Error.WriteLine($"trace: wrote debug target {request.DebugTargetPath}");
     }
+
+    internal static DebugStubKind SelectStub(BuildRequest request) => request.Target switch
+    {
+        CTilde.CompilationTarget.Hosted => DebugStubKind.HostedNative,
+        CTilde.CompilationTarget.EspIdf when request.Environment == CTilde.TargetEnvironment.Qemu => DebugStubKind.EspQemuNativeGdb,
+        _ => DebugStubKind.EspUartGdbStub,
+    };
+
+    private static string StubName(DebugStubKind stub) => stub switch
+    {
+        DebugStubKind.HostedNative => "hosted-native",
+        DebugStubKind.EspUartGdbStub => "esp-uart-gdbstub",
+        _ => "esp-qemu-native-gdb",
+    };
 
     public static int ValidateAttach(BuildRequest request)
     {
@@ -97,6 +141,9 @@ internal static class DebugPreparation
             var expectedTarget = request.Target == CTilde.CompilationTarget.Hosted ? "hosted" : "esp-idf";
             if (!root.GetProperty("target").GetString()!.Equals(expectedTarget, StringComparison.Ordinal))
                 throw new NativeBuildException($"Existing debug artifacts target {root.GetProperty("target").GetString()}, not {expectedTarget}.");
+            var expectedEnvironment = request.Environment == CTilde.TargetEnvironment.Qemu ? "qemu" : "native";
+            if (!root.TryGetProperty("targetEnvironment", out var storedEnvironment) || storedEnvironment.GetString() != expectedEnvironment)
+                throw new NativeBuildException($"Existing debug artifacts use a different target environment. Run a debug Launch for {expectedEnvironment}.");
             var program = root.GetProperty("program").GetString()!;
             var debugMap = root.GetProperty("debugMap").GetString()!;
             if (!File.Exists(program) || !File.Exists(debugMap))
@@ -118,7 +165,7 @@ internal static class DebugPreparation
 
     private static (string Elf, string Target, string ToolPrefix) ReadEspProjectDescription(BuildRequest request)
     {
-        var buildDirectory = Path.Combine(request.EspIdfProjectDirectory!, "build");
+        var buildDirectory = request.EspIdfBuildDirectory;
         var path = Path.Combine(buildDirectory, "project_description.json");
         if (!File.Exists(path))
             throw new NativeBuildException($"ESP-IDF project description was not produced: {path}");

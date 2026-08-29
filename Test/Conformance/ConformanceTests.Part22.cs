@@ -75,7 +75,7 @@ internal static partial class ConformanceTests
                     project.Configuration.Architecture == CompilationArchitecture.X64 &&
                     project.Configuration.Cosmopolitan?.Mode == CosmopolitanRuntimeMode.Tiny,
                     "The Cosmopolitan project target, architecture, or runtime mode was not loaded.");
-                Assert(project.Configuration.Build.Compiler == "wsl:/opt/cosmocc/bin/x86_64-unknown-cosmo-cc",
+                Assert(project.Configuration.Build!.Compiler == "wsl:/opt/cosmocc/bin/x86_64-unknown-cosmo-cc",
                     "A WSL Cosmopolitan wrapper path was incorrectly resolved as a project file.");
                 Assert(project.Configuration.Build.ExecutablePath?.EndsWith("program.com", StringComparison.OrdinalIgnoreCase) == true,
                     "The Cosmopolitan APE output path was not resolved.");

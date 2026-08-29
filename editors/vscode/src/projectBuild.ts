@@ -1,7 +1,7 @@
 import * as path from 'path';
 
 export type CTildeTaskMode = 'check' | 'build' | 'run' | 'bindings';
-export type CTildeProjectTarget = 'hosted' | 'esp-idf' | 'freestanding' | 'cosmopolitan' | 'unknown';
+export type CTildeProjectTarget = 'hosted' | 'esp-idf' | 'esp32_qemu' | 'esp32c3_qemu' | 'freestanding' | 'cosmopolitan' | 'unknown';
 
 export interface CompilerLaunchConfiguration {
     readonly command: string;
@@ -76,11 +76,15 @@ export function compilerArguments(
         mode === 'build' ? '--build' : mode === 'run' ? '--run' : mode === 'bindings' ? '--generate-bindings' : '--check'];
     if ((mode === 'build' || mode === 'run') && (target === 'hosted' || target === 'cosmopolitan') && settings.nativeCompiler.trim().length !== 0)
         result.push('--compiler', settings.nativeCompiler.trim());
-    if (target === 'esp-idf' && settings.idfPath.trim().length !== 0)
+    if (isEspIdfTarget(target) && settings.idfPath.trim().length !== 0)
         result.push('--idf-path', settings.idfPath.trim());
-    if (target === 'esp-idf' && settings.espClangPath.trim().length !== 0)
+    if (isEspIdfTarget(target) && settings.espClangPath.trim().length !== 0)
         result.push('--esp-clang', settings.espClangPath.trim());
     return result;
+}
+
+export function isEspIdfTarget(target: CTildeProjectTarget): boolean {
+    return target === 'esp-idf' || target === 'esp32_qemu' || target === 'esp32c3_qemu';
 }
 
 export function resolveTaskProjectPath(project: string, workspaceFolderPath: string | undefined): string {

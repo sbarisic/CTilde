@@ -1,0 +1,27 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Imported after Microsoft.Common.targets so these targets are authoritative for C~ projects. -->
+  <PropertyGroup>
+    <CTildeDotNetPath Condition="'$(CTildeDotNetPath)' == ''">dotnet</CTildeDotNetPath>
+    <CTildeCompilerPath Condition="'$(CTildeCompilerPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\Tools\Compiler\ctilde.dll'))</CTildeCompilerPath>
+    <CTildeManifestFullPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(CTildeManifest)'))</CTildeManifestFullPath>
+    <DebuggerFlavor Condition="'$(DebuggerFlavor)' == ''">CTilde</DebuggerFlavor>
+  </PropertyGroup>
+  <Target Name="CTildeValidateBuildEnvironment">
+    <Error Condition="!Exists('$(CTildeManifestFullPath)')" Text="C~ manifest '$(CTildeManifestFullPath)' does not exist." />
+    <Error Condition="!Exists('$(CTildeCompilerPath)')" Text="C~ compiler '$(CTildeCompilerPath)' does not exist. Repair the C~ Visual Studio extension or configure its compiler path under Tools &gt; Options &gt; C~." />
+  </Target>
+  <Target Name="Check" DependsOnTargets="CTildeValidateBuildEnvironment">
+    <Message Importance="High" Text="C~ Check: $(CTildeManifestFullPath)" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --check" />
+  </Target>
+  <Target Name="Build" DependsOnTargets="CTildeValidateBuildEnvironment">
+    <Message Importance="High" Text="C~ Build: $(CTildeManifestFullPath)" />
+    <Message Importance="High" Text="C~ uses build.configuration from ctilde.json; Visual Studio's $(Configuration)|$(Platform) selection does not override the manifest." />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --build" />
+  </Target>
+  <Target Name="Clean" DependsOnTargets="CTildeValidateBuildEnvironment">
+    <Message Importance="High" Text="C~ Clean: $(CTildeManifestFullPath)" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; clean --project &quot;$(CTildeManifestFullPath)&quot;" />
+  </Target>
+  <Target Name="Rebuild" DependsOnTargets="Clean;Build" />
+</Project>

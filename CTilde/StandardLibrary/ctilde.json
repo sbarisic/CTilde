@@ -1,0 +1,4 @@
+{
+  "kind": "standard-library",
+  "sources": ["System/*.ct", "Esp/Idf/*.ct"]
+}

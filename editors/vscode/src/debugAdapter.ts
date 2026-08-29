@@ -1,7 +1,8 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { ChildProcessWithoutNullStreams, spawn, spawnSync } from 'child_process';
+import { Socket } from 'net';
 import {
     Breakpoint,
     ContinuedEvent,
@@ -61,6 +62,41 @@ const espSerialBridgeSource = [
     '',
 ].join('\n');
 
+function delay(milliseconds: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, milliseconds));
+}
+
+function canConnect(host: string, port: number, timeout: number): Promise<boolean> {
+    return new Promise(resolve => {
+        const socket = new Socket();
+        let settled = false;
+        const finish = (connected: boolean): void => {
+            if (settled)
+                return;
+            settled = true;
+            socket.destroy();
+            resolve(connected);
+        };
+        socket.setTimeout(timeout);
+        socket.once('connect', () => finish(true));
+        socket.once('timeout', () => finish(false));
+        socket.once('error', () => finish(false));
+        socket.connect(port, host);
+    });
+}
+
+async function waitForPort(host: string, port: number, child: ChildProcessWithoutNullStreams, timeout: number): Promise<void> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+        if (child.exitCode !== null)
+            throw new Error(`ESP-IDF QEMU exited with code ${child.exitCode} before its GDB server became ready.`);
+        if (await canConnect(host, port, 200))
+            return;
+        await delay(100);
+    }
+    throw new Error(`Timed out waiting for ESP-IDF QEMU GDB server at ${host}:${port}.`);
+}
+
 interface DebugSource { readonly file: string; readonly line: number; readonly column: number; }
 interface DebugVariable {
     readonly name: string;
@@ -96,13 +132,15 @@ interface DebugMap {
     readonly boxes?: readonly { type: string; storage: string; valueType: string }[];
     readonly instrumented: boolean;
     readonly memoryDiagnostics: 'off' | 'objects' | 'guarded';
-    readonly runtimeHooks: { readonly throw: string; readonly fatal: string; readonly control?: string; readonly trap?: string };
+    readonly runtimeHooks: { readonly throw: string; readonly fatal: string; readonly control?: string; readonly trap?: string; readonly ready?: string };
     readonly runtimeControl?: { readonly symbol: string; readonly layouts?: readonly DebugMemoryLayout[] };
     readonly runtimeSummary?: { readonly symbol: string; readonly layouts?: readonly DebugMemoryLayout[] };
 }
 interface DebugTarget {
     readonly version: number;
     readonly target: 'hosted' | 'esp-idf';
+    readonly targetEnvironment?: 'native' | 'qemu';
+    readonly debugStub?: 'hosted-native' | 'esp-uart-gdbstub' | 'esp-qemu-native-gdb';
     readonly backend: 'gdb' | 'msvc';
     readonly program: string;
     readonly debugMap: string;
@@ -118,6 +156,15 @@ interface DebugTarget {
     readonly baudRate?: number;
     readonly instrumented: boolean;
     readonly memoryDiagnostics: 'off' | 'objects' | 'guarded';
+    readonly launch?: {
+        readonly fileName: string;
+        readonly arguments: readonly string[];
+        readonly workingDirectory: string;
+        readonly environment?: Readonly<Record<string, string>>;
+        readonly ownsProcess: boolean;
+    };
+    readonly gdbHost?: string;
+    readonly gdbPort?: number;
 }
 interface CTildeDebugArguments {
     readonly debugTarget: string;
@@ -208,6 +255,8 @@ export class CTildeDebugSession extends LoggingDebugSession {
     private endingEspSession: Promise<void> | undefined;
     private stoppedAtLogicalTrap = false;
     private espTrapAdvanced = false;
+    private qemuProcess: ChildProcessWithoutNullStreams | undefined;
+    private qemuTrapBreakpoint: number | undefined;
 
     public constructor() {
         super('ctilde-debug.txt');
@@ -237,6 +286,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
         this.gdb.onExit = () => {
             this.clearTargetConsoleOutput();
             this.removeEspBridge();
+            void this.terminateOwnedQemu();
             this.sendEvent(new TerminatedEvent());
         };
     }
@@ -295,6 +345,8 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 throw new Error('C~ debug metadata v3 with instrumentation is required. Rebuild with --prepare-debug launch using the current compiler and extension.');
             if (this.target.backend !== 'gdb')
                 throw new Error('This configuration was built with MSVC. Use C~: Debug Project for the cppvsdbg fallback.');
+            if (this.isQemu() && request === 'attach')
+                throw new Error('QEMU targets support Debug Launch only in v1. Start a new Debug Launch instead of attaching.');
             if (!existsSync(this.target.program))
                 throw new Error(`Debug program does not exist: ${this.target.program}`);
             const gdbCommand = args.gdbPath?.trim() || this.target.gdbCommand || 'gdb';
@@ -329,16 +381,26 @@ export class CTildeDebugSession extends LoggingDebugSession {
         this.sendResponse(response);
         try {
             if (this.target?.target === 'esp-idf') {
+                if (this.isQemu())
+                    await this.startOwnedQemu();
                 this.suppressNextTargetStop = true;
                 await this.gdb.command(`-interpreter-exec console ${miQuote(`target remote ${this.espRemoteTarget()}`)}`);
                 this.targetRunning = false;
                 this.installStopAtEntry();
-                await this.synchronizeDebugControl();
-                if (this.request === 'launch') {
-                    await this.setControl('StartupReleased', 1);
+                if (this.isQemu()) {
+                    const ready = this.debugMap?.runtimeHooks.ready;
+                    if (ready === undefined)
+                        throw new Error('QEMU debug metadata does not expose its bootstrap probe.');
+                    this.bootstrapBreakpoint = await this.insertBreakpoint(`-t ${ready}`);
                     await this.gdb.command('-exec-continue');
-                } else
+                } else {
+                    await this.synchronizeDebugControl();
+                    if (this.request === 'launch') {
+                        await this.setControl('StartupReleased', 1);
+                        await this.gdb.command('-exec-continue');
+                    } else
                     this.sendEvent(new StoppedEvent('pause', 1, 'Attached to the ESP runtime GDB stub.'));
+                }
             } else if (this.request === 'launch') {
                 await this.configurationPromise;
                 this.installStopAtEntry();
@@ -713,6 +775,11 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     protected async disconnectRequest(response: DebugProtocol.DisconnectResponse): Promise<void> {
+        if (this.isQemu()) {
+            await this.endQemuSession();
+            this.sendResponse(response);
+            return;
+        }
         if (this.target?.target === 'esp-idf') {
             await this.endEspSessionAndContinue();
             this.sendResponse(response);
@@ -734,6 +801,11 @@ export class CTildeDebugSession extends LoggingDebugSession {
     }
 
     protected async terminateRequest(response: DebugProtocol.TerminateResponse): Promise<void> {
+        if (this.isQemu()) {
+            await this.endQemuSession();
+            this.sendResponse(response);
+            return;
+        }
         if (this.target?.target === 'esp-idf') {
             await this.endEspSessionAndContinue();
             this.sendResponse(response);
@@ -818,6 +890,11 @@ export class CTildeDebugSession extends LoggingDebugSession {
 
     protected async restartRequest(response: DebugProtocol.RestartResponse): Promise<void> {
         try {
+            if (this.isQemu()) {
+                await this.restartQemu();
+                this.sendResponse(response);
+                return;
+            }
             try { await this.gdb.command('-exec-abort'); } catch { }
             this.clearTargetConsoleOutput();
             this.controlReady = false;
@@ -1015,6 +1092,12 @@ export class CTildeDebugSession extends LoggingDebugSession {
         const breakpointNumber = Number.parseInt(miString(record.results.bkptno), 10);
         if (this.bootstrapBreakpoint !== undefined && breakpointNumber === this.bootstrapBreakpoint) {
             this.bootstrapBreakpoint = undefined;
+            if (this.isQemu()) {
+                const trap = this.debugMap?.runtimeHooks.trap;
+                if (trap === undefined)
+                    throw new Error('QEMU debug metadata does not expose its logical trap probe.');
+                this.qemuTrapBreakpoint = await this.insertBreakpoint(trap);
+            }
             await this.synchronizeDebugControl();
             this.finishTargetConsoleOutput(false);
             await this.resume(threadId);
@@ -1024,14 +1107,14 @@ export class CTildeDebugSession extends LoggingDebugSession {
             const resume = this.resumeAfterControlSync;
             this.pendingControlSync = false;
             this.resumeAfterControlSync = false;
-            if (this.target?.target === 'esp-idf') {
+            if (this.isPhysicalEsp()) {
                 const fast = await this.refreshFastControl().catch(() => false);
                 const pendingReason = fast
                     ? Number(this.fastControlValue('CurrentReason'))
                     : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10);
                 if (pendingReason !== 0) {
                     this.stoppedAtLogicalTrap = true;
-                    await this.evaluateNative(espTrapResumeExpression(this.target.espTarget));
+                    await this.evaluateNative(espTrapResumeExpression(this.target?.espTarget));
                     this.espTrapAdvanced = true;
                 }
             }
@@ -1056,8 +1139,8 @@ export class CTildeDebugSession extends LoggingDebugSession {
                 : Number.parseInt(await this.evaluateNative('ct_debug_control.CurrentReason'), 10);
         } catch { }
         this.stoppedAtLogicalTrap = debugReason !== 0;
-        if (this.stoppedAtLogicalTrap && this.target?.target === 'esp-idf') {
-            await this.evaluateNative(espTrapResumeExpression(this.target.espTarget));
+        if (this.stoppedAtLogicalTrap && this.isPhysicalEsp()) {
+            await this.evaluateNative(espTrapResumeExpression(this.target?.espTarget));
             this.espTrapAdvanced = true;
         }
         if (debugReason === 1) {
@@ -1172,7 +1255,112 @@ export class CTildeDebugSession extends LoggingDebugSession {
         return path.isAbsolute(sourcePath) ? sourcePath : path.resolve(this.target!.sourceRoot, sourcePath);
     }
 
+    private isQemu(): boolean {
+        return this.target?.target === 'esp-idf' && this.target.targetEnvironment === 'qemu';
+    }
+
+    private isPhysicalEsp(): boolean {
+        return this.target?.target === 'esp-idf' && !this.isQemu();
+    }
+
+    private async startOwnedQemu(): Promise<void> {
+        const launch = this.target?.launch;
+        if (launch === undefined || !launch.ownsProcess)
+            throw new Error('QEMU debug metadata does not contain an owned emulator launch command.');
+        const host = this.target?.gdbHost ?? '127.0.0.1';
+        const port = this.target?.gdbPort ?? 3333;
+        if (await canConnect(host, port, 250))
+            throw new Error(`QEMU GDB port ${host}:${port} is already in use. Stop the existing emulator or debugger and retry.`);
+        const child = spawn(launch.fileName, [...launch.arguments], {
+            cwd: launch.workingDirectory,
+            env: { ...process.env, ...(launch.environment ?? {}) },
+            windowsHide: true,
+            detached: process.platform !== 'win32',
+            stdio: 'pipe',
+        });
+        this.qemuProcess = child;
+        child.stdout.on('data', data => this.sendEvent(new OutputEvent(data.toString(), 'console')));
+        child.stderr.on('data', data => this.sendEvent(new OutputEvent(data.toString(), 'stderr')));
+        child.once('error', error => this.sendEvent(new OutputEvent(`Could not start ESP-IDF QEMU: ${error.message}\n`, 'stderr')));
+        child.once('exit', (code, signal) => {
+            if (this.qemuProcess !== child)
+                return;
+            this.qemuProcess = undefined;
+            if (!this.disconnecting) {
+                this.sendEvent(new OutputEvent(`ESP-IDF QEMU exited (${signal ?? code ?? 'unknown'}).\n`, code === 0 ? 'console' : 'stderr'));
+                this.sendEvent(new TerminatedEvent());
+            }
+        });
+        await waitForPort(host, port, child, 20000);
+    }
+
+    private async terminateOwnedQemu(): Promise<void> {
+        const child = this.qemuProcess;
+        this.qemuProcess = undefined;
+        if (child === undefined || child.pid === undefined || child.exitCode !== null)
+            return;
+        if (process.platform === 'win32') {
+            spawnSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, timeout: 5000 });
+            return;
+        }
+        try { process.kill(-child.pid, 'SIGTERM'); } catch { try { child.kill('SIGTERM'); } catch { } }
+        await delay(250);
+        if (child.exitCode === null)
+            try { process.kill(-child.pid, 'SIGKILL'); } catch { try { child.kill('SIGKILL'); } catch { } }
+    }
+
+    private async endQemuSession(): Promise<void> {
+        this.disconnecting = true;
+        try {
+            if (this.targetRunning)
+                await this.interruptAndWait();
+            await this.removeQemuBreakpoints();
+            await this.clearDebugControl();
+            try { await this.gdb.command('-target-disconnect'); } catch { }
+        } catch (error) {
+            this.sendEvent(new OutputEvent(`C~ QEMU debugger cleanup failed: ${errorMessage(error)}\n`, 'stderr'));
+        } finally {
+            try { await this.gdb.close(); } catch { }
+            await this.terminateOwnedQemu();
+            this.controlReady = false;
+            this.clearTargetConsoleOutput();
+        }
+    }
+
+    private async restartQemu(): Promise<void> {
+        if (this.targetRunning)
+            await this.interruptAndWait();
+        await this.removeQemuBreakpoints();
+        await this.clearDebugControl();
+        try { await this.gdb.command('-target-disconnect'); } catch { }
+        await this.terminateOwnedQemu();
+        this.controlReady = false;
+        this.controlImage = undefined;
+        this.currentSite = undefined;
+        this.pendingLogicalStep = undefined;
+        this.disconnecting = false;
+        await this.startOwnedQemu();
+        this.suppressNextTargetStop = true;
+        await this.gdb.command(`-interpreter-exec console ${miQuote(`target remote ${this.espRemoteTarget()}`)}`);
+        const ready = this.debugMap?.runtimeHooks.ready;
+        if (ready === undefined)
+            throw new Error('QEMU debug metadata does not expose its bootstrap probe.');
+        this.bootstrapBreakpoint = await this.insertBreakpoint(`-t ${ready}`);
+        await this.gdb.command('-exec-continue');
+    }
+
+    private async removeQemuBreakpoints(): Promise<void> {
+        for (const breakpoint of [this.bootstrapBreakpoint, this.qemuTrapBreakpoint]) {
+            if (breakpoint !== undefined)
+                try { await this.gdb.command(`-break-delete ${breakpoint}`); } catch { }
+        }
+        this.bootstrapBreakpoint = undefined;
+        this.qemuTrapBreakpoint = undefined;
+    }
+
     private espRemoteTarget(): string {
+        if (this.isQemu())
+            return `${this.target?.gdbHost ?? '127.0.0.1'}:${this.target?.gdbPort ?? 3333}`;
         const args = this.launchArguments!;
         const port = args.serialPort || this.target?.serialPort;
         const baud = args.baudRate || this.target?.baudRate || 115200;

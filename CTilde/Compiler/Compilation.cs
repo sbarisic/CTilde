@@ -11,11 +11,15 @@ public sealed class Compilation
     private CEmitterOutput? _generatedOutput;
     private BoundProgram? _boundProgram;
     private bool _analyzed;
+    private readonly ImmutableArray<SyntaxTree>? _standardLibraryOverride;
+    private readonly bool _requireEntryPoint;
 
-    private Compilation(ImmutableArray<SyntaxTree> syntaxTrees, CompilationOptions options)
+    private Compilation(ImmutableArray<SyntaxTree> syntaxTrees, CompilationOptions options, ImmutableArray<SyntaxTree>? standardLibraryOverride = null, bool requireEntryPoint = true)
     {
         SyntaxTrees = syntaxTrees;
         Options = options;
+        _standardLibraryOverride = standardLibraryOverride;
+        _requireEntryPoint = requireEntryPoint;
     }
 
     public ImmutableArray<SyntaxTree> SyntaxTrees { get; }
@@ -37,6 +41,9 @@ public sealed class Compilation
             throw new ArgumentException("A compilation cannot contain a null syntax tree.", nameof(syntaxTrees));
         return new Compilation(trees, options ?? new CompilationOptions());
     }
+
+    internal static Compilation CreateStandardLibrary(ImmutableArray<SyntaxTree> syntaxTrees, CompilationOptions options) =>
+        new([], options, syntaxTrees, requireEntryPoint: false);
 
     public ImmutableArray<Diagnostic> GetDiagnostics()
     {
@@ -68,18 +75,21 @@ public sealed class Compilation
                 return;
             var diagnostics = new DiagnosticBag();
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
+            var environment = Enum.IsDefined(Options.Environment) ? Options.Environment : TargetEnvironment.Native;
             var architecture = ResolveArchitecture(target, Options.Architecture);
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
             var hostedIo = (target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && StandardLibrary.RequiresHostedIo(SyntaxTrees);
             var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);
-            var allSyntaxTrees = StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors).AddRange(SyntaxTrees);
+            var allSyntaxTrees = (_standardLibraryOverride ?? StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors)).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);
-            if (SyntaxTrees.Length == 0)
+            if (SyntaxTrees.Length == 0 && _standardLibraryOverride is null)
                 diagnostics.Add("CT1000", "A compilation requires at least one source file.", SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target != CompilationTarget.EspIdf && Options.PanicPolicy != EspIdfPanicPolicy.Abort)
                 diagnostics.Add("CT4113", "Restart and halt panic policies are valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (environment == TargetEnvironment.Qemu && target != CompilationTarget.EspIdf)
+                diagnostics.Add("CT4121", "The QEMU target environment is valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Freestanding && architecture == CompilationArchitecture.Auto)
                 diagnostics.Add("CT4108", "Freestanding compilations require an explicit target architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
@@ -90,7 +100,8 @@ public sealed class Compilation
             ValidateSourceOwners(diagnostics);
             ValidateCpuFeatures(diagnostics, architecture);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
-            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.CpuFeatures);
+            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.CpuFeatures, environment,
+                _requireEntryPoint, _requireEntryPoint);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
@@ -161,7 +172,7 @@ public sealed class Compilation
         if (_generatedOutput is not null)
             return;
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory,
-            Options.SourceIdentityRoot, Options.PanicPolicy);
+            Options.SourceIdentityRoot, Options.PanicPolicy, Options.Environment);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);

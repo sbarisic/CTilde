@@ -21,6 +21,7 @@ import {
     CTildeProjectTarget,
     CTildeTaskMode,
     findNearestProject,
+    isEspIdfTarget,
     resolveCompilerLaunch,
     resolveDebugProjectPath,
     resolveTaskProjectPath,
@@ -64,7 +65,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         const manifests = await this.discoverProjects();
         return manifests.flatMap(manifest => {
             const tasks = [this.createTask(manifest, 'build'), this.createTask(manifest, 'run'), this.createTask(manifest, 'check')];
-            if (this.readProjectTarget(manifest) === 'esp-idf') tasks.push(this.createTask(manifest, 'bindings'));
+            if (isEspIdfTarget(this.readProjectTarget(manifest))) tasks.push(this.createTask(manifest, 'bindings'));
             return tasks;
         });
     }
@@ -142,7 +143,7 @@ class CTildeTaskProvider implements vscode.TaskProvider {
         try {
             const document = JSON.parse(readFileSync(project, 'utf8')) as { target?: unknown };
             if (document.target === undefined || document.target === 'hosted') return 'hosted';
-            if (document.target === 'esp-idf' || document.target === 'freestanding' || document.target === 'cosmopolitan') return document.target;
+            if (document.target === 'esp-idf' || document.target === 'esp32_qemu' || document.target === 'esp32c3_qemu' || document.target === 'freestanding' || document.target === 'cosmopolitan') return document.target;
             return 'unknown';
         } catch {
             return 'unknown';
@@ -262,6 +263,8 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                 : undefined;
             if (target === 'esp-idf' && serialPort.length === 0)
                 throw new Error('ESP-IDF debugging requires ctilde.debugger.serialPort or serialPort in launch.json.');
+            if ((target === 'esp32_qemu' || target === 'esp32c3_qemu') && request === 'attach')
+                throw new Error('QEMU targets support Debug Launch only in v1. Start a new Debug Launch instead of attaching.');
 
             const descriptorDirectory = path.join(this.context.globalStorageUri.fsPath, 'debug-targets');
             mkdirSync(descriptorDirectory, { recursive: true });
@@ -281,7 +284,8 @@ class CTildeDebugProjectProvider implements vscode.DebugConfigurationProvider {
                 const espClangPath = compilerSettings.get<string>('espClangPath', '').trim();
                 if (espClangPath.length !== 0)
                     args.push('--esp-clang', espClangPath);
-                args.push('--serial-port', serialPort, '--baud-rate', String(baudRate));
+                if (target === 'esp-idf')
+                    args.push('--serial-port', serialPort, '--baud-rate', String(baudRate));
             }
             if (!await this.executePreparation(project, launch.command, args))
                 return undefined;

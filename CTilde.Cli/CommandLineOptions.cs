@@ -48,7 +48,9 @@ internal sealed record CommandLineOptions(
     IReadOnlyList<string> Libraries,
     IReadOnlyList<string> CompileOptions,
     IReadOnlyList<string> LinkOptions,
-    IReadOnlyList<CpuFeature> CpuFeatures)
+    IReadOnlyList<CpuFeature> CpuFeatures,
+    TargetEnvironment Environment,
+    EspIdfChip? EspIdfChip)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -92,6 +94,8 @@ internal sealed record CommandLineOptions(
         var build = false;
         var run = false;
         var target = CompilationTarget.Hosted;
+        var environment = TargetEnvironment.Native;
+        EspIdfChip? espIdfChip = null;
         var targetSpecified = false;
         var architecture = CompilationArchitecture.Auto;
         var architectureSpecified = false;
@@ -250,16 +254,25 @@ internal sealed record CommandLineOptions(
                 case "--target":
                     targetSpecified = true;
                     var targetValue = RequireValue();
+                    environment = targetValue is "esp32_qemu" or "esp32c3_qemu" ? TargetEnvironment.Qemu : TargetEnvironment.Native;
+                    espIdfChip = targetValue switch
+                    {
+                        "esp32_qemu" => CTilde.EspIdfChip.Esp32,
+                        "esp32c3_qemu" => CTilde.EspIdfChip.Esp32C3,
+                        _ => null,
+                    };
                     target = targetValue switch
                     {
                         "hosted" => CompilationTarget.Hosted,
                         "esp-idf" => CompilationTarget.EspIdf,
+                        "esp32_qemu" => CompilationTarget.EspIdf,
+                        "esp32c3_qemu" => CompilationTarget.EspIdf,
                         "freestanding" => CompilationTarget.Freestanding,
                         "cosmopolitan" => CompilationTarget.Cosmopolitan,
                         _ => (CompilationTarget)(-1),
                     };
                     if (targetValue is not null && !Enum.IsDefined(target))
-                        parseError = $"Unknown target '{targetValue}'; expected hosted, esp-idf, freestanding, or cosmopolitan.";
+                        parseError = $"Unknown target '{targetValue}'; expected hosted, esp-idf, esp32_qemu, esp32c3_qemu, freestanding, or cosmopolitan.";
                     break;
                 case "--architecture":
                     architectureSpecified = true;
@@ -297,7 +310,8 @@ internal sealed record CommandLineOptions(
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
             targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
-            panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures);
+            panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures,
+            environment, espIdfChip);
         return true;
     }
 }

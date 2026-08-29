@@ -1,0 +1,24 @@
+using System;
+
+namespace $safeprojectname$;
+
+public static class Program
+{
+    private static int Sum(int left, int right)
+    {
+        return left + right;
+    }
+
+    private static void PrintResult(string label, int value)
+    {
+        Console.WriteLine(label);
+        Console.WriteLine(value);
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        int answer = Sum(20, 22);
+        PrintResult("C~ hosted console result:", answer);
+    }
+}

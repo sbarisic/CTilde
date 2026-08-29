@@ -13,6 +13,7 @@ internal interface ILoweringServices
     bool EmitDebugInstrumentation { get; }
     CompilationTarget Target { get; }
     CompilationArchitecture Architecture { get; }
+    TargetEnvironment Environment { get; }
     bool HasCpuFeature(CpuFeature feature);
 
     string CTypeName(CType type);

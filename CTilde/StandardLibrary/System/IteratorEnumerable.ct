@@ -1,0 +1,16 @@
+namespace System;
+
+internal sealed class IteratorEnumerable<T> : IEnumerable<T>
+{
+    private System.Collections.List<T> values;
+
+    internal IteratorEnumerable(System.Collections.List<T> values)
+    {
+        this.values = values;
+    }
+
+    public IEnumerator<T> GetEnumerator()
+    {
+        return values.GetEnumerator();
+    }
+}

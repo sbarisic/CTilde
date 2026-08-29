@@ -1,0 +1,171 @@
+namespace System;
+
+public delegate bool Predicate<T>(T value);
+public delegate bool Equality<T>(T left, T right);
+public delegate int Hasher<T>(T value);
+public delegate int Ordering<T>(T left, T right);
+public delegate TOutput Mapper<TInput, TOutput>(TInput value);
+public delegate TState Folder<TState, TValue>(TState state, TValue value);
+public delegate void Visitor<T>(T value);
+
+public readonly struct Pair<TFirst, TSecond>
+{
+    public readonly TFirst First;
+    public readonly TSecond Second;
+
+    public Pair(TFirst first, TSecond second)
+    {
+        First = first;
+        Second = second;
+    }
+}
+
+public struct Option<T>
+{
+    private bool hasValue;
+    private T value;
+
+    public static Option<T> Some(T value)
+    {
+        Option<T> result = new Option<T>();
+        result.hasValue = true;
+        result.value = value;
+        return result;
+    }
+
+    private static Option<T> CreateNone()
+    {
+        return new Option<T>();
+    }
+
+    public static Option<T> None
+    {
+        get { return CreateNone(); }
+    }
+
+    [NoAlloc]
+    public bool HasValue
+    {
+        get { return hasValue; }
+    }
+
+    [NoAlloc]
+    public bool TryGet(out T value)
+    {
+        value = this.value;
+        return hasValue;
+    }
+
+    [NoAlloc]
+    public T Or(T fallback)
+    {
+        if (hasValue)
+        {
+            return value;
+        }
+
+        return fallback;
+    }
+
+    public Option<TOutput> Map<TOutput>(Mapper<T, TOutput> mapper)
+    {
+        if (!hasValue)
+        {
+            Option<TOutput> result = new Option<TOutput>();
+            return result;
+        }
+
+        return Option<TOutput>.Some(mapper(value));
+    }
+}
+
+public struct Result<TOk, TErr>
+{
+    private bool isOk;
+    private TOk ok;
+    private TErr error;
+
+    public static Result<TOk, TErr> Ok(TOk value)
+    {
+        Result<TOk, TErr> result = new Result<TOk, TErr>();
+        result.isOk = true;
+        result.ok = value;
+        return result;
+    }
+
+    public static Result<TOk, TErr> Err(TErr error)
+    {
+        Result<TOk, TErr> result = new Result<TOk, TErr>();
+        result.isOk = false;
+        result.error = error;
+        return result;
+    }
+
+    [NoAlloc]
+    public bool IsOk
+    {
+        get { return isOk; }
+    }
+
+    [NoAlloc]
+    public bool IsErr
+    {
+        get { return !isOk; }
+    }
+
+    [NoAlloc]
+    public bool TryGetOk(out TOk value)
+    {
+        value = ok;
+        return isOk;
+    }
+
+    [NoAlloc]
+    public bool TryGetErr(out TErr value)
+    {
+        value = error;
+        return !isOk;
+    }
+
+    [NoAlloc]
+    public TOk OkOr(TOk fallback)
+    {
+        if (isOk)
+        {
+            return ok;
+        }
+
+        return fallback;
+    }
+
+    [NoAlloc]
+    public TErr ErrOr(TErr fallback)
+    {
+        if (!isOk)
+        {
+            return error;
+        }
+
+        return fallback;
+    }
+
+    public Result<TOutput, TErr> MapOk<TOutput>(Mapper<TOk, TOutput> mapper)
+    {
+        if (!isOk)
+        {
+            return Result<TOutput, TErr>.Err(error);
+        }
+
+        return Result<TOutput, TErr>.Ok(mapper(ok));
+    }
+
+    public Result<TOk, TOutput> MapErr<TOutput>(Mapper<TErr, TOutput> mapper)
+    {
+        if (isOk)
+        {
+            return Result<TOk, TOutput>.Ok(ok);
+        }
+
+        return Result<TOk, TOutput>.Err(mapper(error));
+    }
+}

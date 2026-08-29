@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Id="sbarisic.ctilde-visualstudio" Version="0.12.0" Language="en-US" Publisher="sbarisic" />
+    <Identity Id="sbarisic.ctilde-visualstudio" Version="0.14.0" Language="en-US" Publisher="sbarisic" />
     <DisplayName>C~ for Visual Studio</DisplayName>
     <Description xml:space="preserve">Preview C~ language support with IntelliSense, diagnostics, manifest-backed projects, hosted debugging, and ESP32/ESP32-C3 QEMU debugging.</Description>
     <MoreInfo>https://ctilde.sbarisic.com</MoreInfo>

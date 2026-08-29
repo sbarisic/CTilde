@@ -65,7 +65,37 @@ internal sealed class DocumentationIndex
         return new DocumentationIndex(documentation.ToImmutable(), ids);
     }
 
-    public string? GetId(object symbol) => _ids.GetValueOrDefault(symbol);
+    public string? GetId(object symbol)
+    {
+        if (_ids.TryGetValue(symbol, out var id))
+            return id;
+
+        var syntax = symbol switch
+        {
+            TypeSymbol type => type.Syntax,
+            MethodSymbol method => method.Syntax,
+            PropertySymbol property => property.Syntax,
+            FieldSymbol field => field.Syntax,
+            _ => null,
+        };
+        if (syntax is null)
+            return null;
+
+        foreach (var (candidate, candidateId) in _ids)
+        {
+            var candidateSyntax = candidate switch
+            {
+                TypeSymbol type when type.IsGenericDefinition => type.Syntax,
+                MethodSymbol method when method.IsGenericDefinition || method.ContainingType.IsGenericDefinition => method.Syntax,
+                PropertySymbol property when property.ContainingType.IsGenericDefinition => property.Syntax,
+                FieldSymbol field when field.ContainingType.IsGenericDefinition => field.Syntax,
+                _ => null,
+            };
+            if (ReferenceEquals(candidateSyntax, syntax))
+                return candidateId;
+        }
+        return null;
+    }
 
     public LanguageDocumentation? GetDocumentation(object symbol) =>
         GetId(symbol) is { } id ? GetDocumentation(id) : null;
@@ -96,7 +126,7 @@ internal sealed class DocumentationIndex
             ? "#ctor"
             : method.IsOperator
                 ? $"op_{OperatorFacts.MetadataName(method.OperatorKind, method.Parameters.Length)}"
-                : method.Name;
+                : method.ExplicitInterfaceType is null ? method.Name : $"{method.ExplicitInterfaceType.DisplayName}.{method.Name}";
         if (method.IsGenericDefinition)
             name += $"``{method.TypeParameters.Length}";
         else if (!method.TypeArguments.IsDefaultOrEmpty)

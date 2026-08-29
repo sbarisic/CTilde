@@ -1,20 +1,20 @@
 # Implementation status
 
-Last reviewed: 2026-08-28
+Last reviewed: 2026-08-30
 
 ## Current state
 
-C~ draft 0.34 has one compiler path:
+C~ draft 0.36 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding/Cosmopolitan GNU C23
 ```
 
-The compiler library, CLI, and conformance runner target .NET 10. Drafts 0.26 through 0.34 add source-owner identity, binary64, scalar-default and explicit hardware SIMD, Unicode scalars, immutable embedded resources, captureless and explicit-capture ARC closures, and exact repository module restore/update/vendor workflows. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
+The compiler library, CLI, and conformance runner target .NET 10. Draft 0.36 adds typed defaults, indexers, explicit interface dispatch, pattern enumeration, iterator syntax, and C~-source mutable generic collections on top of the Draft 0.35 generic foundations. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
 
 The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. Cosmopolitan output uses hosted runtime semantics and produces an x86-64 APE plus a retained ELF/DWARF carrier. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, Cosmopolitan, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted, Cosmopolitan, and freestanding modular objects use draft-versioned content-addressed caches.
 
-`ctilde --run` rebuilds a project, releases the build lock, and launches its immutable host or WSL run configuration only after a successful build. The VS Code 0.11.0 **Run Project** command uses the same path.
+`ctilde --run` rebuilds a project, releases the build lock, and launches its immutable host or WSL run configuration only after a successful build. The VS Code 0.14.0 **Run Project** command uses the same path.
 
 ## Measured baseline
 
@@ -236,7 +236,7 @@ ESP-IDF projects can declare schema-versioned binding manifests. The CLI resolve
 
 ESP-IDF project builds are incremental by default. All generated text artifacts use one compare-before-replace writer, and a versioned ignored binding cache fingerprints manifests, imported headers, target/compiler context, `sdkconfig`, CMake inputs, tool versions, and tracked outputs. The TCan485 wrapper invokes the compiler once, preserves an initialized target, and reserves `-Clean` for explicit clean builds. On the accepted local ESP32 tree, a warm no-op build took 9.6 seconds end to end: the binding cache check took 69 ms, C~ analysis and emission took 1.1 seconds with zero changed outputs, and the no-native-compilation Ninja phase took 2.5 seconds. A scalar `Program.ct` edit changed one generated namespace module; Ninja compiled that one C object and relinked. The measured source-edit build took 24.8 seconds, including 1.2 seconds in C~ and 17.5 seconds in the native build/link phase. A warm build plus 1,009,888-byte firmware upload took 30.2 seconds at 921600 baud without using the fallback. The flashed image completed its ABI markers, Wi-Fi association, certificate validation, HTTP 200 fetch, ARC recovery, and permanent WS2812 loop without a panic. These timings include PowerShell ESP-IDF environment activation and are measurements, not regression budgets.
 
-The VS Code extension and its bundled .NET 10 language server are version 0.11.0. The package includes its JavaScript client, framework-dependent compiler, language server, and Node GDB/MI debug adapter. The user supplies the .NET 10 runtime and native debugger. Run Project rebuilds and launches the manifest run configuration. Debug Project creates an instrumented version-3 image; Attach validates its source hashes and metadata and rejects stale v2 images. GCC/Clang, WSL, and ESP-IDF receive logical breakpoints, adapter-owned conditions/hit counts/logpoints, C~-level stepping, lexical locals, hardware data watchpoints, and ARC/runtime presentation including closed generics, interface views, atomics, Thread IDs, and Mutex state. MSVC uses `cppvsdbg`. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
+The compiler, CLI, language server, debug adapter, VS Code extension, and Visual Studio extension are aligned at preview version 0.14.0. The package includes its JavaScript client, framework-dependent compiler, language server, and Node GDB/MI debug adapter. The user supplies the .NET 10 runtime and native debugger. Run Project rebuilds and launches the manifest run configuration. Debug Project creates an instrumented version-3 image; Attach validates its source hashes and metadata and rejects stale v2 images. GCC/Clang, WSL, and ESP-IDF receive logical breakpoints, adapter-owned conditions/hit counts/logpoints, C~-level stepping, lexical locals, hardware data watchpoints, and ARC/runtime presentation including closed generics, interface views, atomics, Thread IDs, and Mutex state. MSVC uses `cppvsdbg`. Protocol and Extension Host suites cover initialization, incremental edits, diagnostics, semantic-token encoding and refresh, lazy completion documentation, documented hover and active parameters, definitions, symbols, target filtering, embedded sources, shutdown, and exit.
 
 The language-service query snapshot owns the same immutable bound program used by compilation. Its per-document indexes reuse bound expression types and symbols without calling `EmitC` or initializing backend state.
 
@@ -363,7 +363,7 @@ These features are outside draft 0.22:
 
 ## Release gate
 
-A draft 0.34 release requires:
+A draft 0.36 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -378,4 +378,4 @@ On 2026-08-28, the Draft 0.24 solution build completed with zero warnings and er
 
 On 2026-08-28, the Draft 0.23 solution build completed with zero warnings and errors and all 160 conformance cases passed under MSVC, WSL GCC, and WSL Clang. The ESP-IDF runner passed its direct Xtensa and RISC-V compiler probes, ordinary ESP32 and ESP32-C3 builds, and the Draft 0.23 interrupt fixture for both architectures. Xtensa ELF inspection placed `ctilde_draft023_timer_isr` and `ct_draft023_ack` in `.iram0.text` and the C~-owned counter in `.dram0.data`. VS Code 0.8.0 tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The connected automated T-CAN485 run exercised the GPTimer ISR, observed matching C~ and native acknowledgement counters, and emitted `CTILDE_DRAFT_023_OK`; the same run passed the earlier Draft 0.18 through 0.20 fixtures, panic-policy images, memory, console, debugger, detach, and startup-timeout gates before restoring the ordinary Release firmware. Its ignored report is `artifacts/esp32-hardware/20260828-000319.json`. After restoration, the operator confirmed that the ordinary firmware visibly alternated the onboard LED between blue and purple, closing the visual gate. Historical Draft 0.22 and earlier hosted, cross-build, and hardware evidence remains preserved above and in Git history.
 
-Draft 0.34 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.
+Draft 0.36 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.

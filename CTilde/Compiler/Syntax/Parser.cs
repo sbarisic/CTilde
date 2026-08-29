@@ -342,7 +342,27 @@ internal sealed partial class Parser
             }
             return new OperatorDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, operatorToken, parameters, body);
         }
-        var memberName = Match(SyntaxKind.IdentifierToken);
+        ParameterSyntax? indexParameter = null;
+        TypeSyntax? explicitInterfaceType = null;
+        SyntaxToken memberName;
+        if (LooksLikeExplicitInterfaceMember())
+        {
+            explicitInterfaceType = ParseType(allowInlineArray: false);
+            Match(SyntaxKind.DotToken);
+            memberName = Match(SyntaxKind.IdentifierToken);
+        }
+        else if (Current.Kind == SyntaxKind.ThisKeyword)
+        {
+            var @this = NextToken();
+            memberName = @this with { Text = "Item" };
+            Match(SyntaxKind.OpenBracketToken);
+            var parameterType = ParseType();
+            var parameterName = Match(SyntaxKind.IdentifierToken);
+            indexParameter = new ParameterSyntax(_source, TextSpan.FromBounds(parameterType.Span.Start, parameterName.Span.End), [], ParameterPassingKind.Value, parameterType, parameterName.Text);
+            Match(SyntaxKind.CloseBracketToken);
+        }
+        else
+            memberName = Match(SyntaxKind.IdentifierToken);
         var typeParameters = ParseTypeParameters();
         if (Current.Kind == SyntaxKind.OpenParenToken)
         {
@@ -352,7 +372,7 @@ internal sealed partial class Parser
             {
                 var assemblyBody = ParseAssemblyFunctionBody();
                 return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, assemblyBody.Span.End), modifiers, attributes, type, memberName.Text,
-                    parameters, null, typeParameters, constraints, assemblyBody);
+                    parameters, null, typeParameters, constraints, assemblyBody, explicitInterfaceType);
             }
             BlockStatementSyntax? body;
             int end;
@@ -366,7 +386,7 @@ internal sealed partial class Parser
                 body = ParseBlock();
                 end = body.Span.End;
             }
-            return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, memberName.Text, parameters, body, typeParameters, constraints);
+            return new MethodDeclarationSyntax(_source, TextSpan.FromBounds(start, end), modifiers, attributes, type, memberName.Text, parameters, body, typeParameters, constraints, null, explicitInterfaceType);
         }
 
         if (isAssemblyFunction)
@@ -417,8 +437,11 @@ internal sealed partial class Parser
                 }
             }
             var close = Match(SyntaxKind.CloseBraceToken);
-            return new PropertyDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), modifiers, attributes, type, memberName.Text, getter, setter);
+            return new PropertyDeclarationSyntax(_source, TextSpan.FromBounds(start, close.Span.End), modifiers, attributes, type, memberName.Text, getter, setter, indexParameter);
         }
+
+        if (indexParameter is not null)
+            Report("CT0113", "An indexer requires an accessor body.", memberName);
 
         ExpressionSyntax? initializer = null;
         if (Current.Kind == SyntaxKind.EqualsToken)
@@ -572,6 +595,7 @@ internal sealed partial class Parser
             SyntaxKind.DeferKeyword => ParseDefer(),
             SyntaxKind.LockKeyword => ParseLock(),
             SyntaxKind.ReturnKeyword => ParseReturn(),
+            SyntaxKind.YieldKeyword => ParseYield(),
             SyntaxKind.ThrowKeyword => ParseThrow(),
             SyntaxKind.TryKeyword => ParseTry(),
             SyntaxKind.AsmKeyword => ParseInlineAssembly([]),
@@ -741,6 +765,22 @@ internal sealed partial class Parser
         var expression = Current.Kind == SyntaxKind.SemicolonToken ? null : ParseExpression();
         var end = Match(SyntaxKind.SemicolonToken).Span.End;
         return new ReturnStatementSyntax(_source, TextSpan.FromBounds(start, end), expression);
+    }
+
+    private YieldStatementSyntax ParseYield()
+    {
+        var start = NextToken().Span.Start;
+        var isBreak = Current.Kind == SyntaxKind.BreakKeyword;
+        ExpressionSyntax? expression = null;
+        if (isBreak)
+            NextToken();
+        else
+        {
+            Match(SyntaxKind.ReturnKeyword);
+            expression = ParseExpression();
+        }
+        var end = Match(SyntaxKind.SemicolonToken).Span.End;
+        return new YieldStatementSyntax(_source, TextSpan.FromBounds(start, end), expression, isBreak);
     }
 
     private DeferStatementSyntax ParseDefer()
@@ -1011,6 +1051,8 @@ internal sealed partial class Parser
                 return new ParenthesizedExpressionSyntax(_source, TextSpan.FromBounds(open.Span.Start, close.Span.End), nested);
             case SyntaxKind.NewKeyword:
                 return ParseNew();
+            case SyntaxKind.DefaultKeyword:
+                return ParseDefault();
             case SyntaxKind.StackallocKeyword:
                 return ParseStackAlloc();
             case SyntaxKind.SizeofKeyword:
@@ -1061,6 +1103,15 @@ internal sealed partial class Parser
         return keyword.Kind == SyntaxKind.SizeofKeyword
             ? new SizeOfExpressionSyntax(_source, span, type)
             : new AlignOfExpressionSyntax(_source, span, type);
+    }
+
+    private DefaultExpressionSyntax ParseDefault()
+    {
+        var start = NextToken().Span.Start;
+        Match(SyntaxKind.OpenParenToken);
+        var type = ParseType();
+        var close = Match(SyntaxKind.CloseParenToken);
+        return new DefaultExpressionSyntax(_source, TextSpan.FromBounds(start, close.Span.End), type);
     }
 
     private OffsetOfExpressionSyntax ParseOffsetOf()

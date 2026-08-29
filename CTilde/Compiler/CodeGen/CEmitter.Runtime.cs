@@ -1277,12 +1277,22 @@ internal sealed partial class CEmitter
                     continue;
                 var self = property.IsStatic ? string.Empty : $"{InstanceStorageType(type)}* ct_self";
                 if (property.Getter is not null)
-                    writer.WriteLine("static " + CFunctionDeclaration(property.Type, NameMangler.Getter(property), self.Length == 0 ? [] : [self]) + ";");
+                {
+                    var parameters = new List<string>();
+                    if (self.Length != 0)
+                        parameters.Add(self);
+                    if (property.IndexParameter is not null)
+                        parameters.Add(CParameterDeclaration(property.IndexParameter, NameMangler.Identifier(property.IndexParameter.Name)));
+                    writer.WriteLine("static " + CFunctionDeclaration(property.Type, NameMangler.Getter(property), parameters) + ";");
+                }
                 if (property.Setter is not null)
                 {
-                    var parameters = self.Length == 0
-                        ? new[] { CDeclaration(property.Type, NameMangler.Identifier("value")) }
-                        : new[] { self, CDeclaration(property.Type, NameMangler.Identifier("value")) };
+                    var parameters = new List<string>();
+                    if (self.Length != 0)
+                        parameters.Add(self);
+                    if (property.IndexParameter is not null)
+                        parameters.Add(CParameterDeclaration(property.IndexParameter, NameMangler.Identifier(property.IndexParameter.Name)));
+                    parameters.Add(CDeclaration(property.Type, NameMangler.Identifier("value")));
                     writer.WriteLine("static " + CFunctionDeclaration(CType.Void, NameMangler.Setter(property), parameters) + ";");
                 }
             }

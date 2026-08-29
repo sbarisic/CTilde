@@ -1,16 +1,16 @@
 # C~ language specification
 
-Specification version: draft 0.34
+Specification version: draft 0.36
 
 ## Status
 
-This document is the normative specification for C~ draft 0.34.
+This document is the normative specification for C~ draft 0.36.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.34 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.36 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.34 completes source owners, binary64, fixed-width SIMD, Unicode scalars, immutable embedded resources, lambdas and ARC closures, and exact repository modules. It retains the assembly-only functions and constant-initialized immutable native data from Draft 0.25 and the target contracts from Drafts 0.21 through 0.24. Runtime ABI 16 and debug metadata version 3 are unchanged.
+Draft 0.36 adds `default(T)`, single-parameter indexers, explicit interface members, pattern and interface enumeration, iterator blocks, and C~-native mutable generic collections. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
-`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.34 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.36 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -109,7 +109,7 @@ using System;
 using Game.World;
 ```
 
-Draft 0.34 has no using aliases and no `using static`.
+Draft 0.36 has no using aliases and no `using static`.
 
 The `System` namespace is imported automatically.
 
@@ -143,7 +143,7 @@ ushort    using      var        virtual    void       volatile   where
 while
 ```
 
-`get` and `set` are meaningful only in property declarations. `default` is a switch label.
+`get` and `set` are meaningful only in property declarations. `default` starts either a switch label or the typed `default(T)` expression. `yield` starts `yield return` and `yield break` statements.
 
 ### Comments and terminators
 
@@ -185,7 +185,7 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.34 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.36 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
@@ -224,7 +224,7 @@ Every expression has a compile-time type before C emission.
 
 Class, array, string, delegate, unsafe-pointer, and unmanaged function-pointer values use the native pointer width of the selected C target.
 
-Draft 0.34 has no `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
+Draft 0.36 has no `decimal`. Integer literals never infer `nint` or `nuint`; context can convert constants in the portable `int` or `uint` range, while larger `long` or `ulong` values require an explicit cast.
 
 ### Value and reference types
 
@@ -246,7 +246,7 @@ Every array has a read-only `Length` property of type `int`. Indexing starts at 
 
 Inline arrays support one dimension, default initialization, checked indexing, by-value copying, parameters, and returns. Constant out-of-range indices are rejected; dynamic failures use `CTA0003`. Elements that contain managed references are retained and dropped element by element. Native ABI exposure requires a recursively complete unmanaged element type. Managed, multidimensional inline, jagged, and nested inline arrays are not part of this draft. Invalid lengths report `CT2204`.
 
-Draft 0.34 has no multidimensional or jagged managed arrays.
+Draft 0.36 has no multidimensional or jagged managed arrays.
 
 ### Unsafe pointers and unmanaged function pointers
 
@@ -315,7 +315,7 @@ Enum initializers are integral constants. An omitted initializer is one greater 
 
 `public newtype Name : Underlying;` declares a distinct nominal value type with the representation, layout, calling convention, boxing behavior, and native ABI of its complete unmanaged non-void underlying type. Recursive definitions report `CT1295`.
 
-Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.34.
+Conversion between a newtype and its immediate underlying type is explicit. Distinct newtypes do not convert directly. Equality and ordering operate only on two values of the same newtype when supported by the underlying type. Arithmetic, bitwise, mixed-type, and user-defined operations are not lifted; invalid conversion or operator use reports `CT2205`. Newtypes have no declaration body in Draft 0.36.
 
 The standard library declares `be16`, `be32`, `le16`, and `le32` as nominal newtypes. Their stored bytes use the named wire order. `System.Endian` converts between native numeric values and these types, folds constant operands, and lowers big-endian conversions to byte swaps on the currently little-endian target set. Ordinary explicit newtype casts remain representation-preserving. Invalid intrinsic calls report `CT2208`.
 
@@ -431,7 +431,7 @@ There are no finalizers. External resources require an explicit `Dispose()` meth
 
 ### Interfaces and abstract classes
 
-An interface is a managed contract type. It can inherit several interfaces and contains public instance method and property declarations without bodies. Classes and structures can implement several interfaces implicitly by providing identical public members. One implementation can satisfy the same inherited contract from several interfaces.
+An interface is a managed contract type. It can inherit several interfaces and contains public instance method and property declarations without bodies. Classes and structures can implement several interfaces implicitly by providing identical public members. An exact member qualified by its interface name is an explicit implementation; it has no accessibility modifier and is callable only through that interface.
 
 ```csharp
 public interface IShape
@@ -447,7 +447,7 @@ public abstract class Shape : object, IShape
 }
 ```
 
-A class retains one class base and lists interfaces after it. An abstract method or property has no body and is valid only in an abstract class. Abstract classes cannot be constructed. Every non-abstract class and every structure must implement all inherited abstract and interface contracts. Interface implementations are public and implicit; explicit implementations, default interface bodies, static abstract members, and variance are not supported.
+A class retains one class base and lists interfaces after it. An abstract method or property has no body and is valid only in an abstract class. Abstract classes cannot be constructed. Every non-abstract class and every structure must implement all inherited abstract and interface contracts. Interface implementations can be public and implicit or interface-qualified and explicit. Default interface bodies, static abstract members, and variance are not supported.
 
 Interface references participate in ARC. A class-to-interface conversion retains the same object and allocates nothing. A structure-to-interface conversion boxes the value. Interface calls use the concrete type's generated interface dispatch table. Casts, `is`, `as`, null behavior, and `[NoAlloc]` virtual-boundary rules match class references.
 
@@ -555,6 +555,8 @@ public int Count { get; private set; }
 
 The compiler creates a private backing field. A missing getter makes the property unreadable; a missing setter makes it unassignable.
 
+An instance indexer uses `TValue this[TKey key] { get; set; }`. Draft 0.36 permits exactly one index parameter and one indexer per type. Indexers can be declared by classes, structures, interfaces, and abstract types, including virtual and override accessors. They cannot be static or auto-backed. Receiver, key, and assigned value are evaluated exactly once; setters use the same ARC strong-slot replacement rules as properties.
+
 ### Generic declarations
 
 Classes, structures, interfaces, delegates, and methods can declare type parameters. Types and methods can also declare typed integral constant parameters with `const Type Name`. Closed types and explicit method arguments use angle brackets; ordinary method type arguments can be inferred from value arguments, but constant method arguments are always explicit.
@@ -574,6 +576,12 @@ Constant parameter types are integral types, `char`, native-sized integers, or e
 
 Generics use whole-program monomorphization. Each reachable closed type and method has separate code, layout, ARC helpers, allocation analysis, and static storage. Constant declared type and canonical value participate in specialization identity, native names, headers, maps, and debug metadata. Open generic values cannot reach native ABI boundaries. An expanding instantiation chain is rejected with `CT1272`. Variance, partial or return-context inference, reflection metadata, specialization syntax, and static-abstract generic arithmetic are not supported.
 
+Draft 0.35 supplies `Pair<TFirst,TSecond>`, `Option<T>`, `Result<TOk,TErr>`, purpose-specific callback delegates, and `System.Collections.ArrayAlgorithms`. Draft 0.36 adds mutable `List<T>`, `Stack<T>`, `Queue<T>`, `Map<TKey,TValue>`, and `Set<T>` collections with explicit equality and hashing callbacks.
+
+`default(T)` is valid for every complete non-`void` type, including a type parameter. It recursively zero-initializes value storage, produces false, zero, or null as appropriate, and never invokes a constructor. There is no target-typed `default` literal.
+
+`System.Text.Utf8` decodes managed-string bytes or external native buffers and encodes a `rune` into a native destination. Its helpers are `[NoAlloc]`, not `[NoRuntime]`. Invalid offsets, continuation starts, truncation, overlong forms, surrogates, and values above `U+10FFFF` fail with NUL and zero output counts. An encoding destination that is too small remains unchanged. Unicode escape syntax is not part of Draft 0.36.
+
 ## Methods
 
 A method declares a return type, name, parameters, and body.
@@ -588,7 +596,7 @@ Parameters and call arguments can be marked `ref`, `in`, or `out`. The call site
 
 An `out` call treats the caller slot as an uninitialized destination. The caller drops an initialized managed/reference-bearing value, clears the slot to a safe empty state, and marks it uninitialized before entry. The callee's first assignment constructs or moves directly into the destination without reading, retaining, or dropping an old value. Later assignments use ordinary strong-slot replacement. The rule is identical for methods, constructors, delegates, unmanaged function pointers, externs, and exported C declarations. Normal return assigns the caller slot; exceptional control leaves its safe empty value but does not make it definitely assigned. Native `ref` and `out` parameters map to `T*`; native `in` maps to `const T*`. Buffer parameters cannot themselves be by-reference.
 
-Draft 0.34 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
+Draft 0.36 has no optional, named, implicit by-reference, reference-return, reference-local, or parameter-array arguments. An overload cannot differ only between `ref` and `out`.
 
 ### User-defined arithmetic operators
 
@@ -686,7 +694,7 @@ Ordinary parameters are borrowed for the duration of a call. `[Retained]` accept
 
 Managed-reference results are owned. `[ReturnsBorrowed]` accepts no arguments and is valid only on an extern method returning a direct class, array, or string reference. The compiler retains that native result immediately, converting it to the normal owned-result convention. Invalid uses report `CT1235`.
 
-Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.34 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
+Delegates and unmanaged function pointers never convert implicitly to one another. Draft 0.36 supports static-method function-pointer trampolines and synchronous delegate/context adapters on any attached native thread. An exception escaping a callback runs that thread's C~ cleanup and panics with `CTE0003`; it never unwinds through native frames. Retained callbacks remain unsupported. ESP-IDF interrupt entry uses the separate restricted contract below and is not a delegate callback.
 
 ### Effect contracts
 
@@ -716,7 +724,7 @@ Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Cons
 
 `Vec2`, `Vec3`, and `Vec4` remain scalar geometry structures. `System.Simd` defines fixed 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with constant lane access, shuffle, comparisons, selection, and arithmetic. Scalar lowering is the default. `CpuFeature.Simd128`, `Target.HasFeature`, manifest `cpuFeatures`, and CLI `--cpu-feature simd128` enable architecture-validated x86 or Arm intrinsic lowering explicitly.
 
-Draft 0.34 does not provide `System.Type`, reflection, or `System.Convert`.
+Draft 0.36 does not provide `System.Type`, reflection, or `System.Convert`.
 
 ## Object and array creation
 
@@ -814,13 +822,15 @@ One `default` label is permitted. A section must end with `break`, `continue`, `
 
 A switch completes a non-void return only when it has `default` and every reachable section returns.
 
-Draft 0.34 has no pattern cases and no `goto case`.
+Draft 0.36 has no pattern cases and no `goto case`.
 
 ### Loops
 
 `while`, `do while`, and `for` use `bool` conditions. An omitted `for` condition is true.
 
-`foreach` iterates a one-dimensional array from index zero through `Length - 1` and copies each element into the iteration local.
+`foreach` first uses the optimized one-dimensional array path. Otherwise it prefers an accessible concrete `GetEnumerator()` whose result has `bool MoveNext()`, readable `Current`, and `void Dispose()`, then falls back to `IEnumerable<T>`. Concrete structure enumerators remain unboxed; interface enumeration can box them. The enumerator is disposed on exhaustion and every control-flow exit.
+
+An ordinary method returning `IEnumerable<T>` can contain `yield return expression;` and `yield break;`. Each call produces an enumerable and each enumeration has independent state. Execution begins with the first `MoveNext`; disposal is idempotent and terminal. Iterator creation and enumeration allocate and therefore cannot satisfy `[NoAlloc]`. `yield` is invalid in constructors, accessors, operators, lambdas, `catch`, `finally`, `lock`, or where active `try` or `defer` cleanup would cross suspension.
 
 `break` exits the nearest loop or switch. `continue` starts the next iteration of the nearest loop.
 
@@ -965,15 +975,15 @@ An `Atomic<T>` value is non-copyable. It can be directly constructed as a local,
 
 A thread starts at most once. Joining before start, starting twice, or joining itself throws `ThreadStateException`. A worker retains its delegate and control object until completion, so releasing the source `Thread` reference does not cancel it. An exception escaping the delegate is fatal through the existing unhandled-exception path. Workers attach to independent C~ exception, cleanup, ARC-release, and debug state before invoking source code and detach after cleanup.
 
-`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX or Cosmopolitan mutexes, or recursive FreeRTOS mutexes. Draft 0.34 does not include cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, or `async`.
+`System.Threading.Mutex` is process-local and recursive. `Enter`, `TryEnter`, and `Exit` map to `CRITICAL_SECTION`, recursive POSIX or Cosmopolitan mutexes, or recursive FreeRTOS mutexes. Draft 0.36 does not include cancellation, interruption, affinity, naming, timed joins, source thread-local declarations, pools, futures, `Task`, or `async`.
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.34 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, closure state, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.36 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, closure state, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
 
 Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.25.
 
-Draft 0.34 uses a data-race-free memory model for hosted, Cosmopolitan, and ESP-IDF programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. Freestanding v1 has one compiler-owned execution state and no managed threading surface.
+Draft 0.36 uses a data-race-free memory model for hosted, Cosmopolitan, and ESP-IDF programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, and atomics establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. Freestanding v1 has one compiler-owned execution state and no managed threading surface.
 
 One C~ runtime exists per process. `ct_runtime_initialize(config)` attaches the calling primary thread, initializes immortal runtime-fault objects and the ABI-versioned module descriptor, then publishes the ready phase. `ct_runtime_shutdown()` requires all secondary threads detached, finalizes modules, drains ARC work, and detaches the primary thread. `main` and `app_main` perform this lifecycle automatically. A native-created thread uses `ct_thread_attach()` and `ct_thread_detach()` between those calls and must detach with no active C~ calls, cleanup records, exception frames, pending exception, or release drain. Export wrappers, callback trampolines, `ct_retain`, and `ct_release` require attachment. Runtime-phase misuse and unattached entry are panics. Modules cannot unload while their descriptors, vtables, delegates, objects, or generated function pointers remain live. Independent DLL loading and runtime registration are deferred.
 
@@ -993,7 +1003,7 @@ An unhandled exception prints `CTE0001`, its fully qualified runtime type, and i
 
 The public targets `esp32_qemu` and `esp32c3_qemu` both retain `TargetProfile.EspIdf`. They set `Target.Environment` to `Qemu` and fix `Target.Architecture` to `Xtensa` and `RiscV32`, respectively. An explicit conflicting architecture is rejected. The ordinary `esp-idf` target remains `Native` and continues to infer its physical chip from ESP-IDF configuration.
 
-The `cosmopolitan` target requires `architecture: "x64"`; automatic or other architecture selection reports `CT4118`. It requires one ordinary `[EntryPoint]`, generates hosted startup and runtime lifecycle, and exposes the hosted object, exception, console, file, math, threading, mutex, and TLS facilities. `Target.Profile` is `TargetProfile.Cosmopolitan`, `Target.Architecture` is `TargetArchitecture.X64`, and `Target.PointerSize` is eight. The native build emits an x86-64 APE distribution image and retains its ELF/DWARF carrier as `<image>.dbg`. Arm64 and fat multi-architecture APEs are outside Draft 0.34.
+The `cosmopolitan` target requires `architecture: "x64"`; automatic or other architecture selection reports `CT4118`. It requires one ordinary `[EntryPoint]`, generates hosted startup and runtime lifecycle, and exposes the hosted object, exception, console, file, math, threading, mutex, and TLS facilities. `Target.Profile` is `TargetProfile.Cosmopolitan`, `Target.Architecture` is `TargetArchitecture.X64`, and `Target.PointerSize` is eight. The native build emits an x86-64 APE distribution image and retains its ELF/DWARF carrier as `<image>.dbg`. Arm64 and fat multi-architecture APEs are outside Draft 0.36.
 
 `static if (condition) statement else statement` is statement-level compile-time selection. Its condition must be a compile-time Boolean. Only the selected branch is bound, analyzed, lowered, and made reachable. The inactive branch must parse but can name APIs unavailable on the selected target.
 
@@ -1038,7 +1048,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.34 when:
+A compiler conforms to draft 0.36 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1046,7 +1056,7 @@ A compiler conforms to draft 0.34 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.34 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.36 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1057,4 +1067,4 @@ The canonical backend is GNU C23. Draft 0.34 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.34 defers Arm64 and fat Cosmopolitan output, project-wide effect switches, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default and explicit interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, iterators, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.
+Draft 0.36 defers Unicode escape syntax, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, dynamic DLL loading, and runtime module registration.

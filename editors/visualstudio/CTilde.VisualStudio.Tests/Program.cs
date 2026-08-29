@@ -237,10 +237,10 @@ Run("standard-library URI mapping", () =>
     True(StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/System.Console.ct", out var document));
     Equal("System.Console.ct", document);
     True(!StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/../secret.ct", out _));
-    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.12.0", "ctilde-stdlib:/System.Console.ct");
-    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.12.0", "ctilde-stdlib:/System.Console.ct");
+    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.14.0", "ctilde-stdlib:/System.Console.ct");
+    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.14.0", "ctilde-stdlib:/System.Console.ct");
     Equal(first, second);
-    True(first.Contains($"{Path.DirectorySeparatorChar}0.12.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+    True(first.Contains($"{Path.DirectorySeparatorChar}0.14.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     Equal(new Uri(Path.GetFullPath(first)), StandardLibraryUri.FileUri(first));
 });
 Run("Visual Studio TextMate registration", () =>
@@ -304,7 +304,7 @@ Run("Visual Studio debug launch registration", () =>
     True(project.Contains("<VSIXSourceItem Include=\"ProjectSystem/CTildeDebugger.xaml\"", StringComparison.Ordinal));
     True(project.Contains("CTilde.DebugAdapter.csproj", StringComparison.Ordinal));
     True(project.Contains("Tools\\DebugAdapter", StringComparison.Ordinal));
-    True(project.Contains("<AssemblyVersion>0.12.0.0</AssemblyVersion>", StringComparison.Ordinal));
+    True(project.Contains("<AssemblyVersion>0.14.0.0</AssemblyVersion>", StringComparison.Ordinal));
     var registration = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "debug-adapter.pkgdef"));
     var normalizedRegistration = registration.Replace("\r\n", "\n", StringComparison.Ordinal);
     True(registration.Contains("{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}", StringComparison.OrdinalIgnoreCase));

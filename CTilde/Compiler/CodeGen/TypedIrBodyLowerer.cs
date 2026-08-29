@@ -94,6 +94,11 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? _semanticHints;
     private readonly IrOptimizationFacts _optimizationFacts;
     private bool _capturingDirectDefer;
+    private readonly bool _isIteratorMethod;
+    private readonly CType? _iteratorElementType;
+    private readonly CType? _iteratorListType;
+    private readonly CType? _iteratorEnumerableType;
+    private const string IteratorBuilderName = "ct_iterator_values";
     private bool EmitDebugInformation => _emitter.EmitDebugInformation && !_method.IsInterruptCode;
     private bool EmitDebugInstrumentation => _emitter.EmitDebugInstrumentation && !_method.IsInterruptCode;
 
@@ -112,6 +117,19 @@ internal sealed partial class TypedIrBodyLowerer
         _analysisOnly = analysisOnly;
         _semanticHints = semanticHints;
         _optimizationFacts = optimizationFacts ?? IrOptimizationFacts.Empty;
+        _isIteratorMethod = ContainsYield(method.Body);
+        if (_isIteratorMethod)
+        {
+            ValidateYieldPlacement(method.Body!, method.IsConstructor || method.IsOperator || property is not null);
+            if (method.ReturnType.Kind != CTypeKind.Interface || method.ReturnType.Symbol?.GenericDefinition?.FullName != "System.IEnumerable<T>" || method.ReturnType.Symbol.TypeArguments.Length != 1)
+                _diagnostics.Add("CT2212", "An iterator method must return System.IEnumerable<T>.", method.Syntax!.Source, method.Syntax.Span);
+            else
+            {
+                _iteratorElementType = method.ReturnType.Symbol.TypeArguments[0];
+                _iteratorListType = _model.ConstructStandardGeneric("System.Collections.List", [_iteratorElementType], method.Syntax!);
+                _iteratorEnumerableType = _model.ConstructStandardGeneric("System.IteratorEnumerable", [_iteratorElementType], method.Syntax!);
+            }
+        }
         _parameters = method.Parameters.ToDictionary(parameter => parameter.Name, StringComparer.Ordinal);
         _unsafeDepth = HasModifier(method.Syntax, "unsafe") ? 1 : 0;
         _scopes.Push(new Dictionary<string, LocalSymbol>(StringComparer.Ordinal));
@@ -173,12 +191,19 @@ internal sealed partial class TypedIrBodyLowerer
                     body.WriteLine($"(void){name};");
             }
             EmitInstanceFieldInitializers(body);
+            if (_isIteratorMethod)
+                EmitIteratorBuilder(body);
             if (_property is not null && _method.Body is null)
                 EmitAutomaticAccessor(body);
             else if (_method.Body is not null)
             {
                 var flow = EmitStatements(body, _method.Body.Statements);
-                if (!_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
+                if (_isIteratorMethod && flow.FallsThrough)
+                {
+                    EmitIteratorReturn(body, _method.Body);
+                    flow = new FlowResult((flow.Exits & ~FlowExit.FallThrough) | FlowExit.Return);
+                }
+                if (!_isIteratorMethod && !_method.IsConstructor && _method.ReturnType != CType.Void && !flow.AlwaysReturns)
                     Report("CT3100", $"Not every reachable path returns a value from '{(_method.IsOperator ? OperatorFacts.DisplayName(_method.OperatorKind) : _method.Name)}'.", _method.Syntax ?? _method.Body);
                 if (flow.FallsThrough)
                 {
@@ -202,6 +227,28 @@ internal sealed partial class TypedIrBodyLowerer
             }
         }
         return _analysisOnly ? string.Empty : RenderFunction(_emitter.MethodSignature(_method, _nameOverride), body);
+    }
+
+    private static bool ContainsYield(SyntaxNode? syntax)
+    {
+        if (syntax is null)
+            return false;
+        if (syntax is YieldStatementSyntax)
+            return true;
+        return syntax.ChildNodesAndTokens().Any(child => child.Node is not null && ContainsYield(child.Node));
+    }
+
+    private void ValidateYieldPlacement(SyntaxNode syntax, bool forbiddenRegion)
+    {
+        if (syntax is YieldStatementSyntax && forbiddenRegion)
+        {
+            _diagnostics.Add("CT2213", "yield cannot suspend across an accessor, constructor, operator, try, catch, finally, lock, or defer cleanup region.", syntax.Source, syntax.Span);
+            return;
+        }
+        var childForbidden = forbiddenRegion || syntax is TryStatementSyntax or CatchClauseSyntax or FinallyClauseSyntax or LockStatementSyntax or DeferStatementSyntax;
+        foreach (var child in syntax.ChildNodesAndTokens())
+            if (child.Node is not null)
+                ValidateYieldPlacement(child.Node, childForbidden);
     }
 
     private bool TryEmitHardwareSimdOperator(out string definition)
@@ -470,7 +517,10 @@ internal sealed partial class TypedIrBodyLowerer
                 writer.WriteLine("(void)ct_state;");
             }
             foreach (var record in _cleanupRecords.Order(StringComparer.Ordinal))
+            {
                 writer.WriteLine($"ct_cleanup_record {record} = {{0}};");
+                writer.WriteLine($"(void){record};");
+            }
             var bodyText = OptimizeGeneratedBody(body.ToString() ?? string.Empty);
             writer.WriteBlock(bodyText.TrimEnd().Split('\n'));
         }

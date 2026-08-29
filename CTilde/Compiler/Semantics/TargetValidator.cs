@@ -35,7 +35,10 @@ internal static class TargetValidator
         }
 
         var names = new Dictionary<string, MethodSymbol>(StringComparer.Ordinal);
-        foreach (var method in model.Types.Values.SelectMany(type => type.Methods).Where(method => method.ExternName is null))
+        foreach (var method in model.Types.Values
+                     .Where(type => !type.IsGenericDefinition && !type.IsOpenConstructed)
+                     .SelectMany(type => type.Methods)
+                     .Where(method => method.ExternName is null && !method.IsGenericDefinition))
         {
             if (names.TryAdd(method.CName, method))
                 continue;

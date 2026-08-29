@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="T:System.Hasher&lt;T&gt;"><summary>Computes a caller-defined hash for a value.</summary><remarks>Equal values must produce equal hashes. Calls are synchronous and can observe captured ARC state.</remarks></member>
+  <member id="T:System.IDisposable"><summary>Provides deterministic cleanup.</summary></member>
+  <member id="M:System.IDisposable.Dispose"><summary>Releases enumeration state. Repeated calls are harmless.</summary></member>
+  <member id="T:System.IEnumerator&lt;T&gt;"><summary>Advances through a sequence one value at a time.</summary><remarks>Current is valid only after a successful MoveNext and before completion or disposal.</remarks></member>
+  <member id="P:System.IEnumerator&lt;T&gt;.Current"><summary>Gets the current value.</summary></member>
+  <member id="M:System.IEnumerator&lt;T&gt;.MoveNext"><summary>Advances to the next value.</summary><returns>True when Current is valid.</returns></member>
+  <member id="T:System.IEnumerable&lt;T&gt;"><summary>Creates independent enumerators for a sequence.</summary></member>
+  <member id="M:System.IEnumerable&lt;T&gt;.GetEnumerator"><summary>Creates an enumerator.</summary><returns>A new enumeration state.</returns><remarks>Interface enumeration can box a structure enumerator.</remarks></member>
+
+  <member id="T:System.Collections.List&lt;T&gt;"><summary>Stores values in a growable contiguous array.</summary><remarks>Mutations increment the version and invalidate enumerators. Managed values follow ordinary ARC ownership.</remarks></member>
+  <member id="M:System.Collections.List&lt;T&gt;.#ctor"><summary>Creates an empty list.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.#ctor(int)"><summary>Creates an empty list with requested initial capacity.</summary></member>
+  <member id="P:System.Collections.List&lt;T&gt;.Count"><summary>Gets the number of values.</summary></member>
+  <member id="P:System.Collections.List&lt;T&gt;.Item(int)"><summary>Gets or replaces a checked value.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.Add(T)"><summary>Appends a value, growing storage when required.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.Insert(int,T)"><summary>Inserts a value at a checked position.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.RemoveAt(int)"><summary>Removes the value at a checked position.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.Remove(T,System.Equality&lt;T&gt;)"><summary>Removes the first callback-equal value.</summary><remarks>The callback runs left to right and mutation from inside it is invalid.</remarks></member>
+  <member id="M:System.Collections.List&lt;T&gt;.Contains(T,System.Equality&lt;T&gt;)"><summary>Tests values from left to right with explicit equality.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.Clear"><summary>Removes all values and releases their ARC ownership.</summary></member>
+  <member id="M:System.Collections.List&lt;T&gt;.GetEnumerator"><summary>Returns an unboxed structure enumerator.</summary></member>
+
+  <member id="T:System.Collections.Stack&lt;T&gt;"><summary>Stores last-in-first-out values in contiguous storage.</summary><remarks>Enumeration runs top to bottom.</remarks></member>
+  <member id="P:System.Collections.Stack&lt;T&gt;.Count"><summary>Gets the value count.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.Push(T)"><summary>Pushes one value.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.Pop"><summary>Removes and returns the top value.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.TryPop(out T)"><summary>Attempts to remove the top value and writes default on failure.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.Peek"><summary>Returns the top value without removing it.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.TryPeek(out T)"><summary>Attempts to read the top value and writes default on failure.</summary></member>
+  <member id="M:System.Collections.Stack&lt;T&gt;.Clear"><summary>Removes all values.</summary></member>
+
+  <member id="T:System.Collections.Queue&lt;T&gt;"><summary>Stores first-in-first-out values in a circular buffer.</summary><remarks>Enumeration runs front to back.</remarks></member>
+  <member id="P:System.Collections.Queue&lt;T&gt;.Count"><summary>Gets the value count.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.Enqueue(T)"><summary>Adds a value at the back.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.Dequeue"><summary>Removes and returns the front value.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.TryDequeue(out T)"><summary>Attempts to remove the front value and writes default on failure.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.Peek"><summary>Returns the front value without removing it.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.TryPeek(out T)"><summary>Attempts to read the front value and writes default on failure.</summary></member>
+  <member id="M:System.Collections.Queue&lt;T&gt;.Clear"><summary>Removes all values.</summary></member>
+
+  <member id="T:System.Collections.Map&lt;TKey, TValue&gt;"><summary>Maps callback-hashed keys to values while preserving insertion order.</summary><remarks>Null keys are permitted when callbacks handle them. The map is not synchronized. Growth is transactional and does not reinvoke callbacks.</remarks></member>
+  <member id="P:System.Collections.Map&lt;TKey, TValue&gt;.Count"><summary>Gets the mapping count.</summary></member>
+  <member id="P:System.Collections.Map&lt;TKey, TValue&gt;.Item(TKey)"><summary>Gets an existing value or inserts or replaces on assignment.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.Add(TKey,TValue)"><summary>Adds a mapping and throws for a duplicate key.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.TryAdd(TKey,TValue)"><summary>Attempts to add a mapping.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.ContainsKey(TKey)"><summary>Tests for a key with the supplied callbacks.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.TryGetValue(TKey,out TValue)"><summary>Attempts lookup and writes default on failure.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.Remove(TKey)"><summary>Removes a mapping while preserving remaining order.</summary></member>
+  <member id="M:System.Collections.Map&lt;TKey, TValue&gt;.Clear"><summary>Removes all mappings and releases owned values.</summary></member>
+
+  <member id="T:System.Collections.Set&lt;T&gt;"><summary>Stores unique callback-hashed values in insertion order.</summary><remarks>The set is not synchronized and does not supply implicit equality.</remarks></member>
+  <member id="P:System.Collections.Set&lt;T&gt;.Count"><summary>Gets the value count.</summary></member>
+  <member id="M:System.Collections.Set&lt;T&gt;.Add(T)"><summary>Adds a value and returns whether it was new.</summary></member>
+  <member id="M:System.Collections.Set&lt;T&gt;.Contains(T)"><summary>Tests for a value.</summary></member>
+  <member id="M:System.Collections.Set&lt;T&gt;.Remove(T)"><summary>Removes a value.</summary></member>
+  <member id="M:System.Collections.Set&lt;T&gt;.Clear"><summary>Removes all values.</summary></member>
+</doc>

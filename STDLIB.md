@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.34 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF load the APIs for their target profile. Freestanding loads only the object and storage core, `Memory`, target queries, SIMD, MMIO, CPU, endian helpers, inline arrays, and newtypes. It does not load exceptions, console, process services, managed threads, ESP-IDF APIs, hosted I/O, or libm-backed math.
+This document is the canonical standard-library reference for C~ Draft 0.36 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load the generic value containers, callback delegates, array algorithms, UTF-8 helpers, enumeration contracts, and mutable generic collections. Freestanding retains its allocation-free core and generic value containers; managed collections require the ordinary managed-allocation and exception runtime roles.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -12,7 +12,7 @@ The Cosmopolitan profile reuses the hosted object, exception, console, environme
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
 
-Draft 0.34 marks target queries, CPU and SIMD operations, MMIO, and endian conversion with trusted `[NoRuntime]` and `[NoBlock]` contracts in addition to `[NoThrow]` and `[NoAlloc]`. Atomic operations are non-blocking, but dynamic memory-order validation can throw and use the managed runtime. `Thread.Join`, nonzero or dynamic `Thread.Sleep`, and `Mutex.Enter` are blocking; `TryEnter`, `Yield`, and CPU pause hints are not. Console, file, and unannotated native I/O remain conservative effect boundaries.
+Draft 0.36 retains the trusted target-query, CPU, SIMD, MMIO, and endian contracts. UTF-8 helpers are `[NoAlloc]`, but intentionally not `[NoRuntime]`. Callback-driven generic operations inherit the callback's effects.
 
 `[Interrupt]` and `[InterruptSafe]` are compiler-defined attributes rather than ordinary runtime APIs. On ESP-IDF, an interrupt entry has the exact exported `void(void*)` signature and runs without runtime attachment, managed cleanup, exception machinery, or blocking calls. Interrupt-safe externs and assembly must also declare their ordinary effect contracts independently.
 
@@ -473,6 +473,20 @@ Strings and arrays expose language-provided members in addition to the library A
 - String concatenation with `+` and content equality with `==` and `!=`.
 - `array.Length`, checked indexing, allocation, and `foreach` iteration.
 
+### Generic containers and array algorithms
+
+`System.Pair<TFirst,TSecond>` stores immutable `First` and `Second` values. `System.Option<T>` supplies `Some`, `None`, `HasValue`, `TryGet`, `Or`, and `Map`. `System.Result<TOk,TErr>` supplies `Ok`, `Err`, `IsOk`, `IsErr`, both `TryGet` branches, `OkOr`, `ErrOr`, `MapOk`, and `MapErr`. Reference-bearing closed instances use ordinary ARC copy, move, and cleanup.
+
+The callback types are `Predicate<T>`, `Equality<T>`, `Ordering<T>`, `Mapper<TInput,TOutput>`, `Folder<TState,TValue>`, and `Visitor<T>`. `System.Collections.ArrayAlgorithms` provides `Copy`, `Contains`, `IndexOf`, `FindIndex`, `Any`, `All`, `Count`, `ForEach`, `Map`, `Filter`, `Fold`, `Reversed`, and `Sorted`. All callback traversal is left to right. `Any` and `All` short-circuit, `Filter` invokes its predicate exactly once per input, and `Sorted` is stable. Allocating operations return new arrays and never mutate the source. Equality and ordering are explicit; there is no boxing fallback.
+
+`System.IDisposable`, `IEnumerator<T>`, and `IEnumerable<T>` define deterministic enumeration. `System.Collections.List<T>` uses contiguous storage; `Stack<T>` enumerates top to bottom; and circular-buffer `Queue<T>` enumerates front to back. Checked operations throw `ArgumentOutOfRangeException` or `InvalidOperationException`; failed `Try` operations write `default(T)`.
+
+`Map<TKey,TValue>` and `Set<T>` require supplied `Hasher<T>` and `Equality<T>` callbacks. They use cached hashes, power-of-two buckets, a 75 percent growth threshold, free-entry reuse, and insertion-order links. Growth never reinvokes callbacks. Equal keys must have equal hashes. Mutation during an active callback is invalid, callback failure is transactional, replacement keeps map order, and remove-then-add places an item last. Enumerators are versioned and throw after mutation; collections are not synchronized.
+
+### UTF-8 rune helpers
+
+`System.Text.Utf8.TryDecode(string,int,out rune,out int)` reads one scalar at a byte offset. The native-buffer overload validates external bytes, and `TryEncode` writes one scalar to a writable native buffer. All are allocation-free. Failure writes NUL and a zero count; an encode failure does not modify the destination. Decoding rejects continuation starts, truncated and overlong sequences, surrogates, and scalars above `U+10FFFF`.
+
 These operations are compiler intrinsics rather than declarations in the bundled C~ sources.
 
 ## Runtime behavior
@@ -491,6 +505,6 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 The initial Cosmopolitan x64 audit has passed one portable managed-runtime APE on Linux/WSL and Windows. Broader math, environment, exports/callbacks, Unicode-path, custom-section, and final-retention cases remain explicit acceptance work. Arm64 and fat-image claims remain later gates; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
-The checked library roadmap includes rune encode/decode helpers, richer hosted I/O, SIMD buffer operations, and safe long-lived native-resource storage. Later work can add `System.Convert`, parsing, richer strings, collections, streams, directories, clocks, and date/time APIs. [TODO.md](TODO.md) contains the active list.
+The checked library roadmap includes richer hosted I/O, SIMD buffer operations, mutable collections after the required language foundations, and safe long-lived native-resource storage. Later work can add `System.Convert`, parsing, richer strings, streams, directories, clocks, and date/time APIs. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
 
 Project binding manifests can add generated source-compatible ESP-IDF APIs alongside this handwritten surface. Their tracked C~ declarations use ordinary extern and ownership contracts, while project-private adapters consume the installed public headers, native constants, validated initializer macros, nested configuration fields, bounded fixed UTF-8 arrays, and selected output structures. Generated APIs are project declarations, not additions to the embedded standard library. `[NoAlloc]` describes only C~-heap behavior; a generated ESP-IDF call may allocate native memory. Long-lived owned-resource fields and retained callback lifetime rules remain deferred. Generated bindings do not infer `[InterruptSafe]`.

@@ -59,7 +59,7 @@ test("every language keyword receives its intended scope", () => {
       scope: "storage.modifier.ctilde"
     },
     {
-      words: ["alignof", "assert", "break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "offsetof", "return", "sizeof", "switch", "throw", "try", "while"],
+      words: ["alignof", "assert", "break", "case", "catch", "continue", "default", "defer", "do", "else", "finally", "for", "foreach", "if", "in", "lock", "offsetof", "return", "sizeof", "switch", "throw", "try", "while", "yield"],
       scope: "keyword.control.ctilde"
     },
     {

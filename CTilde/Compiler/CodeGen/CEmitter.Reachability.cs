@@ -6,7 +6,23 @@ internal sealed partial class CEmitter
 {
     private ImmutableHashSet<TypeSymbol> _reachableTypes = ImmutableHashSet<TypeSymbol>.Empty;
 
-    private IEnumerable<TypeSymbol> EmittedTypes => Model.UserTypes.Where(_reachableTypes.Contains);
+    private IEnumerable<TypeSymbol> EmittedTypes => Model.UserTypes.Where(type => _reachableTypes.Contains(type) && !IsOpenGenericType(type));
+
+    private static bool IsOpenGenericType(TypeSymbol type) => type.TypeArguments.Any(ContainsOpenTypeParameter);
+
+    private static bool ContainsOpenTypeParameter(CType type)
+    {
+        if (type.Kind == CTypeKind.TypeParameter)
+            return true;
+        if (type.ElementType is not null && ContainsOpenTypeParameter(type.ElementType))
+            return true;
+        if (type.Symbol is not null && type.Symbol.TypeArguments.Any(ContainsOpenTypeParameter))
+            return true;
+        if (type.FunctionPointer is not null &&
+            (ContainsOpenTypeParameter(type.FunctionPointer.ReturnType) || type.FunctionPointer.ParameterTypes.Any(ContainsOpenTypeParameter)))
+            return true;
+        return false;
+    }
 
     private void ComputeReachableTypes(TypedIrProgram program)
     {

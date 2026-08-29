@@ -135,6 +135,7 @@ public enum SyntaxKind
     WhileKeyword,
     VolatileKeyword,
     WhereKeyword,
+    YieldKeyword,
     GetKeyword,
     SetKeyword,
 }
@@ -421,7 +422,8 @@ public sealed record MethodDeclarationSyntax(
     BlockStatementSyntax? Body,
     ImmutableArray<TypeParameterSyntax> TypeParameters = default,
     ImmutableArray<TypeParameterConstraintClauseSyntax> ConstraintClauses = default,
-    AssemblyFunctionBodySyntax? AssemblyBody = null) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+    AssemblyFunctionBodySyntax? AssemblyBody = null,
+    TypeSyntax? ExplicitInterfaceType = null) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 
 public sealed record OperatorDeclarationSyntax(
     SourceText Source,
@@ -467,7 +469,8 @@ public sealed record PropertyDeclarationSyntax(
     TypeSyntax Type,
     string Name,
     AccessorSyntax? Getter,
-    AccessorSyntax? Setter) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
+    AccessorSyntax? Setter,
+    ParameterSyntax? IndexParameter = null) : MemberDeclarationSyntax(Source, Span, Modifiers, Attributes);
 
 public abstract record StatementSyntax(SourceText Source, TextSpan Span) : SyntaxNode(Source, Span);
 
@@ -486,6 +489,7 @@ public sealed record ContinueStatementSyntax(SourceText Source, TextSpan Span) :
 public sealed record DeferStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression) : StatementSyntax(Source, Span);
 public sealed record LockStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax Expression, BlockStatementSyntax Body) : StatementSyntax(Source, Span);
 public sealed record ReturnStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
+public sealed record YieldStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression, bool IsBreak) : StatementSyntax(Source, Span);
 public sealed record ThrowStatementSyntax(SourceText Source, TextSpan Span, ExpressionSyntax? Expression) : StatementSyntax(Source, Span);
 public sealed record TryStatementSyntax(SourceText Source, TextSpan Span, BlockStatementSyntax Body, ImmutableArray<CatchClauseSyntax> Catches, FinallyClauseSyntax? Finally) : StatementSyntax(Source, Span);
 public sealed record CatchClauseSyntax(SourceText Source, TextSpan Span, TypeSyntax? Type, string? Name, BlockStatementSyntax Body) : SyntaxNode(Source, Span);
@@ -524,6 +528,7 @@ public sealed record SwitchLabelSyntax(SourceText Source, TextSpan Span, Express
 public abstract record ExpressionSyntax(SourceText Source, TextSpan Span) : SyntaxNode(Source, Span);
 public sealed record ArgumentSyntax(SourceText Source, TextSpan Span, ParameterPassingKind PassingKind, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
 public sealed record LiteralExpressionSyntax(SourceText Source, TextSpan Span, object? Value, SyntaxKind LiteralKind) : ExpressionSyntax(Source, Span);
+public sealed record DefaultExpressionSyntax(SourceText Source, TextSpan Span, TypeSyntax Type) : ExpressionSyntax(Source, Span);
 public sealed record LambdaParameterSyntax(SourceText Source, TextSpan Span, TypeSyntax? Type, string Name, ParameterPassingKind PassingKind) : SyntaxNode(Source, Span);
 public sealed record LambdaCaptureSyntax(SourceText Source, TextSpan Span, string Name, ExpressionSyntax Expression) : SyntaxNode(Source, Span);
 public sealed record LambdaExpressionSyntax(

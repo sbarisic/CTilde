@@ -144,7 +144,7 @@ internal static partial class ConformanceTests
             var runtimeSource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             var namespaceSources = string.Join("\n", bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content));
             var entrySource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.EntrySource).Content;
-            Assert(internalHeader.Contains("CTILDE_INTERNAL_DRAFT_034_H", StringComparison.Ordinal), "The modular internal-header guard was not derived from the current draft version.");
+            Assert(internalHeader.Contains("CTILDE_INTERNAL_DRAFT_036_H", StringComparison.Ordinal), "The modular internal-header guard was not derived from the current draft version.");
             Assert(internalHeader.Contains(codeMacro, StringComparison.Ordinal), "The internal code prototype lost its section annotation.");
             Assert(!internalHeader.Split('\n').Any(line => line.Contains("extern", StringComparison.Ordinal) && line.Contains(dataMacro, StringComparison.Ordinal)), "An extern data declaration retained a definition-only placement annotation.");
             Assert(runtimeSource.Contains(dataMacro, StringComparison.Ordinal), "The modular data definition lost its section annotation.");

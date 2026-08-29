@@ -1,0 +1,555 @@
+namespace System.Collections;
+
+public sealed class List<T> : System.IEnumerable<T>
+{
+    private T[] items;
+    private int count;
+    private int version;
+    private int callbackDepth;
+
+    public List() : this(0) { }
+
+    public List(int capacity)
+    {
+        if (capacity < 0)
+            throw new System.ArgumentOutOfRangeException();
+        items = new T[capacity];
+        count = 0;
+        version = 0;
+        callbackDepth = 0;
+    }
+
+    public int Count { get { return count; } }
+
+    public T this[int index]
+    {
+        get
+        {
+            CheckIndex(index);
+            return items[index];
+        }
+        set
+        {
+            EnsureCanMutate();
+            CheckIndex(index);
+            items[index] = value;
+            version++;
+        }
+    }
+
+    public void Add(T value)
+    {
+        EnsureCanMutate();
+        EnsureCapacity(count + 1);
+        items[count] = value;
+        count++;
+        version++;
+    }
+
+    public void Insert(int index, T value)
+    {
+        EnsureCanMutate();
+        if (index < 0 || index > count)
+            throw new System.ArgumentOutOfRangeException();
+        EnsureCapacity(count + 1);
+        int position = count;
+        while (position > index)
+        {
+            items[position] = items[position - 1];
+            position--;
+        }
+        items[index] = value;
+        count++;
+        version++;
+    }
+
+    public void RemoveAt(int index)
+    {
+        EnsureCanMutate();
+        CheckIndex(index);
+        int position = index;
+        while (position + 1 < count)
+        {
+            items[position] = items[position + 1];
+            position++;
+        }
+        count--;
+        items[count] = default(T);
+        version++;
+    }
+
+    public bool Contains(T value, System.Equality<T> equality)
+    {
+        if (equality == null)
+            throw new System.ArgumentException();
+        int index = 0;
+        while (index < count)
+        {
+            bool equal = InvokeEquality(equality, items[index], value);
+            if (equal)
+                return true;
+            index++;
+        }
+        return false;
+    }
+
+    public bool Remove(T value, System.Equality<T> equality)
+    {
+        EnsureCanMutate();
+        if (equality == null)
+            throw new System.ArgumentException();
+        int index = 0;
+        while (index < count)
+        {
+            bool equal = InvokeEquality(equality, items[index], value);
+            if (equal)
+            {
+                RemoveAt(index);
+                return true;
+            }
+            index++;
+        }
+        return false;
+    }
+
+    public void Clear()
+    {
+        EnsureCanMutate();
+        if (count == 0)
+            return;
+        int index = 0;
+        while (index < count)
+        {
+            items[index] = default(T);
+            index++;
+        }
+        count = 0;
+        version++;
+    }
+
+    public ListEnumerator<T> GetEnumerator()
+    {
+        return new ListEnumerator<T>(this);
+    }
+
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    internal int InternalVersion { get { return version; } }
+    internal int InternalCount { get { return count; } }
+    internal T InternalGet(int index) { return items[index]; }
+
+    private void CheckIndex(int index)
+    {
+        if (index < 0 || index >= count)
+            throw new System.IndexOutOfRangeException();
+    }
+
+    private void EnsureCanMutate()
+    {
+        if (callbackDepth != 0)
+            throw new System.InvalidOperationException();
+    }
+
+    private bool InvokeEquality(System.Equality<T> equality, T left, T right)
+    {
+        callbackDepth++;
+        try
+        {
+            return equality(left, right);
+        }
+        finally
+        {
+            callbackDepth--;
+        }
+    }
+
+    private void EnsureCapacity(int required)
+    {
+        if (items.Length >= required)
+            return;
+        int capacity = items.Length;
+        if (capacity == 0)
+            capacity = 4;
+        while (capacity < required)
+        {
+            if (capacity > 1073741823)
+                throw new System.OutOfMemoryException();
+            capacity = capacity * 2;
+        }
+        T[] replacement = new T[capacity];
+        int index = 0;
+        while (index < count)
+        {
+            replacement[index] = items[index];
+            index++;
+        }
+        items = replacement;
+    }
+}
+
+public struct ListEnumerator<T> : System.IEnumerator<T>
+{
+    private List<T> collection;
+    private int expectedVersion;
+    private int index;
+    private bool disposed;
+
+    internal ListEnumerator(List<T> collection)
+    {
+        this.collection = collection;
+        expectedVersion = collection.InternalVersion;
+        index = -1;
+        disposed = false;
+    }
+
+    public T Current
+    {
+        get
+        {
+            Validate();
+            if (index < 0 || index >= collection.InternalCount)
+                throw new System.InvalidOperationException();
+            return collection.InternalGet(index);
+        }
+    }
+
+    public bool MoveNext()
+    {
+        if (disposed)
+            return false;
+        Validate();
+        int next = index + 1;
+        if (next >= collection.InternalCount)
+        {
+            index = collection.InternalCount;
+            return false;
+        }
+        index = next;
+        return true;
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        collection = null;
+    }
+
+    private void Validate()
+    {
+        if (disposed || collection == null)
+            throw new System.InvalidOperationException();
+        if (collection.InternalVersion != expectedVersion)
+            throw new System.InvalidOperationException();
+    }
+}
+
+public sealed class Stack<T> : System.IEnumerable<T>
+{
+    private List<T> values;
+
+    public Stack() : this(0) { }
+    public Stack(int capacity) { values = new List<T>(capacity); }
+    public int Count { get { return values.Count; } }
+    public void Push(T value) { values.Add(value); }
+
+    public T Pop()
+    {
+        if (values.Count == 0)
+            throw new System.InvalidOperationException();
+        int index = values.Count - 1;
+        T value = values[index];
+        values.RemoveAt(index);
+        return value;
+    }
+
+    public bool TryPop(out T value)
+    {
+        if (values.Count == 0)
+        {
+            value = default(T);
+            return false;
+        }
+        value = Pop();
+        return true;
+    }
+
+    public T Peek()
+    {
+        if (values.Count == 0)
+            throw new System.InvalidOperationException();
+        return values[values.Count - 1];
+    }
+
+    public bool TryPeek(out T value)
+    {
+        if (values.Count == 0)
+        {
+            value = default(T);
+            return false;
+        }
+        value = values[values.Count - 1];
+        return true;
+    }
+
+    public bool Contains(T value, System.Equality<T> equality) { return values.Contains(value, equality); }
+    public void Clear() { values.Clear(); }
+    public StackEnumerator<T> GetEnumerator() { return new StackEnumerator<T>(values); }
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator() { return GetEnumerator(); }
+}
+
+public struct StackEnumerator<T> : System.IEnumerator<T>
+{
+    private List<T> collection;
+    private int expectedVersion;
+    private int index;
+    private bool disposed;
+
+    internal StackEnumerator(List<T> collection)
+    {
+        this.collection = collection;
+        expectedVersion = collection.InternalVersion;
+        index = collection.InternalCount;
+        disposed = false;
+    }
+
+    public T Current
+    {
+        get
+        {
+            Validate();
+            if (index < 0 || index >= collection.InternalCount)
+                throw new System.InvalidOperationException();
+            return collection.InternalGet(index);
+        }
+    }
+
+    public bool MoveNext()
+    {
+        if (disposed)
+            return false;
+        Validate();
+        int next = index - 1;
+        if (next < 0)
+        {
+            index = -1;
+            return false;
+        }
+        index = next;
+        return true;
+    }
+
+    public void Dispose() { disposed = true; collection = null; }
+    private void Validate()
+    {
+        if (disposed || collection == null || collection.InternalVersion != expectedVersion)
+            throw new System.InvalidOperationException();
+    }
+}
+
+public sealed class Queue<T> : System.IEnumerable<T>
+{
+    private T[] items;
+    private int head;
+    private int count;
+    private int version;
+    private int callbackDepth;
+
+    public Queue() : this(0) { }
+    public Queue(int capacity)
+    {
+        if (capacity < 0)
+            throw new System.ArgumentOutOfRangeException();
+        items = new T[capacity];
+        head = 0;
+        count = 0;
+        version = 0;
+        callbackDepth = 0;
+    }
+
+    public int Count { get { return count; } }
+
+    public void Enqueue(T value)
+    {
+        EnsureCanMutate();
+        EnsureCapacity(count + 1);
+        int index = head + count;
+        if (index >= items.Length)
+            index = index - items.Length;
+        items[index] = value;
+        count++;
+        version++;
+    }
+
+    public T Dequeue()
+    {
+        EnsureCanMutate();
+        if (count == 0)
+            throw new System.InvalidOperationException();
+        T value = items[head];
+        items[head] = default(T);
+        head++;
+        if (head == items.Length)
+            head = 0;
+        count--;
+        version++;
+        return value;
+    }
+
+    public bool TryDequeue(out T value)
+    {
+        if (count == 0)
+        {
+            value = default(T);
+            return false;
+        }
+        value = Dequeue();
+        return true;
+    }
+
+    public T Peek()
+    {
+        if (count == 0)
+            throw new System.InvalidOperationException();
+        return items[head];
+    }
+
+    public bool TryPeek(out T value)
+    {
+        if (count == 0)
+        {
+            value = default(T);
+            return false;
+        }
+        value = items[head];
+        return true;
+    }
+
+    public bool Contains(T value, System.Equality<T> equality)
+    {
+        if (equality == null)
+            throw new System.ArgumentException();
+        int offset = 0;
+        while (offset < count)
+        {
+            int index = PhysicalIndex(offset);
+            callbackDepth++;
+            bool equal = false;
+            try { equal = equality(items[index], value); }
+            finally { callbackDepth--; }
+            if (equal)
+                return true;
+            offset++;
+        }
+        return false;
+    }
+
+    public void Clear()
+    {
+        EnsureCanMutate();
+        if (count == 0)
+            return;
+        int offset = 0;
+        while (offset < count)
+        {
+            items[PhysicalIndex(offset)] = default(T);
+            offset++;
+        }
+        head = 0;
+        count = 0;
+        version++;
+    }
+
+    public QueueEnumerator<T> GetEnumerator() { return new QueueEnumerator<T>(this); }
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator() { return GetEnumerator(); }
+    internal int InternalVersion { get { return version; } }
+    internal int InternalCount { get { return count; } }
+    internal T InternalGet(int offset) { return items[PhysicalIndex(offset)]; }
+
+    private int PhysicalIndex(int offset)
+    {
+        int index = head + offset;
+        if (index >= items.Length)
+            index = index - items.Length;
+        return index;
+    }
+
+    private void EnsureCanMutate()
+    {
+        if (callbackDepth != 0)
+            throw new System.InvalidOperationException();
+    }
+
+    private void EnsureCapacity(int required)
+    {
+        if (items.Length >= required)
+            return;
+        int capacity = items.Length;
+        if (capacity == 0)
+            capacity = 4;
+        while (capacity < required)
+            capacity = capacity * 2;
+        T[] replacement = new T[capacity];
+        int offset = 0;
+        while (offset < count)
+        {
+            replacement[offset] = items[PhysicalIndex(offset)];
+            offset++;
+        }
+        items = replacement;
+        head = 0;
+    }
+}
+
+public struct QueueEnumerator<T> : System.IEnumerator<T>
+{
+    private Queue<T> collection;
+    private int expectedVersion;
+    private int offset;
+    private bool disposed;
+
+    internal QueueEnumerator(Queue<T> collection)
+    {
+        this.collection = collection;
+        expectedVersion = collection.InternalVersion;
+        offset = -1;
+        disposed = false;
+    }
+
+    public T Current
+    {
+        get
+        {
+            Validate();
+            if (offset < 0 || offset >= collection.InternalCount)
+                throw new System.InvalidOperationException();
+            return collection.InternalGet(offset);
+        }
+    }
+
+    public bool MoveNext()
+    {
+        if (disposed)
+            return false;
+        Validate();
+        int next = offset + 1;
+        if (next >= collection.InternalCount)
+        {
+            offset = collection.InternalCount;
+            return false;
+        }
+        offset = next;
+        return true;
+    }
+
+    public void Dispose() { disposed = true; collection = null; }
+    private void Validate()
+    {
+        if (disposed || collection == null || collection.InternalVersion != expectedVersion)
+            throw new System.InvalidOperationException();
+    }
+}

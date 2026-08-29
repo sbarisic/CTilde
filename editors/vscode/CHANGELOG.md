@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 - 2026-08-30
+
+- Added Draft 0.36 generic collections, indexers, enumeration, and iterator syntax.
+- Aligned the compiler, language server, debug adapter, and extension package.
+
+## 0.13.0 - 2026-08-30
+
+- Aligned the compiler, language server, debug adapter, and extension package for C~ Draft 0.35.
+- Added editor coverage for generic standard-library types, array algorithms, callback delegates, and `System.Text.Utf8`.
+
 ## 0.11.0 - 2026-08-28
 
 - Added **C~: Run Project** and manifest-driven rebuild-and-run tasks.

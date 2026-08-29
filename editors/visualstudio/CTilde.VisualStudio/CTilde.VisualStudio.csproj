@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.12.0</Version>
-    <AssemblyVersion>0.12.0.0</AssemblyVersion>
+    <Version>0.14.0</Version>
+    <AssemblyVersion>0.14.0.0</AssemblyVersion>
     <AssemblyName>CTilde.VisualStudio</AssemblyName>
     <RootNamespace>CTilde.VisualStudio</RootNamespace>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>

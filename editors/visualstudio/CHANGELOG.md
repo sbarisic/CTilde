@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0 - Preview
+
+- Added Draft 0.36 generic collections, indexers, enumeration, and iterator syntax.
+- Aligned the VSIX, bundled compiler, language server, and debug adapter.
+
+## 0.13.0 - Preview
+
+- Aligned the VSIX, bundled compiler, language server, and debug adapter for C~ Draft 0.35.
+- Added editor support for generic containers, array algorithms, callback delegates, and `System.Text.Utf8`.
+
 ## 0.12.0 - Preview
 
 - Added Visual Studio F5 launch debugging for `esp32_qemu` and `esp32c3_qemu` through the existing .NET 10 DAP adapter.

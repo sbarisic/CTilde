@@ -101,6 +101,7 @@ internal sealed class Lexer(SourceText source, DiagnosticBag diagnostics)
         ["volatile"] = SyntaxKind.VolatileKeyword,
         ["void"] = SyntaxKind.VoidKeyword,
         ["where"] = SyntaxKind.WhereKeyword,
+        ["yield"] = SyntaxKind.YieldKeyword,
         ["while"] = SyntaxKind.WhileKeyword,
         ["get"] = SyntaxKind.GetKeyword,
         ["set"] = SyntaxKind.SetKeyword,

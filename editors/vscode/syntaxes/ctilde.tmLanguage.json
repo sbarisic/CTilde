@@ -603,7 +603,7 @@
     },
     "control-keywords": {
       "name": "keyword.control.ctilde",
-      "match": "(?<![@_\\p{L}\\p{Nd}])(?:alignof|assert|asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|lock|offsetof|return|sizeof|switch|throw|try|typeof|while)(?![_\\p{L}\\p{Nd}])"
+      "match": "(?<![@_\\p{L}\\p{Nd}])(?:alignof|assert|asm|break|case|catch|continue|default|defer|do|else|finally|for|foreach|if|in|lock|offsetof|return|sizeof|switch|throw|try|typeof|while|yield)(?![_\\p{L}\\p{Nd}])"
     },
     "other-keywords": {
       "patterns": [

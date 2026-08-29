@@ -11,6 +11,7 @@ internal sealed partial class TypedIrBodyLowerer
         var result = syntax switch
         {
             LiteralExpressionSyntax literal => LowerLiteral(literal),
+            DefaultExpressionSyntax @default => LowerDefault(@default),
             LambdaExpressionSyntax lambda => new IrExpressionValue { Type = CType.Error, Code = string.Empty, Lambda = lambda, Symbol = lambda },
             NameExpressionSyntax name => LowerName(name, false),
             ThisExpressionSyntax @this => LowerThis(@this),
@@ -37,6 +38,25 @@ internal sealed partial class TypedIrBodyLowerer
         if (_optimizationFacts.KnownNonNullExpressions.Contains(syntax))
             result.IsKnownNonNull = true;
         return RecordSemantic(syntax, result);
+    }
+
+    private IrExpressionValue LowerDefault(DefaultExpressionSyntax syntax)
+    {
+        var type = ResolveType(syntax.Type);
+        if (type.Kind == CTypeKind.Void || type.IsError)
+        {
+            Report("CT2211", "default(T) requires a complete non-void type.", syntax);
+            return ErrorExpression();
+        }
+        if (type.ContainsPointer)
+            RequireUnsafe(syntax);
+        _emitter.RegisterType(type);
+        return new IrExpressionValue
+        {
+            Type = type,
+            Code = _emitter.DefaultValue(type),
+            Ownership = type.ContainsManagedReferences ? OwnershipKind.Owned : OwnershipKind.None,
+        };
     }
 
     private IrExpressionValue LowerSizeOf(SizeOfExpressionSyntax syntax)
@@ -653,10 +673,54 @@ internal sealed partial class TypedIrBodyLowerer
         var receiver = loweredReceiver.Type.Kind == CTypeKind.InlineArray && loweredReceiver.LValue is not null
             ? loweredReceiver
             : Materialize(loweredReceiver, syntax.Receiver);
-        var indexType = receiver.Type.IsNativeBuffer ? CType.Nuint : CType.Int;
+        var indexer = receiver.Type.Symbol is null
+            ? null
+            : Hierarchy(receiver.Type.Symbol).SelectMany(type => type.Properties)
+                .FirstOrDefault(property => property.IndexParameter is not null);
+        var indexType = indexer?.IndexParameter?.Type ?? (receiver.Type.IsNativeBuffer ? CType.Nuint : CType.Int);
         var index = Materialize(Convert(LowerExpression(syntax.Index), indexType, syntax.Index, false), syntax.Index);
         var prelude = new List<string>(receiver.Prelude);
         prelude.AddRange(index.Prelude);
+        if (indexer is not null)
+        {
+            CheckAccess(indexer, syntax);
+            CheckAccessibility(forWrite ? indexer.SetterAccessibility : indexer.GetterAccessibility, indexer, syntax);
+            if (forWrite && indexer.Setter is null)
+                Report("CT1266", "Indexer is read-only.", syntax);
+            if (!forWrite && indexer.Getter is null)
+                Report("CT2117", "Indexer has no getter.", syntax);
+            var accessor = forWrite
+                ? indexer.Setter is null ? null : _emitter.GetAccessorMethod(indexer, getter: false)
+                : indexer.Getter is null ? null : _emitter.GetAccessorMethod(indexer, getter: true);
+            if (accessor is not null)
+                _emitter.Effects.RecordCall(_method, accessor, syntax, indexer.IsVirtual && !receiver.IsBaseReceiver);
+            var loweredReceiverValue = MaterializeReceiver(receiver, syntax.Receiver);
+            prelude = [.. loweredReceiverValue.Prelude, .. index.Prelude];
+            var typedReceiver = $"({NameMangler.Type(indexer.ContainingType)}*)(void*){loweredReceiverValue.Code}";
+            var objectReceiver = $"((ct_object*)(void*){loweredReceiverValue.Code})";
+            var getterCode = indexer.Getter is null
+                ? _emitter.DefaultValue(indexer.Type)
+                : indexer.IsVirtual && !receiver.IsBaseReceiver
+                    ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(indexer)}({objectReceiver}, {index.Code})"
+                    : $"{NameMangler.Getter(indexer)}({typedReceiver}, {index.Code})";
+            var result = new IrExpressionValue
+            {
+                Type = indexer.Type,
+                Code = getterCode,
+                Prelude = prelude,
+                Symbol = indexer,
+                LValue = indexer.Setter is null ? null : new IrValueStorage
+                {
+                    Store = value => indexer.IsVirtual && !receiver.IsBaseReceiver
+                        ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(indexer)}({objectReceiver}, {index.Code}, {value})"
+                        : $"{NameMangler.Setter(indexer)}({typedReceiver}, {index.Code}, {value})",
+                    Property = indexer,
+                },
+            };
+            return !forWrite && indexer.Type.ContainsManagedReferences
+                ? OwnResult(indexer.Type, getterCode, prelude)
+                : result;
+        }
         if (receiver.Type.Kind == CTypeKind.Array)
         {
             if (!receiver.IsKnownNonNull)
@@ -986,16 +1050,16 @@ internal sealed partial class TypedIrBodyLowerer
             MemberAccessExpressionSyntax targetMember => targetMember.TypeArguments,
             _ => ImmutableArray<TypeSyntax>.Empty,
         };
-        var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == methodName && method.IsStatic == requireStatic)
+        var candidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.ExplicitInterfaceType is null && method.Name == methodName && method.IsStatic == requireStatic)
             .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
         if (!requireStatic && receiver is not null && receiver.Type.IsValueType)
-            candidates = containingType.Methods.Where(method => !method.IsOperator && method.Name == methodName && !method.IsStatic)
+            candidates = containingType.Methods.Where(method => !method.IsOperator && method.ExplicitInterfaceType is null && method.Name == methodName && !method.IsStatic)
                 .Concat(_model.Types["System.Object"].Methods.Where(method => method.Name == methodName && !method.IsStatic))
                 .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First())
                 .ToArray();
         if (syntax.Target is NameExpressionSyntax && !_method.IsStatic)
         {
-            var allCandidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.Name == methodName)
+            var allCandidates = Hierarchy(containingType).SelectMany(type => type.Methods).Where(method => !method.IsOperator && method.ExplicitInterfaceType is null && method.Name == methodName)
                 .GroupBy(MethodSignatureKey, StringComparer.Ordinal).Select(group => group.First()).ToArray();
             if (allCandidates.Length > 0)
                 candidates = allCandidates;

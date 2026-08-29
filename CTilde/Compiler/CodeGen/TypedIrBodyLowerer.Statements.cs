@@ -199,6 +199,8 @@ internal sealed partial class TypedIrBodyLowerer
             case ReturnStatementSyntax @return:
                 EmitReturn(writer, @return);
                 return new FlowResult(FlowExit.Return);
+            case YieldStatementSyntax yield:
+                return EmitYield(writer, yield);
             case ThrowStatementSyntax @throw:
                 EmitThrow(writer, @throw);
                 return new FlowResult(FlowExit.Throw);
@@ -744,9 +746,14 @@ internal sealed partial class TypedIrBodyLowerer
     private void EmitForeach(ILoweringWriter writer, ForeachStatementSyntax syntax)
     {
         BeginScope(writer, syntax, syntax.Span.End);
-        var collection = Materialize(LowerExpression(syntax.Collection), syntax.Collection);
-        if (collection.Type.Kind != CTypeKind.Array)
-            Report("CT2105", "foreach requires a one-dimensional array.", syntax.Collection);
+        var loweredCollection = LowerExpression(syntax.Collection);
+        if (loweredCollection.Type.Kind != CTypeKind.Array)
+        {
+            EmitPatternForeach(writer, syntax, loweredCollection);
+            EndScope(writer, fallsThrough: true);
+            return;
+        }
+        var collection = Materialize(loweredCollection, syntax.Collection);
         EmitPrelude(writer, collection.Prelude);
         var cleanup = EmitCleanupBoundary(writer, "foreach", syntax);
         var elementType = collection.Type.ElementType ?? CType.Error;
@@ -810,6 +817,215 @@ internal sealed partial class TypedIrBodyLowerer
         }
         EndScope(writer, fallsThrough: true);
         RestoreAssignments(before);
+    }
+
+    private void EmitIteratorBuilder(ILoweringWriter writer)
+    {
+        if (_iteratorListType?.Symbol is null)
+            return;
+        var constructor = _iteratorListType.Symbol.Constructors.FirstOrDefault(candidate => candidate.Parameters.Length == 0);
+        if (constructor is null)
+            return;
+        _emitter.RegisterType(_iteratorListType);
+        _emitter.Effects.RecordCall(_method, constructor, _method.Syntax!, requiresContract: false);
+        _emitter.Effects.RecordAllocation(_method, _method.Syntax!, "iterator sequence storage");
+        RecordIteratorDependency("list-constructor", constructor, _iteratorListType);
+        writer.WriteLine($"{_emitter.CDeclaration(_iteratorListType, IteratorBuilderName)} = {_emitter.DefaultValue(_iteratorListType)};");
+        EmitActivateOwnedSlot(writer, _iteratorListType, IteratorBuilderName, "ct_cleanup_iterator_values");
+        EmitInitializeOwnedSlot(writer, _iteratorListType, IteratorBuilderName, $"{constructor.CName}()");
+    }
+
+    private FlowResult EmitYield(ILoweringWriter writer, YieldStatementSyntax syntax)
+    {
+        if (!_isIteratorMethod || _iteratorElementType is null || _iteratorListType?.Symbol is null)
+        {
+            Report("CT2212", "yield is valid only in an iterator method returning System.IEnumerable<T>.", syntax);
+            return FlowResult.None;
+        }
+        if (syntax.IsBreak)
+        {
+            EmitIteratorReturn(writer, syntax);
+            return new FlowResult(FlowExit.Return);
+        }
+        if (syntax.Expression is null)
+            return FlowResult.None;
+        var add = _iteratorListType.Symbol.Methods.First(method => method.Name == "Add" && method.Parameters.Length == 1);
+        RecordIteratorDependency("list-add", add, CType.Void);
+        _emitter.Effects.RecordCall(_method, add, syntax, requiresContract: false);
+        var value = Convert(LowerExpression(syntax.Expression), _iteratorElementType, syntax.Expression, false);
+        EmitPrelude(writer, value.Prelude);
+        writer.WriteLine($"{add.CName}(({NameMangler.Type(_iteratorListType.Symbol)}*)(void*){IteratorBuilderName}, {value.Code});");
+        return FlowResult.None;
+    }
+
+    private void EmitIteratorReturn(ILoweringWriter writer, SyntaxNode syntax)
+    {
+        if (_iteratorEnumerableType?.Symbol is null || _iteratorListType is null)
+            return;
+        var constructor = _iteratorEnumerableType.Symbol.Constructors.First(candidate => candidate.Parameters.Length == 1);
+        RecordIteratorDependency("enumerable-constructor", constructor, _iteratorEnumerableType);
+        _emitter.RegisterType(_iteratorEnumerableType);
+        _emitter.Effects.RecordCall(_method, constructor, syntax, requiresContract: false);
+        _emitter.Effects.RecordAllocation(_method, syntax, "iterator enumerable construction");
+        var created = new IrExpressionValue
+        {
+            Type = _iteratorEnumerableType,
+            Code = $"{constructor.CName}({IteratorBuilderName})",
+            Ownership = OwnershipKind.Owned,
+            IsKnownNonNull = true,
+            Symbol = constructor,
+        };
+        var converted = Convert(created, _method.ReturnType, syntax, false);
+        EmitPrelude(writer, converted.Prelude);
+        EmitReturnTransfer(writer, converted.Code, converted.Ownership, converted.OwnedCleanupRecord);
+    }
+
+    private void RecordIteratorDependency(string name, object symbol, CType type)
+    {
+        var source = _method.Syntax?.Source ?? _method.Body!.Source;
+        var start = _method.Syntax?.Span.Start ?? _method.Body!.Span.Start;
+        var marker = new NameExpressionSyntax(source, new TextSpan(start, 0), $"<iterator-{name}>");
+        _semanticEntries[marker] = new BoundSemanticEntry(marker, type, symbol, null, OwnershipKind.None, BoundValueCategory.Value);
+    }
+
+    private void EmitPatternForeach(ILoweringWriter writer, ForeachStatementSyntax syntax, IrExpressionValue collection)
+    {
+        var collectionType = collection.Type.Symbol;
+        var getEnumerator = collectionType is null ? null : Hierarchy(collectionType).SelectMany(type => type.Methods)
+            .FirstOrDefault(method => method.Name == "GetEnumerator" && !method.IsStatic && method.Parameters.Length == 0 &&
+                (!method.IsAbstract || collection.Type.Kind == CTypeKind.Interface));
+        if (getEnumerator is null || getEnumerator.ReturnType.Symbol is null)
+        {
+            Report("CT2105", "foreach requires an array or an accessible GetEnumerator pattern.", syntax.Collection);
+            EmitPrelude(writer, collection.Prelude);
+            return;
+        }
+        CheckAccess(getEnumerator, syntax.Collection);
+        var enumeratorType = getEnumerator.ReturnType;
+        var enumeratorSymbol = enumeratorType.Symbol!;
+        var moveNext = Hierarchy(enumeratorSymbol).SelectMany(type => type.Methods)
+            .FirstOrDefault(method => method.Name == "MoveNext" && !method.IsStatic && method.Parameters.Length == 0 && method.ReturnType == CType.Bool);
+        var dispose = Hierarchy(enumeratorSymbol).SelectMany(type => type.Methods)
+            .FirstOrDefault(method => method.Name == "Dispose" && !method.IsStatic && method.Parameters.Length == 0 && method.ReturnType == CType.Void);
+        var current = Hierarchy(enumeratorSymbol).SelectMany(type => type.Properties)
+            .FirstOrDefault(property => property.Name == "Current" && !property.IsStatic && property.Getter is not null && property.IndexParameter is null);
+        if (moveNext is null || dispose is null || current is null)
+        {
+            Report("CT2105", "The foreach enumerator requires bool MoveNext(), readable Current, and void Dispose().", syntax.Collection);
+            EmitPrelude(writer, collection.Prelude);
+            return;
+        }
+        CheckAccess(moveNext, syntax.Collection);
+        CheckAccess(dispose, syntax.Collection);
+        CheckAccess(current, syntax.Collection);
+        _emitter.RegisterType(enumeratorType);
+        RecordForeachDependency("get-enumerator", getEnumerator, getEnumerator.ReturnType);
+        RecordForeachDependency("move-next", moveNext, moveNext.ReturnType);
+        RecordForeachDependency("dispose", dispose, dispose.ReturnType);
+        RecordForeachDependency("current", current, current.Type);
+        _emitter.Effects.RecordCall(_method, getEnumerator, syntax, getEnumerator.IsVirtual);
+        _emitter.Effects.RecordCall(_method, moveNext, syntax, moveNext.IsVirtual);
+        _emitter.Effects.RecordCall(_method, dispose, syntax, dispose.IsVirtual);
+        _emitter.Effects.RecordCall(_method, _emitter.GetAccessorMethod(current, getter: true), syntax, current.IsVirtual);
+        var collectionReceiver = MaterializeReceiver(collection, syntax.Collection);
+        EmitPrelude(writer, collectionReceiver.Prelude);
+        var collectionArgument = collection.Type.Kind == CTypeKind.Interface
+            ? $"((ct_object*)(void*){collectionReceiver.Code})"
+            : $"({NameMangler.Type(getEnumerator.ContainingType)}*)(void*){collectionReceiver.Code}";
+        var enumeratorName = NewTemp();
+        RegisterDurableSlot(enumeratorName, enumeratorType);
+        var enumeratorStorage = $"ct_state.{enumeratorName}";
+        var getCall = getEnumerator.IsVirtual
+            ? $"{collectionArgument}->Type->VTable->{CEmitter.VirtualSlotName(getEnumerator)}({collectionArgument})"
+            : $"{getEnumerator.CName}({collectionArgument})";
+        writer.WriteLine($"{enumeratorStorage} = {_emitter.DefaultValue(enumeratorType)};");
+        if (enumeratorType.ContainsManagedReferences)
+        {
+            EmitActivateOwnedSlot(writer, enumeratorType, enumeratorStorage, $"ct_cleanup_foreach_enumerator_{enumeratorName}");
+            EmitInitializeOwnedSlot(writer, enumeratorType, enumeratorStorage, getCall);
+        }
+        else
+            writer.WriteLine($"{enumeratorStorage} = {getCall};");
+        var enumeratorArgument = enumeratorType.Kind == CTypeKind.Interface
+            ? $"((ct_object*)(void*){enumeratorStorage})"
+            : enumeratorType.Kind == CTypeKind.Struct
+            ? $"({NameMangler.Type(enumeratorSymbol)}*)(void*)&{enumeratorStorage}"
+            : $"({NameMangler.Type(enumeratorSymbol)}*)(void*){enumeratorStorage}";
+        var disposeCall = dispose.IsVirtual
+            ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(dispose)}({enumeratorArgument})"
+            : $"{dispose.CName}({enumeratorArgument})";
+        var disposeId = _deferId++;
+        var disposeRecord = $"ct_cleanup_foreach_dispose_{disposeId}";
+        var disposeThunk = _emitter.DirectDeferThunkName(_method, disposeId);
+        _directDefers.Add(new DirectDeferThunk(disposeThunk, $"{disposeCall};"));
+        RegisterCleanupRecord(disposeRecord);
+        writer.WriteLine($"ct_cleanup_push(&{disposeRecord}, (void*)&ct_state, {disposeThunk});");
+        var cleanup = EmitCleanupBoundary(writer, "foreach", syntax);
+        var declaredType = syntax.Type.Name == "var" ? current.Type : ResolveType(syntax.Type);
+        if (!TypeFacts.CanImplicitlyConvert(current.Type, declaredType))
+            Report("CT2106", $"Enumerator element type '{current.Type.DisplayName}' cannot convert to '{declaredType.DisplayName}'.", syntax.Type);
+        var local = new LocalSymbol
+        {
+            Name = syntax.Name,
+            Type = declaredType,
+            Id = _localId++,
+            Syntax = syntax,
+            IsAssigned = true,
+            AssignmentCount = 1,
+            LoopDepthAtDeclaration = _repeatableLoopDepth + 1,
+            IsDurable = _tryCount != 0,
+        };
+        _scopes.Peek()[syntax.Name] = local;
+        _emitter.RegisterDebugLocal(_method, local, syntax.Body.Span.Start, syntax.Body.Span.End);
+        var start = NewLabel("foreach_pattern_test");
+        var @continue = NewLabel("foreach_pattern_continue");
+        var @break = NewLabel("foreach_pattern_break");
+        var before = SnapshotAssignments();
+        writer.WriteLine($"{start}:;");
+        var moveNextCall = moveNext.IsVirtual
+            ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(moveNext)}({enumeratorArgument})"
+            : $"{moveNext.CName}({enumeratorArgument})";
+        writer.WriteLine($"if (!{moveNextCall}) goto {@break};");
+        if (local.IsDurable)
+            RegisterDurableSlot(local.StorageName, declaredType);
+        else
+            writer.WriteLine($"{_emitter.CDeclaration(declaredType, local.CName)} = {_emitter.DefaultValue(declaredType)};");
+        var currentCode = current.IsVirtual
+            ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualGetterSlotName(current)}({enumeratorArgument})"
+            : $"{NameMangler.Getter(current)}({enumeratorArgument})";
+        if (declaredType.ContainsManagedReferences)
+        {
+            EmitActivateOwnedSlot(writer, declaredType, local.CName, $"ct_cleanup_local_{local.Id}");
+            EmitInitializeOwnedSlot(writer, declaredType, local.CName, currentCode);
+        }
+        else
+            writer.WriteLine($"{local.CName} = {currentCode};");
+        _breakAssignmentStates.Push([]); _continueAssignmentStates.Push([]);
+        _breakLabels.Push(@break); _continueLabels.Push(@continue);
+        _breakCleanupBoundaries.Push(cleanup); _continueCleanupBoundaries.Push(cleanup);
+        _repeatableLoopDepth++;
+        EmitEmbedded(writer, syntax.Body);
+        _repeatableLoopDepth--;
+        _continueCleanupBoundaries.Pop(); _breakCleanupBoundaries.Pop();
+        _continueLabels.Pop(); _breakLabels.Pop();
+        _continueAssignmentStates.Pop(); _breakAssignmentStates.Pop();
+        writer.WriteLine($"goto {@continue};");
+        writer.WriteLine($"{@continue}:;");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        writer.WriteLine($"goto {start};");
+        writer.WriteLine($"{@break}:;");
+        if (cleanup is not null)
+            writer.WriteLine($"ct_cleanup_unwind_to({cleanup});");
+        writer.WriteLine($"ct_cleanup_disarm(&{disposeRecord});");
+        writer.WriteLine($"{disposeCall};");
+        RestoreAssignments(before);
+
+        void RecordForeachDependency(string name, object symbol, CType type)
+        {
+            var marker = new NameExpressionSyntax(syntax.Source, new TextSpan(syntax.Span.Start, 0), $"<foreach-{name}>");
+            _semanticEntries[marker] = new BoundSemanticEntry(marker, type, symbol, null, OwnershipKind.None, BoundValueCategory.Value);
+        }
     }
 
     private FlowResult EmitSwitch(ILoweringWriter writer, SwitchStatementSyntax syntax)

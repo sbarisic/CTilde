@@ -31,7 +31,7 @@ internal sealed class LanguageServer
                 true, true, true, true,
                 new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true)),
                 new SemanticTokensOptions(new SemanticTokensLegend(SemanticTokenTypes, SemanticTokenModifiers), true, false)),
-            new ServerInfo("C~ Language Server", "0.11.0"));
+            new ServerInfo("C~ Language Server", "0.14.0"));
     }
 
     [JsonRpcMethod("initialized", UseSingleObjectParameterDeserialization = true)]

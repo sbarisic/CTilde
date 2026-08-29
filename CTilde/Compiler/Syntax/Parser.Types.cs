@@ -110,6 +110,14 @@ internal sealed partial class Parser
         return index < _tokens.Length && _tokens[index].Kind == SyntaxKind.CloseParenToken;
     }
 
+    private bool LooksLikeExplicitInterfaceMember()
+    {
+        var index = _position;
+        return ScanType(ref index, allowVar: false) && index + 2 < _tokens.Length &&
+            _tokens[index].Kind == SyntaxKind.DotToken && _tokens[index + 1].Kind == SyntaxKind.IdentifierToken &&
+            _tokens[index + 2].Kind == SyntaxKind.OpenParenToken;
+    }
+
     private bool ScanType(ref int index, bool allowVar)
     {
         if (index >= _tokens.Length)

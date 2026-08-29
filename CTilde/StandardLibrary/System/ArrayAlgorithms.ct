@@ -1,0 +1,166 @@
+namespace System.Collections;
+
+public static class ArrayAlgorithms
+{
+    public static T[] Copy<T>(T[] source)
+    {
+        T[] result = new T[source.Length];
+        for (int index = 0; index < source.Length; index++)
+        {
+            result[index] = source[index];
+        }
+
+        return result;
+    }
+
+    public static bool Contains<T>(T[] source, T value, Equality<T> equality)
+    {
+        return IndexOf(source, value, equality) >= 0;
+    }
+
+    public static int IndexOf<T>(T[] source, T value, Equality<T> equality)
+    {
+        for (int index = 0; index < source.Length; index++)
+        {
+            if (equality(source[index], value))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    public static int FindIndex<T>(T[] source, Predicate<T> predicate)
+    {
+        for (int index = 0; index < source.Length; index++)
+        {
+            if (predicate(source[index]))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    public static bool Any<T>(T[] source, Predicate<T> predicate)
+    {
+        return FindIndex(source, predicate) >= 0;
+    }
+
+    public static bool All<T>(T[] source, Predicate<T> predicate)
+    {
+        for (int index = 0; index < source.Length; index++)
+        {
+            if (!predicate(source[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    public static int Count<T>(T[] source, Predicate<T> predicate)
+    {
+        int count = 0;
+        for (int index = 0; index < source.Length; index++)
+        {
+            if (predicate(source[index]))
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    public static void ForEach<T>(T[] source, Visitor<T> visitor)
+    {
+        for (int index = 0; index < source.Length; index++)
+        {
+            visitor(source[index]);
+        }
+    }
+
+    public static TOutput[] Map<TInput, TOutput>(TInput[] source, Mapper<TInput, TOutput> mapper)
+    {
+        TOutput[] result = new TOutput[source.Length];
+        for (int index = 0; index < source.Length; index++)
+        {
+            result[index] = mapper(source[index]);
+        }
+
+        return result;
+    }
+
+    public static T[] Filter<T>(T[] source, Predicate<T> predicate)
+    {
+        bool[] included = new bool[source.Length];
+        int count = 0;
+        for (int index = 0; index < source.Length; index++)
+        {
+            bool include = predicate(source[index]);
+            included[index] = include;
+            if (include)
+            {
+                count++;
+            }
+        }
+
+        T[] result = new T[count];
+        int output = 0;
+        for (int index = 0; index < source.Length; index++)
+        {
+            if (included[index])
+            {
+                result[output] = source[index];
+                output++;
+            }
+        }
+
+        return result;
+    }
+
+    public static TState Fold<TState, TValue>(TValue[] source, TState state, Folder<TState, TValue> folder)
+    {
+        TState result = state;
+        for (int index = 0; index < source.Length; index++)
+        {
+            result = folder(result, source[index]);
+        }
+
+        return result;
+    }
+
+    public static T[] Reversed<T>(T[] source)
+    {
+        T[] result = new T[source.Length];
+        for (int index = 0; index < source.Length; index++)
+        {
+            result[source.Length - index - 1] = source[index];
+        }
+
+        return result;
+    }
+
+    public static T[] Sorted<T>(T[] source, Ordering<T> ordering)
+    {
+        T[] result = Copy(source);
+        for (int index = 1; index < result.Length; index++)
+        {
+            T value = result[index];
+            int insertion = index;
+            while (insertion > 0 && ordering(result[insertion - 1], value) > 0)
+            {
+                result[insertion] = result[insertion - 1];
+                insertion--;
+            }
+
+            result[insertion] = value;
+        }
+
+        return result;
+    }
+}

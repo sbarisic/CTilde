@@ -1,0 +1,173 @@
+using System.Runtime;
+
+namespace System.Text;
+
+public static class Utf8
+{
+    [NoAlloc]
+    public static bool TryDecode(string source, int offset, out rune value, out int bytesRead)
+    {
+        value = r'\0';
+        bytesRead = 0;
+        if (source == null || offset < 0 || offset >= source.Length)
+        {
+            return false;
+        }
+
+        uint first = (uint)source[offset];
+        int length = SequenceLength(first);
+        if (length == 0 || offset + length > source.Length)
+        {
+            return false;
+        }
+
+        uint scalar = InitialScalar(first, length);
+        for (int index = 1; index < length; index++)
+        {
+            uint next = (uint)source[offset + index];
+            if (!IsContinuation(next))
+            {
+                return false;
+            }
+
+            scalar = (scalar << 6) | (next & 63u);
+        }
+
+        if (!IsValidScalar(scalar, length))
+        {
+            return false;
+        }
+
+        value = (rune)scalar;
+        bytesRead = length;
+        return true;
+    }
+
+    [NoAlloc]
+    public static unsafe bool TryDecode(ReadOnlyNativeBuffer<byte> source, out rune value, out nuint bytesRead)
+    {
+        value = r'\0';
+        bytesRead = 0;
+        if (source.Length == 0)
+        {
+            return false;
+        }
+
+        uint first = (uint)source[0];
+        int length = SequenceLength(first);
+        if (length == 0 || source.Length < (nuint)length)
+        {
+            return false;
+        }
+
+        uint scalar = InitialScalar(first, length);
+        for (int index = 1; index < length; index++)
+        {
+            uint next = (uint)source[(nuint)index];
+            if (!IsContinuation(next))
+            {
+                return false;
+            }
+
+            scalar = (scalar << 6) | (next & 63u);
+        }
+
+        if (!IsValidScalar(scalar, length))
+        {
+            return false;
+        }
+
+        value = (rune)scalar;
+        bytesRead = (nuint)length;
+        return true;
+    }
+
+    [NoAlloc]
+    public static unsafe bool TryEncode(rune value, NativeBuffer<byte> destination, out nuint bytesWritten)
+    {
+        bytesWritten = 0;
+        uint scalar = (uint)value;
+        nuint required = 1;
+        if (scalar > 127u)
+        {
+            if (scalar <= 2047u)
+            {
+                required = 2;
+            }
+            else if (scalar <= 65535u)
+            {
+                required = 3;
+            }
+            else
+            {
+                required = 4;
+            }
+        }
+
+        if (destination.Length < required)
+        {
+            return false;
+        }
+
+        if (required == 1)
+        {
+            destination[0] = (byte)scalar;
+        }
+        else if (required == 2)
+        {
+            destination[0] = (byte)(192u | (scalar >> 6));
+            destination[1] = (byte)(128u | (scalar & 63u));
+        }
+        else if (required == 3)
+        {
+            destination[0] = (byte)(224u | (scalar >> 12));
+            destination[1] = (byte)(128u | ((scalar >> 6) & 63u));
+            destination[2] = (byte)(128u | (scalar & 63u));
+        }
+        else
+        {
+            destination[0] = (byte)(240u | (scalar >> 18));
+            destination[1] = (byte)(128u | ((scalar >> 12) & 63u));
+            destination[2] = (byte)(128u | ((scalar >> 6) & 63u));
+            destination[3] = (byte)(128u | (scalar & 63u));
+        }
+
+        bytesWritten = required;
+        return true;
+    }
+
+    [NoAlloc]
+    private static int SequenceLength(uint first)
+    {
+        if (first <= 127u) { return 1; }
+        if (first >= 194u && first <= 223u) { return 2; }
+        if (first >= 224u && first <= 239u) { return 3; }
+        if (first >= 240u && first <= 244u) { return 4; }
+        return 0;
+    }
+
+    [NoAlloc]
+    private static uint InitialScalar(uint first, int length)
+    {
+        if (length == 1) { return first; }
+        if (length == 2) { return first & 31u; }
+        if (length == 3) { return first & 15u; }
+        return first & 7u;
+    }
+
+    [NoAlloc]
+    private static bool IsContinuation(uint value)
+    {
+        return value >= 128u && value <= 191u;
+    }
+
+    [NoAlloc]
+    private static bool IsValidScalar(uint scalar, int length)
+    {
+        if (length == 2 && scalar < 128u) { return false; }
+        if (length == 3 && scalar < 2048u) { return false; }
+        if (length == 4 && scalar < 65536u) { return false; }
+        if (scalar >= 55296u && scalar <= 57343u) { return false; }
+        return scalar <= 1114111u;
+    }
+}

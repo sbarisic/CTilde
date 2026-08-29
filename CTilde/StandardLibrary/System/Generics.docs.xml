@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="T:System.Predicate&lt;T&gt;"><summary>Tests one value.</summary><remarks>Calls are synchronous and may observe captured ARC-managed state.</remarks></member>
+  <member id="T:System.Equality&lt;T&gt;"><summary>Tests two values for caller-defined equality.</summary></member>
+  <member id="T:System.Ordering&lt;T&gt;"><summary>Orders two values by returning a negative, zero, or positive result.</summary></member>
+  <member id="T:System.Mapper&lt;TInput, TOutput&gt;"><summary>Transforms one value into another.</summary><remarks>The callback can allocate or throw according to its implementation.</remarks></member>
+  <member id="T:System.Folder&lt;TState, TValue&gt;"><summary>Combines an accumulated state and one input value.</summary></member>
+  <member id="T:System.Visitor&lt;T&gt;"><summary>Visits one value synchronously.</summary></member>
+
+  <member id="T:System.Pair&lt;TFirst, TSecond&gt;"><summary>Stores two immutable values.</summary><remarks>Managed fields participate in ordinary ARC copy and cleanup.</remarks></member>
+  <member id="M:System.Pair&lt;TFirst, TSecond&gt;.#ctor(TFirst,TSecond)"><summary>Creates a pair.</summary><param name="first">The first value.</param><param name="second">The second value.</param></member>
+  <member id="F:System.Pair&lt;TFirst, TSecond&gt;.First"><summary>Gets the immutable first value.</summary></member>
+  <member id="F:System.Pair&lt;TFirst, TSecond&gt;.Second"><summary>Gets the immutable second value.</summary></member>
+
+  <member id="T:System.Option&lt;T&gt;"><summary>Represents a present value or no value.</summary><remarks>The structure allocates no storage by itself. Managed values follow ordinary ARC ownership.</remarks></member>
+  <member id="M:System.Option&lt;T&gt;.Some(T)"><summary>Creates a present option.</summary><param name="value">The stored value.</param><returns>A present option.</returns></member>
+  <member id="P:System.Option&lt;T&gt;.None"><summary>Gets an option with no value.</summary></member>
+  <member id="P:System.Option&lt;T&gt;.HasValue"><summary>Gets whether a value is present.</summary></member>
+  <member id="M:System.Option&lt;T&gt;.TryGet(out T)"><summary>Attempts to get the stored value.</summary><param name="value">Receives the stored value, or the zero-initialized field when absent.</param><returns>True when present.</returns></member>
+  <member id="M:System.Option&lt;T&gt;.Or(T)"><summary>Gets the stored value or a fallback.</summary><param name="fallback">The value returned when absent.</param><returns>The selected value.</returns></member>
+  <member id="M:System.Option&lt;T&gt;.Map``1(System.Mapper&lt;T, TOutput&gt;)"><summary>Maps a present value.</summary><param name="mapper">The callback invoked once only when present.</param><returns>A mapped option.</returns><remarks>The callback can allocate or throw.</remarks></member>
+
+  <member id="T:System.Result&lt;TOk, TErr&gt;"><summary>Represents either a successful value or an error value.</summary><remarks>Managed payloads follow ordinary ARC ownership.</remarks></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.Ok(TOk)"><summary>Creates a successful result.</summary><param name="value">The success value.</param><returns>A successful result.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.Err(TErr)"><summary>Creates an error result.</summary><param name="error">The error value.</param><returns>An error result.</returns></member>
+  <member id="P:System.Result&lt;TOk, TErr&gt;.IsOk"><summary>Gets whether this result is successful.</summary></member>
+  <member id="P:System.Result&lt;TOk, TErr&gt;.IsErr"><summary>Gets whether this result is an error.</summary></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.TryGetOk(out TOk)"><summary>Attempts to get the success value.</summary><param name="value">Receives the success field, including its zero state on an error.</param><returns>True for success.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.TryGetErr(out TErr)"><summary>Attempts to get the error value.</summary><param name="value">Receives the error field, including its zero state on success.</param><returns>True for an error.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.OkOr(TOk)"><summary>Gets the success value or a fallback.</summary><param name="fallback">The fallback for an error.</param><returns>The selected value.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.ErrOr(TErr)"><summary>Gets the error value or a fallback.</summary><param name="fallback">The fallback for success.</param><returns>The selected value.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.MapOk``1(System.Mapper&lt;TOk, TOutput&gt;)"><summary>Maps the success branch.</summary><param name="mapper">The callback invoked once only for success.</param><returns>A result with the mapped success type.</returns></member>
+  <member id="M:System.Result&lt;TOk, TErr&gt;.MapErr``1(System.Mapper&lt;TErr, TOutput&gt;)"><summary>Maps the error branch.</summary><param name="mapper">The callback invoked once only for an error.</param><returns>A result with the mapped error type.</returns></member>
+
+  <member id="T:System.Collections.ArrayAlgorithms"><summary>Provides deterministic algorithms over managed arrays.</summary><remarks>Inputs are never mutated. Callback operations execute left to right.</remarks></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Copy``1(T[])"><summary>Allocates and returns a shallow copy.</summary><param name="source">The source array.</param><returns>A new array.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Contains``1(T[],T,System.Equality&lt;T&gt;)"><summary>Tests for a value with explicit equality and stops at the first match.</summary><param name="source">The source array.</param><param name="value">The sought value.</param><param name="equality">The equality callback.</param><returns>True when found.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.IndexOf``1(T[],T,System.Equality&lt;T&gt;)"><summary>Finds the first matching index.</summary><param name="source">The source array.</param><param name="value">The sought value.</param><param name="equality">The equality callback.</param><returns>The index, or -1.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.FindIndex``1(T[],System.Predicate&lt;T&gt;)"><summary>Finds the first accepted index.</summary><param name="source">The source array.</param><param name="predicate">The predicate.</param><returns>The index, or -1.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Any``1(T[],System.Predicate&lt;T&gt;)"><summary>Tests values until one is accepted.</summary><param name="source">The source array.</param><param name="predicate">The predicate.</param><returns>True on the first accepted value.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.All``1(T[],System.Predicate&lt;T&gt;)"><summary>Tests values until one is rejected.</summary><param name="source">The source array.</param><param name="predicate">The predicate.</param><returns>True when every value is accepted.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Count``1(T[],System.Predicate&lt;T&gt;)"><summary>Counts accepted values.</summary><param name="source">The source array.</param><param name="predicate">The predicate called once per element.</param><returns>The count.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.ForEach``1(T[],System.Visitor&lt;T&gt;)"><summary>Visits every value from left to right.</summary><param name="source">The source array.</param><param name="visitor">The visitor.</param></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Map``2(TInput[],System.Mapper&lt;TInput, TOutput&gt;)"><summary>Allocates a transformed array.</summary><param name="source">The source array.</param><param name="mapper">The callback called once per element.</param><returns>A new array.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Filter``1(T[],System.Predicate&lt;T&gt;)"><summary>Allocates an array containing accepted values.</summary><param name="source">The source array.</param><param name="predicate">The predicate called exactly once per element.</param><returns>A new array preserving input order.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Fold``2(TValue[],TState,System.Folder&lt;TState, TValue&gt;)"><summary>Folds values from left to right.</summary><param name="source">The source array.</param><param name="state">The initial state.</param><param name="folder">The combining callback.</param><returns>The final state.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Reversed``1(T[])"><summary>Allocates a reversed shallow copy.</summary><param name="source">The source array.</param><returns>A new array.</returns></member>
+  <member id="M:System.Collections.ArrayAlgorithms.Sorted``1(T[],System.Ordering&lt;T&gt;)"><summary>Allocates a stable sorted shallow copy.</summary><param name="source">The source array.</param><param name="ordering">The negative-zero-positive ordering callback.</param><returns>A new stably ordered array.</returns></member>
+
+  <member id="T:System.Text.Utf8"><summary>Provides allocation-free UTF-8 scalar encoding and decoding on every target.</summary></member>
+  <member id="M:System.Text.Utf8.TryDecode(string,int,out rune,out int)"><summary>Decodes one scalar at a byte offset.</summary><param name="source">The managed UTF-8 string.</param><param name="offset">The byte offset.</param><param name="value">Receives NUL on failure.</param><param name="bytesRead">Receives zero on failure.</param><returns>True for a valid complete scalar.</returns><remarks>This method is NoAlloc, but not NoRuntime.</remarks></member>
+  <member id="M:System.Text.Utf8.TryDecode(System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;,out rune,out nuint)"><summary>Validates and decodes the first external UTF-8 scalar.</summary><param name="source">The native bytes.</param><param name="value">Receives NUL on failure.</param><param name="bytesRead">Receives zero on failure.</param><returns>True for a valid complete scalar.</returns></member>
+  <member id="M:System.Text.Utf8.TryEncode(rune,System.Runtime.NativeBuffer&lt;byte&gt;,out nuint)"><summary>Encodes one scalar without allocation.</summary><param name="value">The scalar.</param><param name="destination">The native destination.</param><param name="bytesWritten">Receives zero on failure.</param><returns>True when the destination is large enough.</returns><remarks>Failure leaves the destination unchanged.</remarks></member>
+</doc>

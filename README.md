@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.34 includes automatic reference counting (ARC), deterministic cleanup, exceptions, generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. It also includes `double`, `rune`, fixed-width SIMD, embedded resources, lambdas, closures, and exact repository modules.
+Draft 0.36 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic value containers, array algorithms, UTF-8 rune helpers, enumeration contracts, lists, stacks, queues, maps, and sets.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -218,7 +218,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
 
-See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.12.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
+See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.14.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
 
 ## Compiler API
 
@@ -237,7 +237,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.34 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.36 language rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

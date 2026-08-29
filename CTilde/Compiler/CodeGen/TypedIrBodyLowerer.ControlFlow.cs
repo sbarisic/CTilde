@@ -8,6 +8,11 @@ internal sealed partial class TypedIrBodyLowerer
 {
     private void EmitReturn(ILoweringWriter writer, ReturnStatementSyntax syntax)
     {
+        if (_isIteratorMethod)
+        {
+            Report("CT2212", "Iterator methods use yield break instead of return.", syntax);
+            return;
+        }
         if (_finallyBarriers.Count != 0)
         {
             Report("CT3110", "return cannot leave a finally block.", syntax);

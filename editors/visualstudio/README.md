@@ -1,6 +1,6 @@
 # C~ for Visual Studio
 
-This preview extension adds C~ editor and manifest-backed project support to Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.14.0 of this preview extension adds C~ Draft 0.36 editor and manifest-backed project support to Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 

@@ -427,7 +427,21 @@ internal sealed partial class CompilationModel
             TypeArguments = typeArguments,
             TypeSubstitutions = method.TypeSubstitutions,
             GenericDefinition = genericDefinition,
+            ExplicitInterfaceType = method.ExplicitInterfaceType,
         };
+    }
+
+    internal CType ConstructStandardGeneric(string fullName, ImmutableArray<CType> arguments, SyntaxNode syntax)
+    {
+        var definition = Types.Values.FirstOrDefault(type => type.IsGenericDefinition &&
+            $"{type.Namespace}.{type.Name}" == fullName && type.TypeParameters.Length == arguments.Length);
+        if (definition is null)
+        {
+            Diagnostics.Add("CT2176", $"Generic type '{fullName}' could not be found.", syntax.Source, syntax.Span);
+            return CType.Error;
+        }
+        var tree = SyntaxTrees.First(candidate => ReferenceEquals(candidate.Text, syntax.Source));
+        return ConstructGenericType(definition, arguments, tree, syntax).Type;
     }
 
     private void ValidateSimdLaneArguments(MethodSymbol definition, ImmutableArray<CType> arguments, SyntaxNode syntax)
@@ -533,6 +547,13 @@ internal sealed partial class CompilationModel
                 IsStatic = property.IsStatic,
                 Syntax = property.Syntax,
                 Type = SubstituteType(property.Type, substitutions),
+                IndexParameter = property.IndexParameter is null ? null : new ParameterSymbol
+                {
+                    Name = property.IndexParameter.Name,
+                    Type = SubstituteType(property.IndexParameter.Type, substitutions),
+                    Syntax = property.IndexParameter.Syntax,
+                    PassingKind = ParameterPassingKind.Value,
+                },
                 Getter = property.Getter,
                 Setter = property.Setter,
                 BackingField = property.BackingField is null ? null : type.Fields.FirstOrDefault(field => field.Name == property.BackingField.Name),
@@ -559,8 +580,12 @@ internal sealed partial class CompilationModel
             foreach (var required in contract.Methods)
             {
                 var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
-                    .FirstOrDefault(candidate => candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract &&
+                    .FirstOrDefault(candidate => !candidate.IsStatic && !candidate.IsAbstract &&
+                        (candidate.Accessibility == Accessibility.Public && candidate.ExplicitInterfaceType is null || candidate.ExplicitInterfaceType == contract.Type) &&
                         HaveSameSourceSignature(candidate, required) && candidate.ReturnType == required.ReturnType);
+                if (implementation is null && contract.FullName == "System.IDisposable" && required.Name == "Dispose")
+                    implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                        .FirstOrDefault(candidate => !candidate.IsStatic && candidate.Name == "Dispose" && candidate.Parameters.Length == 0 && candidate.ReturnType == CType.Void);
                 if (implementation is not null)
                 {
                     if (!implementation.ImplementedInterfaceMethods.Contains(required))
@@ -652,6 +677,7 @@ internal sealed partial class CompilationModel
             TypeParameterConstraints = method.TypeParameterConstraints,
             TypeSubstitutions = substitutions,
             GenericDefinition = method.GenericDefinition,
+            ExplicitInterfaceType = method.ExplicitInterfaceType is null ? null : SubstituteType(method.ExplicitInterfaceType, substitutions),
         };
         cloned.ImplementedInterfaceMethods.AddRange(method.ImplementedInterfaceMethods);
         return cloned;
@@ -1510,6 +1536,20 @@ internal sealed partial class CompilationModel
                     if (property.Getter is null && property.Setter is null)
                         Diagnostics.Add("CT1224", "A property requires a getter, a setter, or both.", property.Source, property.Span);
                     var propertyType = ResolveType(property.Type, tree);
+                    ParameterSymbol? indexParameter = null;
+                    if (property.IndexParameter is not null)
+                    {
+                        var indexType = ResolveType(property.IndexParameter.Type, tree);
+                        if (isStatic || property.IndexParameter.PassingKind != ParameterPassingKind.Value || indexType.Kind == CTypeKind.Void)
+                            Diagnostics.Add("CT1310", "An indexer requires one value parameter on an instance member.", property.Source, property.Span);
+                        indexParameter = new ParameterSymbol
+                        {
+                            Name = property.IndexParameter.Name,
+                            Type = indexType,
+                            Syntax = property.IndexParameter,
+                            PassingKind = ParameterPassingKind.Value,
+                        };
+                    }
                     if (propertyType.IsNativeBuffer)
                         Diagnostics.Add("CT2185", "Native-buffer views cannot be stored in properties.", property.Source, property.Span);
                     if (propertyType.Kind == CTypeKind.Opaque)
@@ -1563,6 +1603,7 @@ internal sealed partial class CompilationModel
                         IsStatic = isStatic,
                         Syntax = property,
                         Type = propertyType,
+                        IndexParameter = indexParameter,
                         Getter = property.Getter,
                         Setter = property.Setter,
                         BackingField = backing,
@@ -1738,6 +1779,12 @@ internal sealed partial class CompilationModel
                             Diagnostics.Add("CT1244", "Export requires a public static body-bearing method and cannot be combined with EntryPoint or Extern.", method.Source, method.Span);
                     }
                     var returnType = ResolveType(method.ReturnType, tree);
+                    var explicitInterfaceType = method.ExplicitInterfaceType is null ? null : ResolveType(method.ExplicitInterfaceType, tree);
+                    if (explicitInterfaceType is not null)
+                    {
+                        if (explicitInterfaceType.Kind != CTypeKind.Interface || isStatic || method.Modifiers.Any(modifier => modifier is "public" or "internal" or "protected" or "private" or "virtual" or "override" or "abstract"))
+                            Diagnostics.Add("CT1311", "An explicit interface method requires an implemented interface, an instance body, and no accessibility or virtual modifier.", method.Source, method.Span);
+                    }
                     if (returnType.IsNativeBuffer)
                         Diagnostics.Add("CT2186", "Native-buffer views cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
                     if (returnType.IsNativeUtf8String && UserSyntaxTrees.Contains(tree))
@@ -1801,6 +1848,7 @@ internal sealed partial class CompilationModel
                         TypeParameterConstraints = methodConstraints,
                         IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = method.Modifiers.Contains("sealed", StringComparer.Ordinal),
+                        ExplicitInterfaceType = explicitInterfaceType,
                     };
                     if (isAssemblyFunction &&
                         (!isStatic || !symbol.IsUnsafe || isAbstractMethod || external is not null || symbol.IsVirtual ||
@@ -2231,15 +2279,20 @@ internal sealed partial class CompilationModel
                 foreach (var required in contract.Methods)
                 {
                     var implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
-                        .FirstOrDefault(candidate => candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract &&
+                        .FirstOrDefault(candidate => !candidate.IsStatic && !candidate.IsAbstract &&
+                            (candidate.Accessibility == Accessibility.Public && candidate.ExplicitInterfaceType is null || candidate.ExplicitInterfaceType == contract.Type) &&
                             HaveSameSourceSignature(candidate, required) && candidate.ReturnType == required.ReturnType);
+                    if (implementation is null && contract.FullName == "System.IDisposable" && required.Name == "Dispose")
+                        implementation = type.BaseTypesAndSelf().SelectMany(candidate => candidate.Methods)
+                            .FirstOrDefault(candidate => !candidate.IsStatic && candidate.Name == "Dispose" && candidate.Parameters.Length == 0 && candidate.ReturnType == CType.Void);
                     if (implementation is not null)
                     {
                         if (!implementation.ImplementedInterfaceMethods.Contains(required))
                             implementation.ImplementedInterfaceMethods.Add(required);
                         implementation.DeclaredEffects |= required.DeclaredEffects;
                     }
-                    else if (concrete)
+                    else if (concrete && !(contract.FullName == "System.IDisposable" && required.Name == "Dispose" &&
+                        type.Syntax?.Members.OfType<MethodDeclarationSyntax>().Any(member => member.Name == "Dispose" && member.Parameters.Length == 0) == true))
                         Diagnostics.Add("CT1275", $"Concrete type '{type.FullName}' does not implement interface method '{contract.FullName}.{required.Name}'.", type.Syntax!.Source, type.Syntax.Span);
                 }
             }
@@ -2248,7 +2301,8 @@ internal sealed partial class CompilationModel
 
     private static bool ResolvesPropertyContract(PropertySymbol candidate, PropertySymbol contract) =>
         candidate.Accessibility == Accessibility.Public && !candidate.IsStatic && !candidate.IsAbstract && candidate.Name == contract.Name &&
-        candidate.Type == contract.Type && (contract.Getter is null || candidate.Getter is not null) && (contract.Setter is null || candidate.Setter is not null);
+        candidate.Type == contract.Type && candidate.IndexParameter?.Type == contract.IndexParameter?.Type &&
+        (contract.Getter is null || candidate.Getter is not null) && (contract.Setter is null || candidate.Setter is not null);
 
     private static IEnumerable<TypeSymbol> EnumerateInterfaces(TypeSymbol type)
     {
@@ -2319,7 +2373,7 @@ internal sealed partial class CompilationModel
 
     private void AddMethod(List<MethodSymbol> methods, MethodSymbol method)
     {
-        var existing = methods.FirstOrDefault(candidate => candidate.Name == method.Name &&
+        var existing = methods.FirstOrDefault(candidate => candidate.Name == method.Name && candidate.ExplicitInterfaceType == method.ExplicitInterfaceType &&
             candidate.Parameters.Select(parameter => (parameter.Type, NormalizePassingKind(parameter.PassingKind)))
                 .SequenceEqual(method.Parameters.Select(parameter => (parameter.Type, NormalizePassingKind(parameter.PassingKind)))));
         if (existing is not null)

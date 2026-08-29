@@ -15,6 +15,8 @@ extern const ct_type_descriptor ct_d_7d638b34e3766612f7f3de36;
 extern const ct_type_descriptor ct_d_5e1771906f51d8e1b97b4e30;
 extern const ct_type_descriptor ct_d_3240a42f24ee5ffcb16d4738;
 extern const ct_type_descriptor ct_d_1ea76b8b99b085e2e43c6853;
+extern const ct_type_descriptor ct_d_1ce823926d951581cd12836b;
+extern const ct_type_descriptor ct_d_d3c4e0783b079ac44199785e;
 struct ct_t_99b091a0f75882e3ce5f2c48
 {
     ct_t_85f9bec51c25eec663cd1245 ct_base;
@@ -122,6 +124,8 @@ static const ct_vtable ct_v_3d60803cd75a761aa08ce6fb = {
 };
 const ct_type_descriptor ct_d_1ea76b8b99b085e2e43c6853 = { "System.ThreadStateException", &ct_d_cd703f583900b7e4bf13f318, &ct_v_3d60803cd75a761aa08ce6fb, NULL, 0u, 14u, sizeof(ct_t_b5e50b31da161bbdd1109f01), _Alignof(ct_t_b5e50b31da161bbdd1109f01), false, ct_x_e81004d8d95333473e418a54 };
 const ct_type_descriptor ct_d_44afd0f458a75bae245fb18a = { "Examples.ValueReader", &ct_d_5387ab4162c20a4f61d2862f, &ct_default_vtable, NULL, 0u, 15u, sizeof(ct_t_5e604eacc407c4d5a6fe8ce6), _Alignof(ct_t_5e604eacc407c4d5a6fe8ce6), false, ct_x_25fb56881d783b7b3349596c };
+const ct_type_descriptor ct_d_1ce823926d951581cd12836b = { "int[]", &ct_d_5387ab4162c20a4f61d2862f, &ct_default_vtable, NULL, 0u, 16u, sizeof(ct_a_i32), _Alignof(ct_a_i32), false, ct_drop_array_i32 };
+const ct_type_descriptor ct_d_d3c4e0783b079ac44199785e = { "bool[]", &ct_d_5387ab4162c20a4f61d2862f, &ct_default_vtable, NULL, 0u, 17u, sizeof(ct_a_b), _Alignof(ct_a_b), false, ct_drop_array_b };
 static ct_string* ct_box_to_string_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; (void)box; return ct_string_from_bytes((const uint8_t*)"Examples.Pair", 13, "<runtime>", 0); }
 static bool ct_box_equals_s0237cc9215d75be72c301de3(ct_object* a, ct_object* b) { if (b == NULL || b->Type != &ct_desc_box_s0237cc9215d75be72c301de3) return false; ct_box_s0237cc9215d75be72c301de3* left = (ct_box_s0237cc9215d75be72c301de3*)(void*)a; ct_box_s0237cc9215d75be72c301de3* right = (ct_box_s0237cc9215d75be72c301de3*)(void*)b; return (left->Value.u_1_X == right->Value.u_1_X) && (left->Value.u_1_Y == right->Value.u_1_Y); }
 static int32_t ct_box_hash_s0237cc9215d75be72c301de3(ct_object* value) { ct_box_s0237cc9215d75be72c301de3* box = (ct_box_s0237cc9215d75be72c301de3*)(void*)value; uint32_t result = UINT32_C(2166136261);

@@ -1,14 +1,15 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.34 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.36 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Drafts 0.26 through 0.34 completed the source-owner, binary64, rune primitive, embedded-resource, lambda/closure, fixed-width SIMD, and exact repository-module milestones. Remaining follow-ups are:
+Draft 0.36 completed the mutable generic collection and enumeration tranche. Remaining follow-ups are:
 
-- [ ] Add allocation-free rune decode/encode helpers and Unicode escape forms without changing byte-based `char` and string indexing.
+- [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
 - [ ] Extend closure source-debug metadata beyond the current generated-method mapping and add dedicated lambda editor-service fixtures.
+- [ ] Permit iterator suspension across cleanup regions after defining state-machine ownership for `try`, `catch`, `finally`, `lock`, and `defer`.
 
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
 - [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.

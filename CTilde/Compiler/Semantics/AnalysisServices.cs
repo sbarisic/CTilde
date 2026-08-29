@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Numerics;
 
 namespace CTilde;
@@ -90,7 +91,11 @@ internal sealed class AnalysisServices : ILoweringServices
         if (_accessorMethods.TryGetValue((property, getter), out var method))
             return method;
         var syntax = getter ? property.Getter! : property.Setter!;
-        var parameters = getter ? Array.Empty<ParameterSymbol>() : [new ParameterSymbol { Name = "value", Type = property.Type, Syntax = null }];
+        var parameters = new List<ParameterSymbol>();
+        if (property.IndexParameter is not null)
+            parameters.Add(property.IndexParameter);
+        if (!getter)
+            parameters.Add(new ParameterSymbol { Name = "value", Type = property.Type, Syntax = null });
         method = new MethodSymbol
         {
             Name = getter ? $"get_{property.Name}" : $"set_{property.Name}",
@@ -107,6 +112,11 @@ internal sealed class AnalysisServices : ILoweringServices
             IsVirtual = property.IsVirtual,
             IsOverride = property.IsOverride,
             IsSealedOverride = property.IsSealedOverride,
+            TypeSubstitutions = property.ContainingType.GenericDefinition is null
+                ? ImmutableDictionary<string, CType>.Empty
+                : property.ContainingType.GenericDefinition.TypeParameters
+                    .Select((parameter, index) => (parameter.Name, Type: property.ContainingType.TypeArguments[index]))
+                    .ToImmutableDictionary(pair => pair.Name, pair => pair.Type, StringComparer.Ordinal),
         };
         _accessorMethods.Add((property, getter), method);
         return method;

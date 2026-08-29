@@ -60,6 +60,21 @@ public sealed class ArgumentException : Exception
     public ArgumentException() : base("An argument is invalid.") { }
 }
 
+public sealed class ArgumentOutOfRangeException : Exception
+{
+    public ArgumentOutOfRangeException() : base("An argument is outside the valid range.") { }
+}
+
+public sealed class InvalidOperationException : Exception
+{
+    public InvalidOperationException() : base("The operation is not valid for the current state.") { }
+}
+
+public sealed class KeyNotFoundException : Exception
+{
+    public KeyNotFoundException() : base("The requested key was not found.") { }
+}
+
 public sealed class OutOfMemoryException : Exception
 {
     public OutOfMemoryException() : base("Managed allocation failed.") { }

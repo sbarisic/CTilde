@@ -54,6 +54,16 @@ internal static class StandardLibrary
         var files = target == CompilationTarget.Freestanding
             ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
             : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+        files.Add("Generics.ct");
+        files.Add("ArrayAlgorithms.ct");
+        files.Add("Utf8.ct");
+        files.Add("Iteration.ct");
+        if (target != CompilationTarget.Freestanding)
+        {
+            files.Add("LinearCollections.ct");
+            files.Add("HashCollections.ct");
+            files.Add("IteratorEnumerable.ct");
+        }
         if ((vectors & StandardVectorTypes.Vec2) != 0)
             files.Add("Vec2.ct");
         if ((vectors & StandardVectorTypes.Vec3) != 0)
@@ -114,9 +124,9 @@ internal static class StandardLibrary
     {
         var names = target switch
         {
-            CompilationTarget.EspIdf => new[] { "System.docs.xml", "EspIdf.docs.xml" },
-            CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "HostedIO.docs.xml" },
-            _ => new[] { "System.docs.xml" },
+            CompilationTarget.EspIdf => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "EspIdf.docs.xml" },
+            CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "HostedIO.docs.xml" },
+            _ => new[] { "System.docs.xml", "Generics.docs.xml" },
         };
         var assembly = typeof(StandardLibrary).Assembly;
         return [.. names.Select(name =>

@@ -162,10 +162,11 @@ internal sealed partial class CEmitter
         }
         foreach (var property in virtualProperties)
         {
+            var indexParameter = property.IndexParameter is null ? string.Empty : $", {CTypeName(property.IndexParameter.Type)}";
             if (property.Getter is not null)
-                writer.WriteLine($"    {CTypeName(property.Type)} (*{VirtualGetterSlotName(property)})(ct_object*);");
+                writer.WriteLine($"    {CTypeName(property.Type)} (*{VirtualGetterSlotName(property)})(ct_object*{indexParameter});");
             if (property.Setter is not null)
-                writer.WriteLine($"    void (*{VirtualSetterSlotName(property)})(ct_object*, {CTypeName(property.Type)});");
+                writer.WriteLine($"    void (*{VirtualSetterSlotName(property)})(ct_object*{indexParameter}, {CTypeName(property.Type)});");
         }
         writer.WriteLine("};");
         writer.WriteLine("struct ct_interface_entry { const ct_type_descriptor* Type; const ct_vtable* VTable; };");
@@ -632,10 +633,12 @@ internal sealed partial class CEmitter
         if (!_emittedThunks.Add(name))
             return name;
         var self = $"({NameMangler.Type(property.ContainingType)}*)(void*)self";
+        var indexDeclaration = property.IndexParameter is null ? string.Empty : $", {CTypeName(property.IndexParameter.Type)} key";
+        var indexArgument = property.IndexParameter is null ? string.Empty : ", key";
         if (getter)
-            writer.WriteLine($"static {CTypeName(property.Type)} {name}(ct_object* self) {{ return {NameMangler.Getter(property)}({self}); }}");
+            writer.WriteLine($"static {CTypeName(property.Type)} {name}(ct_object* self{indexDeclaration}) {{ return {NameMangler.Getter(property)}({self}{indexArgument}); }}");
         else
-            writer.WriteLine($"static void {name}(ct_object* self, {CTypeName(property.Type)} value) {{ {NameMangler.Setter(property)}({self}, value); }}");
+            writer.WriteLine($"static void {name}(ct_object* self{indexDeclaration}, {CTypeName(property.Type)} value) {{ {NameMangler.Setter(property)}({self}{indexArgument}, value); }}");
         return name;
     }
 
@@ -771,10 +774,12 @@ internal sealed partial class CEmitter
         if (!_emittedThunks.Add(name))
             return name;
         var self = $"&(({BoxName(boxedType)}*)(void*)self)->Value";
+        var indexDeclaration = implementation.IndexParameter is null ? string.Empty : $", {CTypeName(implementation.IndexParameter.Type)} key";
+        var indexArgument = implementation.IndexParameter is null ? string.Empty : ", key";
         if (getter)
-            writer.WriteLine($"static {CTypeName(implementation.Type)} {name}(ct_object* self) {{ return {NameMangler.Getter(implementation)}({self}); }}");
+            writer.WriteLine($"static {CTypeName(implementation.Type)} {name}(ct_object* self{indexDeclaration}) {{ return {NameMangler.Getter(implementation)}({self}{indexArgument}); }}");
         else
-            writer.WriteLine($"static void {name}(ct_object* self, {CTypeName(implementation.Type)} value) {{ {NameMangler.Setter(implementation)}({self}, value); }}");
+            writer.WriteLine($"static void {name}(ct_object* self{indexDeclaration}, {CTypeName(implementation.Type)} value) {{ {NameMangler.Setter(implementation)}({self}{indexArgument}, value); }}");
         return name;
     }
 

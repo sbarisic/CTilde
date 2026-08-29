@@ -1,0 +1,424 @@
+namespace System.Collections;
+
+public sealed class Map<TKey, TValue> : System.IEnumerable<System.Pair<TKey, TValue>>
+{
+    private int[] buckets;
+    private int[] hashes;
+    private int[] next;
+    private int[] orderNext;
+    private int[] orderPrevious;
+    private bool[] used;
+    private TKey[] keys;
+    private TValue[] values;
+    private System.Hasher<TKey> hasher;
+    private System.Equality<TKey> equality;
+    private int count;
+    private int allocated;
+    private int freeHead;
+    private int orderHead;
+    private int orderTail;
+    private int version;
+    private int callbackDepth;
+
+    public Map(System.Hasher<TKey> hasher, System.Equality<TKey> equality) : this(0, hasher, equality) { }
+
+    public Map(int capacity, System.Hasher<TKey> hasher, System.Equality<TKey> equality)
+    {
+        if (capacity < 0)
+            throw new System.ArgumentOutOfRangeException();
+        if (hasher == null || equality == null)
+            throw new System.ArgumentException();
+        int storage = StorageCapacity(capacity);
+        buckets = new int[storage];
+        hashes = new int[storage];
+        next = new int[storage];
+        orderNext = new int[storage];
+        orderPrevious = new int[storage];
+        used = new bool[storage];
+        keys = new TKey[storage];
+        values = new TValue[storage];
+        this.hasher = hasher;
+        this.equality = equality;
+        count = 0;
+        allocated = 0;
+        freeHead = -1;
+        orderHead = -1;
+        orderTail = -1;
+        version = 0;
+        callbackDepth = 0;
+    }
+
+    public int Count { get { return count; } }
+
+    public TValue this[TKey key]
+    {
+        get
+        {
+            TValue value;
+            if (!TryGetValue(key, out value))
+                throw new System.KeyNotFoundException();
+            return value;
+        }
+        set
+        {
+            EnsureCanMutate();
+            int hash = ComputeHash(key);
+            int index = FindIndex(key, hash);
+            if (index >= 0)
+            {
+                values[index] = value;
+                version++;
+                return;
+            }
+            InsertKnownAbsent(key, value, hash);
+        }
+    }
+
+    public void Add(TKey key, TValue value)
+    {
+        if (!TryAdd(key, value))
+            throw new System.ArgumentException();
+    }
+
+    public bool TryAdd(TKey key, TValue value)
+    {
+        EnsureCanMutate();
+        int hash = ComputeHash(key);
+        if (FindIndex(key, hash) >= 0)
+            return false;
+        InsertKnownAbsent(key, value, hash);
+        return true;
+    }
+
+    public bool ContainsKey(TKey key)
+    {
+        int hash = ComputeHash(key);
+        return FindIndex(key, hash) >= 0;
+    }
+
+    public bool TryGetValue(TKey key, out TValue value)
+    {
+        int hash = ComputeHash(key);
+        int index = FindIndex(key, hash);
+        if (index < 0)
+        {
+            value = default(TValue);
+            return false;
+        }
+        value = values[index];
+        return true;
+    }
+
+    public bool Remove(TKey key)
+    {
+        EnsureCanMutate();
+        int hash = ComputeHash(key);
+        int bucket = Bucket(hash);
+        int link = buckets[bucket];
+        int previous = 0;
+        while (link != 0)
+        {
+            int index = link - 1;
+            if (hashes[index] == hash && InvokeEquality(keys[index], key))
+            {
+                if (previous == 0)
+                    buckets[bucket] = next[index];
+                else
+                    next[previous - 1] = next[index];
+                UnlinkOrder(index);
+                keys[index] = default(TKey);
+                values[index] = default(TValue);
+                used[index] = false;
+                next[index] = freeHead + 1;
+                freeHead = index;
+                count--;
+                version++;
+                return true;
+            }
+            previous = link;
+            link = next[index];
+        }
+        return false;
+    }
+
+    public void Clear()
+    {
+        EnsureCanMutate();
+        if (count == 0)
+            return;
+        int index = orderHead;
+        while (index >= 0)
+        {
+            int following = orderNext[index];
+            keys[index] = default(TKey);
+            values[index] = default(TValue);
+            index = following;
+        }
+        int capacity = buckets.Length;
+        int slot = 0;
+        while (slot < capacity)
+        {
+            buckets[slot] = 0;
+            hashes[slot] = 0;
+            next[slot] = 0;
+            orderNext[slot] = 0;
+            orderPrevious[slot] = 0;
+            used[slot] = false;
+            slot++;
+        }
+        count = 0;
+        allocated = 0;
+        freeHead = -1;
+        orderHead = -1;
+        orderTail = -1;
+        version++;
+    }
+
+    public MapEnumerator<TKey, TValue> GetEnumerator()
+    {
+        return new MapEnumerator<TKey, TValue>(this);
+    }
+
+    System.IEnumerator<System.Pair<TKey, TValue>> System.IEnumerable<System.Pair<TKey, TValue>>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    internal int InternalVersion { get { return version; } }
+    internal int InternalFirst { get { return orderHead; } }
+    internal int InternalNext(int index) { return orderNext[index]; }
+    internal System.Pair<TKey, TValue> InternalPair(int index) { return new System.Pair<TKey, TValue>(keys[index], values[index]); }
+
+    private void InsertKnownAbsent(TKey key, TValue value, int hash)
+    {
+        EnsureCapacity(count + 1);
+        int index;
+        if (freeHead >= 0)
+        {
+            index = freeHead;
+            freeHead = next[index] - 1;
+        }
+        else
+        {
+            index = allocated;
+            allocated++;
+        }
+        int bucket = Bucket(hash);
+        hashes[index] = hash;
+        keys[index] = key;
+        values[index] = value;
+        used[index] = true;
+        next[index] = buckets[bucket];
+        buckets[bucket] = index + 1;
+        orderPrevious[index] = orderTail;
+        orderNext[index] = -1;
+        if (orderTail < 0)
+            orderHead = index;
+        else
+            orderNext[orderTail] = index;
+        orderTail = index;
+        count++;
+        version++;
+    }
+
+    private int FindIndex(TKey key, int hash)
+    {
+        int link = buckets[Bucket(hash)];
+        while (link != 0)
+        {
+            int index = link - 1;
+            if (hashes[index] == hash && InvokeEquality(keys[index], key))
+                return index;
+            link = next[index];
+        }
+        return -1;
+    }
+
+    private int ComputeHash(TKey key)
+    {
+        callbackDepth++;
+        int hash = 0;
+        try { hash = hasher(key); }
+        finally { callbackDepth--; }
+        return hash & 2147483647;
+    }
+
+    private bool InvokeEquality(TKey left, TKey right)
+    {
+        callbackDepth++;
+        bool result = false;
+        try { result = equality(left, right); }
+        finally { callbackDepth--; }
+        return result;
+    }
+
+    private int Bucket(int hash) { return hash & (buckets.Length - 1); }
+
+    private void EnsureCanMutate()
+    {
+        if (callbackDepth != 0)
+            throw new System.InvalidOperationException();
+    }
+
+    private void EnsureCapacity(int required)
+    {
+        if (required <= buckets.Length * 3 / 4 && (freeHead >= 0 || allocated < buckets.Length))
+            return;
+        int capacity = buckets.Length * 2;
+        if (capacity < 4)
+            capacity = 4;
+        Resize(capacity);
+    }
+
+    private void Resize(int capacity)
+    {
+        int[] replacementBuckets = new int[capacity];
+        int[] replacementHashes = new int[capacity];
+        int[] replacementNext = new int[capacity];
+        int[] replacementOrderNext = new int[capacity];
+        int[] replacementOrderPrevious = new int[capacity];
+        bool[] replacementUsed = new bool[capacity];
+        TKey[] replacementKeys = new TKey[capacity];
+        TValue[] replacementValues = new TValue[capacity];
+        int old = orderHead;
+        int target = 0;
+        int previous = -1;
+        while (old >= 0)
+        {
+            int following = orderNext[old];
+            int hash = hashes[old];
+            int bucket = hash & (capacity - 1);
+            replacementHashes[target] = hash;
+            replacementKeys[target] = keys[old];
+            replacementValues[target] = values[old];
+            replacementUsed[target] = true;
+            replacementNext[target] = replacementBuckets[bucket];
+            replacementBuckets[bucket] = target + 1;
+            replacementOrderPrevious[target] = previous;
+            replacementOrderNext[target] = -1;
+            if (previous >= 0)
+                replacementOrderNext[previous] = target;
+            previous = target;
+            target++;
+            old = following;
+        }
+        buckets = replacementBuckets;
+        hashes = replacementHashes;
+        next = replacementNext;
+        orderNext = replacementOrderNext;
+        orderPrevious = replacementOrderPrevious;
+        used = replacementUsed;
+        keys = replacementKeys;
+        values = replacementValues;
+        allocated = count;
+        freeHead = -1;
+        orderHead = 0;
+        if (count == 0)
+            orderHead = -1;
+        orderTail = count - 1;
+    }
+
+    private void UnlinkOrder(int index)
+    {
+        int previous = orderPrevious[index];
+        int following = orderNext[index];
+        if (previous < 0)
+            orderHead = following;
+        else
+            orderNext[previous] = following;
+        if (following < 0)
+            orderTail = previous;
+        else
+            orderPrevious[following] = previous;
+        orderPrevious[index] = -1;
+        orderNext[index] = -1;
+    }
+
+    private static int StorageCapacity(int requested)
+    {
+        int capacity = 4;
+        while (capacity * 3 / 4 < requested)
+        {
+            if (capacity > 1073741823)
+                throw new System.OutOfMemoryException();
+            capacity = capacity * 2;
+        }
+        return capacity;
+    }
+}
+
+public struct MapEnumerator<TKey, TValue> : System.IEnumerator<System.Pair<TKey, TValue>>
+{
+    private Map<TKey, TValue> collection;
+    private int expectedVersion;
+    private int index;
+    private bool started;
+    private bool disposed;
+
+    internal MapEnumerator(Map<TKey, TValue> collection)
+    {
+        this.collection = collection;
+        expectedVersion = collection.InternalVersion;
+        index = -1;
+        started = false;
+        disposed = false;
+    }
+
+    public System.Pair<TKey, TValue> Current
+    {
+        get
+        {
+            Validate();
+            if (!started || index < 0)
+                throw new System.InvalidOperationException();
+            return collection.InternalPair(index);
+        }
+    }
+
+    public bool MoveNext()
+    {
+        if (disposed)
+            return false;
+        Validate();
+        if (!started)
+        {
+            started = true;
+            index = collection.InternalFirst;
+        }
+        else if (index >= 0)
+            index = collection.InternalNext(index);
+        return index >= 0;
+    }
+
+    public void Dispose() { disposed = true; collection = null; index = -1; }
+    private void Validate()
+    {
+        if (disposed || collection == null || collection.InternalVersion != expectedVersion)
+            throw new System.InvalidOperationException();
+    }
+}
+
+public sealed class Set<T> : System.IEnumerable<T>
+{
+    private Map<T, bool> map;
+
+    public Set(System.Hasher<T> hasher, System.Equality<T> equality) { map = new Map<T, bool>(hasher, equality); }
+    public Set(int capacity, System.Hasher<T> hasher, System.Equality<T> equality) { map = new Map<T, bool>(capacity, hasher, equality); }
+    public int Count { get { return map.Count; } }
+    public bool Add(T value) { return map.TryAdd(value, true); }
+    public bool Contains(T value) { return map.ContainsKey(value); }
+    public bool Remove(T value) { return map.Remove(value); }
+    public void Clear() { map.Clear(); }
+    public SetEnumerator<T> GetEnumerator() { return new SetEnumerator<T>(map); }
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator() { return GetEnumerator(); }
+}
+
+public struct SetEnumerator<T> : System.IEnumerator<T>
+{
+    private MapEnumerator<T, bool> enumerator;
+
+    internal SetEnumerator(Map<T, bool> map) { enumerator = map.GetEnumerator(); }
+    public T Current { get { return enumerator.Current.First; } }
+    public bool MoveNext() { return enumerator.MoveNext(); }
+    public void Dispose() { enumerator.Dispose(); }
+}

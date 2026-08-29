@@ -1,0 +1,18 @@
+namespace System;
+
+public interface IDisposable
+{
+    void Dispose();
+}
+
+public interface IEnumerator<T> : IDisposable
+{
+    T Current { get; }
+    bool MoveNext();
+    void Dispose();
+}
+
+public interface IEnumerable<T>
+{
+    IEnumerator<T> GetEnumerator();
+}

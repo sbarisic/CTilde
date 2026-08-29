@@ -255,6 +255,7 @@ internal sealed class FieldSymbol : MemberSymbol
 internal sealed class PropertySymbol : MemberSymbol
 {
     public required CType Type { get; init; }
+    public ParameterSymbol? IndexParameter { get; init; }
     public required AccessorSyntax? Getter { get; init; }
     public required AccessorSyntax? Setter { get; init; }
     public required FieldSymbol? BackingField { get; init; }
@@ -363,6 +364,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsGenericDefinition => !TypeParameters.IsDefaultOrEmpty && TypeArguments.IsDefaultOrEmpty;
     public SyntaxKind OperatorKind { get; init; }
     public MethodSymbol? OverriddenMethod { get; set; }
+    public CType? ExplicitInterfaceType { get; init; }
     public List<MethodSymbol> ImplementedInterfaceMethods { get; } = [];
     public ConstructorInitializerSyntax? ConstructorInitializer { get; init; }
     public MethodSymbol? ConstructorInitializerTarget { get; set; }
@@ -431,7 +433,8 @@ internal static class NameMangler
         else if (!method.TypeParameters.IsDefaultOrEmpty)
             name += $"`{method.TypeParameters.Length}";
         var parameters = string.Join(",", method.Parameters.Select(parameter => $"{PassingCode(parameter.PassingKind)}:{CanonicalType(parameter.Type)}"));
-        return $"method:{method.ContainingType.FullName}::{name}({parameters})->{CanonicalType(method.IsConstructor ? method.ContainingType.Type : method.ReturnType)}";
+        var explicitInterface = method.ExplicitInterfaceType is null ? string.Empty : $"[{CanonicalType(method.ExplicitInterfaceType)}]";
+        return $"method:{method.ContainingType.FullName}::{explicitInterface}{name}({parameters})->{CanonicalType(method.IsConstructor ? method.ContainingType.Type : method.ReturnType)}";
     }
 
     public static string CanonicalType(CType type) => type.Kind switch

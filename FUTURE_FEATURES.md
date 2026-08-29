@@ -4,6 +4,8 @@
 
 This document is the historical design record for feature groups implemented across Drafts 0.26 through 0.34. It is not normative and some final syntax differs; see [LANGUAGE.md](LANGUAGE.md) for the current contract.
 
+Draft 0.35 implemented the UTF-8 helper portion of the rune roadmap as `[NoAlloc]` APIs. Draft 0.36 implemented generic mutable collections and enumeration foundations. Unicode escape syntax remains unimplemented, and the historical `[NoRuntime]` sketch below is not the final contract.
+
 The record covers source-owner identity, embedded resources, lambdas, Unicode runes, binary64 numbers, fixed-width SIMD, and source modules from repositories.
 
 Each feature had to satisfy the extension rules in [ARCHITECTURE.md](ARCHITECTURE.md). A complete revision included syntax, binding, lowering, diagnostics, generated C, tools, documentation, and tests.

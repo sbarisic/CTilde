@@ -6,7 +6,7 @@
 
 This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
 
-This is a preview for the experimental C~ Draft 0.34 language. The extension, language server, compiler, and debug adapter are versioned and released together.
+This is a preview for the experimental C~ Draft 0.36 language. The extension, language server, compiler, and debug adapter are versioned and released together.
 
 ## Requirements
 
@@ -23,7 +23,7 @@ If `dotnet`, the native compiler, or the debugger is outside `PATH`, configure i
 After the Marketplace preview is published, search for **C~ Compiler and Debugger** in the Extensions view. To install a downloaded package instead, run:
 
 ```powershell
-code --install-extension .\ctilde-language-0.11.0.vsix --force
+code --install-extension .\ctilde-language-0.14.0.vsix --force
 ```
 
 ## Features
@@ -34,7 +34,7 @@ code --install-extension .\ctilde-language-0.11.0.vsix --force
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.34 syntax and semantic classification, including repository modules, source owners, `double`, `rune`, SIMD, `[Embed]`, lambdas and closures, assembly functions, `[ConstInit]`, interrupts, effect contracts, target profiles, runtime roles, and native interop.
+- Draft 0.36 syntax and semantic classification, including generic collections, indexers, explicit interface members, `foreach`, `yield`, repository modules, source owners, SIMD, closures, interrupts, effect contracts, target profiles, runtime roles, and native interop.
 - Target-aware standard-library completion and documentation: hosted and Cosmopolitan supply console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
 - Cosmopolitan manifests are schema-validated and participate in check, build, and run tasks. C~-aware APE debugging remains deferred to a retained ELF-carrier workflow.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.

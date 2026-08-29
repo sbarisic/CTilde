@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Rule
+  Name="CTilde"
+  DisplayName="C~"
+  PageTemplate="debugger"
+  Description="Runs the active C~ manifest. Native debugging is not available yet."
+  xmlns="http://schemas.microsoft.com/build/2009/properties">
+  <Rule.DataSource>
+    <DataSource Persistence="UserFileWithXamlDefaults" HasConfigurationCondition="True" />
+  </Rule.DataSource>
+</Rule>

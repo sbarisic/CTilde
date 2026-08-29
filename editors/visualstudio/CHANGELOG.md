@@ -9,6 +9,7 @@
 - Added versioned read-only standard-library navigation.
 - Added Visual Studio options for tool paths and protocol tracing.
 - Added CPS launch integration: `Ctrl+F5` runs through the external-console project workflow, while `F5` reports that debugging is not available yet.
+- Fixed the CPS launch target registration so Visual Studio enables both `F5` and `Ctrl+F5` for runnable C~ startup projects.
 - Collapsed method overloads into one completion row without removing overloads from signature help.
 - Fixed incomplete member-access completion and multi-file project context in non-main source files.
 - Added a Visual Studio-specific TextMate classification map so methods, types, locals, literals, comments, operators, and punctuation follow the active theme's C#-style colors.

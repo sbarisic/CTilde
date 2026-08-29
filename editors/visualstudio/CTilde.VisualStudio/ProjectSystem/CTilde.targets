@@ -6,6 +6,11 @@
     <CTildeManifestFullPath>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(CTildeManifest)'))</CTildeManifestFullPath>
     <DebuggerFlavor Condition="'$(DebuggerFlavor)' == ''">CTilde</DebuggerFlavor>
   </PropertyGroup>
+  <ItemGroup>
+    <PropertyPageSchema Include="$(MSBuildThisFileDirectory)CTildeDebugger.xaml">
+      <Context>Project</Context>
+    </PropertyPageSchema>
+  </ItemGroup>
   <Target Name="CTildeValidateBuildEnvironment">
     <Error Condition="!Exists('$(CTildeManifestFullPath)')" Text="C~ manifest '$(CTildeManifestFullPath)' does not exist." />
     <Error Condition="!Exists('$(CTildeCompilerPath)')" Text="C~ compiler '$(CTildeCompilerPath)' does not exist. Repair the C~ Visual Studio extension or configure its compiler path under Tools &gt; Options &gt; C~." />

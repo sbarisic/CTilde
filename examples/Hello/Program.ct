@@ -11,5 +11,6 @@ public static class Program
         uint right = 3u;
         uint result = left + right;
         Console.WriteLine(result);
+        Console.ReadLine();
     }
 }

@@ -3,6 +3,8 @@ param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot 'artifacts')
 )
 
+$ErrorActionPreference = 'Stop'
+
 $project = Join-Path $PSScriptRoot 'CTilde.VisualStudio/CTilde.VisualStudio.csproj'
 dotnet build $project -c $Configuration
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -35,6 +37,9 @@ try {
     finally { $reader.Dispose() }
     if ($pkgdef -notmatch [regex]::Escape('"CodeBase"="$PackageFolder$\CTilde.VisualStudio.dll"')) {
         throw 'The generated package registration does not bind CTilde.VisualStudio.dll through $PackageFolder$.'
+    }
+    if (-not ($archive.Entries | Where-Object FullName -eq 'ProjectSystem/CTildeDebugger.xaml')) {
+        throw 'The packaged extension does not contain the CPS C~ debugger rule required to enable F5 and Ctrl+F5.'
     }
     $inventory = $archive.Entries | Sort-Object FullName | ForEach-Object { '{0}`t{1}' -f $_.FullName, $_.Length }
 }

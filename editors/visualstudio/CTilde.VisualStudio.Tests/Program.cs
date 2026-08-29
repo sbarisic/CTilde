@@ -221,12 +221,21 @@ Run("Visual Studio no-debug launch registration", () =>
     var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
     var provider = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTildeLaunchProvider.cs"));
     True(provider.Contains("[ExportDebugger(DebuggerName)]", StringComparison.Ordinal));
+    True(provider.Contains("CanLaunchAsync(DebugLaunchOptions launchOptions) => Task.FromResult(true)", StringComparison.Ordinal));
     True(provider.Contains("DebugLaunchOptions.NoDebug", StringComparison.Ordinal));
     True(provider.Contains("CTildeRunManager.DebuggingUnavailableMessage", StringComparison.Ordinal));
+    var debuggerRulePath = Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTildeDebugger.xaml");
+    var debuggerRule = System.Xml.Linq.XDocument.Load(debuggerRulePath).Root!;
+    Equal("CTilde", debuggerRule.Attribute("Name")?.Value);
+    Equal("debugger", debuggerRule.Attribute("PageTemplate")?.Value);
+    var project = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "CTilde.VisualStudio.csproj"));
+    True(project.Contains("<VSIXSourceItem Include=\"ProjectSystem/CTildeDebugger.xaml\"", StringComparison.Ordinal));
+    True(project.Contains("<AssemblyVersion>0.11.0.0</AssemblyVersion>", StringComparison.Ordinal));
     var props = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.props"));
     var targets = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.targets"));
     True(props.Contains("<DebuggerFlavor>CTilde</DebuggerFlavor>", StringComparison.Ordinal));
     True(targets.Contains("<DebuggerFlavor Condition=", StringComparison.Ordinal));
+    True(targets.Contains("<PropertyPageSchema Include=\"$(MSBuildThisFileDirectory)CTildeDebugger.xaml\">", StringComparison.Ordinal));
 });
 
 if (failures.Count == 0)

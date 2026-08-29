@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Version>0.11.0</Version>
+    <AssemblyVersion>0.11.0.0</AssemblyVersion>
     <AssemblyName>CTilde.VisualStudio</AssemblyName>
     <RootNamespace>CTilde.VisualStudio</RootNamespace>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
@@ -66,6 +67,7 @@
     <Content Include="../../vscode/schemas/*.json" Link="Schemas/%(Filename)%(Extension)"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>Schemas</VSIXSubPath></Content>
     <Content Include="ProjectSystem/CTilde.props" Link="ProjectSystem/CTilde.props"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>ProjectSystem</VSIXSubPath></Content>
     <Content Include="ProjectSystem/CTilde.targets" Link="ProjectSystem/CTilde.targets"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>ProjectSystem</VSIXSubPath></Content>
+    <Content Include="ProjectSystem/CTildeDebugger.xaml" Link="ProjectSystem/CTildeDebugger.xaml"><IncludeInVSIX>true</IncludeInVSIX><VSIXSubPath>ProjectSystem</VSIXSubPath></Content>
     <None Include="Templates/HostedConsole/**" />
     <None Include="Build-Template.ps1" />
   </ItemGroup>
@@ -83,6 +85,7 @@
     <VSIXSourceItem Include="../../vscode/schemas/*.json" VSIXSubPath="Schemas" />
     <VSIXSourceItem Include="ProjectSystem/CTilde.props" VSIXSubPath="ProjectSystem" />
     <VSIXSourceItem Include="ProjectSystem/CTilde.targets" VSIXSubPath="ProjectSystem" />
+    <VSIXSourceItem Include="ProjectSystem/CTildeDebugger.xaml" VSIXSubPath="ProjectSystem" />
     <VSIXSourceItem Include="$(PkgMicrosoft_VisualStudio_LanguageServer_Client)/lib/net472/Microsoft.VisualStudio.LanguageServer.Client.dll" />
   </ItemGroup>
   <Target Name="PackageHostedTemplate" BeforeTargets="GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">

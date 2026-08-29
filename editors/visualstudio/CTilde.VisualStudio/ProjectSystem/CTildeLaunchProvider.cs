@@ -15,18 +15,9 @@ internal sealed class CTildeLaunchProvider : IDebugLaunchProvider
     [ImportingConstructor]
     public CTildeLaunchProvider(ConfiguredProject project) => _project = project;
 
-    public Task<bool> CanLaunchAsync(DebugLaunchOptions launchOptions)
-    {
-        try
-        {
-            _ = CTildeProjectContract.Load(_project.UnconfiguredProject.FullPath);
-            return Task.FromResult(true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
-        {
-            return Task.FromResult(false);
-        }
-    }
+    // CPS calls this while updating command state and enforces a 100 ms timeout.
+    // Validation belongs in LaunchAsync so cold disk access cannot disable F5/Ctrl+F5.
+    public Task<bool> CanLaunchAsync(DebugLaunchOptions launchOptions) => Task.FromResult(true);
 
     public Task LaunchAsync(DebugLaunchOptions launchOptions)
     {

@@ -3,7 +3,7 @@
   Name="CTilde"
   DisplayName="C~"
   PageTemplate="debugger"
-  Description="Runs the active C~ manifest. Native debugging is not available yet."
+  Description="Runs or debugs the active hosted C~ manifest with the configured GCC, Clang, or WSL-GCC toolchain."
   xmlns="http://schemas.microsoft.com/build/2009/properties">
   <Rule.DataSource>
     <DataSource Persistence="UserFileWithXamlDefaults" HasConfigurationCondition="True" />

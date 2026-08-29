@@ -13,7 +13,7 @@ internal static class CTildeRunManager
     internal const string RunUnsupportedMessage = "This C~ project manifest does not support Run.";
 
     private static readonly object Gate = new();
-    private static readonly Dictionary<string, Process> Processes = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, RunningProcess> Processes = new(StringComparer.OrdinalIgnoreCase);
 
     internal static bool SupportsRun(string projectPath)
     {
@@ -52,6 +52,7 @@ internal static class CTildeRunManager
         if (!File.Exists(compiler))
             throw new FileNotFoundException("The C~ compiler was not found.", compiler);
         var dotnet = string.IsNullOrWhiteSpace(options.DotNetPath) ? "dotnet" : options.DotNetPath;
+        var lease = CTildeProjectLaunchLease.Acquire(contract.ManifestPath);
         var process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -64,14 +65,15 @@ internal static class CTildeRunManager
             },
             EnableRaisingEvents = true,
         };
-        process.Exited += (_, _) => Remove(projectPath, process);
+        var running = new RunningProcess(process, lease);
+        process.Exited += (_, _) => Remove(projectPath, running);
         try
         {
             lock (Gate)
             {
                 if (Processes.ContainsKey(projectPath))
                     throw new InvalidOperationException("This C~ project already has a running process.");
-                Processes.Add(projectPath, process);
+                Processes.Add(projectPath, running);
                 if (!process.Start())
                     throw new InvalidOperationException("The C~ project did not start.");
             }
@@ -79,29 +81,37 @@ internal static class CTildeRunManager
         }
         catch (Win32Exception exception)
         {
-            Remove(projectPath, process);
+            Remove(projectPath, running);
             throw new InvalidOperationException(CommandOutcomes.MissingDotNetMessage(exception.Message), exception);
         }
         catch
         {
-            Remove(projectPath, process);
+            Remove(projectPath, running);
             throw;
         }
     }
 
-    private static void Remove(string projectPath, Process process)
+    private static void Remove(string projectPath, RunningProcess running)
     {
         lock (Gate)
         {
-            if (Processes.TryGetValue(projectPath, out var current) && ReferenceEquals(current, process))
+            if (Processes.TryGetValue(projectPath, out var current) && ReferenceEquals(current, running))
                 Processes.Remove(projectPath);
         }
-        process.Dispose();
+        running.Process.Dispose();
+        running.Lease.Dispose();
     }
 
     private static bool ReadRunSupport(CTildeProjectContract contract)
     {
         var manifest = JObject.Parse(File.ReadAllText(contract.ManifestPath));
         return RunSupport.IsSupported(manifest["kind"]?.Value<string>(), manifest["target"]?.Value<string>(), manifest["run"] is JObject);
+    }
+
+    private sealed class RunningProcess
+    {
+        internal RunningProcess(Process process, IDisposable lease) { Process = process; Lease = lease; }
+        internal Process Process { get; }
+        internal IDisposable Lease { get; }
     }
 }

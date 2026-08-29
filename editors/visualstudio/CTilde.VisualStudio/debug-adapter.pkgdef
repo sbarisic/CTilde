@@ -1,0 +1,32 @@
+[$RootKey$\AD7Metrics\Engine\{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}]
+"CLSID"="{DAB324E9-7B35-454C-ACA8-F6BB0D5C8673}"
+"AlwaysLoadLocal"=dword:00000001
+"AddressBP"=dword:00000000
+"CallStackBP"=dword:00000000
+"Attach"=dword:00000000
+"Exceptions"=dword:00000001
+"ExceptionConditions"=dword:00000000
+"Name"="C~ Debugger"
+"Adapter"="$PackageFolder$\Tools\DebugAdapter\CTilde.DebugAdapter.exe"
+"Language"="C~"
+"LocalsScopeName"="Locals"
+"ExceptionBreakpointCategory"="{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}"
+
+[$RootKey$\AD7Metrics\Engine\{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}\ExceptionCategoryMappings]
+"*"="{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}"
+
+[$RootKey$\AD7Metrics\Engine\{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}\ExceptionBreakpointMappings]
+"C~ thrown exceptions"="thrown"
+"C~ unhandled exceptions"="unhandled"
+"C~ fatal runtime events"="fatal"
+
+[$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}]
+[$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events]
+"State"=dword:00010002
+
+[$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ thrown exceptions]
+"State"=dword:00010001
+[$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ unhandled exceptions]
+"State"=dword:00010002
+[$RootKey$\AD7Metrics\Exception\{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}\C~ Runtime Events\C~ fatal runtime events]
+"State"=dword:00010002

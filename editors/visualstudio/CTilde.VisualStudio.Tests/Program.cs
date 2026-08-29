@@ -83,6 +83,53 @@ Run("command enablement", () =>
     True(!RunSupport.IsSupported("application", "freestanding", false));
     True(!RunSupport.IsSupported("standard-library", "hosted", true));
 });
+Run("debug compiler precedence and preparation", () =>
+{
+    WithProject(root =>
+    {
+        var manifest = Path.Combine(root, "ctilde.json");
+        File.WriteAllText(manifest, "{\"target\":\"hosted\",\"sources\":[\"Program.ct\"],\"build\":{\"compiler\":\"gcc\"}}");
+        var preparation = DebugLaunchContracts.CreatePreparation(Path.Combine(root, "ctilde.dll"), manifest,
+            string.Empty, "clang", CTildeDebugMemoryMode.Objects);
+        Equal("gcc", preparation.Compiler);
+        Equal("hosted", preparation.Target);
+        True(preparation.Arguments.Contains("--prepare-debug"));
+        True(preparation.Arguments.Contains("--compiler"));
+        True(preparation.Arguments.Contains("objects"));
+        Equal("clang", DebugLaunchContracts.ResolveCompiler("clang", "gcc", null));
+        Equal("gcc", DebugLaunchContracts.ResolveCompiler(null, "gcc", "clang"));
+        Equal("wsl:gcc", DebugLaunchContracts.ResolveCompiler(null, "auto", "wsl:gcc"));
+        Throws<InvalidOperationException>(() => DebugLaunchContracts.ResolveCompiler(null, "auto", null));
+        Throws<InvalidOperationException>(() => DebugLaunchContracts.ValidateGdbCompiler("cl.exe"));
+        Throws<InvalidOperationException>(() => DebugLaunchContracts.ValidateGdbCompiler("clang-cl.exe"));
+    });
+});
+Run("QEMU debug preparation and manifest isolation", () =>
+{
+    WithProject(root =>
+    {
+        var esp32 = Path.Combine(root, "ctilde.esp32_qemu.json");
+        var esp32c3 = Path.Combine(root, "ctilde.esp32c3_qemu.json");
+        File.WriteAllText(esp32, "{\"target\":\"esp32_qemu\",\"sources\":[\"Program.ct\"]}");
+        File.WriteAllText(esp32c3, "{\"target\":\"esp32c3_qemu\",\"sources\":[\"Program.ct\"]}");
+        var first = DebugLaunchContracts.CreatePreparation(Path.Combine(root, "ctilde.dll"), esp32,
+            "gcc", "clang", CTildeDebugMemoryMode.Objects, Path.Combine(root, "idf"), Path.Combine(root, "esp-clang.exe"));
+        var second = DebugLaunchContracts.CreatePreparation(Path.Combine(root, "ctilde.dll"), esp32c3,
+            "gcc", "clang", CTildeDebugMemoryMode.Objects);
+        Equal("esp32_qemu", first.Target);
+        Equal("esp32c3_qemu", second.Target);
+        True(first.Arguments.Contains("--idf-path"));
+        True(first.Arguments.Contains("--esp-clang"));
+        True(!first.Arguments.Contains("--compiler"));
+        True(!second.Arguments.Contains("--compiler"));
+        True(!first.DescriptorPath.Equals(second.DescriptorPath, StringComparison.OrdinalIgnoreCase));
+        Equal(DebugLaunchContracts.ManifestIdentity(esp32), Path.GetFileNameWithoutExtension(first.DescriptorPath));
+        var physical = Path.Combine(root, "physical.json");
+        File.WriteAllText(physical, "{\"target\":\"esp-idf\",\"sources\":[\"Program.ct\"]}");
+        Throws<InvalidOperationException>(() => DebugLaunchContracts.CreatePreparation(Path.Combine(root, "ctilde.dll"), physical,
+            null, null, CTildeDebugMemoryMode.Objects));
+    });
+});
 Run("selected project routing and ambiguity", () =>
 {
     WithProject(root =>
@@ -167,10 +214,10 @@ Run("standard-library URI mapping", () =>
     True(StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/System.Console.ct", out var document));
     Equal("System.Console.ct", document);
     True(!StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/../secret.ct", out _));
-    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.11.0", "ctilde-stdlib:/System.Console.ct");
-    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.11.0", "ctilde-stdlib:/System.Console.ct");
+    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.12.0", "ctilde-stdlib:/System.Console.ct");
+    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.12.0", "ctilde-stdlib:/System.Console.ct");
     Equal(first, second);
-    True(first.Contains($"{Path.DirectorySeparatorChar}0.11.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+    True(first.Contains($"{Path.DirectorySeparatorChar}0.12.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     Equal(new Uri(Path.GetFullPath(first)), StandardLibraryUri.FileUri(first));
 });
 Run("Visual Studio TextMate registration", () =>
@@ -216,21 +263,30 @@ Run("Visual Studio TextMate classifications", () =>
     True(project.Contains("Grammars/ctilde.tmLanguage.tmTheme", StringComparison.Ordinal));
     True(project.Contains("VSIXSubPath=\"Grammars\"", StringComparison.Ordinal));
 });
-Run("Visual Studio no-debug launch registration", () =>
+Run("Visual Studio debug launch registration", () =>
 {
     var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
     var provider = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTildeLaunchProvider.cs"));
     True(provider.Contains("[ExportDebugger(DebuggerName)]", StringComparison.Ordinal));
     True(provider.Contains("CanLaunchAsync(DebugLaunchOptions launchOptions) => Task.FromResult(true)", StringComparison.Ordinal));
     True(provider.Contains("DebugLaunchOptions.NoDebug", StringComparison.Ordinal));
-    True(provider.Contains("CTildeRunManager.DebuggingUnavailableMessage", StringComparison.Ordinal));
+    True(provider.Contains("DebugLaunchProviderBase", StringComparison.Ordinal));
+    True(provider.Contains("QueryDebugTargetsAsync", StringComparison.Ordinal));
+    True(provider.Contains("DebugLaunchContracts.EngineGuid", StringComparison.Ordinal));
     var debuggerRulePath = Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTildeDebugger.xaml");
     var debuggerRule = System.Xml.Linq.XDocument.Load(debuggerRulePath).Root!;
     Equal("CTilde", debuggerRule.Attribute("Name")?.Value);
     Equal("debugger", debuggerRule.Attribute("PageTemplate")?.Value);
     var project = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "CTilde.VisualStudio.csproj"));
     True(project.Contains("<VSIXSourceItem Include=\"ProjectSystem/CTildeDebugger.xaml\"", StringComparison.Ordinal));
-    True(project.Contains("<AssemblyVersion>0.11.0.0</AssemblyVersion>", StringComparison.Ordinal));
+    True(project.Contains("CTilde.DebugAdapter.csproj", StringComparison.Ordinal));
+    True(project.Contains("Tools\\DebugAdapter", StringComparison.Ordinal));
+    True(project.Contains("<AssemblyVersion>0.12.0.0</AssemblyVersion>", StringComparison.Ordinal));
+    var registration = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "debug-adapter.pkgdef"));
+    True(registration.Contains("{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}", StringComparison.OrdinalIgnoreCase));
+    True(registration.Contains("{0CF710B9-7DB1-473B-8CEB-1F981ABA01E2}", StringComparison.OrdinalIgnoreCase));
+    True(registration.Contains("Tools\\DebugAdapter\\CTilde.DebugAdapter.exe", StringComparison.Ordinal));
+    True(registration.Contains("\"Attach\"=dword:00000000", StringComparison.Ordinal));
     var props = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.props"));
     var targets = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.targets"));
     True(props.Contains("<DebuggerFlavor>CTilde</DebuggerFlavor>", StringComparison.Ordinal));

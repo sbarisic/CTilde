@@ -1,5 +1,5 @@
 {
   "target": "hosted",
   "sources": ["Program.ct"],
-  "build": { "configuration": "release" }
+  "build": { "configuration": "debug" }
 }

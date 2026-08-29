@@ -5,7 +5,7 @@
   "build": {
     "cLayout": "modules",
     "compiler": "wsl:gcc",
-    "configuration": "release",
+    "configuration": "debug",
     "image": "build/kernel.elf"
   },
   "freestanding": {

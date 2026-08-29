@@ -74,6 +74,11 @@ public static class BootImage
     public static unsafe int Main()
     {
         Write("CTILDE_QEMU_OK\n");
+
+        while (true)
+        {
+        }
+
         return 0;
     }
 

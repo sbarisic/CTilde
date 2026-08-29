@@ -211,7 +211,7 @@ See [the extension guide](editors/vscode/README.md) for installation and debugge
 
 The preview Visual Studio extension supplies TextMate and LSP editor support plus manifest-backed `.ctproj` projects. `CTilde.sln` includes the physical standard library and 12 example entries under the **C~** solution folder. They have solution configuration mappings but are excluded from Build Solution; select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest.
 
-See [the Visual Studio extension guide](editors/visualstudio/README.md). Debugging remains a VS Code-only feature in version 0.11.0.
+See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.12.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
 
 ## Compiler API
 

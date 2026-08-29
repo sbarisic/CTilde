@@ -18,7 +18,7 @@ namespace CTilde.VisualStudio;
 [RunOnContext(RunningContext.RunOnHost)]
 public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCustomMessage2
 {
-    private const string ServerVersion = "0.11.0";
+    private const string ServerVersion = "0.12.0";
     private Process? _process;
     private JsonRpc? _rpc;
     private SolutionEvents? _solutionEvents;

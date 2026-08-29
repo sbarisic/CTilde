@@ -11,6 +11,7 @@ This preview extension adds C~ editor and manifest-backed project support to Vis
 - `.ctproj` CPS projects backed by an authoritative `ctilde.json` manifest.
 - Check, Build, Clean, Rebuild, cancellation, and external-console Run commands under **Tools**.
 - **Start Without Debugging** (`Ctrl+F5`) runs the startup C~ project through the same external-console workflow as **Run C~ Project**.
+- **Start Debugging** (`F5`) launches the bundled C~ debug adapter for hosted projects built explicitly with GCC, Clang, or WSL-GCC.
 - A **C~ Hosted Console Application** project template.
 - **Create Visual Studio Project from C~ Manifest** for existing projects.
 
@@ -27,7 +28,7 @@ Syntax colors use Visual Studio's built-in classifications instead of fixed C~ c
 - The [.NET 10 runtime](https://dotnet.microsoft.com/download/dotnet/10.0).
 - The native toolchain required by the selected manifest target.
 
-Optional `dotnet`, compiler, language-server, and tracing settings are under **Tools > Options > C~**. The compiler and language server are bundled and are the defaults.
+Optional `dotnet`, compiler, language-server, and tracing settings are under **Tools > Options > C~**. Debugger settings add the debug compiler, GDB path, memory diagnostics, stop-at-entry, runtime-frame visibility, and DAP/GDB tracing. The compiler, language server, and debug adapter are bundled; .NET 10 and the native debugger remain external requirements.
 
 ## Project contract
 
@@ -73,11 +74,23 @@ The repository solution contains 13 ready-to-load C~ projects under **C~**: the 
 
 Use **Start Without Debugging** (`Ctrl+F5`) or **Tools > Run C~ Project** to build and run a runnable manifest in a new external console. Both entry points share path resolution, missing-runtime reporting, and one-running-process-per-project protection.
 
-Regular **Start** (`F5`) does not run or attach a debugger. It reports that C~ debugging is not available yet and directs you to `Ctrl+F5` or **Run C~ Project**. Standard-library projects and manifests without a supported run configuration cannot be launched.
+Regular **Start** (`F5`) supports hosted C~ applications with an explicit GDB-capable compiler and the `esp32_qemu` and `esp32c3_qemu` targets. For hosted projects, configure `gcc`, `clang`, `wsl:gcc`, or a matching executable under **Tools > Options > C~ > Debugger**, in `build.compiler`, or through `CTILDE_CC` when the manifest compiler is `auto`. The Visual Studio override wins, followed by the manifest and then `CTILDE_CC`. F5 never silently replaces `auto`, MSVC, or clang-cl with another toolchain.
 
-## Deliberate v0.11 boundaries
+Each new F5 session rebuilds an instrumented image and validates the version-3 descriptor, debug map, executable, control-block layout, site count, and every recorded source hash before GDB starts. Breakpoints, conditions, hit counts, logpoints, function and data breakpoints, C~-mapped stacks and logical source stepping, threads, live lexical locals, arguments, statics, ARC/runtime diagnostics, watches, memory reads, runtime exception filters, pause, restart, and stop are available. The yellow arrow identifies the next C~ statement; its variables and Runtime probe entry are captured from that exact logical site. Watches intentionally accept identifiers, fields, and array indices rather than arbitrary C~ expression execution. Hosted inferiors run in an external native or WSL console so stdin, Unicode, colors, signals, arguments, environment, and the manifest working directory behave like a direct launch.
 
-Debugging, Attach, GDB/DAP integration, ESP serial sessions, Open Folder build commands, and command-line `.ctproj` builds are not included. Loose `.ct` files retain syntax and language-server features, but project commands require a loaded `.ctproj`.
+ESP QEMU sessions always use the cross-GDB and owned `idf.py qemu --gdb` command recorded by the prepared descriptor. Configure an optional ESP-IDF root and Espressif Clang executable under **Tools > Options > C~ > ESP-IDF**; blank values fall back to `IDF_PATH`, `CTILDE_ESP_CLANG`, and the compiler's normal discovery. The adapter verifies that `127.0.0.1:3333` is free, forwards QEMU output to the Debug Console, synchronizes logical state at `ct_debug_qemu_ready`, and uses `ct_debug_qemu_trap` for later logical stops. Restart creates a fresh emulator and GDB session. Stop closes the owned Windows Job Object so the complete emulator process tree is terminated and the fixed port is released.
+
+Install the ESP-IDF-managed emulator packages before the first QEMU session:
+
+```powershell
+python "C:\esp\v6.0.2\esp-idf\tools\idf_tools.py" install qemu-xtensa qemu-riscv32
+```
+
+Run uses a project lease; Debug uses a manifest-specific descriptor lease so same-directory target variants do not overwrite each other. The fixed QEMU endpoint still permits only one ESP QEMU session at a time, and a second session receives an explicit port-conflict error. Standard-library and unsupported targets receive a specific unsupported-launch error.
+
+## Deliberate v0.12 boundaries
+
+Attach, physical ESP/UART debugging, generic CLI QEMU run, peripheral emulation, MSVC/clang-cl debugging, freestanding, Cosmopolitan, mixed-mode and child-process debugging, arbitrary watch expression execution, Open Folder build commands, and command-line `.ctproj` builds are not included. Loose `.ct` files retain syntax and language-server features, but project commands require a loaded `.ctproj`.
 
 Homepage: [ctilde.sbarisic.com](https://ctilde.sbarisic.com)  
 Repository and issues: [github.com/sbarisic/CTilde](https://github.com/sbarisic/CTilde)
@@ -91,9 +104,11 @@ Run this identical checklist on Visual Studio 2022 17.14 and Visual Studio 2026:
 3. Verify hierarchy exclusions and lexical plus semantic highlighting.
 4. Verify diagnostics, completion and resolve, hover, signatures, user and standard-library definitions, references, and symbols.
 5. Verify Check, Build, Clean, Rebuild, **Run C~ Project**, and `Ctrl+F5`, including cancellation, full C~ output, duplicate-process protection, and Error List navigation.
-6. Verify `F5` reports that debugging is unavailable and recommends `Ctrl+F5` or **Run C~ Project** without launching the program.
-7. Verify a missing .NET 10 runtime produces actionable download guidance.
-8. Select Debug and Release and verify neither rewrites nor overrides `build.configuration`.
-9. Update the installed VSIX, uninstall it, and confirm the extension's files are removed.
+6. Configure GCC, Clang, or WSL-GCC and verify `F5` source/function/data breakpoints, conditions, logpoints, cross-file stepping, locals, arrays, objects, statics, watches, memory, runtime exceptions, restart, stop, and external-console I/O. Verify `auto`, MSVC, and missing GDB report actionable errors before adapter launch.
+7. Configure ESP-IDF and Espressif Clang, then verify both T-CAN485 QEMU targets reach `CTILDE_ESP_QEMU_OK`, stop on mapped C~ breakpoints, step, restart, stop, leave no owned QEMU/GDB process, and release port 3333.
+8. Verify QEMU Attach, a generic GDB override, a busy port 3333, and missing emulator packages produce actionable errors.
+9. Verify a missing .NET 10 runtime produces actionable download guidance.
+10. Select Debug and Release and verify neither rewrites nor overrides `build.configuration`.
+11. Update the installed VSIX, uninstall it, and confirm the extension's files are removed.
 
 Do not publish a Visual Studio 2026 compatibility claim until that environment passes every item.

@@ -4,7 +4,7 @@ The C~ extension bundles third-party software. The C~ project license does not r
 
 ## MIT-licensed components
 
-- Microsoft: `@vscode/debugadapter` 1.68.0, `@vscode/debugprotocol` 1.68.0, `vscode-languageclient` 9.0.1, `vscode-languageserver-protocol` 3.17.5, `vscode-jsonrpc` 8.2.0, `vscode-languageserver-types` 3.17.5, StreamJsonRpc 2.25.29, Microsoft.NET.StringTools 18.4.0, Microsoft.VisualStudio.Threading.Only 17.14.15, and Microsoft.VisualStudio.Validation 17.13.22.
+- Microsoft: `@vscode/debugadapter` 1.68.0, `@vscode/debugprotocol` 1.68.0, `vscode-languageclient` 9.0.1, `vscode-languageserver-protocol` 3.17.5, `vscode-jsonrpc` 8.2.0, `vscode-languageserver-types` 3.17.5, Microsoft.VisualStudio.Shared.VSCodeDebugProtocol 18.0.10427.1, StreamJsonRpc 2.25.29, Microsoft.NET.StringTools 18.4.0, Microsoft.VisualStudio.Threading.Only 17.14.15, and Microsoft.VisualStudio.Validation 17.13.22.
 - neuecc and Andrew Arnott: MessagePack and MessagePack.Annotations 2.5.302.
 - Andrew Arnott: Nerdbank.MessagePack 1.2.4 and Nerdbank.Streams 2.13.16.
 - James Newton-King: Newtonsoft.Json 13.0.3.

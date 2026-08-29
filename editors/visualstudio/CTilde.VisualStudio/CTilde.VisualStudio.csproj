@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.11.0</Version>
-    <AssemblyVersion>0.11.0.0</AssemblyVersion>
+    <Version>0.12.0</Version>
+    <AssemblyVersion>0.12.0.0</AssemblyVersion>
     <AssemblyName>CTilde.VisualStudio</AssemblyName>
     <RootNamespace>CTilde.VisualStudio</RootNamespace>
     <GeneratePkgDefFile>true</GeneratePkgDefFile>
@@ -49,6 +49,10 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
+    <Content Include="debug-adapter.pkgdef">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
     <Content Include="Grammars/ctilde.tmLanguage.tmTheme">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
@@ -83,9 +87,19 @@
     <VSIXSourceItem Include="../../vscode/language-configuration.json" VSIXSubPath="Grammars" />
     <VSIXSourceItem Include="Grammars/ctilde.tmLanguage.tmTheme" VSIXSubPath="Grammars" />
     <VSIXSourceItem Include="../../vscode/schemas/*.json" VSIXSubPath="Schemas" />
+    <VSIXSourceItem Include="$(TargetDir)Microsoft.Bcl.AsyncInterfaces.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Buffers.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.IO.Pipelines.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Memory.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Numerics.Vectors.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Runtime.CompilerServices.Unsafe.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Text.Encodings.Web.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Text.Json.dll" />
+    <VSIXSourceItem Include="$(TargetDir)System.Threading.Tasks.Extensions.dll" />
     <VSIXSourceItem Include="ProjectSystem/CTilde.props" VSIXSubPath="ProjectSystem" />
     <VSIXSourceItem Include="ProjectSystem/CTilde.targets" VSIXSubPath="ProjectSystem" />
     <VSIXSourceItem Include="ProjectSystem/CTildeDebugger.xaml" VSIXSubPath="ProjectSystem" />
+    <VSIXSourceItem Include="debug-adapter.pkgdef" />
     <VSIXSourceItem Include="$(PkgMicrosoft_VisualStudio_LanguageServer_Client)/lib/net472/Microsoft.VisualStudio.LanguageServer.Client.dll" />
   </ItemGroup>
   <Target Name="PackageHostedTemplate" BeforeTargets="GetVsixSourceItems" Condition="'$(DesignTimeBuild)' != 'true'">
@@ -97,11 +111,14 @@
     <PropertyGroup>
       <BundledToolsRoot>$(IntermediateOutputPath)BundledTools</BundledToolsRoot>
     </PropertyGroup>
+    <RemoveDir Directories="$(BundledToolsRoot)\DebugAdapter;$(BundledToolsRoot)\DebugAdapterBuild" />
     <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.Cli\CTilde.Cli.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\CompilerBuild&quot; -o &quot;$(BundledToolsRoot)\Compiler&quot;" />
     <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.LanguageServer\CTilde.LanguageServer.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\LanguageServerBuild&quot; -o &quot;$(BundledToolsRoot)\LanguageServer&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.DebugAdapter\CTilde.DebugAdapter.csproj&quot; -c Release --no-self-contained -p:DebugType=None -p:DebugSymbols=false -p:BaseOutputPath=&quot;$(BundledToolsRoot)\DebugAdapterBuild&quot; -o &quot;$(BundledToolsRoot)\DebugAdapter&quot;" />
     <ItemGroup>
       <VSIXSourceItem Include="$(BundledToolsRoot)\Compiler\**\*" VsixSubPath="Tools\Compiler\%(RecursiveDir)" />
       <VSIXSourceItem Include="$(BundledToolsRoot)\LanguageServer\**\*" VsixSubPath="Tools\LanguageServer\%(RecursiveDir)" />
+      <VSIXSourceItem Include="$(BundledToolsRoot)\DebugAdapter\*" VsixSubPath="Tools\DebugAdapter" />
     </ItemGroup>
   </Target>
   <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />

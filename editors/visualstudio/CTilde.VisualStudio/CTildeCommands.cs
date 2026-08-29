@@ -3,6 +3,7 @@ using System.ComponentModel.Design;
 using System.Diagnostics;
 using System.Globalization;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using CTilde.VisualStudio.Core;
 using EnvDTE;
 using Microsoft.VisualStudio;
@@ -16,6 +17,9 @@ namespace CTilde.VisualStudio;
 internal sealed class CTildeCommands : IDisposable
 {
     private static readonly Guid CommandSet = new("235dfa97-a3cf-4627-975b-851e22e0ca63");
+    private static readonly Regex SolutionProjectPattern = new(
+        "^Project\\(\"[^\"]+\"\\)\\s*=\\s*\"[^\"]*\",\\s*\"(?<path>[^\"]+\\.ctproj)\"",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private readonly CTildePackage _package;
     private readonly ErrorListProvider _errors;
     private CancellationTokenSource? _operationCancellation;
@@ -267,6 +271,7 @@ internal sealed class CTildeCommands : IDisposable
             .Select(CTildeProjectPath)
             .Where(path => path is not null)
             .Cast<string>()
+            .Concat(SolutionProjectPaths(dte.Solution.FullName))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         string? selectedProject = null;
@@ -285,10 +290,38 @@ internal sealed class CTildeCommands : IDisposable
         ThreadHelper.ThrowIfNotOnUIThread();
         if (project is null)
             return null;
-        var path = project.FullName;
+        string path;
+        try { path = project.FullName; }
+        catch (Exception exception) when (exception is NotImplementedException or System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
         return !string.IsNullOrWhiteSpace(path) && Path.GetExtension(path).Equals(".ctproj", StringComparison.OrdinalIgnoreCase)
             ? Path.GetFullPath(path)
             : null;
+    }
+
+    private static IEnumerable<string> SolutionProjectPaths(string? solutionPath)
+    {
+        if (string.IsNullOrWhiteSpace(solutionPath) || !File.Exists(solutionPath))
+            yield break;
+        var directory = Path.GetDirectoryName(Path.GetFullPath(solutionPath))!;
+        string[] lines;
+        try { lines = File.ReadAllLines(solutionPath); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            yield break;
+        }
+        foreach (var line in lines)
+        {
+            var match = SolutionProjectPattern.Match(line);
+            if (!match.Success)
+                continue;
+            var path = match.Groups["path"].Value.Replace('\\', Path.DirectorySeparatorChar);
+            path = Path.IsPathRooted(path) ? Path.GetFullPath(path) : Path.GetFullPath(Path.Combine(directory, path));
+            if (File.Exists(path))
+                yield return path;
+        }
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD010:Invoke single-threaded types on Main thread", Justification = "The caller and method verify the UI thread; iterator analysis does not preserve that fact.")]

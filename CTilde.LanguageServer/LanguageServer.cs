@@ -11,6 +11,9 @@ internal sealed class LanguageServer
     private readonly WorkspaceState _workspace = new();
     private JsonRpc? _rpc;
     private CancellationTokenSource? _diagnosticDelay;
+    private readonly object _referenceGate = new();
+    private readonly Dictionary<string, (ProjectSnapshot Project, LanguageReference Reference)[]> _workspaceReferenceCache = new(StringComparer.Ordinal);
+    private long _workspaceReferenceCacheRevision = -1;
     private bool _shutdown;
     private bool _semanticRefreshSupported;
 
@@ -67,13 +70,13 @@ internal sealed class LanguageServer
     }
 
     [JsonRpcMethod("textDocument/didSave", UseSingleObjectParameterDeserialization = true)]
-    public void DidSave(DidSaveTextDocumentParams parameters) => _workspace.FilesChanged();
+    public void DidSave(DidSaveTextDocumentParams parameters) => _workspace.Save(parameters.TextDocument.Uri);
 
     [JsonRpcMethod("workspace/didChangeWorkspaceFolders", UseSingleObjectParameterDeserialization = true)]
     public void DidChangeWorkspaceFolders(DidChangeWorkspaceFoldersParams parameters) => _workspace.ChangeFolders(parameters.Event);
 
     [JsonRpcMethod("workspace/didChangeWatchedFiles", UseSingleObjectParameterDeserialization = true)]
-    public void DidChangeWatchedFiles(DidChangeWatchedFilesParams parameters) => _workspace.FilesChanged();
+    public void DidChangeWatchedFiles(DidChangeWatchedFilesParams parameters) => _workspace.FilesChanged(parameters.Changes);
 
     [JsonRpcMethod("ctilde/didChangeProjects", UseSingleObjectParameterDeserialization = true)]
     public void DidChangeProjects(CTildeProjectContextsParams parameters) => _workspace.SetProjectContexts(parameters);
@@ -155,7 +158,9 @@ internal sealed class LanguageServer
         var symbol = project.LanguageService.GetReferences(path, position, includeDeclaration: true).FirstOrDefault();
         if (symbol is null)
             return [];
-        return [.. WorkspaceReferences(symbol.SymbolKey, parameters.Context.IncludeDeclaration, cancellationToken)
+        var result = WorkspaceReferences([new ReferenceSearch(symbol.SymbolKey, symbol.SymbolSourceIdentity, symbol.SearchScope)],
+            parameters.Context.IncludeDeclaration, cancellationToken);
+        return [.. result.References.GetValueOrDefault(symbol.SymbolKey, [])
             .Select(item => ToLocation(item.Project, item.Reference))];
     }
 
@@ -165,15 +170,18 @@ internal sealed class LanguageServer
         cancellationToken.ThrowIfCancellationRequested();
         var project = _workspace.GetProject(parameters.TextDocument.Uri);
         var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
-        return [.. project.LanguageService.GetReferenceLenses(path).Select(lens => new CTildeReferenceCodeLens(
+        var lenses = project.LanguageService.GetReferenceLenses(path);
+        var references = WorkspaceReferences(lenses.Select(lens => new ReferenceSearch(lens.SymbolKey, lens.SourceIdentity, lens.SearchScope)),
+            includeDeclaration: false, cancellationToken);
+        return [.. lenses.Select(lens => new CTildeReferenceCodeLens(
             lens.SymbolKey,
             lens.Name,
             lens.Detail,
             SymbolKind(lens.Kind),
             ToRange(project, path, lens.Range),
             ToRange(project, path, lens.SelectionRange),
-            WorkspaceReferences(lens.SymbolKey, includeDeclaration: false, cancellationToken).Length,
-            project.Revision))];
+            references.References.GetValueOrDefault(lens.SymbolKey, []).Length,
+            references.Revision))];
     }
 
     [JsonRpcMethod("ctilde/referenceCodeLensDetails", UseSingleObjectParameterDeserialization = true)]
@@ -181,14 +189,22 @@ internal sealed class LanguageServer
     {
         cancellationToken.ThrowIfCancellationRequested();
         var project = _workspace.GetProject(parameters.TextDocument.Uri);
-        if (parameters.Revision != project.Revision)
-            return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, project.Revision, []);
-        var description = _workspace.GetWorkspaceProjects()
-            .Select(candidate => candidate.LanguageService.GetReferenceDescription(parameters.SymbolKey))
-            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? parameters.SymbolKey;
-        var details = WorkspaceReferences(parameters.SymbolKey, includeDeclaration: false, cancellationToken)
+        var revision = _workspace.Revision;
+        if (parameters.Revision != revision)
+            return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, revision, []);
+        var description = project.LanguageService.GetReferenceDescription(parameters.SymbolKey) ?? parameters.SymbolKey;
+        var cached = CachedWorkspaceReferences(revision, parameters.SymbolKey);
+        if (cached is null)
+        {
+            var occurrence = project.LanguageService.GetReferences(parameters.SymbolKey, includeDeclaration: true).FirstOrDefault();
+            if (occurrence is null)
+                return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, revision, []);
+            cached = WorkspaceReferences([new ReferenceSearch(parameters.SymbolKey, occurrence.SymbolSourceIdentity, occurrence.SearchScope)],
+                includeDeclaration: false, cancellationToken).References.GetValueOrDefault(parameters.SymbolKey, []);
+        }
+        var details = cached.Where(item => !item.Reference.IsDeclaration)
             .Select(item => ToReferenceDetail(item.Project, item.Reference, description)).ToArray();
-        return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, project.Revision, details);
+        return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, revision, details);
     }
 
     [JsonRpcMethod("textDocument/documentSymbol", UseSingleObjectParameterDeserialization = true)]
@@ -262,7 +278,7 @@ internal sealed class LanguageServer
             if (_semanticRefreshSupported && _rpc is { } rpc)
                 await rpc.InvokeAsync("workspace/semanticTokens/refresh", Array.Empty<object>()).ConfigureAwait(false);
             if (_rpc is { } referenceRpc)
-                await referenceRpc.NotifyWithParameterObjectAsync("ctilde/referenceCodeLens/refresh", new { }).ConfigureAwait(false);
+                await referenceRpc.NotifyWithParameterObjectAsync("ctilde/referenceCodeLens/refresh", new CTildeReferenceCodeLensRefresh(_workspace.Revision)).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (next.IsCancellationRequested) { }
         catch (Exception exception)
@@ -308,30 +324,97 @@ internal sealed class LanguageServer
     private static Location ToLocation(ProjectSnapshot project, LanguageReference reference) =>
         new(UriHelpers.ToUri(reference.FilePath), ToRange(project, reference.FilePath, reference.Span));
 
-    private (ProjectSnapshot Project, LanguageReference Reference)[] WorkspaceReferences(string symbolKey, bool includeDeclaration, CancellationToken cancellationToken)
+    private WorkspaceReferenceBatch WorkspaceReferences(IEnumerable<ReferenceSearch> searches, bool includeDeclaration, CancellationToken cancellationToken)
     {
-        var result = new List<(ProjectSnapshot Project, LanguageReference Reference)>();
-        var seen = new HashSet<(string Uri, int Start, int Length, bool Declaration)>();
-        foreach (var candidate in _workspace.GetWorkspaceProjects())
+        var requested = searches.DistinctBy(search => search.SymbolKey).ToArray();
+        var revision = _workspace.Revision;
+        lock (_referenceGate)
         {
-            cancellationToken.ThrowIfCancellationRequested();
-            foreach (var reference in candidate.LanguageService.GetReferences(symbolKey, includeDeclaration))
+            if (_workspaceReferenceCacheRevision != revision)
             {
-                var identity = (UriHelpers.ToUri(reference.FilePath), reference.Span.Start, reference.Span.Length, reference.IsDeclaration);
-                if (seen.Add(identity))
-                    result.Add((candidate, reference));
+                _workspaceReferenceCache.Clear();
+                _workspaceReferenceCacheRevision = revision;
             }
         }
-        return [.. result.OrderBy(item => UriHelpers.ToUri(item.Reference.FilePath), StringComparer.OrdinalIgnoreCase).ThenBy(item => item.Reference.Span.Start)];
+
+        var missing = requested.Where(search => CachedWorkspaceReferences(revision, search.SymbolKey) is null).ToArray();
+        if (missing.Length != 0)
+        {
+            var keys = missing.Select(search => search.SymbolKey).ToHashSet(StringComparer.Ordinal);
+            var projectSources = missing.Where(search => search.SearchScope == LanguageReferenceSearchScope.ProjectSource)
+                .Select(search => search.SourceIdentity).ToHashSet(PathIdentityComparer);
+            var includeSharedProjects = missing.Any(search => search.SearchScope != LanguageReferenceSearchScope.ProjectSource);
+            var results = keys.ToDictionary(key => key, _ => new List<(ProjectSnapshot Project, LanguageReference Reference)>(), StringComparer.Ordinal);
+            var seen = keys.ToDictionary(key => key,
+                _ => new HashSet<(string SourceIdentity, int Start, int Length, bool Declaration)>(WorkspaceReferenceIdentityComparer.Instance),
+                StringComparer.Ordinal);
+            foreach (var candidate in _workspace.GetWorkspaceProjects(projectSources, includeSharedProjects))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                foreach (var reference in candidate.LanguageService.GetReferences(keys, includeDeclaration: true))
+                {
+                    var identity = (reference.SourceIdentity, reference.Span.Start, reference.Span.Length, reference.IsDeclaration);
+                    if (seen[reference.SymbolKey].Add(identity))
+                        results[reference.SymbolKey].Add((candidate, reference));
+                }
+            }
+            if (_workspace.Revision == revision)
+            {
+                lock (_referenceGate)
+                {
+                    if (_workspaceReferenceCacheRevision == revision)
+                        foreach (var result in results)
+                            _workspaceReferenceCache[result.Key] = [.. result.Value
+                                .OrderBy(item => UriHelpers.ToUri(item.Reference.FilePath), StringComparer.OrdinalIgnoreCase)
+                                .ThenBy(item => item.Reference.Span.Start)];
+                }
+            }
+        }
+
+        var references = requested.ToDictionary(search => search.SymbolKey, search =>
+        {
+            var cached = CachedWorkspaceReferences(revision, search.SymbolKey) ?? [];
+            return includeDeclaration ? cached : [.. cached.Where(item => !item.Reference.IsDeclaration)];
+        }, StringComparer.Ordinal);
+        return new WorkspaceReferenceBatch(revision, references);
     }
+
+    private (ProjectSnapshot Project, LanguageReference Reference)[]? CachedWorkspaceReferences(long revision, string symbolKey)
+    {
+        lock (_referenceGate)
+            return _workspaceReferenceCacheRevision == revision && _workspaceReferenceCache.TryGetValue(symbolKey, out var references) ? references : null;
+    }
+
+    private sealed class WorkspaceReferenceIdentityComparer : IEqualityComparer<(string SourceIdentity, int Start, int Length, bool Declaration)>
+    {
+        public static readonly WorkspaceReferenceIdentityComparer Instance = new();
+
+        public bool Equals((string SourceIdentity, int Start, int Length, bool Declaration) left,
+            (string SourceIdentity, int Start, int Length, bool Declaration) right) =>
+            left.Start == right.Start && left.Length == right.Length && left.Declaration == right.Declaration &&
+            PathIdentityComparer.Equals(left.SourceIdentity, right.SourceIdentity);
+
+        public int GetHashCode((string SourceIdentity, int Start, int Length, bool Declaration) value) =>
+            HashCode.Combine(PathIdentityComparer.GetHashCode(value.SourceIdentity), value.Start, value.Length, value.Declaration);
+
+        private static StringComparer PathIdentityComparer => LanguageServer.PathIdentityComparer;
+    }
+
+    private static StringComparer PathIdentityComparer { get; } = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private sealed record ReferenceSearch(string SymbolKey, string SourceIdentity, LanguageReferenceSearchScope SearchScope);
+    private sealed record WorkspaceReferenceBatch(long Revision,
+        Dictionary<string, (ProjectSnapshot Project, LanguageReference Reference)[]> References);
 
     private static CTildeReferenceDetail ToReferenceDetail(ProjectSnapshot project, LanguageReference reference, string description)
     {
         if (!project.LanguageService.TryGetSourceText(reference.FilePath, out var source))
-            return new CTildeReferenceDetail(UriHelpers.ToUri(reference.FilePath), ToRange(project, reference.FilePath, reference.Span), string.Empty, 0, 0, $"{description} — {reference.FilePath}");
+            return new CTildeReferenceDetail(UriHelpers.ToUri(reference.FilePath), ToRange(project, reference.FilePath, reference.Span),
+                string.Empty, 0, 0, $"{description} — {reference.FilePath}", string.Empty, string.Empty, string.Empty, string.Empty);
         var location = source.GetLocation(reference.Span);
-        var lineStart = source.GetPosition(location.Line - 1, 0);
-        var lineEnd = source.GetPosition(location.Line - 1, int.MaxValue);
+        var lineIndex = location.Line - 1;
+        var lineStart = source.GetPosition(lineIndex, 0);
+        var lineEnd = source.GetPosition(lineIndex, int.MaxValue);
         var text = source.Text[lineStart..lineEnd];
         var start = Math.Clamp(reference.Span.Start - lineStart, 0, text.Length);
         var end = Math.Clamp(reference.Span.End - lineStart, start, text.Length);
@@ -341,7 +424,20 @@ internal sealed class LanguageServer
             text,
             start,
             end,
-            $"{description} — {reference.FilePath} ({location.Line},{location.Column})");
+            $"{description} — {reference.FilePath} ({location.Line},{location.Column})",
+            SourceLine(source, lineIndex - 2),
+            SourceLine(source, lineIndex - 1),
+            SourceLine(source, lineIndex + 1),
+            SourceLine(source, lineIndex + 2));
+    }
+
+    private static string SourceLine(SourceText source, int zeroBasedLine)
+    {
+        if (zeroBasedLine < 0 || zeroBasedLine >= source.LineCount)
+            return string.Empty;
+        var start = source.GetPosition(zeroBasedLine, 0);
+        var end = source.GetPosition(zeroBasedLine, int.MaxValue);
+        return source.Text[start..end];
     }
 
     private static int PositionToOffset(ProjectSnapshot project, string path, Position position) =>

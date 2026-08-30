@@ -70,4 +70,17 @@ public sealed record CompilationOptions(
     string? SourceIdentityRoot = null,
     EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
     ImmutableArray<CpuFeature> CpuFeatures = default,
-    TargetEnvironment Environment = TargetEnvironment.Native);
+    TargetEnvironment Environment = TargetEnvironment.Native,
+    bool SimdOptimizations = false)
+{
+    public ImmutableArray<CpuFeature> EffectiveCpuFeatures
+    {
+        get
+        {
+            var features = CpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : CpuFeatures;
+            return SimdOptimizations && !features.Contains(CpuFeature.Simd128)
+                ? features.Add(CpuFeature.Simd128)
+                : features;
+        }
+    }
+}

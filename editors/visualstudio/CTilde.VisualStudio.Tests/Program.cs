@@ -259,12 +259,61 @@ Run("reference CodeLens contracts and VSIX registration", () =>
         },
         ReferenceText = "    Call();",
         ReferenceLongDescription = "Source.ct (5,8)",
+        TextBeforeReference2 = "before two",
+        TextBeforeReference1 = "before one",
+        TextAfterReference1 = "after one",
+        TextAfterReference2 = "after two",
     };
+    var serialized = ReferenceCodeLensContracts.SerializeDetails(new ReferenceCodeLensDetails
+    {
+        SymbolKey = "source:key",
+        Revision = 42,
+        References = [reference],
+    });
+    var roundTripped = ReferenceCodeLensContracts.DeserializeDetails(serialized);
+    Equal("source:key", roundTripped.SymbolKey);
+    Equal(42L, roundTripped.Revision);
+    Equal("    Call();", roundTripped.References.Single().ReferenceText);
+    Equal("before one", roundTripped.References.Single().TextBeforeReference1);
     var row = ReferenceCodeLensContracts.DetailRows([reference]).Single();
     Equal(Path.Combine(Path.GetTempPath(), "Source.ct"), row.FilePath);
     Equal(4, row.LineNumber);
     Equal(7, row.ColumnNumber);
     Equal("    Call();", row.ReferenceText);
+    Equal("before two", row.TextBeforeReference2);
+    Equal("before one", row.TextBeforeReference1);
+    Equal("after one", row.TextAfterReference1);
+    Equal("after two", row.TextAfterReference2);
+    Equal("Source.ct:5  Call();", ReferenceCodeLensContracts.DisplayReference(row));
+
+    var fallbackPath = Path.Combine(Path.GetTempPath(), $"ctilde-reference-{Guid.NewGuid():N}.ct");
+    File.WriteAllLines(fallbackPath, ["first", "    restored Call();", "last"]);
+    try
+    {
+        var missingText = new ReferenceCodeLensDetails
+        {
+            References =
+            [
+                new ReferenceDetail
+                {
+                    Uri = new Uri(fallbackPath).AbsoluteUri,
+                    Range = new ProtocolRange
+                    {
+                        Start = new ProtocolPosition { Line = 1, Character = 13 },
+                        End = new ProtocolPosition { Line = 1, Character = 17 },
+                    },
+                },
+            ],
+        };
+        ReferenceCodeLensContracts.RestoreMissingReferenceText(missingText);
+        Equal("    restored Call();", missingText.References.Single().ReferenceText);
+        Equal(13, missingText.References.Single().ReferenceStart);
+        Equal(17, missingText.References.Single().ReferenceEnd);
+    }
+    finally
+    {
+        File.Delete(fallbackPath);
+    }
     True(ReferenceNavigationTarget.TryParse(row.NavigationArgument, out var target));
     Equal(reference.Uri, target.Uri);
     Equal(4, target.Range.Start.Line);
@@ -280,6 +329,10 @@ Run("reference CodeLens contracts and VSIX registration", () =>
     True(project.Contains("CTilde.VisualStudio.CodeLens.csproj", StringComparison.Ordinal));
     var tagger = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ReferenceCodeLensTagger.cs"));
     True(tagger.Contains("ICodeLensTag3", StringComparison.Ordinal));
+    True(tagger.Contains("item.SelectionRange", StringComparison.Ordinal));
+    True(tagger.Contains("ICodeLensDescriptorContextProvider", StringComparison.Ordinal));
+    True(tagger.Contains("Tracking spans keep the last complete result", StringComparison.Ordinal));
+    True(!tagger.Contains("private void BufferChanged(object sender, TextContentChangedEventArgs eventArgs) => QueueRefresh();", StringComparison.Ordinal));
     True(tagger.Contains("ShowReferenceCodeLens", StringComparison.Ordinal));
     True(tagger.Contains("5 => CodeElementKinds.Class", StringComparison.Ordinal));
     True(tagger.Contains("6 => CodeElementKinds.Method", StringComparison.Ordinal));
@@ -288,6 +341,17 @@ Run("reference CodeLens contracts and VSIX registration", () =>
     var provider = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio.CodeLens", "ReferenceDataPointProvider.cs"));
     True(provider.Contains("IAsyncCodeLensDataPointProvider", StringComparison.Ordinal));
     True(provider.Contains("ReferenceCodeLensContracts.DetailRows", StringComparison.Ordinal));
+    True(provider.Contains("StartDetailsFetch", StringComparison.Ordinal));
+    True(provider.Contains("Loading references...", StringComparison.Ordinal));
+    True(!provider.Contains("DetailsTemplateName(\"references\"", StringComparison.Ordinal));
+    True(provider.Contains("DisplayName = \"Reference\"", StringComparison.Ordinal));
+    True(provider.Contains("ReferenceCodeLensContracts.RestoreMissingReferenceText", StringComparison.Ordinal));
+    True(provider.Contains("ReferenceCodeLensContracts.DisplayReference", StringComparison.Ordinal));
+    True(!provider.Contains("public async Task<CodeLensDataPointDescriptor> GetDataAsync", StringComparison.Ordinal));
+    var callback = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ReferenceCodeLensCallbackListener.cs"));
+    True(callback.Contains("[ContentType(\"ctilde\")]", StringComparison.Ordinal));
+    True(callback.Contains("Task<string> GetDetailsAsync", StringComparison.Ordinal));
+    True(callback.Contains("ReferenceCodeLensContracts.SerializeDetails", StringComparison.Ordinal));
 });
 Run("Visual Studio TextMate registration", () =>
 {

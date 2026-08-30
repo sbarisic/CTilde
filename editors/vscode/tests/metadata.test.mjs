@@ -134,8 +134,15 @@ test("project schema includes native build configuration", async () => {
   assert.equal(schema.properties.kind.default, "application");
   assert.equal(schema.properties.hosted.additionalProperties, false);
   assert.equal(schema.properties.hosted.properties.nativeSources.uniqueItems, true);
+  assert.equal(schema.properties.simdOptimizations.type, "boolean");
+  assert.equal(schema.properties.simdOptimizations.default, false);
+  assert.match(schema.properties.simdOptimizations.description, /hosted x64/i);
+  assert.ok(schema.allOf.some(rule => rule.if?.properties?.simdOptimizations?.const === true &&
+    rule.then?.properties?.target?.const === "hosted" &&
+    rule.then?.properties?.architecture?.enum?.includes("x64")));
   assert.ok(schema.allOf.some(rule => rule.if?.properties?.kind?.const === "standard-library" &&
-    rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("build"))));
+    rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("build")) &&
+    rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("simdOptimizations"))));
   assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
   assert.ok(schema.properties.target.enum.includes("cosmopolitan"));
   assert.ok(schema.properties.target.enum.includes("esp32_qemu"));

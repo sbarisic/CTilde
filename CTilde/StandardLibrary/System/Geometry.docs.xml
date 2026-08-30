@@ -26,6 +26,9 @@
   <member id="M:System.Vec4.DistanceSquared(System.Vec4,System.Vec4)"><summary>Returns squared Euclidean distance without a square root.</summary></member>
 
   <member id="T:System.Simd.F32x4"><summary>An explicit four-lane single-precision SIMD value.</summary><remarks>Storage is exactly 16 bytes. Operations use scalar code unless simd128 is selected. Values cannot cross native ABI boundaries.</remarks></member>
+  <member id="T:System.Simd.Vec3x4"><summary>Four three-dimensional vectors stored in structure-of-arrays form.</summary><remarks>Storage is exactly 48 bytes as three F32x4 fields. The value cannot cross native ABI boundaries.</remarks></member>
+  <member id="M:System.Simd.Vec3x4.GetLane(System.Int32)"><summary>Gets one three-dimensional vector selected by a constant lane.</summary></member>
+  <member id="M:System.Simd.Vec3x4.WithLane(System.Int32,System.Vec3)"><summary>Returns a copy with one constant lane replaced.</summary></member>
   <member id="T:System.Simd.I32x4"><summary>An explicit four-lane signed-integer SIMD value.</summary><remarks>Storage is exactly 16 bytes and source-visible alignment is unchanged.</remarks></member>
   <member id="T:System.Simd.U32x4"><summary>An explicit four-lane unsigned-integer SIMD value.</summary><remarks>Storage is exactly 16 bytes and source-visible alignment is unchanged.</remarks></member>
   <member id="T:System.Simd.Mask32x4"><summary>A four-lane all-zero or all-one selection mask.</summary></member>

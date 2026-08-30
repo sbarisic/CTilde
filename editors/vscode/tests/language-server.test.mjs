@@ -120,8 +120,18 @@ test("language server provides reference locations and lazy reference CodeLens d
   const libraryUri = pathToFileURL(libraryPath).href;
   const programUri = pathToFileURL(programPath).href;
   const library = "public static class Library { public static void Ping(int value) { } public static void Unused() { } }";
-  const program = "public static class Program { [EntryPoint] public static void Main() { Library.Ping(1); Library.Ping(2); } }";
-  const changedProgram = program.replace(" Library.Ping(2);", "");
+  const program = [
+    "public static class Program",
+    "{",
+    "  [EntryPoint]",
+    "  public static void Main()",
+    "  {",
+    "    Library.Ping(1);",
+    "    Library.Ping(2);",
+    "  }",
+    "}",
+  ].join("\n");
+  const changedProgram = program.replace("    Library.Ping(2);\n", "");
   await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
   await writeFile(libraryPath, library);
   await writeFile(programPath, program);
@@ -167,12 +177,15 @@ test("language server provides reference locations and lazy reference CodeLens d
     assert.ok(details.references.every(reference => reference.referenceText.includes("Library.Ping")));
     assert.ok(details.references.every(reference => reference.referenceEnd > reference.referenceStart));
     assert.ok(details.references.every(reference => reference.referenceLongDescription.includes("Library.Ping")));
+    assert.ok(details.references.some(reference => reference.textAfterReference1.includes("Library.Ping(2)")));
+    assert.ok(details.references.some(reference => reference.textBeforeReference1.includes("Library.Ping(1)")));
 
     client.notify("textDocument/didChange", {
       textDocument: { uri: programUri, version: 2 }, contentChanges: [{ text: changedProgram }]
     });
     await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === programUri && value.version === 2);
-    await client.waitForNotification("ctilde/referenceCodeLens/refresh", () => true);
+    const referenceRefresh = await client.waitForNotification("ctilde/referenceCodeLens/refresh", value => value.revision > ping.revision);
+    assert.ok(referenceRefresh.revision > ping.revision);
     const changedLenses = await client.request("ctilde/referenceCodeLenses", { textDocument: { uri: libraryUri } });
     const changedPing = changedLenses.find(lens => lens.name === "Ping");
     assert.equal(changedPing.referenceCount, 1);
@@ -195,25 +208,61 @@ test("language server provides reference locations and lazy reference CodeLens d
   }
 });
 
+test("HostedIo reference CodeLens details include the complete source row", async () => {
+  const repositoryRoot = path.resolve(extensionRoot, "..", "..");
+  const directory = path.join(repositoryRoot, "examples", "HostedIo");
+  const materialsPath = path.join(directory, "Materials.ct");
+  const materialsUri = pathToFileURL(materialsPath).href;
+  const client = new LspClient(serverDll);
+  try {
+    await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "HostedIo" }],
+      capabilities: {}
+    });
+    client.notify("initialized", {});
+    const lenses = await client.request("ctilde/referenceCodeLenses", { textDocument: { uri: materialsUri } });
+    const metal = lenses.find(lens => lens.name === "Metal" && lens.detail.includes("Vec3"));
+    assert.ok(metal);
+    const details = await client.request("ctilde/referenceCodeLensDetails", {
+      textDocument: { uri: materialsUri }, symbolKey: metal.symbolKey, revision: metal.revision
+    });
+    assert.ok(details.references.some(reference => reference.referenceText.includes("new Metal(albedo, fuzz)")));
+    assert.ok(details.references.some(reference => reference.referenceText.includes("new Metal(new Vec3")));
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+  }
+});
+
 test("language server resolves a non-main document through its loaded project and recovers incomplete member completion", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-multi-project-"));
   const helloDirectory = path.join(directory, "Hello");
   const hostedDirectory = path.join(directory, "HostedIo");
+  const unrelatedDirectory = path.join(directory, "Unrelated");
   await mkdir(helloDirectory);
   await mkdir(hostedDirectory);
+  await mkdir(unrelatedDirectory);
   const helloManifest = path.join(helloDirectory, "ctilde.json");
   const hostedManifest = path.join(hostedDirectory, "ctilde.json");
   const scenePath = path.join(hostedDirectory, "Scene.ct");
   const siblingPath = path.join(hostedDirectory, "Sibling.ct");
   const sceneUri = pathToFileURL(scenePath).href;
+  const helloProgramPath = path.join(helloDirectory, "Program.ct");
   const validScene = "using System; namespace Hosted; public static class Scene { public static void Build() { Console.WriteLine(); Sibling value = new Sibling(); } }";
   const incompleteScene = validScene.replace("Console.WriteLine();", "Console.Wri\n");
   await writeFile(helloManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
-  await writeFile(path.join(helloDirectory, "Program.ct"), "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(); } }");
+  const helloProgram = "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(); } }";
+  await writeFile(helloProgramPath, helloProgram);
   await writeFile(hostedManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
   await writeFile(path.join(hostedDirectory, "Program.ct"), "namespace Hosted; public static class Program { [EntryPoint] public static void Main() { Scene.Build(); } }");
   await writeFile(siblingPath, "namespace Hosted; public class Sibling { }");
   await writeFile(scenePath, validScene);
+  await writeFile(path.join(unrelatedDirectory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(path.join(unrelatedDirectory, "Program.ct"), "using System; public static class Unrelated { public static void Run() { Console.WriteLine(); } }");
 
   const client = new LspClient(serverDll);
   try {
@@ -246,8 +295,24 @@ test("language server resolves a non-main document through its loaded project an
     assert.ok(crossProjectReferences.length >= 2);
     assert.equal(crossProjectReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(helloDirectory)).length, 1);
     assert.equal(crossProjectReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(hostedDirectory)).length, 1);
+    assert.equal(crossProjectReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(unrelatedDirectory)).length, 0);
 
-    client.notify("textDocument/didChange", { textDocument: { uri: sceneUri, version: 2 }, contentChanges: [{ text: incompleteScene }] });
+    await writeFile(helloProgramPath, helloProgram.replace("Console.WriteLine();", ""));
+    client.notify("textDocument/didChange", { textDocument: { uri: sceneUri, version: 2 }, contentChanges: [{ text: validScene + " " }] });
+    await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === sceneUri && value.version === 2);
+    const editRefresh = await client.waitForNotification("ctilde/referenceCodeLens/refresh", value => value.revision > 0);
+    const retainedReferences = await client.request("textDocument/references", {
+      textDocument: { uri: sceneUri }, position: positionAt(validScene, writeLineOffset), context: { includeDeclaration: false }
+    });
+    assert.equal(retainedReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(helloDirectory)).length, 1);
+    client.notify("workspace/didChangeWatchedFiles", { changes: [{ uri: pathToFileURL(helloProgramPath).href, type: 2 }] });
+    await client.waitForNotification("ctilde/referenceCodeLens/refresh", value => value.revision > editRefresh.revision);
+    const invalidatedReferences = await client.request("textDocument/references", {
+      textDocument: { uri: sceneUri }, position: positionAt(validScene, writeLineOffset), context: { includeDeclaration: false }
+    });
+    assert.equal(invalidatedReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(helloDirectory)).length, 0);
+
+    client.notify("textDocument/didChange", { textDocument: { uri: sceneUri, version: 3 }, contentChanges: [{ text: incompleteScene }] });
     const completionOffset = incompleteScene.indexOf("Console.Wri") + "Console.Wri".length;
     const completion = await client.request("textDocument/completion", { textDocument: { uri: sceneUri }, position: positionAt(incompleteScene, completionOffset) });
     const writeLines = completion.items.filter(item => item.label === "WriteLine");
@@ -558,6 +623,19 @@ test("physical standard-library projects navigate without embedded duplicates", 
     const mathOffset = source.indexOf("Math.Sqrt") + 1;
     const definition = await client.request("textDocument/definition", { textDocument: { uri }, position: positionAt(source, mathOffset) });
     assert.equal(fileURLToPath(definition.uri), path.join(directory, "System", "Math.ct"));
+    const lenses = await client.request("ctilde/referenceCodeLenses", { textDocument: { uri } });
+    const minLine = positionAt(source, source.indexOf("public static Vec2 Min")).line;
+    const minParameters = lenses.filter(item => item.kind === 26 && (item.name === "left" || item.name === "right") && item.selectionRange.start.line === minLine);
+    assert.equal(minParameters.length, 2);
+    assert.deepEqual(minParameters.map(item => item.referenceCount), [2, 2]);
+    const maxOffset = source.indexOf("Max(Vec2 left") + 1;
+    const maxReferences = await client.request("textDocument/references", {
+      textDocument: { uri },
+      position: positionAt(source, maxOffset),
+      context: { includeDeclaration: false }
+    });
+    assert.equal(maxReferences.length, 1);
+    assert.equal(fileURLToPath(maxReferences[0].uri), programPath);
     await client.request("shutdown");
     client.notify("exit");
     assert.equal(await client.exited, 0);

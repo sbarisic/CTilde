@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Simd;
 
 namespace HostedIoExample;
 
@@ -53,6 +54,61 @@ public sealed class Camera
     }
 
     public void Render(FileHandle image, Hittable world, uint renderSeed)
+    {
+        Initialize();
+        File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString()
+            + "\n255\n");
+        RandomGenerator random0 = new RandomGenerator(renderSeed);
+        RandomGenerator random1 = new RandomGenerator(renderSeed);
+        RandomGenerator random2 = new RandomGenerator(renderSeed);
+        RandomGenerator random3 = new RandomGenerator(renderSeed);
+        int row = 0;
+        int lastProgressPercent = 0;
+        while (row < imageHeight)
+        {
+            int column = 0;
+            while (column < ImageWidth)
+            {
+                int laneCount = ImageWidth - column;
+                if (laneCount > 4)
+                    laneCount = 4;
+                Mask32x4 active = PacketMasks.First(laneCount);
+                Vec3x4 colors = Vec3x4.Zero;
+                int sample = 0;
+                while (sample < SamplesPerPixel)
+                {
+                    Ray lane0 = GetPacketRay(active.GetLane<0>(), column, row, sample,
+                        renderSeed, random0);
+                    Ray lane1 = GetPacketRay(active.GetLane<1>(), column + 1, row,
+                        sample, renderSeed, random1);
+                    Ray lane2 = GetPacketRay(active.GetLane<2>(), column + 2, row,
+                        sample, renderSeed, random2);
+                    Ray lane3 = GetPacketRay(active.GetLane<3>(), column + 3, row,
+                        sample, renderSeed, random3);
+                    RayPacket rays = RayPacket.Create(lane0, lane1, lane2, lane3);
+                    colors += RayColor4(rays, active, MaxDepth, world, random0, random1,
+                        random2, random3);
+                    sample++;
+                }
+                WritePacketColors(image, colors, active);
+                column += 4;
+            }
+            int completed = row + 1;
+            if (ProgressRows > 0 && (completed % ProgressRows == 0 || completed == imageHeight))
+            {
+                int percent = completed * 100 / imageHeight;
+                if (percent > lastProgressPercent)
+                {
+                    Console.WriteLine("Progress: " + percent.ToString() + "%.");
+                    lastProgressPercent = percent;
+                }
+            }
+            row++;
+        }
+    }
+
+    // Retained as a deterministic oracle for packet-renderer acceptance tests.
+    public void RenderScalar(FileHandle image, Hittable world, uint renderSeed)
     {
         Initialize();
         File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString()
@@ -136,6 +192,91 @@ public sealed class Camera
     }
 
     [NoAlloc]
+    private Ray GetPacketRay(bool active, int column, int row, int sample, uint renderSeed,
+        RandomGenerator random)
+    {
+        if (!active)
+            return new Ray(Vec3.Zero, Vec3.UnitZ);
+        random.Reseed(RandomGenerator.SampleSeed(renderSeed, column, row, sample));
+        return GetRay(column, row, random);
+    }
+
+    [NoAlloc]
+    private Vec3x4 RayColor4(RayPacket rays, Mask32x4 active, int depth, Hittable world,
+        RandomGenerator random0, RandomGenerator random1, RandomGenerator random2,
+        RandomGenerator random3)
+    {
+        Vec3x4 result = Vec3x4.Zero;
+        if (depth <= 0 || active.None())
+            return result;
+        HitPacket hits;
+        world.Hit4(rays, new Interval(0.001f, 1000000000000000000000000000000.0f),
+            active, out hits);
+        Ray scattered0 = new Ray(Vec3.Zero, Vec3.UnitZ);
+        Ray scattered1 = scattered0;
+        Ray scattered2 = scattered0;
+        Ray scattered3 = scattered0;
+        Vec3 attenuation0 = Vec3.Zero;
+        Vec3 attenuation1 = Vec3.Zero;
+        Vec3 attenuation2 = Vec3.Zero;
+        Vec3 attenuation3 = Vec3.Zero;
+        bool scatter0 = false;
+        bool scatter1 = false;
+        bool scatter2 = false;
+        bool scatter3 = false;
+        if (active.GetLane<0>())
+        {
+            if (hits.HitMask.GetLane<0>())
+                scatter0 = hits.Lane0.SurfaceMaterial.Scatter(rays.GetLane<0>(),
+                hits.Lane0, random0, out attenuation0, out scattered0);
+            else
+                result = result.WithLane<0>(SkyColor(rays.GetLane<0>()));
+        }
+        if (active.GetLane<1>())
+        {
+            if (hits.HitMask.GetLane<1>())
+                scatter1 = hits.Lane1.SurfaceMaterial.Scatter(rays.GetLane<1>(),
+                hits.Lane1, random1, out attenuation1, out scattered1);
+            else
+                result = result.WithLane<1>(SkyColor(rays.GetLane<1>()));
+        }
+        if (active.GetLane<2>())
+        {
+            if (hits.HitMask.GetLane<2>())
+                scatter2 = hits.Lane2.SurfaceMaterial.Scatter(rays.GetLane<2>(),
+                hits.Lane2, random2, out attenuation2, out scattered2);
+            else
+                result = result.WithLane<2>(SkyColor(rays.GetLane<2>()));
+        }
+        if (active.GetLane<3>())
+        {
+            if (hits.HitMask.GetLane<3>())
+                scatter3 = hits.Lane3.SurfaceMaterial.Scatter(rays.GetLane<3>(),
+                hits.Lane3, random3, out attenuation3, out scattered3);
+            else
+                result = result.WithLane<3>(SkyColor(rays.GetLane<3>()));
+        }
+        Mask32x4 scatteredMask = PacketMasks.FromBools(scatter0, scatter1, scatter2,
+            scatter3);
+        if (scatteredMask.Any())
+        {
+            RayPacket scattered = RayPacket.Create(scattered0, scattered1, scattered2,
+                scattered3);
+            Vec3x4 bounced = RayColor4(scattered, scatteredMask, depth - 1, world,
+                random0, random1, random2, random3);
+            if (scatter0)
+                result = result.WithLane<0>(attenuation0 * bounced.GetLane<0>());
+            if (scatter1)
+                result = result.WithLane<1>(attenuation1 * bounced.GetLane<1>());
+            if (scatter2)
+                result = result.WithLane<2>(attenuation2 * bounced.GetLane<2>());
+            if (scatter3)
+                result = result.WithLane<3>(attenuation3 * bounced.GetLane<3>());
+        }
+        return result;
+    }
+
+    [NoAlloc]
     private Vec3 RayColor(Ray ray, int depth, Hittable world, RandomGenerator random)
     {
         if (depth <= 0)
@@ -153,6 +294,12 @@ public sealed class Camera
                 return attenuation * RayColor(scattered, depth - 1, world, random);
             return Vec3.Zero;
         }
+        return SkyColor(ray);
+    }
+
+    [NoAlloc]
+    private static Vec3 SkyColor(Ray ray)
+    {
         Vec3 unitDirection = ray.Direction.Normalize();
         float blend = 0.5f * (unitDirection.Y + 1.0f);
         return(1.0f - blend) * Vec3.One + blend * new Vec3(0.5f, 0.7f, 1.0f);
@@ -165,6 +312,18 @@ public sealed class Camera
         int blue = ToColorByte(LinearToGamma(accumulated.Z * sampleScale));
         File.Write(image, red.ToString() + " " + green.ToString() + " " + blue.ToString()
             + "\n");
+    }
+
+    private void WritePacketColors(FileHandle image, Vec3x4 accumulated, Mask32x4 active)
+    {
+        if (active.GetLane<0>())
+            WriteColor(image, accumulated.GetLane<0>());
+        if (active.GetLane<1>())
+            WriteColor(image, accumulated.GetLane<1>());
+        if (active.GetLane<2>())
+            WriteColor(image, accumulated.GetLane<2>());
+        if (active.GetLane<3>())
+            WriteColor(image, accumulated.GetLane<3>());
     }
 
     [NoAlloc]

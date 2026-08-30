@@ -8,6 +8,7 @@ var tests = new List<(string Name, Action Run)>
 {
     ("MI result parsing", MiResultParsing),
     ("DAP framing and initialize", DapFraming),
+    ("unsupported hover remains nonfatal", UnsupportedHoverRemainsNonfatal),
     ("MI stream parsing", MiStreamParsing),
     ("fake GDB command lifecycle", FakeGdbLifecycle),
     ("debug control 32-bit layout", () => DebugControlLayout(4)),
@@ -26,6 +27,8 @@ var tests = new List<(string Name, Action Run)>
 };
 if (args is ["--real", var descriptor])
     tests.Add(("real hosted DAP session", () => RealDapSession(descriptor)));
+if (args is ["--real-hosted-inspection", var hostedDescriptor])
+    tests.Add(("real HostedIo paused inspection", () => RealHostedInspection(hostedDescriptor)));
 if (args is ["--real-qemu", var qemuDescriptor])
     tests.Add(("real ESP-IDF QEMU DAP session", () => RealQemuDapSession(qemuDescriptor)));
 var failures = 0;
@@ -72,6 +75,38 @@ static void DapFraming()
     if (!response.Contains("\"success\":true", StringComparison.Ordinal) ||
         !response.Contains("\"supportsConfigurationDoneRequest\":true", StringComparison.Ordinal))
         throw new InvalidOperationException("The initialize response did not advertise the required C~ capabilities: " + response);
+    process.StandardInput.Close();
+    if (!process.WaitForExit(3000)) process.Kill(true);
+}
+
+static void UnsupportedHoverRemainsNonfatal()
+{
+    var adapter = typeof(DebugTarget).Assembly.Location;
+    var start = new ProcessStartInfo
+    {
+        FileName = "dotnet",
+        UseShellExecute = false,
+        RedirectStandardInput = true,
+        RedirectStandardOutput = true,
+        RedirectStandardError = true,
+        CreateNoWindow = true,
+    };
+    start.ArgumentList.Add(adapter);
+    using var process = Process.Start(start) ?? throw new InvalidOperationException("Adapter process did not start.");
+    var sequence = 0;
+    SendDap(process, ++sequence, "initialize", new { adapterID = "ctilde", linesStartAt1 = true, columnsStartAt1 = true });
+    using var initialized = ReadUntil(process, message => Response(message, "initialize"));
+
+    SendDap(process, ++sequence, "evaluate", new { expression = "File.Open(\"image.ppm\")", context = "hover" });
+    using var unsupported = ReadUntil(process, message => Response(message, "evaluate"));
+    Equal("<not available>", unsupported.RootElement.GetProperty("body").GetProperty("result").GetString());
+
+    SendDap(process, ++sequence, "evaluate", new { expression = "image", context = "hover" });
+    using var unresolved = ReadUntil(process, message => Response(message, "evaluate"));
+    Equal("<not available>", unresolved.RootElement.GetProperty("body").GetProperty("result").GetString());
+    if (process.HasExited)
+        throw new InvalidOperationException("The adapter exited after an unsupported hover request. " + process.StandardError.ReadToEnd());
+
     process.StandardInput.Close();
     if (!process.WaitForExit(3000)) process.Kill(true);
 }
@@ -157,6 +192,60 @@ static void RealDapSession(string descriptor)
     SendDap(process, ++sequence, "restart", new { });
     using var restarted = ReadUntil(process, message => Response(message, "restart"));
     using var restartedStop = ReadUntil(process, message => message.RootElement.TryGetProperty("event", out var eventName) && eventName.GetString() == "stopped");
+    SendDap(process, ++sequence, "disconnect", new { terminateDebuggee = true });
+    using var disconnected = ReadUntil(process, message => Response(message, "disconnect"));
+    process.StandardInput.Close();
+    if (!process.WaitForExit(5000)) process.Kill(true);
+}
+
+static void RealHostedInspection(string descriptor)
+{
+    var adapter = typeof(DebugTarget).Assembly.Location;
+    var start = new ProcessStartInfo { FileName = "dotnet", UseShellExecute = false, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, CreateNoWindow = true };
+    start.ArgumentList.Add(adapter);
+    using var process = Process.Start(start) ?? throw new InvalidOperationException("Adapter process did not start.");
+    var sequence = 0;
+    SendDap(process, ++sequence, "initialize", new { adapterID = "ctilde", linesStartAt1 = true, columnsStartAt1 = true });
+    using var initialize = ReadUntil(process, message => Response(message, "initialize"));
+    SendDap(process, ++sequence, "launch", new { request = "launch", debugTarget = Path.GetFullPath(descriptor), stopAtEntry = true, showRuntimeFrames = false, externalConsole = true, trace = false, memoryDiagnostics = "objects" });
+    var initialized = false;
+    var launched = false;
+    while (!initialized || !launched)
+    {
+        using var message = ReadDapDocumentWithTimeout(process);
+        var root = message.RootElement;
+        initialized |= root.TryGetProperty("event", out var eventName) && eventName.GetString() == "initialized";
+        launched |= root.TryGetProperty("command", out var command) && command.GetString() == "launch" && root.GetProperty("success").GetBoolean();
+    }
+    SendDap(process, ++sequence, "configurationDone", new { });
+    using var configured = ReadUntil(process, message => Response(message, "configurationDone"));
+    using var stopped = ReadUntil(process, message => message.RootElement.TryGetProperty("event", out var eventName) && eventName.GetString() == "stopped");
+
+    SendDap(process, ++sequence, "threads", new { });
+    using var threads = ReadUntil(process, message => Response(message, "threads"));
+    var threadId = threads.RootElement.GetProperty("body").GetProperty("threads")[0].GetProperty("id").GetInt32();
+    SendDap(process, ++sequence, "stackTrace", new { threadId });
+    using var stack = ReadUntil(process, message => Response(message, "stackTrace"));
+    var frameId = stack.RootElement.GetProperty("body").GetProperty("stackFrames")[0].GetProperty("id").GetInt32();
+    SendDap(process, ++sequence, "scopes", new { frameId });
+    using var scopes = ReadUntil(process, message => Response(message, "scopes"));
+    foreach (var scope in scopes.RootElement.GetProperty("body").GetProperty("scopes").EnumerateArray())
+    {
+        var variablesReference = scope.GetProperty("variablesReference").GetInt32();
+        SendDap(process, ++sequence, "variables", new { variablesReference });
+        using var variables = ReadUntil(process, message => Response(message, "variables"));
+    }
+
+    foreach (var expression in new[] { "image", "world", "renderWorld", "camera", "File.Open", "File.Open(\"image.ppm\")" })
+    {
+        SendDap(process, ++sequence, "evaluate", new { expression, frameId, context = "hover" });
+        using var evaluated = ReadUntil(process, message => Response(message, "evaluate"));
+        if (!evaluated.RootElement.GetProperty("success").GetBoolean())
+            throw new InvalidOperationException("HostedIo hover evaluation failed: " + evaluated.RootElement.GetRawText());
+    }
+    if (process.HasExited)
+        throw new InvalidOperationException("The adapter exited during HostedIo paused-state inspection. " + process.StandardError.ReadToEnd());
+
     SendDap(process, ++sequence, "disconnect", new { terminateDebuggee = true });
     using var disconnected = ReadUntil(process, message => Response(message, "disconnect"));
     process.StandardInput.Close();

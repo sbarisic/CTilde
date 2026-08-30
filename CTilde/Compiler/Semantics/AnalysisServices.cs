@@ -51,6 +51,8 @@ internal sealed class AnalysisServices : ILoweringServices
     public CompilationArchitecture Architecture => _architecture;
     public TargetEnvironment Environment => Model.Environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
+    public void RequireMathSymbol(string symbol) { }
+    public bool SimdOptimizations => Model.SimdOptimizations;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })

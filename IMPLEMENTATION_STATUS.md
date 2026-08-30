@@ -4,13 +4,13 @@ Last reviewed: 2026-08-30
 
 ## Current state
 
-C~ draft 0.37 has one compiler path:
+C~ draft 0.38 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding/Cosmopolitan GNU C23
 ```
 
-The compiler library, CLI, and conformance runner target .NET 10. Draft 0.37 completes explicit SIMD128 operations and adds scalar-layout vectors, matrices, and quaternions on top of the Draft 0.36 generic collection and iterator foundations. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
+The compiler library, CLI, and conformance runner target .NET 10. Draft 0.38 adds opt-in hosted x64 scalar-geometry SIMD optimization, `System.Simd.Vec3x4`, and four-ray HostedIo production batching on top of the Draft 0.37 SIMD and geometry foundations. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
 
 The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. Cosmopolitan output uses hosted runtime semantics and produces an x86-64 APE plus a retained ELF/DWARF carrier. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, Cosmopolitan, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted, Cosmopolitan, and freestanding modular objects use draft-versioned content-addressed caches.
 
@@ -74,7 +74,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | Full-fidelity tokens and trivia | Implemented | Valid and invalid exact round-trip tests |
 | Comments, escapes, and numeric forms | Implemented | Lexer diagnostics and literal tests |
 | IEEE-754 `double` and Unicode `rune` | Implemented | Exact layouts, conversions, math, boxing, UTF-8 output, and invalid-scalar diagnostics |
-| Fixed-width 128-bit SIMD | Implemented | Four 16-byte lane types, scalar-default semantics, lane checks, and explicit x86 hardware lowering |
+| Fixed-width 128-bit SIMD | Implemented | Four 16-byte lane types, `Vec3x4`, scalar-default semantics, lane checks, explicit target lowering, and opt-in hosted x64 scalar-geometry kernels |
 | Immutable `[Embed]` resources | Implemented | Owner-relative traversal checks, exact read-only bytes, and path-leak validation |
 | Lambdas and explicit value captures | Implemented | Captureless static lowering, explicit capture diagnostics, ARC environment lifetime, and native execution |
 | Exact repository modules | Implemented | Lock/cache restore, commit/tag/branch selectors, aliases, verified vendor content, ignored replacements, and offline load precedence |
@@ -242,11 +242,17 @@ The language-service query snapshot owns the same immutable bound program used b
 
 ## SIMD and scalar geometry
 
-`F32x4`, `I32x4`, `U32x4`, and `Mask32x4` retain deterministic 16-byte storage and scalar-default behavior. Draft 0.37 expands their arithmetic, bitwise, comparison, selection, reduction, conversion, reinterpretation, and lane APIs. Checked managed-array operations and unaligned-safe unsafe pointer operations preserve source-visible storage. Semantic SIMD operation records carry lane kind, width, inputs, and constant immediates before x86 or Arm backend tables select intrinsics. Missing exact instructions retain scalar lane code.
+`F32x4`, `I32x4`, `U32x4`, and `Mask32x4` retain deterministic 16-byte storage and scalar-default behavior. Their arithmetic, bitwise, comparison, selection, reduction, conversion, reinterpretation, and lane APIs remain available independently of automatic optimization. Checked managed-array operations and unaligned-safe unsafe pointer operations preserve source-visible storage. Semantic SIMD operation records carry lane kind, width, inputs, and constant immediates before x86 or Arm backend tables select intrinsics. Missing exact instructions retain scalar lane code.
 
-`Matrix3x2`, `Matrix4x4`, and `Quaternion` are physical C~ sources with 24-, 64-, and 16-byte scalar layouts. They implement row-vector composition, right-handed zero-to-one camera transforms, failure-output contracts, and allocation-free quaternion conversion and interpolation. Conditional FMA emission is limited to explicit multiply-add and recognized kernels, and only activates when compiler macros prove support. Runtime ABI remains 16 and debug metadata remains version 3.
+`Vec2`, `Vec3`, `Vec4`, `Matrix3x2`, `Matrix4x4`, and `Quaternion` preserve their 8-, 12-, 16-, 24-, 64-, and 16-byte scalar layouts. Top-level `simdOptimizations: true` is hosted-x64-only, defaults off, and implicitly selects SIMD128 without overriding the explicit `cpuFeatures` contract. Safe packing avoids overreading 8- and 12-byte vectors or the 24-byte affine matrix. Conditional FMA remains limited to documented recognized kernels. Runtime ABI remains 16 and debug metadata remains version 3.
 
-The Draft 0.37 code-generation fixture is a multi-function graphics and four-lane workload. Its scalar and x64 SIMD executions produce identical results. The x64 emission baseline contains unaligned matrix loads/stores and conditional `_mm_fmadd_ps`; the Arm64 emission baseline contains NEON loads/stores and conditional `vfmaq_f32`. These are code-generation and correctness records, not performance acceptance thresholds; wall-clock benchmarking remains machine- and toolchain-specific.
+`System.Simd.Vec3x4` has exact 48-byte storage as three `F32x4` components. It supports constant lane construction/access, arithmetic, lane scaling, dot, cross, length, normalization, and selection, and is rejected at every native ABI boundary. Optional debug-map shape metadata identifies four lanes and three nested components. HostedIo processes four columns per production packet, uses one deterministic RNG stream per lane, masks 1-3 pixel tails, retains a scalar renderer as the oracle, and provides packet AABB, sphere, list, and BVH entry points. The established 256x144 seeded PPM remains byte-identical.
+
+The Draft 0.38 code-generation fixtures compare automatic and scalar executions across finite values, NaNs, infinities, signed zero, failure outputs, unaligned storage, and native-boundary rejection. Representative x64 emission contains SSE arithmetic, safe packed vector loads, matrix loads/stores, and the existing conditional FMA kernels; disabled automatic optimization emits no transparent scalar-geometry intrinsics.
+
+On 2026-08-30, the ignored `artifacts/hosted-simd/20260830-190439.json` MSVC Release-LTO report measured a 160-pixel, four-sample, depth-eight HostedIo workload after warmup. Three-run medians were 551.14 ms disabled and 611.02 ms enabled (0.90x), with the same `4DA652C11A4DE7D3720AD4C41560649FAA8513F68B5DFA783BC1873032048362` PPM checksum. The executable sizes were 231,424 and 231,936 bytes. The current small workload therefore shows a regression rather than a speedup; timings are reported honestly and are not a release gate.
+
+The same machine passed HostedIo Debug and Release builds in both unity and modular layouts, including Release LTO, through MSVC, WSL GCC 13.3.0, and WSL Clang 18.1.3. The retained `Test/Fixtures/HostedSimd` exports exercise every scalar geometry family. Native disassembly contained representative SSE packed arithmetic, shuffle, division, and unaligned-move instructions under all three compilers; the Clang and MSVC inspection recorded 455 and 161 matching instructions respectively.
 
 ## ESP-IDF target
 
@@ -371,7 +377,7 @@ These features are outside draft 0.22:
 
 ## Release gate
 
-A draft 0.37 release requires:
+A draft 0.38 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -386,4 +392,4 @@ On 2026-08-28, the Draft 0.24 solution build completed with zero warnings and er
 
 On 2026-08-28, the Draft 0.23 solution build completed with zero warnings and errors and all 160 conformance cases passed under MSVC, WSL GCC, and WSL Clang. The ESP-IDF runner passed its direct Xtensa and RISC-V compiler probes, ordinary ESP32 and ESP32-C3 builds, and the Draft 0.23 interrupt fixture for both architectures. Xtensa ELF inspection placed `ctilde_draft023_timer_isr` and `ct_draft023_ack` in `.iram0.text` and the C~-owned counter in `.dram0.data`. VS Code 0.8.0 tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The connected automated T-CAN485 run exercised the GPTimer ISR, observed matching C~ and native acknowledgement counters, and emitted `CTILDE_DRAFT_023_OK`; the same run passed the earlier Draft 0.18 through 0.20 fixtures, panic-policy images, memory, console, debugger, detach, and startup-timeout gates before restoring the ordinary Release firmware. Its ignored report is `artifacts/esp32-hardware/20260828-000319.json`. After restoration, the operator confirmed that the ordinary firmware visibly alternated the onboard LED between blue and purple, closing the visual gate. Historical Draft 0.22 and earlier hosted, cross-build, and hardware evidence remains preserved above and in Git history.
 
-Draft 0.37 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.
+Draft 0.38 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Automatic scalar-geometry SIMD acceptance is hosted x64 only in this revision. Historical Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.

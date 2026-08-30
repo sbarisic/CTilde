@@ -73,7 +73,7 @@ public sealed class SourceText
         var end = line + 1 < _lineStarts.Length ? _lineStarts[line + 1] : Text.Length;
         while (end > start && Text[end - 1] is '\r' or '\n')
             end--;
-        return Math.Clamp(start + Math.Max(0, zeroBasedColumn), start, end);
+        return start + Math.Clamp(zeroBasedColumn, 0, end - start);
     }
 
     public string Slice(TextSpan span) => Text.Substring(span.Start, span.Length);

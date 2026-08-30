@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.37 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout vectors, matrices, and quaternions.
+Draft 0.38 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -109,7 +109,7 @@ public static class Program
 }
 ```
 
-SIMD values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` to select validated x86 or Arm intrinsic lowering.
+SIMD lane values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` for explicit supported-target intrinsic lowering, or set top-level `simdOptimizations: true` to optimize scalar geometry in hosted x64 applications and implicitly select SIMD128. `Vec3x4` stores three `F32x4` components in exactly 48 bytes.
 
 The [feature example](examples/Features/Program.ct) covers more syntax. The [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
 
@@ -262,7 +262,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.37 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.38 language rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

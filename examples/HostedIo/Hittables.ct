@@ -1,4 +1,5 @@
 using System;
+using System.Simd;
 
 namespace HostedIoExample;
 
@@ -64,6 +65,38 @@ public struct Aabb
     }
 
     [NoAlloc]
+    public Mask32x4 Hit4(RayPacket rays, Interval interval, Mask32x4 active)
+    {
+        F32x4 near = F32x4.Splat(interval.Min);
+        F32x4 far = F32x4.Splat(interval.Max);
+        Mask32x4 result = IntersectAxis4(rays.Origins.X, rays.Directions.X, Min.X,
+            Max.X, ref near, ref far, active);
+        result = IntersectAxis4(rays.Origins.Y, rays.Directions.Y, Min.Y, Max.Y,
+            ref near, ref far, result);
+        return IntersectAxis4(rays.Origins.Z, rays.Directions.Z, Min.Z, Max.Z, ref near,
+            ref far, result);
+    }
+
+    [NoAlloc]
+    private static Mask32x4 IntersectAxis4(F32x4 origin, F32x4 direction, float minimum,
+        float maximum, ref F32x4 near, ref F32x4 far, Mask32x4 active)
+    {
+        Mask32x4 parallel = F32x4.CompareLessThan(F32x4.Abs(direction), F32x4.Splat(0.000000000001f));
+        Mask32x4 inside = Mask32x4.And(F32x4.CompareGreaterThanOrEqual(origin, F32x4.Splat(minimum)),
+            F32x4.CompareLessThanOrEqual(origin, F32x4.Splat(maximum)));
+        F32x4 inverse = F32x4.Splat(1.0f) / direction;
+        F32x4 first = (F32x4.Splat(minimum) - origin) * inverse;
+        F32x4 second = (F32x4.Splat(maximum) - origin) * inverse;
+        F32x4 axisNear = F32x4.Min(first, second);
+        F32x4 axisFar = F32x4.Max(first, second);
+        near = F32x4.Max(near, F32x4.Select(parallel, near, axisNear));
+        far = F32x4.Min(far, F32x4.Select(parallel, far, axisFar));
+        Mask32x4 parallelValid = Mask32x4.Or(Mask32x4.Not(parallel), inside);
+        return Mask32x4.And(active, Mask32x4.And(parallelValid, F32x4.CompareGreaterThanOrEqual(far,
+            near)));
+    }
+
+    [NoAlloc]
     private static bool IntersectAxis(float origin, float direction, float min, float max,
         ref float near, ref float far)
     {
@@ -103,6 +136,15 @@ public struct HitRecord
     }
 }
 
+public struct HitPacket
+{
+    public HitRecord Lane0;
+    public HitRecord Lane1;
+    public HitRecord Lane2;
+    public HitRecord Lane3;
+    public Mask32x4 HitMask;
+}
+
 public class Hittable
 {
     [NoAlloc]
@@ -110,6 +152,20 @@ public class Hittable
     {
         hit = new HitRecord();
         return false;
+    }
+
+    [NoAlloc]
+    public virtual bool Hit4(RayPacket rays, Interval interval, Mask32x4 active,
+        out HitPacket hits)
+    {
+        HitPacket result = new HitPacket();
+        bool lane0 = active.GetLane<0>() && Hit(rays.GetLane<0>(), interval, out result.Lane0);
+        bool lane1 = active.GetLane<1>() && Hit(rays.GetLane<1>(), interval, out result.Lane1);
+        bool lane2 = active.GetLane<2>() && Hit(rays.GetLane<2>(), interval, out result.Lane2);
+        bool lane3 = active.GetLane<3>() && Hit(rays.GetLane<3>(), interval, out result.Lane3);
+        result.HitMask = PacketMasks.FromBools(lane0, lane1, lane2, lane3);
+        hits = result;
+        return result.HitMask.Any();
     }
 
     [NoAlloc]
@@ -158,6 +214,61 @@ public sealed class Sphere : Hittable
         result.SurfaceMaterial = material;
         hit = result;
         return true;
+    }
+
+    [NoAlloc]
+    public override bool Hit4(RayPacket rays, Interval interval, Mask32x4 active,
+        out HitPacket hits)
+    {
+        HitPacket result = new HitPacket();
+        Vec3x4 centerToOrigin = rays.Origins - Vec3x4.Splat(center);
+        F32x4 a = rays.Directions.LengthSquared();
+        F32x4 halfB = centerToOrigin.Dot(rays.Directions);
+        F32x4 c = centerToOrigin.LengthSquared() - F32x4.Splat(radius * radius);
+        F32x4 discriminant = halfB * halfB - a * c;
+        Mask32x4 hasRoot = Mask32x4.And(active, F32x4.CompareGreaterThanOrEqual(discriminant,
+            F32x4.Zero));
+        F32x4 squareRoot = F32x4.Sqrt(discriminant);
+        F32x4 first = (-halfB - squareRoot) / a;
+        F32x4 second = (-halfB + squareRoot) / a;
+        Mask32x4 firstValid = Mask32x4.And(hasRoot, Mask32x4.And(F32x4.CompareGreaterThan(first,
+            F32x4.Splat(interval.Min)), F32x4.CompareLessThan(first, F32x4.Splat(interval.Max))));
+        Mask32x4 secondValid = Mask32x4.And(hasRoot, Mask32x4.And(F32x4.CompareGreaterThan(second,
+            F32x4.Splat(interval.Min)), F32x4.CompareLessThan(second, F32x4.Splat(interval.Max))));
+        result.HitMask = Mask32x4.Or(firstValid, secondValid);
+        F32x4 distance = F32x4.Select(firstValid, first, second);
+        Vec3x4 points = rays.At(distance);
+        Vec3x4 outwardNormals = (points - Vec3x4.Splat(center)) / F32x4.Splat(radius);
+        if (result.HitMask.GetLane<0>())
+        {
+            result.Lane0.Distance = distance.GetLane<0>();
+            result.Lane0.Point = points.GetLane<0>();
+            result.Lane0.SetFaceNormal(rays.GetLane<0>(), outwardNormals.GetLane<0>());
+            result.Lane0.SurfaceMaterial = material;
+        }
+        if (result.HitMask.GetLane<1>())
+        {
+            result.Lane1.Distance = distance.GetLane<1>();
+            result.Lane1.Point = points.GetLane<1>();
+            result.Lane1.SetFaceNormal(rays.GetLane<1>(), outwardNormals.GetLane<1>());
+            result.Lane1.SurfaceMaterial = material;
+        }
+        if (result.HitMask.GetLane<2>())
+        {
+            result.Lane2.Distance = distance.GetLane<2>();
+            result.Lane2.Point = points.GetLane<2>();
+            result.Lane2.SetFaceNormal(rays.GetLane<2>(), outwardNormals.GetLane<2>());
+            result.Lane2.SurfaceMaterial = material;
+        }
+        if (result.HitMask.GetLane<3>())
+        {
+            result.Lane3.Distance = distance.GetLane<3>();
+            result.Lane3.Point = points.GetLane<3>();
+            result.Lane3.SetFaceNormal(rays.GetLane<3>(), outwardNormals.GetLane<3>());
+            result.Lane3.SurfaceMaterial = material;
+        }
+        hits = result;
+        return result.HitMask.Any();
     }
 
     [NoAlloc]
@@ -237,6 +348,20 @@ public sealed class HittableList : Hittable
         }
         hit = closestHit;
         return hitAnything;
+    }
+
+    [NoAlloc]
+    public override bool Hit4(RayPacket rays, Interval interval, Mask32x4 active,
+        out HitPacket hits)
+    {
+        HitPacket result = new HitPacket();
+        bool lane0 = active.GetLane<0>() && Hit(rays.GetLane<0>(), interval, out result.Lane0);
+        bool lane1 = active.GetLane<1>() && Hit(rays.GetLane<1>(), interval, out result.Lane1);
+        bool lane2 = active.GetLane<2>() && Hit(rays.GetLane<2>(), interval, out result.Lane2);
+        bool lane3 = active.GetLane<3>() && Hit(rays.GetLane<3>(), interval, out result.Lane3);
+        result.HitMask = PacketMasks.FromBools(lane0, lane1, lane2, lane3);
+        hits = result;
+        return result.HitMask.Any();
     }
 
     [NoAlloc]
@@ -386,5 +511,27 @@ public sealed class BvhNode : Hittable
             hit = candidate;
         }
         return hitAnything;
+    }
+
+    [NoAlloc]
+    public override bool Hit4(RayPacket rays, Interval interval, Mask32x4 active,
+        out HitPacket hits)
+    {
+        Mask32x4 bounded = bounds.Hit4(rays, interval, active);
+        if (!hasRight)
+        {
+            HitPacket leafHits;
+            bool leafResult = left.Hit4(rays, interval, bounded, out leafHits);
+            hits = leafHits;
+            return leafResult;
+        }
+        HitPacket result = new HitPacket();
+        bool lane0 = bounded.GetLane<0>() && Hit(rays.GetLane<0>(), interval, out result.Lane0);
+        bool lane1 = bounded.GetLane<1>() && Hit(rays.GetLane<1>(), interval, out result.Lane1);
+        bool lane2 = bounded.GetLane<2>() && Hit(rays.GetLane<2>(), interval, out result.Lane2);
+        bool lane3 = bounded.GetLane<3>() && Hit(rays.GetLane<3>(), interval, out result.Lane3);
+        result.HitMask = PacketMasks.FromBools(lane0, lane1, lane2, lane3);
+        hits = result;
+        return result.HitMask.Any();
     }
 }

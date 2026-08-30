@@ -42,6 +42,7 @@ internal sealed record BuildRequest(
     FreestandingProjectConfiguration? Freestanding = null,
     CosmopolitanRuntimeMode CosmopolitanMode = CosmopolitanRuntimeMode.Default,
     IReadOnlyList<CpuFeature>? CpuFeatures = null,
+    bool SimdOptimizations = false,
     IReadOnlyDictionary<string, SourceOwnerIdentity>? SourceOwners = null,
     CTildeProjectRunConfiguration? RunConfiguration = null,
     TargetEnvironment Environment = TargetEnvironment.Native,
@@ -143,6 +144,7 @@ internal static class BuildRequestResolver
             options.PanicPolicySpecified ? options.PanicPolicy : project.Configuration.PanicPolicy, freestanding,
             options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default,
             options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
+            project.Configuration.SimdOptimizations,
             project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted);
     }
 
@@ -216,7 +218,7 @@ internal static class BuildRequestResolver
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
             null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures,
-            null, null, options.Environment, options.EspIdfChip);
+            false, null, null, options.Environment, options.EspIdfChip);
     }
 
     private static void ValidateCommon(CommandLineOptions options)

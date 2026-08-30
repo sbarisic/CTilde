@@ -26,6 +26,7 @@ internal sealed partial class CompilationModel
 
     public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture,
         ImmutableArray<CpuFeature> cpuFeatures = default, TargetEnvironment environment = TargetEnvironment.Native,
+        bool simdOptimizations = false,
         bool requireEntryPoint = true, bool requireRuntimeImplementations = true)
     {
         _target = target;
@@ -33,6 +34,7 @@ internal sealed partial class CompilationModel
         _environment = environment;
         RequireRuntimeImplementations = requireRuntimeImplementations;
         CpuFeatures = (cpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : cpuFeatures).ToImmutableHashSet();
+        SimdOptimizations = simdOptimizations;
         SyntaxTrees = syntaxTrees;
         UserSyntaxTrees = userSyntaxTrees;
         Diagnostics = diagnostics;
@@ -58,6 +60,7 @@ internal sealed partial class CompilationModel
     public TargetEnvironment Environment => _environment;
     internal bool RequireRuntimeImplementations { get; }
     public ImmutableHashSet<CpuFeature> CpuFeatures { get; }
+    public bool SimdOptimizations { get; }
     public DiagnosticBag Diagnostics { get; }
     public List<BoundStaticAssertion> StaticAssertions { get; } = [];
     public ImmutableDictionary<FieldSymbol, ConstDataValue> ConstInitializers { get; set; } = ImmutableDictionary<FieldSymbol, ConstDataValue>.Empty;
@@ -447,7 +450,7 @@ internal sealed partial class CompilationModel
     private void ValidateSimdLaneArguments(MethodSymbol definition, ImmutableArray<CType> arguments, SyntaxNode syntax)
     {
         if (definition.ContainingType.Namespace != "System.Simd" ||
-            definition.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4" or "Mask32x4") ||
+            definition.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4" or "Mask32x4" or "Vec3x4") ||
             definition.Name is not ("GetLane" or "WithLane" or "Shuffle" or "ShiftLeft" or "ShiftRight"))
             return;
 

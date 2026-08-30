@@ -65,6 +65,16 @@ internal static partial class ConformanceTests
             var withDeclaration = service.GetReferences("uses.ct", mapUse, includeDeclaration: true);
             Assert(withDeclaration.Length == 2 && withDeclaration.Count(reference => reference.IsDeclaration) == 1,
                 "Reference lookup did not honor declaration inclusion.");
+            var batchKeys = declarationLenses.Where(lens => lens.Name is "Box" or "Field" or "Property")
+                .Select(lens => lens.SymbolKey).ToHashSet(StringComparer.Ordinal);
+            var batched = service.GetReferences(batchKeys, includeDeclaration: false);
+            var individual = batchKeys.SelectMany(key => service.GetReferences(key, includeDeclaration: false))
+                .OrderBy(reference => reference.SymbolKey, StringComparer.Ordinal)
+                .ThenBy(reference => reference.FilePath, StringComparer.Ordinal)
+                .ThenBy(reference => reference.Span.Start).ToArray();
+            Assert(batched.SequenceEqual(individual), "Batched reference lookup did not equal the union of individual symbol queries.");
+            Assert(batched.All(reference => reference.SearchScope == LanguageReferenceSearchScope.ProjectSource),
+                "Ordinary source references did not retain project-source search scope metadata.");
         });
 
         suite.Run("inline assembly reference index", () =>
@@ -100,6 +110,21 @@ internal static partial class ConformanceTests
             var embeddedKey = embedded.GetReferences("embedded-use.ct", use).First().SymbolKey;
             Assert(physical.GetReferenceLenses(mathPath).Any(lens => lens.Name == "Sqrt" && lens.SymbolKey == embeddedKey),
                 "Physical and embedded standard-library declarations did not share a stable semantic reference identity.");
+            var sqrtLens = physical.GetReferenceLenses(mathPath).Single(lens => lens.Name == "Sqrt" && lens.SymbolKey == embeddedKey);
+            Assert(sqrtLens.SearchScope == LanguageReferenceSearchScope.StandardLibrary && sqrtLens.SourceIdentity.StartsWith("stdlib/", StringComparison.Ordinal),
+                "Standard-library lenses did not expose shared search scope and source identity metadata.");
+
+            var vec2Path = Path.Combine(standardLibraryRoot, "System", "Vec2.ct");
+            var vec2 = LanguageServiceSnapshot.CreateStandardLibraryProject(standardLibraryRoot, vec2Path);
+            var vec2Source = File.ReadAllText(vec2Path);
+            var minStart = vec2Source.IndexOf("public static Vec2 Min", StringComparison.Ordinal);
+            var maxStart = vec2Source.IndexOf("public static Vec2 Max", StringComparison.Ordinal);
+            var minParameters = vec2.GetReferenceLenses(vec2Path)
+                .Where(lens => lens.Kind == LanguageSymbolKind.Parameter && lens.Name is "left" or "right" &&
+                    lens.SelectionRange.Start >= minStart && lens.SelectionRange.Start < maxStart)
+                .ToArray();
+            Assert(minParameters.Length == 2 && minParameters.All(lens => lens.ReferenceCount == 2),
+                $"Physical standard-library parameter references were duplicated: {string.Join(", ", minParameters.Select(lens => $"{lens.Name}={lens.ReferenceCount}"))}");
         });
 
         suite.Run("lambda parameter references exclude synthetic methods", () =>
@@ -140,6 +165,10 @@ internal static partial class ConformanceTests
             Assert(itemLens.ReferenceCount == 1, $"Foreach-variable references were not indexed (count {itemLens.ReferenceCount}).");
             var errorLens = lenses.Single(lens => lens.Name == "error");
             Assert(errorLens.ReferenceCount == 1, $"Catch-variable references were not indexed (count {errorLens.ReferenceCount}).");
+            var writeLineReference = service.GetReferences("scoped-reference.ct", source.IndexOf("WriteLine", StringComparison.Ordinal)).First();
+            Assert(writeLineReference.SearchScope == LanguageReferenceSearchScope.StandardLibrary &&
+                writeLineReference.SymbolSourceIdentity.StartsWith("stdlib/", StringComparison.Ordinal),
+                "Embedded standard-library references did not retain shared search scope metadata.");
             Assert(service.GetReferences("scoped-reference.ct", source.IndexOf("Missing", StringComparison.Ordinal)).IsEmpty,
                 "An unresolved identifier was included in the reference index.");
         });

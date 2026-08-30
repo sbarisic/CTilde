@@ -22,6 +22,7 @@ public sealed record CTildeProjectConfiguration(
     CTildeProjectBuildConfiguration? Build,
     ImmutableArray<EspIdfBindingManifest> BindingManifests,
     ImmutableArray<CpuFeature> CpuFeatures,
+    bool SimdOptimizations,
     ImmutableArray<RepositoryModuleReference> Modules,
     CTildeProjectRunConfiguration? Run,
     bool NoRecursion,
@@ -174,6 +175,7 @@ public static class CTildeProjectFile
             architecture = requiredArchitecture;
         }
         var cpuFeatures = ParseCpuFeatures(document.CpuFeatures, fullManifestPath);
+        var simdOptimizations = document.SimdOptimizations ?? false;
         var root = Path.GetDirectoryName(fullManifestPath)!;
         var modules = ParseModules(document.Modules, fullManifestPath);
         var sources = ValidatePatterns(document.Sources, "sources", fullManifestPath);
@@ -205,7 +207,7 @@ public static class CTildeProjectFile
         {
             return new CTildeProject(fullManifestPath, root,
                 new CTildeProjectConfiguration(kind, CompilationTarget.Hosted, CompilationArchitecture.Auto, TargetEnvironment.Native, null,
-                    sources, excludes, null, [], [], [], null, false, EspIdfPanicPolicy.Abort, null, null, null),
+                    sources, excludes, null, [], [], false, [], null, false, EspIdfPanicPolicy.Abort, null, null, null),
                 files, ImmutableDictionary<string, SourceOwnerIdentity>.Empty);
         }
 
@@ -217,6 +219,10 @@ public static class CTildeProjectFile
             throw new CTildeProjectException($"Property 'freestanding' in '{fullManifestPath}' is valid only for freestanding projects.");
         if (target != CompilationTarget.Cosmopolitan && document.Cosmopolitan is not null)
             throw new CTildeProjectException($"Property 'cosmopolitan' in '{fullManifestPath}' is valid only for Cosmopolitan projects.");
+        if (simdOptimizations && target != CompilationTarget.Hosted)
+            throw new CTildeProjectException($"Property 'simdOptimizations' in '{fullManifestPath}' is currently valid only for hosted projects.");
+        if (simdOptimizations && architecture is not (CompilationArchitecture.Auto or CompilationArchitecture.X64))
+            throw new CTildeProjectException($"Property 'simdOptimizations' in '{fullManifestPath}' currently requires architecture 'x64' or 'auto'.");
         var bindingPaths = document.EspIdf?.Bindings ?? [];
         var bindingManifests = bindingPaths.Select(path => EspIdfBindingManifest.Load(path, root)).OrderBy(binding => binding.ManifestPath, comparer).ToImmutableArray();
         if (bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }).Distinct(comparer).Count() != bindingManifests.Length * 2)
@@ -242,7 +248,7 @@ public static class CTildeProjectFile
         var cosmopolitan = target == CompilationTarget.Cosmopolitan
             ? CreateCosmopolitanConfiguration(document.Cosmopolitan, fullManifestPath)
             : null;
-        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(kind, target, architecture, environment, espIdfChip, sources, excludes, build, bindingManifests, cpuFeatures, modules, run,
+        return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(kind, target, architecture, environment, espIdfChip, sources, excludes, build, bindingManifests, cpuFeatures, simdOptimizations, modules, run,
             document.NoRecursion ?? false, panicPolicy, hosted, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
     }
 
@@ -252,6 +258,7 @@ public static class CTildeProjectFile
         if (document.Target is not null) unsupported.Add("target");
         if (document.Architecture is not null) unsupported.Add("architecture");
         if (document.CpuFeatures is not null) unsupported.Add("cpuFeatures");
+        if (document.SimdOptimizations is not null) unsupported.Add("simdOptimizations");
         if (document.Modules is not null) unsupported.Add("modules");
         if (document.NoRecursion is not null) unsupported.Add("noRecursion");
         if (document.PanicPolicy is not null) unsupported.Add("panicPolicy");
@@ -710,6 +717,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("target")] string? Target,
         [property: JsonPropertyName("architecture")] string? Architecture,
         [property: JsonPropertyName("cpuFeatures")] string[]? CpuFeatures,
+        [property: JsonPropertyName("simdOptimizations")] bool? SimdOptimizations,
         [property: JsonPropertyName("modules")] ModuleDocument[]? Modules,
         [property: JsonPropertyName("sources")] string[]? Sources,
         [property: JsonPropertyName("exclude")] string[]? Exclude,

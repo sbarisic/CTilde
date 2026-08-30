@@ -306,6 +306,9 @@ internal sealed partial class TypedIrBodyLowerer
         definition = string.Empty;
         if (!_emitter.HasCpuFeature(CpuFeature.Simd128))
             return false;
+        if (_emitter.SimdOptimizations && _emitter.Architecture == CompilationArchitecture.X64 &&
+            TryEmitExtendedX64GeometryKernel(out definition))
+            return true;
         if (_method.IsOperator && _method.IsStatic && _method.OperatorKind == SyntaxKind.StarToken && _method.Parameters.Length == 2)
         {
             if (_method.ContainingType.FullName == "System.Matrix4x4" && _method.Parameters.All(parameter => parameter.Type.Symbol?.FullName == "System.Matrix4x4"))

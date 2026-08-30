@@ -15,6 +15,8 @@ internal interface ILoweringServices
     CompilationArchitecture Architecture { get; }
     TargetEnvironment Environment { get; }
     bool HasCpuFeature(CpuFeature feature);
+    void RequireMathSymbol(string symbol);
+    bool SimdOptimizations { get; }
 
     string CTypeName(CType type);
     string CDeclaration(CType type, string name);

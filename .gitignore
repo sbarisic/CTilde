@@ -220,6 +220,7 @@ orleans.codegen.cs
 /examples/HostedIo/program.exe
 /examples/HostedIo/ctilde-hosted-*.txt
 /examples/HostedIo/image.ppm
+/Test/Fixtures/HostedSimd/build/
 
 # Freestanding example output
 /examples/Freestanding/build/

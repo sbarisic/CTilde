@@ -1,5 +1,7 @@
 # Changelog
 
+- Added Draft 0.38 hosted x64 scalar-geometry SIMD optimization, `Vec3x4`, packet-renderer editor metadata, and the `simdOptimizations` manifest schema.
+
 ## 0.15.0 - 2026-08-30
 
 - Added Draft 0.37 SIMD128, matrix, quaternion, and scalar-vector helper completion, hover, signatures, semantic tokens, and embedded-source navigation.

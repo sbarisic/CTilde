@@ -125,6 +125,8 @@ internal sealed partial class CEmitter : ILoweringServices
     public CompilationArchitecture Architecture => _architecture;
     public TargetEnvironment Environment => _environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
+    public void RequireMathSymbol(string symbol) => _usedMathSymbols.Add(symbol);
+    public bool SimdOptimizations => Model.SimdOptimizations;
 
     public CompilationModel Model { get; }
     public DiagnosticBag Diagnostics { get; }
@@ -744,6 +746,7 @@ internal sealed partial class CEmitter : ILoweringServices
         {
             var entry = SymbolMapEntry(NameMangler.Type(type), NameMangler.TypeIdentity(type), "type", type.FullName, type.Syntax);
             entry["bitFieldBackingType"] = type.BitFieldBackingType?.DisplayName;
+            entry["simd"] = SimdShape(type);
             entry["bitViews"] = type.Fields.Where(field => field.IsBitView)
                 .OrderBy(field => field.Name, StringComparer.Ordinal)
                 .Select(field => new Dictionary<string, object?>
@@ -922,6 +925,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["genericDefinition"] = type.GenericDefinition?.FullName,
                 ["typeArguments"] = type.TypeArguments.Select(argument => argument.DisplayName).ToArray(),
                 ["runtimeBacked"] = type is { Namespace: "System.Threading", Name: "Thread" or "Mutex" },
+                ["simd"] = SimdShape(type),
                 ["source"] = type.Syntax is null ? null : DebugSourceEntry(type.Syntax),
                 ["values"] = type.EnumValues.OrderBy(value => value.Value).ThenBy(value => value.Name, StringComparer.Ordinal)
                     .Select(value => new Dictionary<string, object?>
@@ -1027,6 +1031,21 @@ internal sealed partial class CEmitter : ILoweringServices
                 ["layouts"] = DebugRuntimeSummaryLayouts(),
             } : null,
         }, new JsonSerializerOptions { WriteIndented = true }) + "\n";
+    }
+
+    private static Dictionary<string, object?>? SimdShape(TypeSymbol type)
+    {
+        if (type.Namespace != "System.Simd")
+            return null;
+        return type.Name switch
+        {
+            "F32x4" => new Dictionary<string, object?> { ["laneType"] = "float32", ["laneCount"] = 4, ["componentCount"] = 1 },
+            "I32x4" => new Dictionary<string, object?> { ["laneType"] = "int32", ["laneCount"] = 4, ["componentCount"] = 1 },
+            "U32x4" => new Dictionary<string, object?> { ["laneType"] = "uint32", ["laneCount"] = 4, ["componentCount"] = 1 },
+            "Mask32x4" => new Dictionary<string, object?> { ["laneType"] = "mask32", ["laneCount"] = 4, ["componentCount"] = 1 },
+            "Vec3x4" => new Dictionary<string, object?> { ["laneType"] = "float32", ["laneCount"] = 4, ["componentCount"] = 3 },
+            _ => null,
+        };
     }
 
     private object[] DebugControlLayouts()

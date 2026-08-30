@@ -31,7 +31,10 @@ internal sealed class ReferenceCodeLensTagger : ITagger<ICodeLensTag>, IDisposab
     private readonly string _filePath;
     private readonly object _gate = new();
     private ReferenceCodeLensItem[] _items = Array.Empty<ReferenceCodeLensItem>();
+    private readonly Dictionary<string, ReferenceCodeLensTag> _tags = new(StringComparer.Ordinal);
     private CancellationTokenSource? _refreshCancellation;
+    private long _appliedRevision = -1;
+    private int _refreshGeneration;
     private bool _disposed;
 
     internal ReferenceCodeLensTagger(ITextBuffer buffer, string filePath)
@@ -56,40 +59,80 @@ internal sealed class ReferenceCodeLensTagger : ITagger<ICodeLensTag>, IDisposab
         var snapshot = spans[0].Snapshot;
         foreach (var item in items)
         {
-            if (!TrySpan(snapshot, item.Range, out var range) || !spans.IntersectsWith(range))
-                continue;
-            var descriptor = new ReferenceCodeLensDescriptor
+            var identity = TagIdentity(item);
+            ReferenceCodeLensTag tag;
+            lock (_gate)
             {
-                FilePath = _filePath,
-                ProjectGuid = Guid.Empty,
-                ElementDescription = string.IsNullOrWhiteSpace(item.Detail) ? item.Name : item.Detail,
-                ApplicableSpan = range.Span,
-                Kind = CodeElementKind(item.Kind),
-            };
-            var tag = new ReferenceCodeLensTag(descriptor, snapshot.CreateTrackingSpan(range.Span, SpanTrackingMode.EdgeInclusive),
-                new Uri(_filePath).AbsoluteUri, item);
-            yield return new TagSpan<ICodeLensTag>(range, tag);
+                if (!_tags.TryGetValue(identity, out tag!))
+                {
+                    if (!TrySpan(snapshot, item.SelectionRange, out var initialAnchor) || !TrySpan(snapshot, item.Range, out var range))
+                        continue;
+                    var trackingSpan = snapshot.CreateTrackingSpan(range.Span, SpanTrackingMode.EdgeInclusive);
+                    var descriptor = new ReferenceCodeLensDescriptor(
+                        _filePath,
+                        string.IsNullOrWhiteSpace(item.Detail) ? item.Name : item.Detail,
+                        range.Span,
+                        CodeElementKind(item.Kind),
+                        trackingSpan,
+                        new Uri(_filePath).AbsoluteUri,
+                        item);
+                    tag = new ReferenceCodeLensTag(descriptor,
+                        snapshot.CreateTrackingSpan(initialAnchor.Span, SpanTrackingMode.EdgeInclusive));
+                    _tags.Add(identity, tag);
+                }
+            }
+            var anchor = tag.AnchorSpan.GetSpan(snapshot);
+            if (!spans.IntersectsWith(anchor))
+                continue;
+            yield return new TagSpan<ICodeLensTag>(anchor, tag);
         }
     }
 
-    private void BufferChanged(object sender, TextContentChangedEventArgs eventArgs) => QueueRefresh();
+    private static string TagIdentity(ReferenceCodeLensItem item) =>
+        string.Join("|", item.SymbolKey, item.Revision, item.ReferenceCount,
+            item.Range.Start.Line, item.Range.Start.Character, item.Range.End.Line, item.Range.End.Character,
+            item.SelectionRange.Start.Line, item.SelectionRange.Start.Character, item.SelectionRange.End.Line, item.SelectionRange.End.Character);
 
-    private void QueueRefresh()
+    private void BufferChanged(object sender, TextContentChangedEventArgs eventArgs)
+    {
+        // Tracking spans keep the last complete result positioned while the language server analyzes the edit.
+        var snapshot = eventArgs.After;
+        TagsChanged?.Invoke(this, new SnapshotSpanEventArgs(new SnapshotSpan(snapshot, 0, snapshot.Length)));
+    }
+
+    private void QueueRefresh(long revision)
+    {
+        if (revision <= Volatile.Read(ref _appliedRevision))
+            return;
+        QueueRefresh(revision, force: false);
+    }
+
+    private void QueueRefresh() => QueueRefresh(-1, force: true);
+
+    private void QueueRefresh(long revision, bool force)
     {
         if (_disposed)
             return;
-        lock (_gate)
-            _items = Array.Empty<ReferenceCodeLensItem>();
-        var snapshot = _buffer.CurrentSnapshot;
-        TagsChanged?.Invoke(this, new SnapshotSpanEventArgs(new SnapshotSpan(snapshot, 0, snapshot.Length)));
+        if (!CTildeToolPaths.Current.ShowReferenceCodeLens)
+        {
+            lock (_gate)
+            {
+                _items = Array.Empty<ReferenceCodeLensItem>();
+                _tags.Clear();
+            }
+            var hiddenSnapshot = _buffer.CurrentSnapshot;
+            TagsChanged?.Invoke(this, new SnapshotSpanEventArgs(new SnapshotSpan(hiddenSnapshot, 0, hiddenSnapshot.Length)));
+            return;
+        }
+        var generation = Interlocked.Increment(ref _refreshGeneration);
         var next = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref _refreshCancellation, next);
         previous?.Cancel();
         previous?.Dispose();
-        _ = RefreshAsync(next.Token);
+        _ = RefreshAsync(generation, revision, force, next.Token);
     }
 
-    private async Task RefreshAsync(CancellationToken cancellationToken)
+    private async Task RefreshAsync(int generation, long requestedRevision, bool force, CancellationToken cancellationToken)
     {
         try
         {
@@ -98,8 +141,17 @@ internal sealed class ReferenceCodeLensTagger : ITagger<ICodeLensTag>, IDisposab
             var items = client is null || !CTildeToolPaths.Current.ShowReferenceCodeLens
                 ? Array.Empty<ReferenceCodeLensItem>()
                 : await client.GetReferenceCodeLensesAsync(new Uri(_filePath).AbsoluteUri, cancellationToken).ConfigureAwait(false);
+            if (generation != Volatile.Read(ref _refreshGeneration) ||
+                !force && items.Length != 0 && items.Max(item => item.Revision) < requestedRevision)
+                return;
             lock (_gate)
+            {
                 _items = items;
+                _tags.Clear();
+            }
+            var appliedRevision = items.Length == 0 ? requestedRevision : items.Max(item => item.Revision);
+            if (appliedRevision >= 0)
+                Interlocked.Exchange(ref _appliedRevision, appliedRevision);
             var snapshot = _buffer.CurrentSnapshot;
             TagsChanged?.Invoke(this, new SnapshotSpanEventArgs(new SnapshotSpan(snapshot, 0, snapshot.Length)));
         }
@@ -149,12 +201,34 @@ internal sealed class ReferenceCodeLensTagger : ITagger<ICodeLensTag>, IDisposab
 
     private sealed class ReferenceCodeLensTag : ICodeLensTag3, ICodeLensDescriptorContextProvider
     {
+        internal ReferenceCodeLensTag(ReferenceCodeLensDescriptor descriptor, ITrackingSpan anchorSpan)
+        {
+            Descriptor = descriptor;
+            AnchorSpan = anchorSpan;
+            Properties = new CodeLensTagProperties(displayBeforeCreatingDataPoints: true);
+        }
+
+        public ICodeLensDescriptor Descriptor { get; }
+        internal ITrackingSpan AnchorSpan { get; }
+        public ICodeLensDescriptorContextProvider DescriptorContextProvider => (ICodeLensDescriptorContextProvider)Descriptor;
+        public CodeLensTagProperties Properties { get; }
+        public event EventHandler Disconnected { add { } remove { } }
+
+        public Task<CodeLensDescriptorContext> GetCurrentContextAsync() => DescriptorContextProvider.GetCurrentContextAsync();
+    }
+
+    private sealed class ReferenceCodeLensDescriptor : ICodeLensDescriptor, ICodeLensDescriptorContextProvider
+    {
         private readonly ITrackingSpan _trackingSpan;
         private readonly Dictionary<object, object> _properties;
 
-        internal ReferenceCodeLensTag(ICodeLensDescriptor descriptor, ITrackingSpan trackingSpan, string documentUri, ReferenceCodeLensItem item)
+        internal ReferenceCodeLensDescriptor(string filePath, string elementDescription, Span applicableSpan, CodeElementKinds kind,
+            ITrackingSpan trackingSpan, string documentUri, ReferenceCodeLensItem item)
         {
-            Descriptor = descriptor;
+            FilePath = filePath;
+            ElementDescription = elementDescription;
+            ApplicableSpan = applicableSpan;
+            Kind = kind;
             _trackingSpan = trackingSpan;
             _properties = new Dictionary<object, object>
             {
@@ -164,27 +238,18 @@ internal sealed class ReferenceCodeLensTagger : ITagger<ICodeLensTag>, IDisposab
                 [ReferenceCodeLensContracts.RevisionProperty] = item.Revision,
                 [ReferenceCodeLensContracts.CountProperty] = item.ReferenceCount,
             };
-            Properties = new CodeLensTagProperties(displayBeforeCreatingDataPoints: true);
         }
 
-        public ICodeLensDescriptor Descriptor { get; }
-        public ICodeLensDescriptorContextProvider DescriptorContextProvider => this;
-        public CodeLensTagProperties Properties { get; }
-        public event EventHandler Disconnected { add { } remove { } }
+        public string FilePath { get; }
+        public Guid ProjectGuid => Guid.Empty;
+        public string ElementDescription { get; }
+        public Span? ApplicableSpan { get; }
+        public CodeElementKinds Kind { get; }
 
         public Task<CodeLensDescriptorContext> GetCurrentContextAsync()
         {
             var span = _trackingSpan.GetSpan(_trackingSpan.TextBuffer.CurrentSnapshot).Span;
             return Task.FromResult(new CodeLensDescriptorContext(span, _properties));
         }
-    }
-
-    private sealed class ReferenceCodeLensDescriptor : ICodeLensDescriptor
-    {
-        public string FilePath { get; set; } = string.Empty;
-        public Guid ProjectGuid { get; set; }
-        public string ElementDescription { get; set; } = string.Empty;
-        public Span? ApplicableSpan { get; set; }
-        public CodeElementKinds Kind { get; set; }
     }
 }

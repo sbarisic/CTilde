@@ -233,51 +233,67 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
 
     protected override ThreadsResponse HandleThreadsRequest(ThreadsArguments arguments)
     {
-        var record = Command("-thread-info");
-        var threads = new List<DapThread>();
-        foreach (var item in MiParser.Array(record.Results.TryGetValue("threads", out var value) ? value : null))
+        try
         {
-            var tuple = MiParser.Tuple(item);
-            var id = ParseInt(MiParser.String(tuple, "id"), 1);
-            var name = MiParser.String(tuple, "name", MiParser.String(tuple, "target-id", $"Thread {id}"));
-            threads.Add(new DapThread(id, name));
+            var record = Command("-thread-info");
+            var threads = new List<DapThread>();
+            foreach (var item in MiParser.Array(record.Results.TryGetValue("threads", out var value) ? value : null))
+            {
+                var tuple = MiParser.Tuple(item);
+                var id = ParseInt(MiParser.String(tuple, "id"), 1);
+                var name = MiParser.String(tuple, "name", MiParser.String(tuple, "target-id", $"Thread {id}"));
+                threads.Add(new DapThread(id, name));
+            }
+            if (threads.Count == 0) threads.Add(new DapThread(1, "Main Thread"));
+            return new ThreadsResponse(threads);
         }
-        if (threads.Count == 0) threads.Add(new DapThread(1, "Main Thread"));
-        return new ThreadsResponse(threads);
+        catch (Exception exception)
+        {
+            TraceInspectionFailure("threads", exception);
+            return new ThreadsResponse([]);
+        }
     }
 
     protected override StackTraceResponse HandleStackTraceRequest(StackTraceArguments arguments)
     {
-        var record = Command($"-stack-list-frames --thread {arguments.ThreadId}");
-        var frames = new List<StackFrame>();
-        var mappedCurrent = false;
-        foreach (var item in MiParser.Array(record.Results.TryGetValue("stack", out var value) ? value : null))
+        try
         {
-            var wrapper = MiParser.Tuple(item);
-            var tuple = wrapper.TryGetValue("frame", out var frameValue) ? MiParser.Tuple(frameValue) : wrapper;
-            var function = MiParser.String(tuple, "func", "<unknown>");
-            var mappedFunction = _map?.Functions.FirstOrDefault(candidate => candidate.Name.Equals(function, StringComparison.Ordinal));
-            var file = MiParser.String(tuple, "fullname", MiParser.String(tuple, "file"));
-            if (!_showRuntimeFrames && (mappedFunction is null || file.Equals("<ctilde-generated>", StringComparison.Ordinal))) continue;
-            var level = ParseInt(MiParser.String(tuple, "level"), frames.Count);
-            var id = checked(arguments.ThreadId * 10000 + level + 1);
-            _frameLevels[id] = level;
-            _frameFunctions[id] = mappedFunction;
-            _frameThreads[id] = arguments.ThreadId;
-            var line = ParseInt(MiParser.String(tuple, "line"), 1);
-            var exactSite = !mappedCurrent && arguments.ThreadId == _currentStoppedThread && mappedFunction == _currentFunction
-                ? _currentSite : null;
-            if (exactSite is not null) mappedCurrent = true;
-            var frameSite = exactSite ?? ResolveFrameSite(mappedFunction?.Sites ?? [], line);
-            _frameSites[id] = frameSite;
-            var sourcePath = frameSite is not null ? NormalizeSource(frameSite.Source)?.File : mappedFunction?.Source is null ? file : NormalizeSource(mappedFunction.Source)?.File;
-            var sourceLine = frameSite?.Source.Line ?? line;
-            frames.Add(new StackFrame(id, mappedFunction?.DisplayName ?? function, sourceLine, frameSite?.Source.Column ?? 1)
+            var record = Command($"-stack-list-frames --thread {arguments.ThreadId}");
+            var frames = new List<StackFrame>();
+            var mappedCurrent = false;
+            foreach (var item in MiParser.Array(record.Results.TryGetValue("stack", out var value) ? value : null))
             {
-                Source = string.IsNullOrWhiteSpace(sourcePath) ? null : new Source { Name = Path.GetFileName(sourcePath), Path = sourcePath },
-            });
+                var wrapper = MiParser.Tuple(item);
+                var tuple = wrapper.TryGetValue("frame", out var frameValue) ? MiParser.Tuple(frameValue) : wrapper;
+                var function = MiParser.String(tuple, "func", "<unknown>");
+                var mappedFunction = _map?.Functions.FirstOrDefault(candidate => candidate.Name.Equals(function, StringComparison.Ordinal));
+                var file = MiParser.String(tuple, "fullname", MiParser.String(tuple, "file"));
+                if (!_showRuntimeFrames && (mappedFunction is null || file.Equals("<ctilde-generated>", StringComparison.Ordinal))) continue;
+                var level = ParseInt(MiParser.String(tuple, "level"), frames.Count);
+                var id = checked(arguments.ThreadId * 10000 + level + 1);
+                _frameLevels[id] = level;
+                _frameFunctions[id] = mappedFunction;
+                _frameThreads[id] = arguments.ThreadId;
+                var line = ParseInt(MiParser.String(tuple, "line"), 1);
+                var exactSite = !mappedCurrent && arguments.ThreadId == _currentStoppedThread && mappedFunction == _currentFunction
+                    ? _currentSite : null;
+                if (exactSite is not null) mappedCurrent = true;
+                var frameSite = exactSite ?? ResolveFrameSite(mappedFunction?.Sites ?? [], line);
+                _frameSites[id] = frameSite;
+                var sourcePath = frameSite is not null ? NormalizeSource(frameSite.Source)?.File : mappedFunction?.Source is null ? file : NormalizeSource(mappedFunction.Source)?.File;
+                var sourceLine = frameSite?.Source.Line ?? line;
+                frames.Add(new StackFrame(id, mappedFunction?.DisplayName ?? function, sourceLine, frameSite?.Source.Column ?? 1)
+                {
+                    Source = string.IsNullOrWhiteSpace(sourcePath) ? null : new Source { Name = Path.GetFileName(sourcePath), Path = sourcePath },
+                });
+            }
+            return new StackTraceResponse(frames) { TotalFrames = frames.Count };
         }
-        return new StackTraceResponse(frames) { TotalFrames = frames.Count };
+        catch (Exception exception)
+        {
+            TraceInspectionFailure("stack trace", exception);
+            return new StackTraceResponse([]) { TotalFrames = 0 };
+        }
     }
 
     protected override ScopesResponse HandleScopesRequest(ScopesArguments arguments)
@@ -300,6 +316,16 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
 
     protected override VariablesResponse HandleVariablesRequest(VariablesArguments arguments)
     {
+        try { return GetVariables(arguments); }
+        catch (Exception exception)
+        {
+            TraceInspectionFailure("variables", exception);
+            return new VariablesResponse([]);
+        }
+    }
+
+    private VariablesResponse GetVariables(VariablesArguments arguments)
+    {
         if (!_variables.TryGetValue(arguments.VariablesReference, out var container))
             return new VariablesResponse([]);
         var level = _frameLevels.TryGetValue(container.FrameId, out var stored) ? stored : 0;
@@ -315,7 +341,10 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
         var record = Command($"-stack-list-variables --thread {thread} --frame {level} --simple-values");
         var result = new List<Variable>();
         var native = MiParser.Array(record.Results.TryGetValue("variables", out var value) ? value : null)
-            .Select(MiParser.Tuple).ToDictionary(tuple => MiParser.String(tuple, "name"), tuple => tuple, StringComparer.Ordinal);
+            .Select(MiParser.Tuple)
+            .Where(tuple => !string.IsNullOrWhiteSpace(MiParser.String(tuple, "name")))
+            .GroupBy(tuple => MiParser.String(tuple, "name"), StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.Ordinal);
         var function = _frameFunctions.TryGetValue(container.FrameId, out var mapped) ? mapped : null;
         var logicalVariables = container.Kind switch
         {
@@ -349,19 +378,37 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
 
     protected override EvaluateResponse HandleEvaluateRequest(EvaluateArguments arguments)
     {
-        if (!IsSafeWatch(arguments.Expression))
-            throw new InvalidOperationException("C~ watches currently support identifiers, fields, and array indices only.");
-        var frame = arguments.FrameId ?? _frameLevels.Keys.FirstOrDefault();
-        var level = _frameLevels.TryGetValue(frame, out var stored) ? stored : 0;
-        var thread = _frameThreads.TryGetValue(frame, out var mappedThread) ? mappedThread : _currentStoppedThread;
-        var function = _frameFunctions.TryGetValue(frame, out var mapped) ? mapped : ResolveSelectedFunction(thread);
-        var translated = TranslateWatch(arguments.Expression, function, frame)
-            ?? throw new InvalidOperationException("The C~ watch does not resolve to a live local, argument, receiver, field, or array element.");
-        var record = Command($"-data-evaluate-expression --thread {thread} --frame {level} {Quote(translated.Expression)}");
-        var value = MiParser.String(record.Results, "value", "<unavailable>");
-        var reference = CanExpand(translated.Type, value) ? AddVariables(new VariableContainer(frame, "expression", translated.Expression, translated.Type)) : 0;
-        return new EvaluateResponse(value, reference) { MemoryReference = ExtractAddress(value) };
+        try
+        {
+            if (!IsSafeWatch(arguments.Expression))
+                return UnavailableEvaluation("unsupported expression syntax");
+            var frame = arguments.FrameId ?? _frameLevels.Keys.FirstOrDefault();
+            var level = _frameLevels.TryGetValue(frame, out var stored) ? stored : 0;
+            var thread = _frameThreads.TryGetValue(frame, out var mappedThread) ? mappedThread : _currentStoppedThread;
+            var function = _frameFunctions.TryGetValue(frame, out var mapped) ? mapped : ResolveSelectedFunction(thread);
+            var translated = TranslateWatch(arguments.Expression, function, frame);
+            if (translated is null)
+                return UnavailableEvaluation("expression does not resolve to live C~ storage");
+            var record = Command($"-data-evaluate-expression --thread {thread} --frame {level} {Quote(translated.Value.Expression)}");
+            var value = MiParser.String(record.Results, "value", "<unavailable>");
+            var reference = CanExpand(translated.Value.Type, value) ? AddVariables(new VariableContainer(frame, "expression", translated.Value.Expression, translated.Value.Type)) : 0;
+            return new EvaluateResponse(value, reference) { MemoryReference = ExtractAddress(value) };
+        }
+        catch (Exception exception)
+        {
+            TraceInspectionFailure("evaluate", exception);
+            return new EvaluateResponse("<not available>", 0);
+        }
     }
+
+    private EvaluateResponse UnavailableEvaluation(string reason)
+    {
+        Trace("Evaluation unavailable: " + reason + ".");
+        return new EvaluateResponse("<not available>", 0);
+    }
+
+    private void TraceInspectionFailure(string request, Exception exception) =>
+        Trace($"Could not answer {request} request: {exception.Message}");
 
     protected override ContinueResponse HandleContinueRequest(ContinueArguments arguments)
     {
@@ -1210,10 +1257,15 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
         if (mappedType is not null)
         {
             var result = new List<Variable>();
-            foreach (var field in InstanceFields(mappedType))
+            var fields = InstanceFields(mappedType).ToArray();
+            for (var index = 0; index < fields.Length; index++)
             {
+                var field = fields[index];
                 var member = mappedType.Kind is "class" or "delegate" ? $"({expression})->{field.Storage}" : $"({expression}).{field.Storage}";
-                result.Add(EvaluateVariable(field.Name, member, field.Type, container.FrameId, level));
+                var name = mappedType.Simd is { ComponentCount: 1 } && index < mappedType.Simd.LaneCount
+                    ? $"[{index}]"
+                    : field.Name;
+                result.Add(EvaluateVariable(name, member, field.Type, container.FrameId, level));
             }
             if (mappedType.Kind is "class" or "delegate")
             {

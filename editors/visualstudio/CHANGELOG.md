@@ -1,5 +1,7 @@
 # Changelog
 
+- Added Draft 0.38 hosted x64 scalar-geometry SIMD optimization, `Vec3x4` lane-aware debug presentation, and `simdOptimizations` project support while retaining extension version 0.15.0.
+
 ## 0.15.0 - Preview
 
 - Added solution-wide semantic Find All References and native Visual Studio reference-count CodeLens indicators with lazy details, navigation, live refresh, and an opt-out setting.

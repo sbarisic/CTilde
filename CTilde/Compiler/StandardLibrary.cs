@@ -13,7 +13,8 @@ internal enum StandardVectorTypes
     Vec4 = 4,
     Simd = 8,
     Geometry = 16,
-    All = Vec2 | Vec3 | Vec4 | Simd | Geometry,
+    PacketGeometry = 32,
+    All = Vec2 | Vec3 | Vec4 | Simd | Geometry | PacketGeometry,
 }
 
 internal static class StandardLibrary
@@ -54,6 +55,8 @@ internal static class StandardLibrary
     {
         if ((vectors & StandardVectorTypes.Geometry) != 0)
             vectors |= StandardVectorTypes.Vec2 | StandardVectorTypes.Vec3 | StandardVectorTypes.Vec4;
+        if ((vectors & StandardVectorTypes.PacketGeometry) != 0)
+            vectors |= StandardVectorTypes.Vec3 | StandardVectorTypes.Simd;
         var files = target == CompilationTarget.Freestanding
             ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
             : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
@@ -77,6 +80,8 @@ internal static class StandardLibrary
             files.Add("Vec4.ct");
         if ((vectors & StandardVectorTypes.Simd) != 0)
             files.Add("Simd.ct");
+        if ((vectors & StandardVectorTypes.PacketGeometry) != 0)
+            files.Add("Vec3x4.ct");
         if ((vectors & StandardVectorTypes.Geometry) != 0)
         {
             files.Add("Matrix3x2.ct");
@@ -101,6 +106,7 @@ internal static class StandardLibrary
                 "Vec3" => StandardVectorTypes.Vec3,
                 "Vec4" => StandardVectorTypes.Vec4,
                 "F32x4" or "I32x4" or "U32x4" or "Mask32x4" => StandardVectorTypes.Simd,
+                "Vec3x4" => StandardVectorTypes.PacketGeometry,
                 "Matrix3x2" or "Matrix4x4" or "Quaternion" => StandardVectorTypes.Geometry,
                 _ => StandardVectorTypes.None,
             };

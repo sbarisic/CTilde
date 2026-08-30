@@ -127,7 +127,7 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
         return Task.CompletedTask;
     }
 
-    internal static event Action? ReferenceCodeLensesChanged;
+    internal static event Action<long>? ReferenceCodeLensesChanged;
 
     internal async Task<ReferenceCodeLensItem[]> GetReferenceCodeLensesAsync(string uri, CancellationToken cancellationToken)
     {
@@ -159,8 +159,8 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
 
     private sealed class ReferenceCodeLensMessageTarget
     {
-        [JsonRpcMethod("ctilde/referenceCodeLens/refresh")]
-        public void Refresh() => ReferenceCodeLensesChanged?.Invoke();
+        [JsonRpcMethod("ctilde/referenceCodeLens/refresh", UseSingleObjectParameterDeserialization = true)]
+        public void Refresh(ReferenceCodeLensRefresh refresh) => ReferenceCodeLensesChanged?.Invoke(refresh.Revision);
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100:Avoid async void methods", Justification = "EnvDTE solution events require void callbacks.")]

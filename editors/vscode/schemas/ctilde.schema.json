@@ -38,6 +38,11 @@
       "items": { "type": "string", "enum": ["simd128"] },
       "description": "Explicit CPU features. SIMD remains scalar unless simd128 is selected."
     },
+    "simdOptimizations": {
+      "type": "boolean",
+      "default": false,
+      "description": "Enable hosted x64 SIMD optimization of scalar vectors, matrices, quaternions, and packet geometry. This implicitly selects simd128."
+    },
     "modules": {
       "type": "array",
       "description": "Exact repository-backed source modules. Build and check never access the network.",
@@ -294,6 +299,7 @@
             { "required": ["target"] },
             { "required": ["architecture"] },
             { "required": ["cpuFeatures"] },
+            { "required": ["simdOptimizations"] },
             { "required": ["modules"] },
             { "required": ["noRecursion"] },
             { "required": ["panicPolicy"] },
@@ -304,6 +310,18 @@
             { "required": ["freestanding"] },
             { "required": ["cosmopolitan"] }
           ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": { "simdOptimizations": { "const": true } },
+        "required": ["simdOptimizations"]
+      },
+      "then": {
+        "properties": {
+          "target": { "const": "hosted" },
+          "architecture": { "enum": ["auto", "x64"] }
         }
       }
     }

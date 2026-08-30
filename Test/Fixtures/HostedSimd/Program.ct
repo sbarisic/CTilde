@@ -1,0 +1,59 @@
+using System;
+
+public static class Program
+{
+    [Export("ct_simd_vec2")]
+    public static float Vec2Kernel(float a, float b)
+    {
+        Vec2 value = Vec2.Clamp(Vec2.Abs(new Vec2(a, b) + new Vec2(b, a)), Vec2.Zero,
+            Vec2.One * 100.0f);
+        return value.Dot(new Vec2(2.0f, 3.0f));
+    }
+
+    [Export("ct_simd_vec3")]
+    public static float Vec3Kernel(float a, float b)
+    {
+        Vec3 value = new Vec3(a, b, 1.0f).Cross(new Vec3(b, a, 2.0f)).Normalize();
+        return value.X + value.Y + value.Z;
+    }
+
+    [Export("ct_simd_vec4")]
+    public static float Vec4Kernel(float a, float b)
+    {
+        Vec4 value = Vec4.Lerp(new Vec4(a), new Vec4(b), 0.25f);
+        return value.LengthSquared();
+    }
+
+    [Export("ct_simd_matrix3x2")]
+    public static float Matrix3x2Kernel(float a, float b)
+    {
+        Matrix3x2 left = Matrix3x2.CreateScale(a, b);
+        Matrix3x2 right = Matrix3x2.CreateTranslation(b, a);
+        return Matrix3x2.Lerp(left, left * right, 0.5f).TransformPoint(new Vec2(a,
+            b)).X;
+    }
+
+    [Export("ct_simd_matrix4x4")]
+    public static float Matrix4x4Kernel(float a, float b)
+    {
+        Matrix4x4 left = Matrix4x4.CreateScale(a);
+        Matrix4x4 right = Matrix4x4.CreateTranslation(b, a, b);
+        Matrix4x4 value = Matrix4x4.Transpose(Matrix4x4.Lerp(left, left * right,
+            0.5f));
+        return value.Transform(new Vec4(a, b, 1.0f, 1.0f)).X;
+    }
+
+    [Export("ct_simd_quaternion")]
+    public static float QuaternionKernel(float a, float b)
+    {
+        Quaternion left = new Quaternion(a, b, 0.5f, 1.0f).Normalize();
+        Quaternion right = new Quaternion(b, a, 0.25f, 1.0f).Conjugate();
+        Quaternion value = Quaternion.Lerp(left, left * right, 0.25f);
+        return Quaternion.Dot(value, right);
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+    }
+}

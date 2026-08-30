@@ -223,7 +223,8 @@ internal static partial class ConformanceTests
                 """;
             var result = CompileAndRun(HostedIoSources(harness), memoryDiagnostics: true);
             Assert(result.ExitCode == 0, result.StandardError);
-            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 24)), result.StandardOutput);
+            Assert(Normalize(result.StandardOutput) == string.Concat(Enumerable.Repeat("True\n", 22))
+                + "Create final!\nTrue\nTrue\n", result.StandardOutput);
         });
 
         suite.Run("hosted path tracer deterministic native render", () =>
@@ -267,7 +268,7 @@ internal static partial class ConformanceTests
             var second = CompileAndRun(sources, captureFile: "image.ppm");
             Assert(first.ExitCode == 0, first.StandardError);
             Assert(second.ExitCode == 0, second.StandardError);
-            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nProgress: 33%.\nProgress: 66%.\nProgress: 100%.\nDone: 256x144.\n", first.StandardOutput);
+            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nCreate final!\nProgress: 33%.\nProgress: 66%.\nProgress: 100%.\nDone: 256x144.\n", first.StandardOutput);
             Assert(Normalize(second.StandardOutput) == Normalize(first.StandardOutput), second.StandardOutput);
             var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first path-tracer run did not produce image.ppm.");
             var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second path-tracer run did not produce image.ppm.");

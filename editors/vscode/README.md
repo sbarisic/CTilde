@@ -6,7 +6,7 @@
 
 This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
 
-This is a preview for the experimental C~ Draft 0.37 language. The extension, language server, compiler, and debug adapter are versioned and released together.
+This is a preview for the experimental C~ Draft 0.38 language. The extension, language server, compiler, and debug adapter are versioned and released together.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ code --install-extension .\ctilde-language-0.15.0.vsix --force
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.37 syntax and semantic classification, including generic collections, indexers, iterators, explicit SIMD128 values, scalar matrices and quaternions, repository modules, source owners, closures, interrupts, effect contracts, target profiles, runtime roles, and native interop.
+- Draft 0.38 syntax and semantic classification, including `simdOptimizations`, `Vec3x4`, generic collections, indexers, iterators, explicit SIMD128 values, scalar geometry, repository modules, source owners, closures, interrupts, effect contracts, target profiles, runtime roles, and native interop.
 - Target-aware standard-library completion and documentation: hosted and Cosmopolitan supply console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
 - Cosmopolitan manifests are schema-validated and participate in check, build, and run tasks. C~-aware APE debugging remains deferred to a retained ELF-carrier workflow.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.

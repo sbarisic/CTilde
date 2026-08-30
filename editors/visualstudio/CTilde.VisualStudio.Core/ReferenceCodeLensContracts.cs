@@ -11,7 +11,56 @@ public static class ReferenceCodeLensContracts
     public static readonly Guid CommandSet = new("235dfa97-a3cf-4627-975b-851e22e0ca63");
     public const int NavigateCommandId = 0x0109;
 
+    private static readonly System.Text.Json.JsonSerializerOptions DetailSerializerOptions = new(System.Text.Json.JsonSerializerDefaults.Web);
+
     public static string Label(int count) => count == 1 ? "1 reference" : $"{count} references";
+
+    public static string SerializeDetails(ReferenceCodeLensDetails details) =>
+        System.Text.Json.JsonSerializer.Serialize(details, DetailSerializerOptions);
+
+    public static ReferenceCodeLensDetails DeserializeDetails(string payload) =>
+        System.Text.Json.JsonSerializer.Deserialize<ReferenceCodeLensDetails>(payload, DetailSerializerOptions)
+        ?? throw new InvalidOperationException("The reference detail callback returned an empty payload.");
+
+    public static void RestoreMissingReferenceText(ReferenceCodeLensDetails details)
+    {
+        var sourceCache = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var reference in details.References)
+        {
+            if (!string.IsNullOrWhiteSpace(reference.ReferenceText) ||
+                !System.Uri.TryCreate(reference.Uri, UriKind.Absolute, out var uri) || !uri.IsFile)
+                continue;
+            try
+            {
+                var path = uri.LocalPath;
+                if (!sourceCache.TryGetValue(path, out var lines))
+                {
+                    lines = File.ReadAllLines(path);
+                    sourceCache[path] = lines;
+                }
+                var line = reference.Range.Start.Line;
+                if (line < 0 || line >= lines.Length)
+                    continue;
+                reference.ReferenceText = lines[line];
+                reference.ReferenceStart = Clamp(reference.Range.Start.Character, 0, reference.ReferenceText.Length);
+                reference.ReferenceEnd = Clamp(reference.Range.End.Character, reference.ReferenceStart, reference.ReferenceText.Length);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // The callback value remains authoritative. Disk access is only a fallback for
+                // Visual Studio CodeLens hosts that drop nested source text during projection.
+            }
+        }
+    }
+
+    public static string DisplayReference(ReferenceDetailRow row)
+    {
+        if (row.NavigationArgument is null)
+            return row.ReferenceText;
+        return $"{Path.GetFileName(row.FilePath)}:{row.LineNumber + 1}  {row.ReferenceText.TrimStart()}";
+    }
+
+    private static int Clamp(int value, int minimum, int maximum) => Math.Min(Math.Max(value, minimum), maximum);
 
     public static ReferenceDetailRow[] DetailRows(IReadOnlyList<ReferenceDetail> references)
     {
@@ -31,10 +80,19 @@ public static class ReferenceCodeLensContracts
                 ReferenceStart = reference.ReferenceStart,
                 ReferenceEnd = reference.ReferenceEnd,
                 ReferenceLongDescription = reference.ReferenceLongDescription,
+                TextBeforeReference2 = reference.TextBeforeReference2,
+                TextBeforeReference1 = reference.TextBeforeReference1,
+                TextAfterReference1 = reference.TextAfterReference1,
+                TextAfterReference2 = reference.TextAfterReference2,
                 NavigationArgument = new ReferenceNavigationTarget { Uri = reference.Uri, Range = reference.Range }.Serialize(),
             };
         })];
     }
+}
+
+public sealed class ReferenceCodeLensRefresh
+{
+    public long Revision { get; set; }
 }
 
 public sealed class ReferenceDetailRow
@@ -46,6 +104,10 @@ public sealed class ReferenceDetailRow
     public int ReferenceStart { get; set; }
     public int ReferenceEnd { get; set; }
     public string ReferenceLongDescription { get; set; } = string.Empty;
+    public string TextBeforeReference2 { get; set; } = string.Empty;
+    public string TextBeforeReference1 { get; set; } = string.Empty;
+    public string TextAfterReference1 { get; set; } = string.Empty;
+    public string TextAfterReference2 { get; set; } = string.Empty;
     public string? NavigationArgument { get; set; }
 }
 
@@ -93,6 +155,10 @@ public sealed class ReferenceDetail
     public int ReferenceStart { get; set; }
     public int ReferenceEnd { get; set; }
     public string ReferenceLongDescription { get; set; } = string.Empty;
+    public string TextBeforeReference2 { get; set; } = string.Empty;
+    public string TextBeforeReference1 { get; set; } = string.Empty;
+    public string TextAfterReference1 { get; set; } = string.Empty;
+    public string TextAfterReference2 { get; set; } = string.Empty;
 }
 
 public sealed class ProtocolRange

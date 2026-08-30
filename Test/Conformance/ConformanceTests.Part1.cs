@@ -199,6 +199,8 @@ internal static partial class ConformanceTests
             var unicodePosition = unicode.GetPosition(1, 1);
             var unicodeLocation = unicode.GetLocation(new TextSpan(unicodePosition, 0));
             Assert(unicodePosition == 4 && unicodeLocation.Line == 2 && unicodeLocation.Column == 2, "UTF-16 CRLF position conversion was incorrect.");
+            Assert(unicode.GetPosition(1, int.MaxValue) == unicode.Length,
+                "Clamping a large source column overflowed instead of returning the end of the line.");
         });
 
         suite.Run("language service scopes and targets", () =>

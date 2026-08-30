@@ -1,0 +1,178 @@
+using System;
+
+namespace System.Simd;
+
+public struct Vec3x4
+{
+    public F32x4 X;
+    public F32x4 Y;
+    public F32x4 Z;
+
+    public Vec3x4(F32x4 x, F32x4 y, F32x4 z)
+    {
+        X = x;
+        Y = y;
+        Z = z;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 Zero
+    {
+        get
+        {
+            return new Vec3x4(F32x4.Zero, F32x4.Zero, F32x4.Zero);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 Splat(Vec3 value)
+    {
+        return new Vec3x4(F32x4.Splat(value.X), F32x4.Splat(value.Y), F32x4.Splat(value.Z));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public Vec3 GetLane<const int Lane>()
+    {
+        return new Vec3(X.GetLane<Lane>(), Y.GetLane<Lane>(), Z.GetLane<Lane>());
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public Vec3x4 WithLane<const int Lane>(Vec3 value)
+    {
+        return new Vec3x4(X.WithLane<Lane>(value.X), Y.WithLane<Lane>(value.Y), Z.WithLane<Lane>(value.Z));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator +(Vec3x4 left, Vec3x4 right)
+    {
+        return new Vec3x4(left.X + right.X, left.Y + right.Y, left.Z + right.Z);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator -(Vec3x4 left, Vec3x4 right)
+    {
+        return new Vec3x4(left.X - right.X, left.Y - right.Y, left.Z - right.Z);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator -(Vec3x4 value)
+    {
+        return new Vec3x4(-value.X, -value.Y, -value.Z);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator *(Vec3x4 left, Vec3x4 right)
+    {
+        return new Vec3x4(left.X * right.X, left.Y * right.Y, left.Z * right.Z);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator /(Vec3x4 left, Vec3x4 right)
+    {
+        return new Vec3x4(left.X / right.X, left.Y / right.Y, left.Z / right.Z);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator *(Vec3x4 value, F32x4 scale)
+    {
+        return new Vec3x4(value.X * scale, value.Y * scale, value.Z * scale);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator *(F32x4 scale, Vec3x4 value)
+    {
+        return value * scale;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 operator /(Vec3x4 value, F32x4 scale)
+    {
+        return new Vec3x4(value.X / scale, value.Y / scale, value.Z / scale);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public F32x4 Dot(Vec3x4 other)
+    {
+        return(X * other.X + Y * other.Y) + Z * other.Z;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public Vec3x4 Cross(Vec3x4 other)
+    {
+        return new Vec3x4(Y * other.Z - Z * other.Y, Z * other.X - X * other.Z, X
+            * other.Y - Y * other.X);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public F32x4 LengthSquared()
+    {
+        return Dot(this);
+    }
+
+    [NoAlloc]
+    public F32x4 Length()
+    {
+        return F32x4.Sqrt(LengthSquared());
+    }
+
+    [NoAlloc]
+    public Vec3x4 Normalize()
+    {
+        return this / Length();
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Vec3x4 Select(Mask32x4 mask, Vec3x4 whenTrue, Vec3x4 whenFalse)
+    {
+        return new Vec3x4(F32x4.Select(mask, whenTrue.X, whenFalse.X), F32x4.Select(mask,
+            whenTrue.Y, whenFalse.Y), F32x4.Select(mask, whenTrue.Z, whenFalse.Z));
+    }
+}

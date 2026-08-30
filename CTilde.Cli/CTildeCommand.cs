@@ -184,7 +184,7 @@ internal static class CTildeCommand
             }).ToArray();
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
                 request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
-                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment));
+                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment, request.SimdOptimizations));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;

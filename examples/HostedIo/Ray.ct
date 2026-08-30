@@ -1,4 +1,5 @@
 using System;
+using System.Simd;
 
 namespace HostedIoExample;
 
@@ -47,6 +48,62 @@ public struct Ray
     public Vec3 At(float distance)
     {
         return Origin + Direction * distance;
+    }
+}
+
+public struct RayPacket
+{
+    public Vec3x4 Origins;
+    public Vec3x4 Directions;
+
+    public RayPacket(Vec3x4 origins, Vec3x4 directions)
+    {
+        Origins = origins;
+        Directions = directions;
+    }
+
+    [NoAlloc]
+    public static RayPacket Create(Ray lane0, Ray lane1, Ray lane2, Ray lane3)
+    {
+        Vec3x4 origins = Vec3x4.Zero.WithLane<0>(lane0.Origin).WithLane<1>(lane1.Origin).WithLane<2>(lane2.Origin).WithLane<3>(lane3.Origin);
+        Vec3x4 directions = Vec3x4.Zero.WithLane<0>(lane0.Direction).WithLane<1>(lane1.Direction).WithLane<2>(lane2.Direction).WithLane<3>(lane3.Direction);
+        return new RayPacket(origins, directions);
+    }
+
+    [NoAlloc]
+    public Ray GetLane<const int Lane>()
+    {
+        return new Ray(Origins.GetLane<Lane>(), Directions.GetLane<Lane>());
+    }
+
+    [NoAlloc]
+    public Vec3x4 At(F32x4 distance)
+    {
+        return Origins + Directions * distance;
+    }
+}
+
+public static class PacketMasks
+{
+    [NoAlloc]
+    public static Mask32x4 First(int count)
+    {
+        return F32x4.CompareLessThan(F32x4.Create(0.0f, 1.0f, 2.0f, 3.0f), F32x4.Splat((float)count));
+    }
+
+    [NoAlloc]
+    public static Mask32x4 FromBools(bool lane0, bool lane1, bool lane2, bool lane3)
+    {
+        return F32x4.CompareGreaterThan(F32x4.Create(ToFloat(lane0), ToFloat(lane1),
+            ToFloat(lane2), ToFloat(lane3)), F32x4.Zero);
+    }
+
+    [NoAlloc]
+    private static float ToFloat(bool value)
+    {
+        if (value)
+            return 1.0f;
+        return 0.0f;
     }
 }
 

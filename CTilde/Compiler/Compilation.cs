@@ -98,9 +98,10 @@ public sealed class Compilation
                 diagnostics.Add("CT4115", "Debug information and debug-memory instrumentation are unavailable for freestanding compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             ValidateSourceIdentityRoot(diagnostics);
             ValidateSourceOwners(diagnostics);
-            ValidateCpuFeatures(diagnostics, architecture);
+            ValidateCpuFeatures(diagnostics, target, architecture);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
-            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.CpuFeatures, environment,
+            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.EffectiveCpuFeatures, environment,
+                Options.SimdOptimizations,
                 _requireEntryPoint, _requireEntryPoint);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
             _diagnostics = diagnostics.ToImmutable();
@@ -313,9 +314,9 @@ public sealed class Compilation
         }
     }
 
-    private void ValidateCpuFeatures(DiagnosticBag diagnostics, CompilationArchitecture architecture)
+    private void ValidateCpuFeatures(DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture)
     {
-        var features = Options.CpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : Options.CpuFeatures;
+        var features = Options.EffectiveCpuFeatures;
         var source = SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty);
         foreach (var feature in features)
             if (!Enum.IsDefined(feature))
@@ -324,6 +325,8 @@ public sealed class Compilation
             diagnostics.Add("CT4120", "A CPU feature can be selected only once.", source, new TextSpan(0, 0));
         if (features.Contains(CpuFeature.Simd128) && architecture is not (CompilationArchitecture.X86 or CompilationArchitecture.X64 or CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64))
             diagnostics.Add("CT4120", $"CPU feature 'simd128' is not available for architecture '{architecture}'.", source, new TextSpan(0, 0));
+        if (Options.SimdOptimizations && (target != CompilationTarget.Hosted || architecture != CompilationArchitecture.X64))
+            diagnostics.Add("CT4122", "SIMD geometry optimizations currently require a hosted x64 compilation.", source, new TextSpan(0, 0));
     }
 
     private static void ValidateOwnerRoot(string? value, string label, SyntaxTree tree, DiagnosticBag diagnostics)

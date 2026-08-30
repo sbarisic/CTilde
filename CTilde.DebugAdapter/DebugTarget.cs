@@ -91,7 +91,15 @@ internal sealed class DebugType
     public string Storage { get; init; } = string.Empty;
     public string Kind { get; init; } = string.Empty;
     public string? Base { get; init; }
+    public DebugSimdShape? Simd { get; init; }
     public DebugTypeField[] Fields { get; init; } = [];
+}
+
+internal sealed class DebugSimdShape
+{
+    public string LaneType { get; init; } = string.Empty;
+    public int LaneCount { get; init; }
+    public int ComponentCount { get; init; }
 }
 
 internal sealed class DebugTypeField

@@ -2,7 +2,21 @@ using System.Collections.Immutable;
 
 namespace CTilde;
 
-public sealed record LanguageReference(string SymbolKey, string FilePath, TextSpan Span, bool IsDeclaration);
+public enum LanguageReferenceSearchScope
+{
+    ProjectSource,
+    StandardLibrary,
+    Documentation,
+}
+
+public sealed record LanguageReference(
+    string SymbolKey,
+    string FilePath,
+    string SourceIdentity,
+    string SymbolSourceIdentity,
+    LanguageReferenceSearchScope SearchScope,
+    TextSpan Span,
+    bool IsDeclaration);
 
 public sealed record LanguageReferenceLens(
     string SymbolKey,
@@ -10,6 +24,8 @@ public sealed record LanguageReferenceLens(
     string Detail,
     LanguageSymbolKind Kind,
     string FilePath,
+    string SourceIdentity,
+    LanguageReferenceSearchScope SearchScope,
     TextSpan Range,
     TextSpan SelectionRange,
     int ReferenceCount);
@@ -40,6 +56,20 @@ public sealed partial class LanguageServiceSnapshot
             .ThenBy(reference => reference.Span.Start)];
     }
 
+    public ImmutableArray<LanguageReference> GetReferences(IReadOnlySet<string> symbolKeys, bool includeDeclaration = false)
+    {
+        ArgumentNullException.ThrowIfNull(symbolKeys);
+        if (symbolKeys.Count == 0)
+            return [];
+        return [.. ReferenceIndexValue.Occurrences
+            .Where(reference => symbolKeys.Contains(reference.SymbolKey) && (includeDeclaration || !reference.IsDeclaration))
+            .DistinctBy(reference => (reference.SymbolKey, NormalizePath(reference.FilePath), reference.Span.Start, reference.Span.Length, reference.IsDeclaration),
+                ReferenceBatchLocationComparer.Instance)
+            .OrderBy(reference => reference.SymbolKey, StringComparer.Ordinal)
+            .ThenBy(reference => NormalizePath(reference.FilePath), _pathComparer)
+            .ThenBy(reference => reference.Span.Start)];
+    }
+
     public ImmutableArray<LanguageReferenceLens> GetReferenceLenses(string filePath)
     {
         var path = NormalizePath(filePath);
@@ -52,6 +82,8 @@ public sealed partial class LanguageServiceSnapshot
                 declaration.Detail,
                 declaration.Kind,
                 declaration.FilePath,
+                declaration.SourceIdentity,
+                declaration.SearchScope,
                 declaration.Range,
                 declaration.SelectionRange,
                 index.ReferenceCounts.GetValueOrDefault(declaration.SymbolKey)))
@@ -115,7 +147,7 @@ public sealed partial class LanguageServiceSnapshot
                 continue;
             var span = ReferenceSpan(semantic.Syntax, semantic.Symbol);
             if (span.Length != 0)
-                occurrences.Add(new LanguageReference(key, semantic.Syntax.Source.FilePath, span, false));
+                occurrences.Add(CreateReference(key, semantic.Syntax.Source.FilePath, span, false));
         }
 
         foreach (var index in _documentIndexes.Values)
@@ -125,7 +157,7 @@ public sealed partial class LanguageServiceSnapshot
                 var type = _model.ResolveType(typeSyntax, index.Tree, false).Symbol;
                 if (type is null || ReferenceSymbolKey(type) is not { } key)
                     continue;
-                occurrences.Add(new LanguageReference(key, typeSyntax.Source.FilePath, TypeReferenceSpan(typeSyntax), false));
+                occurrences.Add(CreateReference(key, typeSyntax.Source.FilePath, TypeReferenceSpan(typeSyntax), false));
             }
         }
 
@@ -154,14 +186,14 @@ public sealed partial class LanguageServiceSnapshot
                     .ToArray();
                 if (keys.Length == 1)
                 {
-                    occurrences.Add(new LanguageReference(keys[0], index.Tree.Text.FilePath, token.Span, false));
+                    occurrences.Add(CreateReference(keys[0], index.Tree.Text.FilePath, token.Span, false));
                     indexedLocations.Add(location);
                 }
             }
         }
 
         foreach (var declaration in declarations.Values)
-            occurrences.Add(new LanguageReference(declaration.SymbolKey, declaration.FilePath, declaration.SelectionRange, true));
+            occurrences.Add(CreateReference(declaration.SymbolKey, declaration.FilePath, declaration.SelectionRange, true));
 
         var distinct = occurrences
             .Where(reference => reference.Span.Length != 0)
@@ -188,7 +220,9 @@ public sealed partial class LanguageServiceSnapshot
             if (syntax is null || key is null || declarations.ContainsKey(key))
                 return;
             var selection = DeclarationSelectionSpan(syntax, name);
-            declarations.Add(key, new ReferenceDeclaration(key, name, detail, kind, syntax.Source.FilePath, syntax.Span, selection));
+            var sourceIdentity = ReferenceSourcePath(syntax.Source.FilePath);
+            declarations.Add(key, new ReferenceDeclaration(key, name, detail, kind, syntax.Source.FilePath, sourceIdentity,
+                ReferenceSearchScope(key, sourceIdentity), syntax.Span, selection));
         }
 
         void AddSyntaxDeclaration(SyntaxNode syntax, string name, LanguageSymbolKind kind, string detail)
@@ -197,8 +231,39 @@ public sealed partial class LanguageServiceSnapshot
             if (declarations.ContainsKey(key))
                 return;
             var selection = DeclarationSelectionSpan(syntax, name);
-            declarations.Add(key, new ReferenceDeclaration(key, name, detail, kind, syntax.Source.FilePath, syntax.Span, selection));
+            var sourceIdentity = ReferenceSourcePath(syntax.Source.FilePath);
+            declarations.Add(key, new ReferenceDeclaration(key, name, detail, kind, syntax.Source.FilePath, sourceIdentity,
+                ReferenceSearchScope(key, sourceIdentity), syntax.Span, selection));
         }
+
+        LanguageReference CreateReference(string symbolKey, string filePath, TextSpan span, bool isDeclaration)
+        {
+            var sourceIdentity = ReferenceSourcePath(filePath);
+            var symbolSourceIdentity = ReferenceSymbolSourceIdentity(symbolKey, sourceIdentity);
+            return new LanguageReference(symbolKey, filePath, sourceIdentity, symbolSourceIdentity,
+                ReferenceSearchScope(symbolKey, symbolSourceIdentity), span, isDeclaration);
+        }
+    }
+
+    private static LanguageReferenceSearchScope ReferenceSearchScope(string symbolKey, string sourceIdentity) =>
+        symbolKey.StartsWith("doc:", StringComparison.Ordinal)
+            ? LanguageReferenceSearchScope.Documentation
+            : symbolKey.StartsWith("source:stdlib/", StringComparison.Ordinal) || sourceIdentity.StartsWith("stdlib/", StringComparison.Ordinal)
+                ? LanguageReferenceSearchScope.StandardLibrary
+                : LanguageReferenceSearchScope.ProjectSource;
+
+    private static string ReferenceSymbolSourceIdentity(string symbolKey, string fallback)
+    {
+        if (!symbolKey.StartsWith("source:", StringComparison.Ordinal))
+            return fallback;
+        var end = symbolKey.Length;
+        for (var field = 0; field < 4; field++)
+        {
+            end = symbolKey.LastIndexOf(':', end - 1);
+            if (end < "source:".Length)
+                return fallback;
+        }
+        return symbolKey["source:".Length..end];
     }
 
     private string? ReferenceSymbolKey(object symbol)
@@ -340,6 +405,8 @@ public sealed partial class LanguageServiceSnapshot
         string Detail,
         LanguageSymbolKind Kind,
         string FilePath,
+        string SourceIdentity,
+        LanguageReferenceSearchScope SearchScope,
         TextSpan Range,
         TextSpan SelectionRange);
 
@@ -360,6 +427,23 @@ public sealed partial class LanguageServiceSnapshot
         {
             var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
             return HashCode.Combine(comparer.GetHashCode(value.Path), value.Start, value.Length, value.IsDeclaration);
+        }
+    }
+
+    private sealed class ReferenceBatchLocationComparer : IEqualityComparer<(string SymbolKey, string Path, int Start, int Length, bool IsDeclaration)>
+    {
+        public static readonly ReferenceBatchLocationComparer Instance = new();
+
+        public bool Equals((string SymbolKey, string Path, int Start, int Length, bool IsDeclaration) left,
+            (string SymbolKey, string Path, int Start, int Length, bool IsDeclaration) right) =>
+            left.Start == right.Start && left.Length == right.Length && left.IsDeclaration == right.IsDeclaration &&
+            StringComparer.Ordinal.Equals(left.SymbolKey, right.SymbolKey) &&
+            (OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).Equals(left.Path, right.Path);
+
+        public int GetHashCode((string SymbolKey, string Path, int Start, int Length, bool IsDeclaration) value)
+        {
+            var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            return HashCode.Combine(StringComparer.Ordinal.GetHashCode(value.SymbolKey), comparer.GetHashCode(value.Path), value.Start, value.Length, value.IsDeclaration);
         }
     }
 }

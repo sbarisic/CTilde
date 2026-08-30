@@ -80,6 +80,7 @@ internal sealed record CTildeProjectContextsParams(CTildeProjectContext[] Projec
 internal sealed record CTildeActiveProjectParams(string? ManifestUri);
 internal sealed record CTildeReferenceCodeLensParams(TextDocumentIdentifier TextDocument);
 internal sealed record CTildeReferenceCodeLensDetailsParams(TextDocumentIdentifier TextDocument, string SymbolKey, long Revision);
+internal sealed record CTildeReferenceCodeLensRefresh(long Revision);
 internal sealed record CTildeReferenceCodeLens(
     string SymbolKey,
     string Name,
@@ -95,7 +96,11 @@ internal sealed record CTildeReferenceDetail(
     string ReferenceText,
     int ReferenceStart,
     int ReferenceEnd,
-    string ReferenceLongDescription);
+    string ReferenceLongDescription,
+    string TextBeforeReference2,
+    string TextBeforeReference1,
+    string TextAfterReference1,
+    string TextAfterReference2);
 internal sealed record CTildeReferenceCodeLensDetails(string SymbolKey, long Revision, CTildeReferenceDetail[] References);
 internal sealed record ShowMessageParams(int Type, string Message);
 

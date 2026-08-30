@@ -23,6 +23,18 @@ internal enum SimdOperationKind
     BitwiseOr,
     BitwiseXor,
     BitwiseNot,
+    BitwiseAndNot,
+    CompareEqual,
+    CompareNotEqual,
+    CompareLessThan,
+    CompareLessThanOrEqual,
+    CompareGreaterThan,
+    CompareGreaterThanOrEqual,
+    Select,
+    ShiftLeft,
+    ShiftRight,
+    ConvertInt32ToFloat,
+    ConvertUInt32ToFloat,
 }
 
 /// <summary>A target-independent SIMD operation selected after semantic binding.</summary>
@@ -71,12 +83,27 @@ internal readonly record struct SimdOperation(
                 "Or" => SimdOperationKind.BitwiseOr,
                 "Xor" => SimdOperationKind.BitwiseXor,
                 "Not" => SimdOperationKind.BitwiseNot,
+                "AndNot" => SimdOperationKind.BitwiseAndNot,
+                "CompareEqual" => SimdOperationKind.CompareEqual,
+                "CompareNotEqual" => SimdOperationKind.CompareNotEqual,
+                "CompareLessThan" => SimdOperationKind.CompareLessThan,
+                "CompareLessThanOrEqual" => SimdOperationKind.CompareLessThanOrEqual,
+                "CompareGreaterThan" => SimdOperationKind.CompareGreaterThan,
+                "CompareGreaterThanOrEqual" => SimdOperationKind.CompareGreaterThanOrEqual,
+                "Select" => SimdOperationKind.Select,
+                "ShiftLeft" => SimdOperationKind.ShiftLeft,
+                "ShiftRight" => SimdOperationKind.ShiftRight,
+                "FromI32" when laneKind == SimdLaneKind.Float32 => SimdOperationKind.ConvertInt32ToFloat,
+                "FromU32" when laneKind == SimdLaneKind.Float32 => SimdOperationKind.ConvertUInt32ToFloat,
                 _ => null,
             };
         if (kind is null)
             return false;
 
-        operation = new SimdOperation(kind.Value, laneKind.Value, 32, 4, method.Parameters.Length, ImmutableArray<int>.Empty);
+        var immediates = method.TypeArguments
+            .Where(argument => argument.Kind == CTypeKind.Constant && argument.ConstantValue is not null)
+            .Select(argument => checked((int)argument.ConstantValue!.Value)).ToImmutableArray();
+        operation = new SimdOperation(kind.Value, laneKind.Value, 32, 4, method.Parameters.Length, immediates);
         return true;
     }
 }

@@ -262,6 +262,9 @@ internal sealed partial class TypedIrBodyLowerer
             return TryEmitHardwareMultiplyAdd(out definition);
         if (operation.Kind == SimdOperationKind.Abs && operation.LaneKind == SimdLaneKind.Float32 && _emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64)
             return TryEmitX86FloatAbs(out definition);
+        if (_emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64 &&
+            TryEmitX86SimdSpecial(operation, out definition))
+            return true;
         var intrinsic = SimdBackendTable.Intrinsic(_emitter.Architecture, operation);
         if (intrinsic is null)
             return false;
@@ -269,6 +272,100 @@ internal sealed partial class TypedIrBodyLowerer
         var type = _emitter.CTypeName(_method.ReturnType);
         definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    ct_result.ct_simd = {intrinsic}({arguments});\n    return ct_result;\n}}";
         return true;
+    }
+
+    private bool TryEmitX86SimdSpecial(SimdOperation operation, out string definition)
+    {
+        definition = string.Empty;
+        var type = _emitter.CTypeName(_method.ReturnType);
+        var parameters = _method.Parameters.Select(parameter => NameMangler.Identifier(parameter.Name)).ToArray();
+        string? expression = null;
+        string? body = null;
+        var floatLanes = operation.LaneKind == SimdLaneKind.Float32;
+
+        if (operation.Kind == SimdOperationKind.Multiply && operation.LaneKind is SimdLaneKind.Int32 or SimdLaneKind.UInt32)
+        {
+            body = $"""
+                __m128i ct_even = _mm_mul_epu32({parameters[0]}.ct_simd, {parameters[1]}.ct_simd);
+                __m128i ct_odd = _mm_mul_epu32(_mm_srli_si128({parameters[0]}.ct_simd, 4), _mm_srli_si128({parameters[1]}.ct_simd, 4));
+                __m128i ct_even_low = _mm_shuffle_epi32(ct_even, _MM_SHUFFLE(0, 0, 2, 0));
+                __m128i ct_odd_low = _mm_shuffle_epi32(ct_odd, _MM_SHUFFLE(0, 0, 2, 0));
+                ct_result.ct_simd = _mm_unpacklo_epi32(ct_even_low, ct_odd_low);
+                """;
+        }
+        else if (operation.Kind is SimdOperationKind.ShiftLeft or SimdOperationKind.ShiftRight &&
+            operation.LaneKind is SimdLaneKind.Int32 or SimdLaneKind.UInt32 && operation.ConstantImmediates.Length == 1)
+        {
+            var intrinsic = operation.Kind == SimdOperationKind.ShiftLeft ? "_mm_slli_epi32" :
+                operation.LaneKind == SimdLaneKind.Int32 ? "_mm_srai_epi32" : "_mm_srli_epi32";
+            expression = $"{intrinsic}(ct_self->ct_simd, {operation.ConstantImmediates[0]})";
+        }
+        else if (operation.Kind == SimdOperationKind.BitwiseNot && operation.LaneKind is SimdLaneKind.Int32 or SimdLaneKind.UInt32 or SimdLaneKind.Mask32)
+            expression = $"_mm_xor_si128({parameters[0]}.ct_simd, _mm_set1_epi32(-1))";
+        else if (operation.Kind == SimdOperationKind.BitwiseAndNot && operation.LaneKind == SimdLaneKind.Mask32)
+            expression = $"_mm_andnot_si128({parameters[0]}.ct_simd, {parameters[1]}.ct_simd)";
+        else if (operation.Kind == SimdOperationKind.Select)
+        {
+            if (floatLanes)
+                expression = $"_mm_or_ps(_mm_and_ps(_mm_castsi128_ps({parameters[0]}.ct_simd), {parameters[1]}.ct_simd), _mm_andnot_ps(_mm_castsi128_ps({parameters[0]}.ct_simd), {parameters[2]}.ct_simd))";
+            else if (operation.LaneKind is SimdLaneKind.Int32 or SimdLaneKind.UInt32)
+                expression = $"_mm_or_si128(_mm_and_si128({parameters[0]}.ct_simd, {parameters[1]}.ct_simd), _mm_andnot_si128({parameters[0]}.ct_simd, {parameters[2]}.ct_simd))";
+        }
+        else if (operation.Kind is >= SimdOperationKind.CompareEqual and <= SimdOperationKind.CompareGreaterThanOrEqual)
+            expression = X86ComparisonExpression(operation, parameters);
+        else if (operation.Kind == SimdOperationKind.ConvertInt32ToFloat)
+            expression = $"_mm_cvtepi32_ps({parameters[0]}.ct_simd)";
+        else if (operation.Kind == SimdOperationKind.ConvertUInt32ToFloat)
+        {
+            body = $"""
+                __m128i ct_half = _mm_srli_epi32({parameters[0]}.ct_simd, 1);
+                __m128i ct_low = _mm_and_si128({parameters[0]}.ct_simd, _mm_set1_epi32(1));
+                __m128 ct_half_float = _mm_cvtepi32_ps(ct_half);
+                ct_result.ct_simd = _mm_add_ps(_mm_add_ps(ct_half_float, ct_half_float), _mm_cvtepi32_ps(ct_low));
+                """;
+        }
+
+        if (expression is null && body is null)
+            return false;
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    {(body ?? $"ct_result.ct_simd = {expression};")}\n    return ct_result;\n}}";
+        return true;
+    }
+
+    private static string? X86ComparisonExpression(SimdOperation operation, IReadOnlyList<string> parameters)
+    {
+        var left = $"{parameters[0]}.ct_simd";
+        var right = $"{parameters[1]}.ct_simd";
+        if (operation.LaneKind == SimdLaneKind.Float32)
+        {
+            var intrinsic = operation.Kind switch
+            {
+                SimdOperationKind.CompareEqual => "_mm_cmpeq_ps",
+                SimdOperationKind.CompareNotEqual => "_mm_cmpneq_ps",
+                SimdOperationKind.CompareLessThan => "_mm_cmplt_ps",
+                SimdOperationKind.CompareLessThanOrEqual => "_mm_cmple_ps",
+                SimdOperationKind.CompareGreaterThan => "_mm_cmpgt_ps",
+                SimdOperationKind.CompareGreaterThanOrEqual => "_mm_cmpge_ps",
+                _ => null,
+            };
+            return intrinsic is null ? null : $"_mm_castps_si128({intrinsic}({left}, {right}))";
+        }
+        if (operation.LaneKind is not (SimdLaneKind.Int32 or SimdLaneKind.UInt32))
+            return null;
+        if (operation.LaneKind == SimdLaneKind.UInt32)
+        {
+            left = $"_mm_xor_si128({left}, _mm_set1_epi32((int)0x80000000u))";
+            right = $"_mm_xor_si128({right}, _mm_set1_epi32((int)0x80000000u))";
+        }
+        return operation.Kind switch
+        {
+            SimdOperationKind.CompareEqual => $"_mm_cmpeq_epi32({left}, {right})",
+            SimdOperationKind.CompareNotEqual => $"_mm_xor_si128(_mm_cmpeq_epi32({left}, {right}), _mm_set1_epi32(-1))",
+            SimdOperationKind.CompareLessThan => $"_mm_cmplt_epi32({left}, {right})",
+            SimdOperationKind.CompareLessThanOrEqual => $"_mm_xor_si128(_mm_cmpgt_epi32({left}, {right}), _mm_set1_epi32(-1))",
+            SimdOperationKind.CompareGreaterThan => $"_mm_cmpgt_epi32({left}, {right})",
+            SimdOperationKind.CompareGreaterThanOrEqual => $"_mm_xor_si128(_mm_cmplt_epi32({left}, {right}), _mm_set1_epi32(-1))",
+            _ => null,
+        };
     }
 
     private bool TryEmitX86FloatAbs(out string definition)

@@ -166,6 +166,56 @@ internal static partial class ConformanceTests
                 "The API accepted automatic SIMD optimization on freestanding x64.");
         });
 
+        suite.Run("draft 0.38 hosted x64 packet SIMD operations", () =>
+        {
+            const string source = """
+                using System;
+                using System.Simd;
+                public static class Program
+                {
+                    [EntryPoint] public static void Main()
+                    {
+                        U32x4 left = U32x4.Create(0xffffffffu, 0x80000000u, 3u, 0x40000001u);
+                        U32x4 product = left * U32x4.Create(2u, 3u, 7u, 4u);
+                        Console.WriteLine(product.GetLane<0>() == 0xfffffffeu && product.GetLane<1>() == 0x80000000u
+                            && product.GetLane<2>() == 21u && product.GetLane<3>() == 4u);
+                        U32x4 shifted = left.ShiftLeft<0>().ShiftRight<31>();
+                        Console.WriteLine(shifted.GetLane<0>() == 1u && shifted.GetLane<1>() == 1u
+                            && shifted.GetLane<2>() == 0u && shifted.GetLane<3>() == 0u);
+                        Mask32x4 unsignedLess = U32x4.CompareLessThan(left, U32x4.Create(0u, 0xffffffffu, 4u, 0x40000000u));
+                        U32x4 selected = U32x4.Select(unsignedLess, U32x4.Splat(11u), U32x4.Splat(22u));
+                        Console.WriteLine(unsignedLess.MoveMask() == 6u && selected.GetLane<0>() == 22u
+                            && selected.GetLane<1>() == 11u && selected.GetLane<2>() == 11u && selected.GetLane<3>() == 22u);
+                        I32x4 signed = I32x4.Create(-2147483648, -1, 0, 2147483647);
+                        Console.WriteLine(I32x4.CompareLessThan(signed, I32x4.Zero).MoveMask() == 3u
+                            && signed.ShiftRight<31>().GetLane<0>() == -1 && signed.ShiftRight<31>().GetLane<2>() == 0);
+                        float nan = System.Math.Sqrt(-1.0f);
+                        F32x4 floats = F32x4.Create(-0.0f, 0.0f, nan, 2.0f);
+                        Console.WriteLine(F32x4.CompareEqual(floats, F32x4.Zero).MoveMask() == 3u
+                            && F32x4.CompareNotEqual(floats, F32x4.Zero).MoveMask() == 12u);
+                        F32x4 converted = F32x4.FromU32(U32x4.Create(0u, 16777217u, 0x80000000u, 0xffffffffu));
+                        Console.WriteLine(converted.GetLane<0>() == 0.0f && converted.GetLane<1>() == 16777216.0f
+                            && converted.GetLane<2>() == 2147483648.0f && converted.GetLane<3>() == 4294967296.0f);
+                        Mask32x4 all = Mask32x4.Not(Mask32x4.FromBools(false, false, false, false));
+                        Console.WriteLine(Mask32x4.AndNot(unsignedLess, all).MoveMask() == 9u);
+                    }
+                }
+                """;
+            var scalar = CompileAndRun(source, new CompilationOptions(Architecture: CompilationArchitecture.X64));
+            var options = new CompilationOptions(Architecture: CompilationArchitecture.X64,
+                CpuFeatures: ImmutableArray.Create(CpuFeature.Simd128));
+            var simd = CompileAndRun(source, options);
+            Assert(scalar.ExitCode == 0 && simd.ExitCode == 0 && scalar.StandardOutput == simd.StandardOutput,
+                $"Scalar and SSE2 packet operations differed. Scalar:\n{scalar.StandardOutput}{scalar.StandardError}\nSSE2:\n{simd.StandardOutput}{simd.StandardError}");
+            Assert(simd.StandardOutput.Replace("\r", string.Empty, StringComparison.Ordinal).Trim() ==
+                "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue", $"Unexpected SIMD operation result: {simd.StandardOutput}");
+            var emitted = Emit(source, options);
+            Assert(emitted.Contains("_mm_mul_epu32", StringComparison.Ordinal) && emitted.Contains("_mm_srli_epi32", StringComparison.Ordinal)
+                && emitted.Contains("_mm_cmplt_epi32", StringComparison.Ordinal) && emitted.Contains("_mm_cmpneq_ps", StringComparison.Ordinal)
+                && emitted.Contains("_mm_cvtepi32_ps", StringComparison.Ordinal) && emitted.Contains("_mm_andnot_si128", StringComparison.Ordinal),
+                "The hosted x64 backend did not emit every packet SIMD operation family.");
+        });
+
         suite.Run("draft 0.38 HostedIo four-ray packets match scalar odd-width oracle", () =>
         {
             static string Harness(bool packet) => $$"""

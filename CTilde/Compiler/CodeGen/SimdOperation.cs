@@ -17,6 +17,8 @@ internal enum SimdOperationKind
     Multiply,
     Divide,
     Abs,
+    Minimum,
+    Maximum,
     Sqrt,
     MultiplyAdd,
     BitwiseAnd,
@@ -35,6 +37,12 @@ internal enum SimdOperationKind
     ShiftRight,
     ConvertInt32ToFloat,
     ConvertUInt32ToFloat,
+    MaskAny,
+    MaskAll,
+    MaskNone,
+    MaskMove,
+    Splat,
+    Create,
 }
 
 /// <summary>A target-independent SIMD operation selected after semantic binding.</summary>
@@ -46,10 +54,25 @@ internal readonly record struct SimdOperation(
     int InputCount,
     ImmutableArray<int> ConstantImmediates)
 {
+    private const EffectContract PureEffects = EffectContract.NoAlloc | EffectContract.NoThrow |
+        EffectContract.NoBlock | EffectContract.NoRuntime;
+
+    public static bool IsFusionValue(CType type) =>
+        type.Symbol is { Namespace: "System.Simd" } symbol &&
+        symbol.Name is "F32x4" or "I32x4" or "U32x4" or "Mask32x4" or "Vec3x4";
+
+    public static bool IsPureFusionKernel(MethodSymbol method) =>
+        !method.IsVirtual && !method.IsUnsafe &&
+        (method.DeclaredEffects & PureEffects) == PureEffects &&
+        method.ContainingType.Namespace == "System.Simd" &&
+        (IsFusionValue(method.ReturnType) || method.ReturnType == CType.Bool || method.ReturnType == CType.Uint) &&
+        method.Parameters.All(parameter => parameter.PassingKind == ParameterPassingKind.Value &&
+            !parameter.Type.ContainsManagedReferences);
+
     public static bool TryClassify(MethodSymbol method, out SimdOperation operation)
     {
         operation = default;
-        if (!method.IsStatic || method.ContainingType.Namespace != "System.Simd")
+        if (method.ContainingType.Namespace != "System.Simd")
             return false;
 
         var laneKind = method.ContainingType.Name switch
@@ -77,6 +100,8 @@ internal readonly record struct SimdOperation(
             kind = method.Name switch
             {
                 "Abs" => SimdOperationKind.Abs,
+                "Min" => SimdOperationKind.Minimum,
+                "Max" => SimdOperationKind.Maximum,
                 "Sqrt" => SimdOperationKind.Sqrt,
                 "MultiplyAdd" => SimdOperationKind.MultiplyAdd,
                 "And" => SimdOperationKind.BitwiseAnd,
@@ -95,6 +120,12 @@ internal readonly record struct SimdOperation(
                 "ShiftRight" => SimdOperationKind.ShiftRight,
                 "FromI32" when laneKind == SimdLaneKind.Float32 => SimdOperationKind.ConvertInt32ToFloat,
                 "FromU32" when laneKind == SimdLaneKind.Float32 => SimdOperationKind.ConvertUInt32ToFloat,
+                "Any" when laneKind == SimdLaneKind.Mask32 => SimdOperationKind.MaskAny,
+                "All" when laneKind == SimdLaneKind.Mask32 => SimdOperationKind.MaskAll,
+                "None" when laneKind == SimdLaneKind.Mask32 => SimdOperationKind.MaskNone,
+                "MoveMask" when laneKind == SimdLaneKind.Mask32 => SimdOperationKind.MaskMove,
+                "Splat" => SimdOperationKind.Splat,
+                "Create" => SimdOperationKind.Create,
                 _ => null,
             };
         if (kind is null)

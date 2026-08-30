@@ -1121,7 +1121,8 @@ internal sealed partial class TypedIrBodyLowerer
         }
         var loweredArguments = captureForDefer
             ? CaptureDeferredArgumentsWithPostlude(arguments, selected.Parameters, syntax.Arguments)
-            : LowerArguments(arguments, selected.Parameters, syntax.Arguments);
+            : LowerArguments(arguments, selected.Parameters, syntax.Arguments,
+                SimdOperation.IsPureFusionKernel(selected));
         prelude.AddRange(loweredArguments.Prelude);
 
         if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, arguments, prelude, syntax, out var atomicResult))

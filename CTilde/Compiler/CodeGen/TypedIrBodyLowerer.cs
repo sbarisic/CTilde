@@ -324,6 +324,41 @@ internal sealed partial class TypedIrBodyLowerer
                 ct_result.ct_simd = _mm_add_ps(_mm_add_ps(ct_half_float, ct_half_float), _mm_cvtepi32_ps(ct_low));
                 """;
         }
+        else if (operation.Kind is SimdOperationKind.Minimum or SimdOperationKind.Maximum &&
+            operation.LaneKind == SimdLaneKind.Float32)
+        {
+            var intrinsic = operation.Kind == SimdOperationKind.Minimum ? "_mm_min_ps" : "_mm_max_ps";
+            var zeroMerge = operation.Kind == SimdOperationKind.Minimum ? "_mm_or_ps" : "_mm_and_ps";
+            body = $"""
+                __m128 ct_left = {parameters[0]}.ct_simd;
+                __m128 ct_right = {parameters[1]}.ct_simd;
+                __m128 ct_value = {intrinsic}(ct_left, ct_right);
+                __m128 ct_right_nan = _mm_cmpunord_ps(ct_right, ct_right);
+                ct_value = _mm_or_ps(_mm_and_ps(ct_right_nan, ct_left), _mm_andnot_ps(ct_right_nan, ct_value));
+                __m128 ct_equal_zero = _mm_and_ps(_mm_cmpeq_ps(ct_left, ct_right), _mm_cmpeq_ps(ct_left, _mm_setzero_ps()));
+                __m128 ct_zero = {zeroMerge}(ct_left, ct_right);
+                ct_result.ct_simd = _mm_or_ps(_mm_and_ps(ct_equal_zero, ct_zero), _mm_andnot_ps(ct_equal_zero, ct_value));
+                """;
+        }
+        else if (operation.Kind is SimdOperationKind.MaskAny or SimdOperationKind.MaskAll or SimdOperationKind.MaskNone or SimdOperationKind.MaskMove)
+        {
+            var comparison = operation.Kind switch
+            {
+                SimdOperationKind.MaskAny => " != 0",
+                SimdOperationKind.MaskAll => " == 15",
+                SimdOperationKind.MaskNone => " == 0",
+                _ => string.Empty,
+            };
+            var cast = operation.Kind == SimdOperationKind.MaskMove ? "(uint32_t)" : string.Empty;
+            definition = $"{_emitter.MethodSignature(_method)}\n{{\n    return {cast}(_mm_movemask_ps(_mm_castsi128_ps(ct_self->ct_simd)){comparison});\n}}";
+            return true;
+        }
+        else if (operation.Kind == SimdOperationKind.Splat && parameters.Length == 1)
+            expression = floatLanes ? $"_mm_set1_ps({parameters[0]})" : $"_mm_set1_epi32((int32_t){parameters[0]})";
+        else if (operation.Kind == SimdOperationKind.Create && parameters.Length == 4)
+            expression = floatLanes
+                ? $"_mm_setr_ps({string.Join(", ", parameters)})"
+                : $"_mm_setr_epi32((int32_t){parameters[0]}, (int32_t){parameters[1]}, (int32_t){parameters[2]}, (int32_t){parameters[3]})";
 
         if (expression is null && body is null)
             return false;

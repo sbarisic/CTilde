@@ -30,7 +30,8 @@ internal sealed partial class TypedIrBodyLowerer
         CheckAccess(selected, syntax);
         _emitter.Effects.RecordCall(_method, selected, syntax, false);
 
-        var loweredArguments = LowerOperatorArguments(operands, selected.Parameters, arguments);
+        var loweredArguments = LowerOperatorArguments(operands, selected.Parameters, arguments,
+            SimdOperation.IsPureFusionKernel(selected));
         var prelude = new List<string>(loweredArguments.Prelude);
         var call = $"{selected.CName}({string.Join(", ", loweredArguments.Codes)})";
         if (selected.ReturnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
@@ -43,7 +44,8 @@ internal sealed partial class TypedIrBodyLowerer
     private (List<string> Prelude, List<string> Codes) LowerOperatorArguments(
         IReadOnlyList<IrExpressionValue> operands,
         ImmutableArray<ParameterSymbol> parameters,
-        ImmutableArray<ArgumentSyntax> syntax)
+        ImmutableArray<ArgumentSyntax> syntax,
+        bool fuseSimd)
     {
         var prelude = new List<string>();
         var codes = new List<string>();
@@ -58,12 +60,21 @@ internal sealed partial class TypedIrBodyLowerer
                 continue;
             }
             prelude.AddRange(converted.Prelude);
+            if (fuseSimd && converted.Prelude.Count == 0 && IsInlineableSimdArgument(syntax[index].Expression))
+            {
+                codes.Add(converted.Code);
+                continue;
+            }
             var temporary = NewTemp();
             prelude.Add($"{_emitter.CDeclaration(converted.Type, temporary)} = {converted.Code};");
             codes.Add(temporary);
         }
         return (prelude, codes);
     }
+
+    private bool IsInlineableSimdArgument(ExpressionSyntax syntax) =>
+        _optimizationFacts.SimdFusionExpressions.Contains(syntax) ||
+        syntax is NameExpressionSyntax or LiteralExpressionSyntax or ThisExpressionSyntax or BaseExpressionSyntax;
 
     private static bool HasUserDefinedOperatorOperand(params IrExpressionValue[] operands) =>
         operands.Any(operand => operand.Type.Symbol?.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct);

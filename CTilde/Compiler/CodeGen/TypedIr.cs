@@ -40,11 +40,13 @@ internal sealed record IrOptimizationFacts(
     ImmutableHashSet<SyntaxNode> CleanupBoundaries,
     ImmutableDictionary<SyntaxNode, object?> Constants,
     ImmutableHashSet<SyntaxNode> KnownNonNullExpressions,
-    ImmutableHashSet<SyntaxNode> OwnedMoveCandidates)
+    ImmutableHashSet<SyntaxNode> OwnedMoveCandidates,
+    ImmutableHashSet<SyntaxNode> SimdFusionExpressions)
 {
     public static IrOptimizationFacts Empty { get; } = new(
         ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance),
         ImmutableDictionary.Create<SyntaxNode, object?>(ReferenceEqualityComparer.Instance),
+        ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance),
         ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance),
         ImmutableHashSet.Create<SyntaxNode>(ReferenceEqualityComparer.Instance));
 }
@@ -166,6 +168,16 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
             var constants = ImmutableDictionary.CreateBuilder<SyntaxNode, object?>(ReferenceEqualityComparer.Instance);
             var knownNonNull = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
             var ownedMoves = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
+            var simdFusionExpressions = ImmutableHashSet.CreateBuilder<SyntaxNode>(ReferenceEqualityComparer.Instance);
+
+            var uses = new Dictionary<int, List<int>>();
+            foreach (var block in function.Blocks)
+            foreach (var input in block.Instructions.SelectMany(instruction => instruction.Inputs))
+            {
+                if (!uses.TryGetValue(input.Id, out var blocks))
+                    uses[input.Id] = blocks = [];
+                blocks.Add(block.Id);
+            }
 
             foreach (var block in function.Blocks)
             {
@@ -181,12 +193,25 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
                             knownNonNull.Add(expression);
                         if (output.Ownership == OwnershipKind.Owned && output.Type.ContainsManagedReferences)
                             ownedMoves.Add(expression);
+
+                        var kernel = instruction switch
+                        {
+                            IrCall call => call.Target as MethodSymbol,
+                            IrUnary unary => function.Body.Semantics.GetValueOrDefault(unary.Expression)?.Symbol as MethodSymbol,
+                            IrBinary binary => function.Body.Semantics.GetValueOrDefault(binary.Expression)?.Symbol as MethodSymbol,
+                            _ => null,
+                        };
+                        if (kernel is not null && SimdOperation.IsPureFusionKernel(kernel) &&
+                            SimdOperation.IsFusionValue(output.Type) &&
+                            uses.TryGetValue(output.Id, out var consumers) && consumers.Count == 1 && consumers[0] == block.Id)
+                            simdFusionExpressions.Add(expression);
                     }
                 }
             }
 
             MarkCleanupBoundaries(function.Body.Root);
-            return new IrOptimizationFacts(cleanupBoundaries.ToImmutable(), constants.ToImmutable(), knownNonNull.ToImmutable(), ownedMoves.ToImmutable());
+            return new IrOptimizationFacts(cleanupBoundaries.ToImmutable(), constants.ToImmutable(), knownNonNull.ToImmutable(),
+                ownedMoves.ToImmutable(), simdFusionExpressions.ToImmutable());
 
             bool MarkCleanupBoundaries(BoundStatement statement)
             {

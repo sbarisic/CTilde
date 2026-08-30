@@ -203,7 +203,8 @@ internal sealed partial class TypedIrBodyLowerer
         return matches.Length == 1 ? matches[0] : null;
     }
 
-    private (List<string> Prelude, List<string> Codes, List<string> Postlude) LowerArguments(IReadOnlyList<IrExpressionValue> arguments, ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax)
+    private (List<string> Prelude, List<string> Codes, List<string> Postlude) LowerArguments(IReadOnlyList<IrExpressionValue> arguments,
+        ImmutableArray<ParameterSymbol> parameters, ImmutableArray<ArgumentSyntax> syntax, bool fuseSimd = false)
     {
         var prelude = new List<string>();
         var codes = new List<string>();
@@ -253,6 +254,11 @@ internal sealed partial class TypedIrBodyLowerer
                 ConsumeOwnedExpression(converted, argumentSyntax.Expression);
             prelude.AddRange(converted.Prelude);
             if (converted.Type.Kind == CTypeKind.Void)
+            {
+                codes.Add(converted.Code);
+                continue;
+            }
+            if (fuseSimd && converted.Prelude.Count == 0 && IsInlineableSimdArgument(argumentSyntax.Expression))
             {
                 codes.Add(converted.Code);
                 continue;

@@ -7,7 +7,7 @@
     "generatedDirectory": "build/generated/modules",
     "generatedHeader": "build/generated/ctilde_exports.h",
     "symbolMap": "build/generated/ctilde_symbols.json",
-    "configuration": "debug",
-    "lto": false
+    "configuration": "release",
+    "lto": true
   }
 }

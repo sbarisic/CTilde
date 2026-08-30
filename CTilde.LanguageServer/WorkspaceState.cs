@@ -201,6 +201,29 @@ internal sealed class WorkspaceState
         return cached.Snapshot.Value;
     }
 
+    public bool IsCurrent(OpenDocument document, ProjectSnapshot project)
+    {
+        lock (_gate)
+        {
+            if (!_documents.TryGetValue(document.Uri, out var currentDocument) || currentDocument.Version != document.Version)
+                return false;
+            var path = Path.GetFullPath(currentDocument.Path);
+            var manifest = ResolveManifest(path);
+            CTildeProject? currentProject = null;
+            if (manifest is not null)
+            {
+                try { currentProject = LoadProject(manifest); }
+                catch (CTildeProjectException) { }
+            }
+            var included = currentProject is not null && currentProject.SourceFiles.Contains(path, PathComparer);
+            var target = currentProject?.Configuration.Target ?? CompilationTarget.Hosted;
+            var key = included ? currentProject!.ManifestPath : $"standalone:{path}:{target}";
+            return key.Equals(project.Key, PathComparison) &&
+                _projects.TryGetValue(key, out var cached) && cached.Snapshot.IsValueCreated &&
+                ReferenceEquals(cached.Snapshot.Value, project);
+        }
+    }
+
     public ImmutableArray<ProjectSnapshot> GetWorkspaceProjects() => GetWorkspaceProjects(null, includeShared: true);
 
     public ImmutableArray<ProjectSnapshot> GetWorkspaceProjects(IReadOnlySet<string>? projectSourceIdentities, bool includeShared)
@@ -436,6 +459,7 @@ internal sealed class WorkspaceState
     }
 
     private static StringComparer PathComparer { get; } = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    private static StringComparison PathComparison { get; } = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     private sealed record CachedProject(ImmutableArray<string> SourceFiles, Lazy<ProjectSnapshot> Snapshot);
 }

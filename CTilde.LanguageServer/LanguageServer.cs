@@ -1,6 +1,7 @@
 using CTilde;
 using StreamJsonRpc;
 using System.Text;
+using System.Text.Json;
 
 namespace CTilde.LanguageServer;
 
@@ -11,6 +12,9 @@ internal sealed class LanguageServer
     private readonly WorkspaceState _workspace = new();
     private JsonRpc? _rpc;
     private CancellationTokenSource? _diagnosticDelay;
+    private long _diagnosticGeneration;
+    private bool _waitingForProjectContexts;
+    private int _testPostAnalysisDelayMilliseconds;
     private readonly object _referenceGate = new();
     private readonly Dictionary<string, (ProjectSnapshot Project, LanguageReference Reference)[]> _workspaceReferenceCache = new(StringComparer.Ordinal);
     private long _workspaceReferenceCacheRevision = -1;
@@ -25,6 +29,8 @@ internal sealed class LanguageServer
     public InitializeResult Initialize(InitializeParams parameters)
     {
         _workspace.Initialize(parameters.RootUri, parameters.WorkspaceFolders);
+        _waitingForProjectContexts = IsVisualStudio(parameters.InitializationOptions);
+        _testPostAnalysisDelayMilliseconds = TestPostAnalysisDelay(parameters.InitializationOptions);
         _semanticRefreshSupported = SupportsSemanticTokenRefresh(parameters.Capabilities);
         return new InitializeResult(
             new ServerCapabilities(
@@ -79,7 +85,14 @@ internal sealed class LanguageServer
     public void DidChangeWatchedFiles(DidChangeWatchedFilesParams parameters) => _workspace.FilesChanged(parameters.Changes);
 
     [JsonRpcMethod("ctilde/didChangeProjects", UseSingleObjectParameterDeserialization = true)]
-    public void DidChangeProjects(CTildeProjectContextsParams parameters) => _workspace.SetProjectContexts(parameters);
+    public void DidChangeProjects(CTildeProjectContextsParams parameters)
+    {
+        var firstSynchronization = _waitingForProjectContexts;
+        _waitingForProjectContexts = false;
+        _workspace.SetProjectContexts(parameters);
+        if (firstSynchronization)
+            _ = ScheduleDiagnosticsAsync();
+    }
 
     [JsonRpcMethod("ctilde/didChangeActiveProject", UseSingleObjectParameterDeserialization = true)]
     public void DidChangeActiveProject(CTildeActiveProjectParams parameters) => _workspace.SetActiveProject(parameters.ManifestUri);
@@ -267,16 +280,21 @@ internal sealed class LanguageServer
 
     private async Task ScheduleDiagnosticsAsync()
     {
+        var generation = Interlocked.Increment(ref _diagnosticGeneration);
         var next = new CancellationTokenSource();
         var previous = Interlocked.Exchange(ref _diagnosticDelay, next);
         previous?.Cancel();
         previous?.Dispose();
+        if (_waitingForProjectContexts)
+            return;
         try
         {
             await Task.Delay(150, next.Token).ConfigureAwait(false);
-            await PublishDiagnosticsAsync(next.Token).ConfigureAwait(false);
+            await PublishDiagnosticsAsync(generation, next.Token).ConfigureAwait(false);
+            ThrowIfStale(generation, next.Token);
             if (_semanticRefreshSupported && _rpc is { } rpc)
                 await rpc.InvokeAsync("workspace/semanticTokens/refresh", Array.Empty<object>()).ConfigureAwait(false);
+            ThrowIfStale(generation, next.Token);
             if (_rpc is { } referenceRpc)
                 await referenceRpc.NotifyWithParameterObjectAsync("ctilde/referenceCodeLens/refresh", new CTildeReferenceCodeLensRefresh(_workspace.Revision)).ConfigureAwait(false);
         }
@@ -287,22 +305,59 @@ internal sealed class LanguageServer
         }
     }
 
-    private async Task PublishDiagnosticsAsync(CancellationToken cancellationToken)
+    private async Task PublishDiagnosticsAsync(long generation, CancellationToken cancellationToken)
     {
         var rpc = _rpc;
         if (rpc is null)
             return;
         foreach (var document in _workspace.OpenDocuments)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            ThrowIfStale(generation, cancellationToken);
             var project = _workspace.GetProject(document.Uri);
+            if (_testPostAnalysisDelayMilliseconds > 0)
+                await Task.Delay(_testPostAnalysisDelayMilliseconds).ConfigureAwait(false);
+            ThrowIfStale(generation, cancellationToken);
+            if (!_workspace.IsCurrent(document, project))
+                continue;
             if (project.ProjectError is not null)
+            {
                 await rpc.NotifyWithParameterObjectAsync("window/showMessage", new ShowMessageParams(1, project.ProjectError)).ConfigureAwait(false);
+                continue;
+            }
             var diagnostics = project.LanguageService.Diagnostics
                 .Where(diagnostic => PathEquals(diagnostic.Location.FilePath, document.Path))
                 .Select(diagnostic => ToDiagnostic(project, diagnostic)).ToArray();
+            ThrowIfStale(generation, cancellationToken);
+            if (!_workspace.IsCurrent(document, project))
+                continue;
             await rpc.NotifyWithParameterObjectAsync("textDocument/publishDiagnostics", new PublishDiagnosticsParams(document.Uri, diagnostics, document.Version)).ConfigureAwait(false);
         }
+    }
+
+    private void ThrowIfStale(long generation, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (generation != Volatile.Read(ref _diagnosticGeneration))
+            throw new OperationCanceledException(cancellationToken);
+    }
+
+    private static bool IsVisualStudio(JsonElement? initializationOptions)
+    {
+        if (initializationOptions is not { ValueKind: JsonValueKind.Object } options ||
+            !options.TryGetProperty("ctilde", out var ctilde) || ctilde.ValueKind != JsonValueKind.Object ||
+            !ctilde.TryGetProperty("client", out var client) || client.ValueKind != JsonValueKind.String)
+            return false;
+        return string.Equals(client.GetString(), "visualstudio", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int TestPostAnalysisDelay(JsonElement? initializationOptions)
+    {
+        if (!string.Equals(Environment.GetEnvironmentVariable("CTILDE_LANGUAGE_SERVER_TESTING"), "1", StringComparison.Ordinal) ||
+            initializationOptions is not { ValueKind: JsonValueKind.Object } options ||
+            !options.TryGetProperty("ctilde", out var ctilde) || ctilde.ValueKind != JsonValueKind.Object ||
+            !ctilde.TryGetProperty("testPostAnalysisDelayMilliseconds", out var delay) || !delay.TryGetInt32(out var milliseconds))
+            return 0;
+        return Math.Clamp(milliseconds, 0, 5_000);
     }
 
     private static Diagnostic ToDiagnostic(ProjectSnapshot project, CTilde.Diagnostic diagnostic)

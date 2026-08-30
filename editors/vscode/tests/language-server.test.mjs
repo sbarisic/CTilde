@@ -603,6 +603,79 @@ test("explicit same-root project contexts follow the active manifest", async () 
   }
 });
 
+test("Visual Studio diagnostics wait for project contexts and discard obsolete generations", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-vs-diagnostics-"));
+  const projectPath = path.join(directory, "Hosted.ctproj");
+  const manifestPath = path.join(directory, "ctilde.json");
+  const programPath = path.join(directory, "Program.ct");
+  const uri = pathToFileURL(programPath).href;
+  const invalid = "public static class Program { [EntryPoint] public static void Main() { Missing(); } }";
+  const valid = "public static class Program { [EntryPoint] public static void Main() { } }";
+  await writeFile(manifestPath, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(projectPath, "<Project />");
+  await writeFile(programPath, invalid);
+  const client = new LspClient(serverDll, { CTILDE_LANGUAGE_SERVER_TESTING: "1" });
+  try {
+    await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "fixture" }],
+      capabilities: { workspace: { semanticTokens: { refreshSupport: true } } },
+      initializationOptions: { ctilde: { client: "visualstudio", testPostAnalysisDelayMilliseconds: 500 } }
+    });
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: invalid } });
+    await client.assertNoNotification("textDocument/publishDiagnostics", value => value.uri === uri, 350);
+
+    client.notify("ctilde/didChangeProjects", {
+      projects: [{ projectUri: pathToFileURL(projectPath).href, manifestUri: pathToFileURL(manifestPath).href }],
+      activeManifestUri: pathToFileURL(manifestPath).href
+    });
+    await new Promise(resolve => setTimeout(resolve, 250));
+    client.notify("textDocument/didChange", {
+      textDocument: { uri, version: 2 },
+      contentChanges: [{ text: valid }]
+    });
+    const current = await client.waitForNotification("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === 2);
+    assert.deepEqual(current.diagnostics, []);
+    await client.assertNoNotification("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === 1, 300);
+    client.clearNotifications("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === 2);
+
+    await writeFile(manifestPath, "{");
+    client.notify("workspace/didChangeWatchedFiles", {
+      changes: [{ uri: pathToFileURL(manifestPath).href, type: 2 }]
+    });
+    await client.assertNoNotification("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === 2, 850);
+
+    await writeFile(manifestPath, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+    client.notify("workspace/didChangeWatchedFiles", {
+      changes: [{ uri: pathToFileURL(manifestPath).href, type: 2 }]
+    });
+    client.notify("textDocument/didChange", {
+      textDocument: { uri, version: 3 },
+      contentChanges: [{ text: invalid }]
+    });
+    const error = await client.waitForNotification("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === 3);
+    assert.ok(error.diagnostics.some(item => item.severity === 1));
+
+    client.notify("textDocument/didClose", { textDocument: { uri } });
+    const closed = await client.waitForNotification("textDocument/publishDiagnostics",
+      value => value.uri === uri && value.version === undefined && value.diagnostics.length === 0);
+    assert.deepEqual(closed.diagnostics, []);
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("physical standard-library projects navigate without embedded duplicates", async () => {
   const directory = path.resolve(extensionRoot, "..", "..", "CTilde", "StandardLibrary");
   const programPath = path.join(directory, "System", "Vec2.ct");
@@ -680,8 +753,8 @@ class LspClient {
   #notifications = [];
   #waiters = [];
 
-  constructor(dll) {
-    this.#process = spawn("dotnet", [dll], { stdio: ["pipe", "pipe", "pipe"] });
+  constructor(dll, environment = {}) {
+    this.#process = spawn("dotnet", [dll], { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, ...environment } });
     this.exited = new Promise(resolve => this.#process.once("exit", code => resolve(code)));
     this.#process.stdout.on("data", data => this.#receive(data));
     this.#process.stderr.on("data", data => process.stderr.write(data));
@@ -707,9 +780,21 @@ class LspClient {
     if (existingIndex >= 0)
       return Promise.resolve(this.#notifications.splice(existingIndex, 1)[0].params);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timed out waiting for ${method}`)), 10000);
+      const timer = setTimeout(() => reject(new Error(`Timed out waiting for ${method}; queued: ${JSON.stringify(this.#notifications.filter(item => item.method === method).map(item => item.params))}`)), 10000);
       this.#waiters.push({ method, predicate, resolve: value => { clearTimeout(timer); resolve(value); } });
     });
+  }
+
+  async assertNoNotification(method, predicate, milliseconds) {
+    if (this.#notifications.some(item => item.method === method && predicate(item.params)))
+      assert.fail(`Unexpected ${method} notification`);
+    await new Promise(resolve => setTimeout(resolve, milliseconds));
+    if (this.#notifications.some(item => item.method === method && predicate(item.params)))
+      assert.fail(`Unexpected ${method} notification`);
+  }
+
+  clearNotifications(method, predicate) {
+    this.#notifications = this.#notifications.filter(item => item.method !== method || !predicate(item.params));
   }
 
   dispose() {

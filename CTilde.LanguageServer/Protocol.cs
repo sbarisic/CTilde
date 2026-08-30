@@ -15,7 +15,8 @@ internal sealed record DidSaveTextDocumentParams(TextDocumentIdentifier TextDocu
 internal sealed record TextDocumentContentChangeEvent(Range? Range, int? RangeLength, string Text);
 internal sealed record DidChangeTextDocumentParams(VersionedTextDocumentIdentifier TextDocument, TextDocumentContentChangeEvent[] ContentChanges);
 internal sealed record WorkspaceFolder(string Uri, string Name);
-internal sealed record InitializeParams(int? ProcessId, string? RootUri, WorkspaceFolder[]? WorkspaceFolders, JsonElement? Capabilities);
+internal sealed record InitializeParams(int? ProcessId, string? RootUri, WorkspaceFolder[]? WorkspaceFolders, JsonElement? Capabilities,
+    JsonElement? InitializationOptions = null);
 internal sealed record InitializeResult(ServerCapabilities Capabilities, ServerInfo ServerInfo);
 internal sealed record ServerInfo(string Name, string Version);
 internal sealed record ServerCapabilities(

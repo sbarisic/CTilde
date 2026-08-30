@@ -173,7 +173,7 @@ internal static partial class ConformanceTests
                 using System.Simd;
                 public static class Program
                 {
-                    [EntryPoint] public static void Main()
+                    [EntryPoint] public static unsafe void Main()
                     {
                         U32x4 left = U32x4.Create(0xffffffffu, 0x80000000u, 3u, 0x40000001u);
                         U32x4 product = left * U32x4.Create(2u, 3u, 7u, 4u);
@@ -182,6 +182,9 @@ internal static partial class ConformanceTests
                         U32x4 shifted = left.ShiftLeft<0>().ShiftRight<31>();
                         Console.WriteLine(shifted.GetLane<0>() == 1u && shifted.GetLane<1>() == 1u
                             && shifted.GetLane<2>() == 0u && shifted.GetLane<3>() == 0u);
+                        U32x4 shiftedBoundary = left.ShiftLeft<31>().ShiftRight<31>();
+                        Console.WriteLine(shiftedBoundary.GetLane<0>() == 1u && shiftedBoundary.GetLane<1>() == 0u
+                            && shiftedBoundary.GetLane<2>() == 1u && shiftedBoundary.GetLane<3>() == 1u);
                         Mask32x4 unsignedLess = U32x4.CompareLessThan(left, U32x4.Create(0u, 0xffffffffu, 4u, 0x40000000u));
                         U32x4 selected = U32x4.Select(unsignedLess, U32x4.Splat(11u), U32x4.Splat(22u));
                         Console.WriteLine(unsignedLess.MoveMask() == 6u && selected.GetLane<0>() == 22u
@@ -198,6 +201,18 @@ internal static partial class ConformanceTests
                             && converted.GetLane<2>() == 2147483648.0f && converted.GetLane<3>() == 4294967296.0f);
                         Mask32x4 all = Mask32x4.Not(Mask32x4.FromBools(false, false, false, false));
                         Console.WriteLine(Mask32x4.AndNot(unsignedLess, all).MoveMask() == 9u);
+                        Console.WriteLine(unsignedLess.Any() && !unsignedLess.All() && !unsignedLess.None()
+                            && all.All() && !all.None());
+                        F32x4 minimum = F32x4.Min(F32x4.Create(0.0f, -0.0f, nan, 4.0f),
+                            F32x4.Create(-0.0f, 0.0f, 3.0f, nan));
+                        F32x4 maximum = F32x4.Max(F32x4.Create(0.0f, -0.0f, nan, 4.0f),
+                            F32x4.Create(-0.0f, 0.0f, 3.0f, nan));
+                        Console.WriteLine(F32x4.AsU32(minimum).GetLane<0>() == 0x80000000u
+                            && F32x4.AsU32(minimum).GetLane<1>() == 0x80000000u
+                            && minimum.GetLane<2>() == 3.0f && minimum.GetLane<3>() == 4.0f);
+                        Console.WriteLine(F32x4.AsU32(maximum).GetLane<0>() == 0u
+                            && F32x4.AsU32(maximum).GetLane<1>() == 0u
+                            && maximum.GetLane<2>() == 3.0f && maximum.GetLane<3>() == 4.0f);
                     }
                 }
                 """;
@@ -208,15 +223,18 @@ internal static partial class ConformanceTests
             Assert(scalar.ExitCode == 0 && simd.ExitCode == 0 && scalar.StandardOutput == simd.StandardOutput,
                 $"Scalar and SSE2 packet operations differed. Scalar:\n{scalar.StandardOutput}{scalar.StandardError}\nSSE2:\n{simd.StandardOutput}{simd.StandardError}");
             Assert(simd.StandardOutput.Replace("\r", string.Empty, StringComparison.Ordinal).Trim() ==
-                "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue", $"Unexpected SIMD operation result: {simd.StandardOutput}");
+                "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue", $"Unexpected SIMD operation result: {simd.StandardOutput}");
             var emitted = Emit(source, options);
-            Assert(emitted.Contains("_mm_mul_epu32", StringComparison.Ordinal) && emitted.Contains("_mm_srli_epi32", StringComparison.Ordinal)
+            Assert(emitted.Contains("_mm_mul_epu32", StringComparison.Ordinal) && emitted.Contains("_mm_slli_epi32", StringComparison.Ordinal)
+                && emitted.Contains("_mm_srli_epi32", StringComparison.Ordinal) && emitted.Contains("_mm_srai_epi32", StringComparison.Ordinal)
                 && emitted.Contains("_mm_cmplt_epi32", StringComparison.Ordinal) && emitted.Contains("_mm_cmpneq_ps", StringComparison.Ordinal)
-                && emitted.Contains("_mm_cvtepi32_ps", StringComparison.Ordinal) && emitted.Contains("_mm_andnot_si128", StringComparison.Ordinal),
+                && emitted.Contains("_mm_cvtepi32_ps", StringComparison.Ordinal) && emitted.Contains("_mm_andnot_si128", StringComparison.Ordinal)
+                && emitted.Contains("_mm_movemask_ps", StringComparison.Ordinal) && emitted.Contains("_mm_min_ps", StringComparison.Ordinal)
+                && emitted.Contains("_mm_max_ps", StringComparison.Ordinal) && emitted.Contains("_mm_set1_epi32", StringComparison.Ordinal),
                 "The hosted x64 backend did not emit every packet SIMD operation family.");
         });
 
-        suite.Run("draft 0.38 HostedIo four-ray packets match scalar odd-width oracle", () =>
+        suite.Run("draft 0.38 HostedIo packet golden and traversal fixtures", () =>
         {
             static string Harness(bool packet) => $$"""
                 using System;
@@ -250,11 +268,13 @@ internal static partial class ConformanceTests
                 """;
 
             var packet = CompileAndRun(HostedIoSources(Harness(true)), captureFile: "image.ppm");
-            var scalar = CompileAndRun(HostedIoSources(Harness(false)), captureFile: "image.ppm");
             Assert(packet.ExitCode == 0, packet.StandardError);
-            Assert(scalar.ExitCode == 0, scalar.StandardError);
-            Assert((packet.CapturedFile ?? []).SequenceEqual(scalar.CapturedFile ?? []),
-                "Four-ray production batching changed the odd-width seeded PPM.");
+            var packetHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packet.CapturedFile ?? []));
+            Assert(packetHash == "799529CAE793F5C425EB3A15805991ACA7926EE66733906D940935093CAA6FB0",
+                $"The optimized odd-width PPM golden changed: {packetHash}.");
+            var repeated = CompileAndRun(HostedIoSources(Harness(true)), captureFile: "image.ppm");
+            Assert(repeated.ExitCode == 0 && (packet.CapturedFile ?? []).SequenceEqual(repeated.CapturedFile ?? []),
+                "The optimized packet renderer was not deterministic across repeated seeded renders.");
 
             const string traversalHarness = """
                 using System;
@@ -274,14 +294,80 @@ internal static partial class ConformanceTests
                             new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)),
                             new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f)));
                         HitPacket hits;
-                        bool any = world.Hit4(rays, new Interval(0.001f, 1000.0f), PacketMasks.First(3), out hits);
+                        RayInterval4 interval = RayInterval4.Splat(0.001f, 1000.0f);
+                        bool any = world.Hit4(ref rays, ref interval, PacketMasks.First(3), out hits);
                         Console.WriteLine(any && hits.HitMask.MoveMask() == 5u
-                            && hits.Lane0.Distance == hits.Lane2.Distance);
+                            && hits.Distances.GetLane<0>() == hits.Distances.GetLane<2>());
+
+                        Aabb box = new Aabb(new Vec3(-1.0f), new Vec3(1.0f));
+                        RayPacket boxRays = RayPacket.Create(
+                            new Ray(new Vec3(0.0f, 0.0f, 2.0f), new Vec3(0.0f, 0.0f, -1.0f)),
+                            new Ray(new Vec3(2.0f, 0.0f, 0.0f), new Vec3(0.0f, 1.0f, 0.0f)),
+                            new Ray(new Vec3(0.0f, 0.0f, -2.0f), new Vec3(0.0f, 0.0f, 1.0f)),
+                            new Ray(new Vec3(0.0f, 0.0f, 2.0f), new Vec3(0.0f, 0.0f, -1.0f)));
+                        F32x4 entries;
+                        Mask32x4 boxHits = box.Hit4(ref boxRays, ref interval, PacketMasks.First(3), out entries);
+                        Console.WriteLine(boxHits.MoveMask() == 5u && entries.GetLane<0>() == 1.0f
+                            && entries.GetLane<2>() == 1.0f);
+
+                        HittableList divergent = new HittableList();
+                        divergent.Add(new Sphere(new Vec3(-1.0f, 0.0f, -3.0f), 0.75f,
+                            new Lambertian(new Vec3(0.25f, 0.5f, 0.75f))));
+                        divergent.Add(new Sphere(new Vec3(1.0f, 0.0f, -3.0f), 0.75f,
+                            new Metal(new Vec3(0.75f, 0.5f, 0.25f), 0.0f)));
+                        Hittable divergentWorld = divergent.BuildBvh();
+                        RayPacket divergentRays = RayPacket.Create(
+                            new Ray(Vec3.Zero, new Vec3(-1.0f, 0.0f, -3.0f)),
+                            new Ray(Vec3.Zero, new Vec3(1.0f, 0.0f, -3.0f)),
+                            new Ray(Vec3.Zero, new Vec3(-1.0f, 0.0f, -3.0f)),
+                            new Ray(Vec3.Zero, new Vec3(1.0f, 0.0f, -3.0f)));
+                        HitPacket divergentHits;
+                        bool divergentAny = divergentWorld.Hit4(ref divergentRays, ref interval,
+                            PacketMasks.First(4), out divergentHits);
+                        Console.WriteLine(divergentAny && divergentHits.HitMask.MoveMask() == 15u
+                            && divergentHits.Materials.Kinds.GetLane<0>() == (uint)MaterialKind.Lambertian
+                            && divergentHits.Materials.Kinds.GetLane<1>() == (uint)MaterialKind.Metal);
+
+                        HitPacket materialHits = HitPacket.Empty(F32x4.Splat(100.0f));
+                        materialHits.Points = Vec3x4.Zero;
+                        materialHits.Normals = Vec3x4.Splat(Vec3.UnitY);
+                        materialHits.HitMask = PacketMasks.First(3);
+                        materialHits.FrontFaceMask = PacketMasks.First(3);
+                        materialHits.Materials = new MaterialPacket(U32x4.Create(
+                            (uint)MaterialKind.Lambertian, (uint)MaterialKind.Metal,
+                            (uint)MaterialKind.Dielectric, (uint)MaterialKind.None),
+                            new Vec3x4(F32x4.Create(0.2f, 0.4f, 1.0f, 0.0f),
+                                F32x4.Create(0.3f, 0.5f, 1.0f, 0.0f),
+                                F32x4.Create(0.4f, 0.6f, 1.0f, 0.0f)),
+                            F32x4.Create(0.0f, 0.0f, 1.5f, 0.0f));
+                        RayPacket incoming = new RayPacket(Vec3x4.Zero,
+                            Vec3x4.Splat(new Vec3(0.0f, -1.0f, 0.0f)));
+                        PacketRandomGenerator random = new PacketRandomGenerator(123u);
+                        random.Reseed(PacketRandomGenerator.SampleSeeds(123u, 0, 0, 0,
+                            PacketMasks.First(3)));
+                        Vec3x4 attenuation;
+                        RayPacket scattered;
+                        Mask32x4 scatteredMask = PacketMaterials.Scatter(ref incoming,
+                            ref materialHits, PacketMasks.First(3), random, out attenuation,
+                            out scattered);
+                        Console.WriteLine(scatteredMask.MoveMask() == 7u
+                            && attenuation.X.GetLane<0>() == 0.2f
+                            && attenuation.Y.GetLane<1>() == 0.5f
+                            && attenuation.Z.GetLane<2>() == 1.0f);
+
+                        PacketRandomGenerator firstRandom = new PacketRandomGenerator(321u);
+                        PacketRandomGenerator secondRandom = new PacketRandomGenerator(321u);
+                        Vec3x4 firstSample = firstRandom.InUnitSphere(PacketMasks.First(3));
+                        Vec3x4 secondSample = secondRandom.InUnitSphere(PacketMasks.First(3));
+                        Console.WriteLine(F32x4.CompareEqual(firstSample.X, secondSample.X).All()
+                            && F32x4.CompareEqual(firstSample.Y, secondSample.Y).All()
+                            && F32x4.CompareEqual(firstSample.Z, secondSample.Z).All());
                     }
                 }
                 """;
             var traversal = CompileAndRun(HostedIoSources(traversalHarness));
-            Assert(traversal.ExitCode == 0 && traversal.StandardOutput.Trim() == "True",
+            Assert(traversal.ExitCode == 0 && traversal.StandardOutput.Replace("\r", string.Empty, StringComparison.Ordinal).Trim() ==
+                "True\nTrue\nTrue\nTrue\nTrue",
                 $"Packet traversal or inactive-lane handling failed: {traversal.StandardOutput}{traversal.StandardError}");
         });
     }

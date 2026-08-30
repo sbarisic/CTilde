@@ -33,6 +33,24 @@ public struct Interval
     }
 }
 
+public struct RayInterval4
+{
+    public F32x4 Min;
+    public F32x4 Max;
+
+    public RayInterval4(F32x4 min, F32x4 max)
+    {
+        Min = min;
+        Max = max;
+    }
+
+    [NoAlloc]
+    public static RayInterval4 Splat(float min, float max)
+    {
+        return new RayInterval4(F32x4.Splat(min), F32x4.Splat(max));
+    }
+}
+
 public struct Ray
 {
     public Vec3 Origin;
@@ -99,6 +117,21 @@ public static class PacketMasks
     }
 
     [NoAlloc]
+    public static float FirstValue(F32x4 values, Mask32x4 active, float fallback)
+    {
+        uint lanes = active.MoveMask();
+        if ((lanes & 1u) != 0u)
+            return values.GetLane<0>();
+        if ((lanes & 2u) != 0u)
+            return values.GetLane<1>();
+        if ((lanes & 4u) != 0u)
+            return values.GetLane<2>();
+        if ((lanes & 8u) != 0u)
+            return values.GetLane<3>();
+        return fallback;
+    }
+
+    [NoAlloc]
     private static float ToFloat(bool value)
     {
         if (value)
@@ -131,5 +164,20 @@ public static class VectorMath
         Vec3 parallel = -Math.Sqrt(Math.Abs(1.0f - perpendicular.LengthSquared()))
             * normal;
         return perpendicular + parallel;
+    }
+
+    [NoAlloc]
+    public static Vec3x4 Reflect(Vec3x4 direction, Vec3x4 normal)
+    {
+        return direction - normal * (direction.Dot(normal) * F32x4.Splat(2.0f));
+    }
+
+    [NoAlloc]
+    public static Vec3x4 Refract(Vec3x4 unitDirection, Vec3x4 normal, F32x4 refractionRatio)
+    {
+        F32x4 cosine = F32x4.Min((-unitDirection).Dot(normal), F32x4.Splat(1.0f));
+        Vec3x4 perpendicular = (unitDirection + normal * cosine) * refractionRatio;
+        F32x4 parallelScale = -F32x4.Sqrt(F32x4.Abs(F32x4.Splat(1.0f) - perpendicular.LengthSquared()));
+        return perpendicular + normal * parallelScale;
     }
 }

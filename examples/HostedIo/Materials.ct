@@ -1,9 +1,77 @@
 using System;
+using System.Simd;
 
 namespace HostedIoExample;
 
+public enum MaterialKind
+{
+    None,
+    Lambertian,
+    Metal,
+    Dielectric,
+}
+
+public struct MaterialDescriptor
+{
+    public MaterialKind Kind;
+    public Vec3 Albedo;
+    public float Parameter;
+
+    public MaterialDescriptor(MaterialKind kind, Vec3 albedo, float parameter)
+    {
+        Kind = kind;
+        Albedo = albedo;
+        Parameter = parameter;
+    }
+}
+
+public struct MaterialPacket
+{
+    public U32x4 Kinds;
+    public Vec3x4 Albedos;
+    public F32x4 Parameters;
+
+    public MaterialPacket(U32x4 kinds, Vec3x4 albedos, F32x4 parameters)
+    {
+        Kinds = kinds;
+        Albedos = albedos;
+        Parameters = parameters;
+    }
+
+    [NoAlloc]
+    public static MaterialPacket Empty
+    {
+        get
+        {
+            return new MaterialPacket(U32x4.Zero, Vec3x4.Zero, F32x4.Zero);
+        }
+    }
+
+    [NoAlloc]
+    public static MaterialPacket Splat(MaterialDescriptor descriptor)
+    {
+        return new MaterialPacket(U32x4.Splat((uint)descriptor.Kind), Vec3x4.Splat(descriptor.Albedo),
+            F32x4.Splat(descriptor.Parameter));
+    }
+
+    [NoAlloc]
+    public static MaterialPacket Select(Mask32x4 mask, MaterialPacket whenTrue,
+        MaterialPacket whenFalse)
+    {
+        return new MaterialPacket(U32x4.Select(mask, whenTrue.Kinds, whenFalse.Kinds),
+            Vec3x4.Select(mask, whenTrue.Albedos, whenFalse.Albedos), F32x4.Select(mask,
+            whenTrue.Parameters, whenFalse.Parameters));
+    }
+}
+
 public class Material
 {
+    [NoAlloc]
+    public virtual MaterialDescriptor Descriptor()
+    {
+        return new MaterialDescriptor(MaterialKind.None, Vec3.Zero, 0.0f);
+    }
+
     [NoAlloc]
     public virtual bool Scatter(Ray incoming, HitRecord hit, RandomGenerator random,
         out Vec3 attenuation, out Ray scattered)
@@ -34,6 +102,12 @@ public sealed class Lambertian : Material
         scattered = new Ray(hit.Point, direction);
         return true;
     }
+
+    [NoAlloc]
+    public override MaterialDescriptor Descriptor()
+    {
+        return new MaterialDescriptor(MaterialKind.Lambertian, albedo, 0.0f);
+    }
 }
 
 public sealed class Metal : Material
@@ -56,6 +130,12 @@ public sealed class Metal : Material
         attenuation = albedo;
         scattered = new Ray(hit.Point, direction);
         return direction.Dot(hit.Normal) > 0.0f;
+    }
+
+    [NoAlloc]
+    public override MaterialDescriptor Descriptor()
+    {
+        return new MaterialDescriptor(MaterialKind.Metal, albedo, fuzz);
     }
 }
 
@@ -100,5 +180,85 @@ public sealed class Dielectric : Material
         float complementSquared = complement * complement;
         float complementFifth = complementSquared * complementSquared * complement;
         return baseValue + (1.0f - baseValue) * complementFifth;
+    }
+
+    [NoAlloc]
+    public override MaterialDescriptor Descriptor()
+    {
+        return new MaterialDescriptor(MaterialKind.Dielectric, Vec3.One, refractionIndex);
+    }
+}
+
+public static class PacketMaterials
+{
+    [NoAlloc]
+    public static Mask32x4 Scatter(ref RayPacket incoming, ref HitPacket hit, Mask32x4 active,
+        PacketRandomGenerator random, out Vec3x4 attenuation, out RayPacket scattered)
+    {
+        U32x4 kinds = hit.Materials.Kinds;
+        Mask32x4 lambertian = Mask32x4.And(active, U32x4.CompareEqual(kinds,
+            U32x4.Splat((uint)MaterialKind.Lambertian)));
+        Mask32x4 metal = Mask32x4.And(active, U32x4.CompareEqual(kinds,
+            U32x4.Splat((uint)MaterialKind.Metal)));
+        Mask32x4 dielectric = Mask32x4.And(active, U32x4.CompareEqual(kinds,
+            U32x4.Splat((uint)MaterialKind.Dielectric)));
+        Vec3x4 directions = Vec3x4.Zero;
+        Vec3x4 attenuations = Vec3x4.Zero;
+
+        if (lambertian.Any())
+        {
+            Vec3x4 diffuseDirection = hit.Normals + random.UnitVector(lambertian);
+            const float nearZero = 0.00000001f;
+            Mask32x4 diffuseNearZero = Mask32x4.And(lambertian, Mask32x4.And(
+                F32x4.CompareLessThan(F32x4.Abs(diffuseDirection.X), F32x4.Splat(nearZero)),
+                Mask32x4.And(F32x4.CompareLessThan(F32x4.Abs(diffuseDirection.Y), F32x4.Splat(nearZero)),
+                F32x4.CompareLessThan(F32x4.Abs(diffuseDirection.Z), F32x4.Splat(nearZero)))));
+            diffuseDirection = Vec3x4.Select(diffuseNearZero, hit.Normals, diffuseDirection);
+            directions = Vec3x4.Select(lambertian, diffuseDirection, directions);
+            attenuations = Vec3x4.Select(lambertian, hit.Materials.Albedos, attenuations);
+        }
+
+        Mask32x4 metalScattered = PacketMasks.First(0);
+        if (metal.Any())
+        {
+            Vec3x4 reflected = VectorMath.Reflect(incoming.Directions, hit.Normals).Normalize();
+            Vec3x4 metalDirection = reflected + random.UnitVector(metal) * hit.Materials.Parameters;
+            metalScattered = Mask32x4.And(metal, F32x4.CompareGreaterThan(metalDirection.Dot(hit.Normals),
+                F32x4.Zero));
+            directions = Vec3x4.Select(metalScattered, metalDirection, directions);
+            attenuations = Vec3x4.Select(metalScattered, hit.Materials.Albedos, attenuations);
+        }
+
+        if (dielectric.Any())
+        {
+            F32x4 ratio = F32x4.Select(hit.FrontFaceMask, F32x4.Splat(1.0f) / hit.Materials.Parameters,
+                hit.Materials.Parameters);
+            Vec3x4 unitDirection = incoming.Directions.Normalize();
+            F32x4 cosine = F32x4.Min((-unitDirection).Dot(hit.Normals), F32x4.Splat(1.0f));
+            F32x4 sine = F32x4.Sqrt(F32x4.Splat(1.0f) - cosine * cosine);
+            Mask32x4 cannotRefract = F32x4.CompareGreaterThan(ratio * sine, F32x4.Splat(1.0f));
+            F32x4 reflectance = Reflectance(cosine, ratio);
+            Mask32x4 reflect = Mask32x4.And(dielectric, Mask32x4.Or(cannotRefract,
+                F32x4.CompareGreaterThan(reflectance, random.NextFloat(dielectric))));
+            Vec3x4 dielectricDirection = Vec3x4.Select(reflect, VectorMath.Reflect(unitDirection,
+                hit.Normals), VectorMath.Refract(unitDirection, hit.Normals, ratio));
+            directions = Vec3x4.Select(dielectric, dielectricDirection, directions);
+            attenuations = Vec3x4.Select(dielectric, Vec3x4.Splat(Vec3.One), attenuations);
+        }
+
+        attenuation = attenuations;
+        scattered = new RayPacket(hit.Points, directions);
+        return Mask32x4.Or(lambertian, Mask32x4.Or(metalScattered, dielectric));
+    }
+
+    [NoAlloc]
+    private static F32x4 Reflectance(F32x4 cosine, F32x4 ratio)
+    {
+        F32x4 one = F32x4.Splat(1.0f);
+        F32x4 baseValue = (one - ratio) / (one + ratio);
+        baseValue = baseValue * baseValue;
+        F32x4 complement = one - cosine;
+        F32x4 squared = complement * complement;
+        return baseValue + (one - baseValue) * squared * squared * complement;
     }
 }

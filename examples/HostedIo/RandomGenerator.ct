@@ -1,4 +1,5 @@
 using System;
+using System.Simd;
 
 namespace HostedIoExample;
 
@@ -105,5 +106,112 @@ public sealed class RandomGenerator
                 return point;
         }
         return Vec3.Zero;
+    }
+}
+
+public sealed class PacketRandomGenerator
+{
+    private U32x4 state;
+
+    public PacketRandomGenerator(uint seed)
+    {
+        state = U32x4.Splat(seed);
+    }
+
+    [NoAlloc]
+    public static U32x4 SampleSeeds(uint globalSeed, int firstColumn, int row, int sample,
+        Mask32x4 active)
+    {
+        U32x4 value = U32x4.Splat(globalSeed);
+        U32x4 columns = U32x4.Create((uint)firstColumn, (uint)(firstColumn + 1),
+            (uint)(firstColumn + 2), (uint)(firstColumn + 3));
+        value = U32x4.Xor(value, columns * U32x4.Splat(0x9E3779B9u));
+        value = U32x4.Xor(value, U32x4.Splat((uint)row) * U32x4.Splat(0x85EBCA6Bu));
+        value = U32x4.Xor(value, U32x4.Splat((uint)sample) * U32x4.Splat(0xC2B2AE35u));
+        value = U32x4.Xor(value, value.ShiftRight<16>());
+        value = value * U32x4.Splat(0x7FEB352Du);
+        value = U32x4.Xor(value, value.ShiftRight<15>());
+        value = value * U32x4.Splat(0x846CA68Bu);
+        value = U32x4.Xor(value, value.ShiftRight<16>());
+        Mask32x4 zero = U32x4.CompareEqual(value, U32x4.Zero);
+        value = U32x4.Select(zero, U32x4.Splat(RandomGenerator.DefaultSeed), value);
+        return U32x4.Select(active, value, U32x4.Splat(RandomGenerator.DefaultSeed));
+    }
+
+    [NoAlloc]
+    public void Reseed(U32x4 seeds)
+    {
+        state = seeds;
+    }
+
+    [NoAlloc]
+    public U32x4 NextUInt(Mask32x4 active)
+    {
+        U32x4 value = state;
+        value = U32x4.Xor(value, value.ShiftLeft<13>());
+        value = U32x4.Xor(value, value.ShiftRight<17>());
+        value = U32x4.Xor(value, value.ShiftLeft<5>());
+        state = U32x4.Select(active, value, state);
+        return U32x4.Select(active, value, U32x4.Zero);
+    }
+
+    [NoAlloc]
+    public F32x4 NextFloat(Mask32x4 active)
+    {
+        return F32x4.Select(active, F32x4.FromU32(NextUInt(active).ShiftRight<8>()) /
+            F32x4.Splat(16777216.0f), F32x4.Zero);
+    }
+
+    [NoAlloc]
+    public F32x4 Range(float minimum, float maximum, Mask32x4 active)
+    {
+        return F32x4.Splat(minimum) + F32x4.Splat(maximum - minimum) * NextFloat(active);
+    }
+
+    [NoAlloc]
+    public Vec3x4 Vector(float minimum, float maximum, Mask32x4 active)
+    {
+        return new Vec3x4(Range(minimum, maximum, active), Range(minimum, maximum,
+            active), Range(minimum, maximum, active));
+    }
+
+    [NoAlloc]
+    public Vec3x4 InUnitSphere(Mask32x4 active)
+    {
+        Vec3x4 result = Vec3x4.Zero;
+        Mask32x4 pending = active;
+        while (pending.Any())
+        {
+            Vec3x4 candidate = Vector(-1.0f, 1.0f, pending);
+            F32x4 lengthSquared = candidate.LengthSquared();
+            Mask32x4 accepted = Mask32x4.And(pending, Mask32x4.And(F32x4.CompareLessThan(lengthSquared,
+                F32x4.Splat(1.0f)), F32x4.CompareGreaterThan(lengthSquared, F32x4.Splat(0.000000000001f))));
+            result = Vec3x4.Select(accepted, candidate, result);
+            pending = Mask32x4.AndNot(accepted, pending);
+        }
+        return result;
+    }
+
+    [NoAlloc]
+    public Vec3x4 UnitVector(Mask32x4 active)
+    {
+        return Vec3x4.Select(active, InUnitSphere(active).Normalize(), Vec3x4.Zero);
+    }
+
+    [NoAlloc]
+    public Vec3x4 InUnitDisk(Mask32x4 active)
+    {
+        Vec3x4 result = Vec3x4.Zero;
+        Mask32x4 pending = active;
+        while (pending.Any())
+        {
+            Vec3x4 candidate = new Vec3x4(Range(-1.0f, 1.0f, pending), Range(-1.0f,
+                1.0f, pending), F32x4.Zero);
+            Mask32x4 accepted = Mask32x4.And(pending, F32x4.CompareLessThan(candidate.LengthSquared(),
+                F32x4.Splat(1.0f)));
+            result = Vec3x4.Select(accepted, candidate, result);
+            pending = Mask32x4.AndNot(accepted, pending);
+        }
+        return result;
     }
 }

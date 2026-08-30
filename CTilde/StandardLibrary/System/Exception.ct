@@ -18,7 +18,10 @@ public class Exception
 
     public string Message
     {
-        get { return message; }
+        get
+        {
+            return message;
+        }
     }
 
     public override string ToString()
@@ -32,60 +35,84 @@ public class Exception
 
 public sealed class NullReferenceException : Exception
 {
-    public NullReferenceException() : base("Object reference is null.") { }
+    public NullReferenceException() : base("Object reference is null.")
+    {
+    }
 }
 
 public sealed class IndexOutOfRangeException : Exception
 {
-    public IndexOutOfRangeException() : base("Index is outside the valid range.") { }
+    public IndexOutOfRangeException() : base("Index is outside the valid range.")
+    {
+    }
 }
 
 public sealed class DivideByZeroException : Exception
 {
-    public DivideByZeroException() : base("Integer division by zero.") { }
+    public DivideByZeroException() : base("Integer division by zero.")
+    {
+    }
 }
 
 public sealed class InvalidCastException : Exception
 {
-    public InvalidCastException() : base("The value has an incompatible runtime type.") { }
+    public InvalidCastException() : base("The value has an incompatible runtime type.")
+    {
+    }
 }
 
 public sealed class OverflowException : Exception
 {
-    public OverflowException() : base("A checked size operation overflowed.") { }
+    public OverflowException() : base("A checked size operation overflowed.")
+    {
+    }
 }
 
 public sealed class ArgumentException : Exception
 {
-    public ArgumentException() : base("An argument is invalid.") { }
+    public ArgumentException() : base("An argument is invalid.")
+    {
+    }
 }
 
 public sealed class ArgumentOutOfRangeException : Exception
 {
-    public ArgumentOutOfRangeException() : base("An argument is outside the valid range.") { }
+    public ArgumentOutOfRangeException() : base("An argument is outside the valid range.")
+    {
+    }
 }
 
 public sealed class InvalidOperationException : Exception
 {
-    public InvalidOperationException() : base("The operation is not valid for the current state.") { }
+    public InvalidOperationException() : base("The operation is not valid for the current state.")
+    {
+    }
 }
 
 public sealed class KeyNotFoundException : Exception
 {
-    public KeyNotFoundException() : base("The requested key was not found.") { }
+    public KeyNotFoundException() : base("The requested key was not found.")
+    {
+    }
 }
 
 public sealed class OutOfMemoryException : Exception
 {
-    public OutOfMemoryException() : base("Managed allocation failed.") { }
+    public OutOfMemoryException() : base("Managed allocation failed.")
+    {
+    }
 }
 
 public sealed class ThreadStateException : Exception
 {
-    public ThreadStateException() : base("The thread is in an invalid state for this operation.") { }
+    public ThreadStateException() : base("The thread is in an invalid state for this operation.")
+    {
+    }
 }
 
 public sealed class SynchronizationLockException : Exception
 {
-    public SynchronizationLockException() : base("The current thread does not own the mutex.") { }
+    public SynchronizationLockException() : base("The current thread does not own the mutex.")
+    {
+    }
 }

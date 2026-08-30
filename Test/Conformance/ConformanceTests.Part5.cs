@@ -21,8 +21,8 @@ internal static partial class ConformanceTests
         suite.Run("object ABI snapshot", () =>
         {
             var source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Examples", "ObjectModel", "Program.ct"));
-            var projection = ProjectObjectAbi(Emit(source));
-            var expected = Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt")));
+            var projection = NormalizeObjectAbi(ProjectObjectAbi(Emit(source)));
+            var expected = NormalizeObjectAbi(Normalize(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Snapshots", "object-model.abi.txt"))));
             Assert(projection == expected, $"Generated object ABI snapshot changed.{Environment.NewLine}{projection}");
         });
 

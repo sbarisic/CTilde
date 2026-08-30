@@ -389,6 +389,9 @@ internal static partial class ConformanceTests
 
     static string Normalize(string value) => value.Replace("\r\n", "\n", StringComparison.Ordinal);
 
+    static string NormalizeObjectAbi(string value) =>
+        System.Text.RegularExpressions.Regex.Replace(value, "(\\\"test\\.ct\\\", )\\d+", "$1<line>", System.Text.RegularExpressions.RegexOptions.CultureInvariant);
+
     static string ProjectObjectAbi(string generated)
     {
         var result = new StringBuilder();

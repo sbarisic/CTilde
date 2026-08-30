@@ -26,25 +26,37 @@ public struct Vec2
     [NoAlloc]
     public static Vec2 Zero
     {
-        get { return new Vec2(); }
+        get
+        {
+            return new Vec2();
+        }
     }
 
     [NoAlloc]
     public static Vec2 One
     {
-        get { return new Vec2(1.0f); }
+        get
+        {
+            return new Vec2(1.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec2 UnitX
     {
-        get { return new Vec2(1.0f, 0.0f); }
+        get
+        {
+            return new Vec2(1.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec2 UnitY
     {
-        get { return new Vec2(0.0f, 1.0f); }
+        get
+        {
+            return new Vec2(0.0f, 1.0f);
+        }
     }
 
     [NoAlloc]
@@ -123,5 +135,47 @@ public struct Vec2
     public Vec2 Normalize()
     {
         return this / Length();
+    }
+
+    [NoAlloc]
+    public static Vec2 Abs(Vec2 value)
+    {
+        return new Vec2(Math.Abs(value.X), Math.Abs(value.Y));
+    }
+
+    [NoAlloc]
+    public static Vec2 Min(Vec2 left, Vec2 right)
+    {
+        return new Vec2(Math.Min(left.X, right.X), Math.Min(left.Y, right.Y));
+    }
+
+    [NoAlloc]
+    public static Vec2 Max(Vec2 left, Vec2 right)
+    {
+        return new Vec2(Math.Max(left.X, right.X), Math.Max(left.Y, right.Y));
+    }
+
+    [NoAlloc]
+    public static Vec2 Clamp(Vec2 value, Vec2 minimum, Vec2 maximum)
+    {
+        return Min(Max(value, minimum), maximum);
+    }
+
+    [NoAlloc]
+    public static Vec2 Lerp(Vec2 left, Vec2 right, float amount)
+    {
+        return left + (right - left) * amount;
+    }
+
+    [NoAlloc]
+    public static float DistanceSquared(Vec2 left, Vec2 right)
+    {
+        return(right - left).LengthSquared();
+    }
+
+    [NoAlloc]
+    public static float Distance(Vec2 left, Vec2 right)
+    {
+        return Math.Sqrt(DistanceSquared(left, right));
     }
 }

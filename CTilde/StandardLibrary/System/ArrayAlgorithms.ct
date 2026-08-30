@@ -9,7 +9,6 @@ public static class ArrayAlgorithms
         {
             result[index] = source[index];
         }
-
         return result;
     }
 
@@ -27,7 +26,6 @@ public static class ArrayAlgorithms
                 return index;
             }
         }
-
         return -1;
     }
 
@@ -40,7 +38,6 @@ public static class ArrayAlgorithms
                 return index;
             }
         }
-
         return -1;
     }
 
@@ -58,7 +55,6 @@ public static class ArrayAlgorithms
                 return false;
             }
         }
-
         return true;
     }
 
@@ -72,7 +68,6 @@ public static class ArrayAlgorithms
                 count++;
             }
         }
-
         return count;
     }
 
@@ -91,7 +86,6 @@ public static class ArrayAlgorithms
         {
             result[index] = mapper(source[index]);
         }
-
         return result;
     }
 
@@ -108,7 +102,6 @@ public static class ArrayAlgorithms
                 count++;
             }
         }
-
         T[] result = new T[count];
         int output = 0;
         for (int index = 0; index < source.Length; index++)
@@ -119,7 +112,6 @@ public static class ArrayAlgorithms
                 output++;
             }
         }
-
         return result;
     }
 
@@ -130,7 +122,6 @@ public static class ArrayAlgorithms
         {
             result = folder(result, source[index]);
         }
-
         return result;
     }
 
@@ -141,7 +132,6 @@ public static class ArrayAlgorithms
         {
             result[source.Length - index - 1] = source[index];
         }
-
         return result;
     }
 
@@ -157,10 +147,8 @@ public static class ArrayAlgorithms
                 result[insertion] = result[insertion - 1];
                 insertion--;
             }
-
             result[insertion] = value;
         }
-
         return result;
     }
 }

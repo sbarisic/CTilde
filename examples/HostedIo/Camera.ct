@@ -16,7 +16,6 @@ public sealed class Camera
     public float DefocusAngle;
     public float FocusDistance;
     public int ProgressRows;
-
     private int imageHeight;
     private float sampleScale;
     private Vec3 center;
@@ -56,9 +55,9 @@ public sealed class Camera
     public void Render(FileHandle image, Hittable world, uint renderSeed)
     {
         Initialize();
-        File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString() + "\n255\n");
+        File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString()
+            + "\n255\n");
         RandomGenerator random = new RandomGenerator(renderSeed);
-
         int row = 0;
         int lastProgressPercent = 0;
         while (row < imageHeight)
@@ -70,7 +69,8 @@ public sealed class Camera
                 int sample = 0;
                 while (sample < SamplesPerPixel)
                 {
-                    random.Reseed(RandomGenerator.SampleSeed(renderSeed, column, row, sample));
+                    random.Reseed(RandomGenerator.SampleSeed(renderSeed, column,
+                        row, sample));
                     Ray ray = GetRay(column, row, random);
                     color += RayColor(ray, MaxDepth, world, random);
                     sample++;
@@ -78,7 +78,6 @@ public sealed class Camera
                 WriteColor(image, color);
                 column++;
             }
-
             int completed = row + 1;
             if (ProgressRows > 0 && (completed % ProgressRows == 0 || completed == imageHeight))
             {
@@ -99,25 +98,20 @@ public sealed class Camera
         imageHeight = ImageHeight;
         sampleScale = 1.0f / (float)SamplesPerPixel;
         center = LookFrom;
-
         float theta = VerticalFieldOfView * Math.Pi / 180.0f;
         float viewportHeight = 2.0f * Math.Tan(theta * 0.5f) * FocusDistance;
         float viewportWidth = viewportHeight * ((float)ImageWidth / (float)imageHeight);
-
         Vec3 viewBack = (LookFrom - LookAt).Normalize();
         Vec3 viewRight = Up.Cross(viewBack).Normalize();
         Vec3 viewUp = viewBack.Cross(viewRight);
-
         Vec3 viewportU = viewportWidth * viewRight;
         Vec3 viewportV = -viewportHeight * viewUp;
         pixelDeltaU = viewportU / (float)ImageWidth;
         pixelDeltaV = viewportV / (float)imageHeight;
-
         Vec3 viewportUpperLeft = center - FocusDistance * viewBack;
         viewportUpperLeft -= viewportU * 0.5f;
         viewportUpperLeft -= viewportV * 0.5f;
         pixel00Location = viewportUpperLeft + (pixelDeltaU + pixelDeltaV) * 0.5f;
-
         float defocusRadius = FocusDistance * Math.Tan(DefocusAngle * Math.Pi / 360.0f);
         defocusDiskU = viewRight * defocusRadius;
         defocusDiskV = viewUp * defocusRadius;
@@ -131,7 +125,6 @@ public sealed class Camera
         Vec3 pixelSample = pixel00Location;
         pixelSample += ((float)column + offsetX) * pixelDeltaU;
         pixelSample += ((float)row + offsetY) * pixelDeltaV;
-
         Vec3 origin = center;
         if (DefocusAngle > 0.0f)
         {
@@ -147,22 +140,22 @@ public sealed class Camera
     {
         if (depth <= 0)
             return Vec3.Zero;
-
         HitRecord hit;
-        bool hasHit = world.Hit(ray, new Interval(0.001f, 1000000000000000000000000000000.0f), out hit);
+        bool hasHit = world.Hit(ray, new Interval(0.001f, 1000000000000000000000000000000.0f),
+            out hit);
         if (hasHit)
         {
             Vec3 attenuation;
             Ray scattered;
-            bool didScatter = hit.SurfaceMaterial.Scatter(ray, hit, random, out attenuation, out scattered);
+            bool didScatter = hit.SurfaceMaterial.Scatter(ray, hit, random, out attenuation,
+                out scattered);
             if (didScatter)
                 return attenuation * RayColor(scattered, depth - 1, world, random);
             return Vec3.Zero;
         }
-
         Vec3 unitDirection = ray.Direction.Normalize();
         float blend = 0.5f * (unitDirection.Y + 1.0f);
-        return (1.0f - blend) * Vec3.One + blend * new Vec3(0.5f, 0.7f, 1.0f);
+        return(1.0f - blend) * Vec3.One + blend * new Vec3(0.5f, 0.7f, 1.0f);
     }
 
     private void WriteColor(FileHandle image, Vec3 accumulated)
@@ -170,7 +163,8 @@ public sealed class Camera
         int red = ToColorByte(LinearToGamma(accumulated.X * sampleScale));
         int green = ToColorByte(LinearToGamma(accumulated.Y * sampleScale));
         int blue = ToColorByte(LinearToGamma(accumulated.Z * sampleScale));
-        File.Write(image, red.ToString() + " " + green.ToString() + " " + blue.ToString() + "\n");
+        File.Write(image, red.ToString() + " " + green.ToString() + " " + blue.ToString()
+            + "\n");
     }
 
     [NoAlloc]
@@ -184,6 +178,6 @@ public sealed class Camera
     [NoAlloc]
     private static int ToColorByte(float value)
     {
-        return (int)(256.0f * new Interval(0.0f, 0.999f).Clamp(value));
+        return(int)(256.0f * new Interval(0.0f, 0.999f).Clamp(value));
     }
 }

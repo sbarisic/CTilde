@@ -1,11 +1,17 @@
 namespace System;
 
 public delegate bool Predicate<T>(T value);
+
 public delegate bool Equality<T>(T left, T right);
+
 public delegate int Hasher<T>(T value);
+
 public delegate int Ordering<T>(T left, T right);
+
 public delegate TOutput Mapper<TInput, TOutput>(TInput value);
+
 public delegate TState Folder<TState, TValue>(TState state, TValue value);
+
 public delegate void Visitor<T>(T value);
 
 public readonly struct Pair<TFirst, TSecond>
@@ -40,13 +46,19 @@ public struct Option<T>
 
     public static Option<T> None
     {
-        get { return CreateNone(); }
+        get
+        {
+            return CreateNone();
+        }
     }
 
     [NoAlloc]
     public bool HasValue
     {
-        get { return hasValue; }
+        get
+        {
+            return hasValue;
+        }
     }
 
     [NoAlloc]
@@ -63,7 +75,6 @@ public struct Option<T>
         {
             return value;
         }
-
         return fallback;
     }
 
@@ -74,7 +85,6 @@ public struct Option<T>
             Option<TOutput> result = new Option<TOutput>();
             return result;
         }
-
         return Option<TOutput>.Some(mapper(value));
     }
 }
@@ -104,13 +114,19 @@ public struct Result<TOk, TErr>
     [NoAlloc]
     public bool IsOk
     {
-        get { return isOk; }
+        get
+        {
+            return isOk;
+        }
     }
 
     [NoAlloc]
     public bool IsErr
     {
-        get { return !isOk; }
+        get
+        {
+            return !isOk;
+        }
     }
 
     [NoAlloc]
@@ -134,7 +150,6 @@ public struct Result<TOk, TErr>
         {
             return ok;
         }
-
         return fallback;
     }
 
@@ -145,7 +160,6 @@ public struct Result<TOk, TErr>
         {
             return error;
         }
-
         return fallback;
     }
 
@@ -155,7 +169,6 @@ public struct Result<TOk, TErr>
         {
             return Result<TOutput, TErr>.Err(error);
         }
-
         return Result<TOutput, TErr>.Ok(mapper(ok));
     }
 
@@ -165,7 +178,6 @@ public struct Result<TOk, TErr>
         {
             return Result<TOk, TOutput>.Ok(ok);
         }
-
         return Result<TOk, TOutput>.Err(mapper(error));
     }
 }

@@ -6,7 +6,9 @@ public delegate int ExceptionReader();
 
 public class DemoException : Exception
 {
-    public DemoException(string message) : base(message) { }
+    public DemoException(string message) : base(message)
+    {
+    }
 }
 
 public static class ExceptionExample

@@ -16,7 +16,7 @@ test("manifest registers the C~ language and grammar", async () => {
   const [grammar] = manifest.contributes.grammars;
 
   assert.equal(manifest.name, "ctilde-language");
-  assert.equal(manifest.version, "0.14.0");
+  assert.equal(manifest.version, "0.15.0");
   assert.equal(manifest.engines.vscode, "^1.85.0");
   assert.equal(manifest.license, "SEE LICENSE IN LICENSE");
   assert.equal(manifest.preview, true);

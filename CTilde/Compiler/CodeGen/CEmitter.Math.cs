@@ -11,6 +11,7 @@ internal sealed partial class CEmitter
         ("ct_math_max", "fmaxf", "float", 2),
         ("ct_math_sin", "sinf", "float", 1),
         ("ct_math_cos", "cosf", "float", 1),
+        ("ct_math_acos", "acosf", "float", 1),
         ("ct_math_floor", "floorf", "float", 1),
         ("ct_math_ceiling", "ceilf", "float", 1),
         ("ct_math_sqrt_double", "sqrt", "double", 1),
@@ -20,6 +21,7 @@ internal sealed partial class CEmitter
         ("ct_math_max_double", "fmax", "double", 2),
         ("ct_math_sin_double", "sin", "double", 1),
         ("ct_math_cos_double", "cos", "double", 1),
+        ("ct_math_acos_double", "acos", "double", 1),
         ("ct_math_floor_double", "floor", "double", 1),
         ("ct_math_ceiling_double", "ceil", "double", 1),
     ];

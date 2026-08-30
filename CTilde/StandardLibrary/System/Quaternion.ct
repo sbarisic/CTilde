@@ -1,0 +1,233 @@
+namespace System;
+
+public struct Quaternion
+{
+    public float X;
+    public float Y;
+    public float Z;
+    public float W;
+
+    public Quaternion(float x, float y, float z, float w)
+    {
+        X = x;
+        Y = y;
+        Z = z;
+        W = w;
+    }
+
+    [NoAlloc]
+    public static Quaternion Identity
+    {
+        get
+        {
+            return new Quaternion(0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    }
+
+    [NoAlloc]
+    public float LengthSquared()
+    {
+        return X * X + Y * Y + Z * Z + W * W;
+    }
+
+    [NoAlloc]
+    public float Length()
+    {
+        return Math.Sqrt(LengthSquared());
+    }
+
+    [NoAlloc]
+    public static float Dot(Quaternion a, Quaternion b)
+    {
+        return a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W;
+    }
+
+    [NoAlloc]
+    public Quaternion Conjugate()
+    {
+        return new Quaternion(-X, -Y, -Z, W);
+    }
+
+    [NoAlloc]
+    public Quaternion Normalize()
+    {
+        float inverse = 1.0f / Length();
+        return new Quaternion(X * inverse, Y * inverse, Z * inverse, W * inverse);
+    }
+
+    [NoAlloc]
+    public Quaternion Inverse()
+    {
+        float inverse = 1.0f / LengthSquared();
+        return new Quaternion(-X * inverse, -Y * inverse, -Z * inverse, W * inverse);
+    }
+
+    [NoAlloc]
+    public static bool TryNormalize(Quaternion value, out Quaternion result)
+    {
+        float length = value.Length();
+        if (length == 0.0f || length - length != 0.0f)
+        {
+            result = Identity;
+            return false;
+        }
+        float inverse = 1.0f / length;
+        result = new Quaternion(value.X * inverse, value.Y * inverse, value.Z * inverse,
+            value.W * inverse);
+        return true;
+    }
+
+    [NoAlloc]
+    public static bool TryInverse(Quaternion value, out Quaternion result)
+    {
+        float length = value.LengthSquared();
+        if (length == 0.0f || length - length != 0.0f)
+        {
+            result = Identity;
+            return false;
+        }
+        float inverse = 1.0f / length;
+        result = new Quaternion(-value.X * inverse, -value.Y * inverse, -value.Z
+            * inverse, value.W * inverse);
+        return true;
+    }
+
+    [NoAlloc]
+    public static Quaternion operator +(Quaternion a, Quaternion b)
+    {
+        return new Quaternion(a.X + b.X, a.Y + b.Y, a.Z + b.Z, a.W + b.W);
+    }
+
+    [NoAlloc]
+    public static Quaternion operator -(Quaternion a, Quaternion b)
+    {
+        return new Quaternion(a.X - b.X, a.Y - b.Y, a.Z - b.Z, a.W - b.W);
+    }
+
+    [NoAlloc]
+    public static Quaternion operator -(Quaternion value)
+    {
+        return new Quaternion(-value.X, -value.Y, -value.Z, -value.W);
+    }
+
+    [NoAlloc]
+    public static Quaternion operator *(Quaternion value, float scale)
+    {
+        return new Quaternion(value.X * scale, value.Y * scale, value.Z * scale,
+            value.W * scale);
+    }
+
+    [NoAlloc]
+    public static Quaternion operator *(Quaternion a, Quaternion b)
+    {
+        return new Quaternion(a.W * b.X + a.X * b.W + a.Y * b.Z - a.Z * b.Y, a.W
+            * b.Y - a.X * b.Z + a.Y * b.W + a.Z * b.X, a.W * b.Z + a.X * b.Y - a.Y
+            * b.X + a.Z * b.W, a.W * b.W - a.X * b.X - a.Y * b.Y - a.Z * b.Z);
+    }
+
+    [NoAlloc]
+    public static Quaternion Lerp(Quaternion a, Quaternion b, float amount)
+    {
+        if (Dot(a, b) < 0.0f)
+            b = -b;
+        return(a * (1.0f - amount) + b * amount).Normalize();
+    }
+
+    [NoAlloc]
+    public static Quaternion Slerp(Quaternion a, Quaternion b, float amount)
+    {
+        float cosine = Dot(a, b);
+        if (cosine < 0.0f)
+        {
+            b = -b;
+            cosine = -cosine;
+        }
+        if (cosine > 0.9995f)
+            return Lerp(a, b, amount);
+        cosine = Math.Max(-1.0f, Math.Min(1.0f, cosine));
+        float angle = Math.Acos(cosine);
+        float sine = Math.Sin(angle);
+        float left = Math.Sin((1.0f - amount) * angle) / sine;
+        float right = Math.Sin(amount * angle) / sine;
+        return a * left + b * right;
+    }
+
+    [NoAlloc]
+    public static Quaternion CreateFromAxisAngle(Vec3 axis, float radians)
+    {
+        float half = radians * 0.5f;
+        float sine = Math.Sin(half);
+        return new Quaternion(axis.X * sine, axis.Y * sine, axis.Z * sine, Math.Cos(half));
+    }
+
+    [NoAlloc]
+    public static Quaternion CreateFromYawPitchRoll(float yaw, float pitch, float roll)
+    {
+        float halfRoll = roll * 0.5f;
+        float sr = Math.Sin(halfRoll);
+        float cr = Math.Cos(halfRoll);
+        float halfPitch = pitch * 0.5f;
+        float sp = Math.Sin(halfPitch);
+        float cp = Math.Cos(halfPitch);
+        float halfYaw = yaw * 0.5f;
+        float sy = Math.Sin(halfYaw);
+        float cy = Math.Cos(halfYaw);
+        return new Quaternion(cy * sp * cr + sy * cp * sr, sy * cp * cr - cy * sp
+            * sr, cy * cp * sr - sy * sp * cr, cy * cp * cr + sy * sp * sr);
+    }
+
+    [NoAlloc]
+    public static Quaternion CreateFromRotationMatrix(Matrix4x4 m)
+    {
+        float trace = m.M11 + m.M22 + m.M33;
+        if (trace > 0.0f)
+        {
+            float s = Math.Sqrt(trace + 1.0f);
+            float inverse = 0.5f / s;
+            return new Quaternion((m.M23 - m.M32) * inverse, (m.M31 - m.M13) * inverse,
+                (m.M12 - m.M21) * inverse, s * 0.5f);
+        }
+        if (m.M11 >= m.M22 && m.M11 >= m.M33)
+        {
+            float s = Math.Sqrt(1.0f + m.M11 - m.M22 - m.M33);
+            float inverse = 0.5f / s;
+            return new Quaternion(0.5f * s, (m.M12 + m.M21) * inverse, (m.M13 + m.M31)
+                * inverse, (m.M23 - m.M32) * inverse);
+        }
+        if (m.M22 > m.M33)
+        {
+            float s = Math.Sqrt(1.0f + m.M22 - m.M11 - m.M33);
+            float inverse = 0.5f / s;
+            return new Quaternion((m.M21 + m.M12) * inverse, 0.5f * s, (m.M32 + m.M23)
+                * inverse, (m.M31 - m.M13) * inverse);
+        }
+        float s = Math.Sqrt(1.0f + m.M33 - m.M11 - m.M22);
+        float inverse = 0.5f / s;
+        return new Quaternion((m.M31 + m.M13) * inverse, (m.M32 + m.M23) * inverse,
+            0.5f * s, (m.M12 - m.M21) * inverse);
+    }
+
+    [NoAlloc]
+    public Matrix4x4 ToMatrix4x4()
+    {
+        float xx = X * X;
+        float yy = Y * Y;
+        float zz = Z * Z;
+        float xy = X * Y;
+        float wz = Z * W;
+        float xz = Z * X;
+        float wy = Y * W;
+        float yz = Y * Z;
+        float wx = X * W;
+        return new Matrix4x4(1.0f - 2.0f * (yy + zz), 2.0f * (xy + wz), 2.0f * (xz
+            - wy), 0.0f, 2.0f * (xy - wz), 1.0f - 2.0f * (zz + xx), 2.0f * (yz + wx),
+            0.0f, 2.0f * (xz + wy), 2.0f * (yz - wx), 1.0f - 2.0f * (yy + xx), 0.0f,
+            0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    [NoAlloc]
+    public Vec3 Transform(Vec3 value)
+    {
+        return ToMatrix4x4().TransformVector(value);
+    }
+}

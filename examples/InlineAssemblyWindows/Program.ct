@@ -9,12 +9,8 @@ public static class AssemblyMath
     {
         int result;
         [NoAlloc]
-        asm (
-            in left as leftValue,
-            in right as rightValue,
-            out("&r") result,
-            clobber("cc")
-        ) {
+        asm(in left as leftValue, in right as rightValue, out("&r") result, clobber("cc"))
+        {
             movl leftValue, result
             addl rightValue, result
         }
@@ -26,12 +22,8 @@ public static class AssemblyMath
     {
         int result;
         [NoAlloc]
-        asm (
-            in left as leftValue,
-            in right as rightValue,
-            out("&r") result,
-            clobber("cc")
-        ) {
+        asm(in left as leftValue, in right as rightValue, out("&r") result, clobber("cc"))
+        {
             movl leftValue, result
             subl rightValue, result
         }
@@ -43,12 +35,8 @@ public static class AssemblyMath
     {
         int result;
         [NoAlloc]
-        asm (
-            in left as leftValue,
-            in right as rightValue,
-            out("&r") result,
-            clobber("cc")
-        ) {
+        asm(in left as leftValue, in right as rightValue, out("&r") result, clobber("cc"))
+        {
             movl leftValue, result
             imull rightValue, result
         }
@@ -59,7 +47,8 @@ public static class AssemblyMath
     public static unsafe int Increment(int value)
     {
         [NoAlloc]
-        asm (ref value, clobber("cc")) {
+        asm(ref value, clobber("cc"))
+        {
             addl $1, value
         }
         return value;
@@ -69,7 +58,8 @@ public static class AssemblyMath
     public static unsafe int Negate(int value)
     {
         [NoAlloc]
-        asm (ref value, clobber("cc")) {
+        asm(ref value, clobber("cc"))
+        {
             negl value
         }
         return value;
@@ -79,11 +69,8 @@ public static class AssemblyMath
     public static unsafe uint RotateLeft(uint value, int bitCount)
     {
         [NoAlloc]
-        asm (
-            in("c") bitCount,
-            ref value,
-            clobber("cc")
-        ) {
+        asm(in("c") bitCount, ref value, clobber("cc"))
+        {
             roll %cl, value
         }
         return value;

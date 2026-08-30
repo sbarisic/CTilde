@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.14.0 - Preview
+## 0.15.0 - Preview
 
-- Added Draft 0.36 generic collections, indexers, enumeration, and iterator syntax.
+- Added solution-wide semantic Find All References and native Visual Studio reference-count CodeLens indicators with lazy details, navigation, live refresh, and an opt-out setting.
+- Added Draft 0.37 SIMD128, matrix, quaternion, and scalar-vector helper completion, hover, signatures, semantic tokens, and embedded-source navigation.
 - Aligned the VSIX, bundled compiler, language server, and debug adapter.
 
 ## 0.13.0 - Preview

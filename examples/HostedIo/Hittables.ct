@@ -16,7 +16,7 @@ public struct Aabb
     [NoAlloc]
     public Vec3 Centroid()
     {
-        return (Min + Max) * 0.5f;
+        return(Min + Max) * 0.5f;
     }
 
     [NoAlloc]
@@ -33,9 +33,10 @@ public struct Aabb
     [NoAlloc]
     public static Aabb Union(Aabb left, Aabb right)
     {
-        return new Aabb(
-            new Vec3(Math.Min(left.Min.X, right.Min.X), Math.Min(left.Min.Y, right.Min.Y), Math.Min(left.Min.Z, right.Min.Z)),
-            new Vec3(Math.Max(left.Max.X, right.Max.X), Math.Max(left.Max.Y, right.Max.Y), Math.Max(left.Max.Z, right.Max.Z)));
+        return new Aabb(new Vec3(Math.Min(left.Min.X, right.Min.X), Math.Min(left.Min.Y,
+            right.Min.Y), Math.Min(left.Min.Z, right.Min.Z)), new Vec3(Math.Max(left.Max.X,
+            right.Max.X), Math.Max(left.Max.Y, right.Max.Y), Math.Max(left.Max.Z,
+            right.Max.Z)));
     }
 
     [NoAlloc]
@@ -50,9 +51,10 @@ public struct Aabb
     {
         float near = interval.Min;
         float far = interval.Max;
-        if (!IntersectAxis(ray.Origin.X, ray.Direction.X, Min.X, Max.X, ref near, ref far) ||
-            !IntersectAxis(ray.Origin.Y, ray.Direction.Y, Min.Y, Max.Y, ref near, ref far) ||
-            !IntersectAxis(ray.Origin.Z, ray.Direction.Z, Min.Z, Max.Z, ref near, ref far))
+        if (!IntersectAxis(ray.Origin.X, ray.Direction.X, Min.X, Max.X, ref near,
+            ref far) || !IntersectAxis(ray.Origin.Y, ray.Direction.Y, Min.Y, Max.Y,
+            ref near, ref far) || !IntersectAxis(ray.Origin.Z, ray.Direction.Z, Min.Z,
+            Max.Z, ref near, ref far))
         {
             entry = interval.Max;
             return false;
@@ -62,7 +64,8 @@ public struct Aabb
     }
 
     [NoAlloc]
-    private static bool IntersectAxis(float origin, float direction, float min, float max, ref float near, ref float far)
+    private static bool IntersectAxis(float origin, float direction, float min, float max,
+        ref float near, ref float far)
     {
         if (Math.Abs(direction) < 0.000000000001f)
             return origin >= min && origin <= max;
@@ -140,7 +143,6 @@ public sealed class Sphere : Hittable
         float discriminant = halfB * halfB - a * c;
         if (discriminant < 0.0f)
             return false;
-
         float root = (-halfB - Math.Sqrt(discriminant)) / a;
         if (!interval.Surrounds(root))
         {
@@ -148,7 +150,6 @@ public sealed class Sphere : Hittable
             if (!interval.Surrounds(root))
                 return false;
         }
-
         HitRecord result = new HitRecord();
         result.Distance = root;
         result.Point = ray.At(root);
@@ -182,7 +183,10 @@ public sealed class HittableList : Hittable
     [NoAlloc]
     public int Count
     {
-        get { return count; }
+        get
+        {
+            return count;
+        }
     }
 
     public void Add(Hittable value)
@@ -221,7 +225,8 @@ public sealed class HittableList : Hittable
         while (index < count)
         {
             HitRecord candidate;
-            bool didHit = objects[index].Hit(ray, new Interval(interval.Min, closestDistance), out candidate);
+            bool didHit = objects[index].Hit(ray, new Interval(interval.Min, closestDistance),
+                out candidate);
             if (didHit)
             {
                 hitAnything = true;
@@ -282,7 +287,6 @@ public sealed class BvhNode : Hittable
         int length = end - start;
         if (length == 1)
             return new BvhNode(objects[start], null, false);
-
         Aabb aggregate = objects[start].BoundingBox();
         int index = start + 1;
         while (index < end)
@@ -316,7 +320,8 @@ public sealed class BvhNode : Hittable
             Hittable value = objects[index];
             float centroid = Axis(value.BoundingBox().Centroid(), axis);
             int insertion = index;
-            while (insertion > start && Axis(objects[insertion - 1].BoundingBox().Centroid(), axis) > centroid)
+            while (insertion > start && Axis(objects[insertion - 1].BoundingBox().Centroid(),
+                axis) > centroid)
             {
                 objects[insertion] = objects[insertion - 1];
                 insertion--;
@@ -348,14 +353,12 @@ public sealed class BvhNode : Hittable
         hit = new HitRecord();
         if (!bounds.Hit(ray, interval))
             return false;
-
         float leftEntry;
         bool canHitLeft = leftBounds.Hit(ray, interval, out leftEntry);
         float rightEntry = interval.Max;
         bool canHitRight = hasRight && rightBounds.Hit(ray, interval, out rightEntry);
         if (!canHitLeft && !canHitRight)
             return false;
-
         Hittable first = left;
         Hittable second = right;
         bool canHitFirst = canHitLeft;
@@ -367,7 +370,6 @@ public sealed class BvhNode : Hittable
             canHitFirst = canHitRight;
             canHitSecond = canHitLeft;
         }
-
         bool hitAnything = false;
         float closest = interval.Max;
         HitRecord candidate;
@@ -377,7 +379,8 @@ public sealed class BvhNode : Hittable
             closest = candidate.Distance;
             hit = candidate;
         }
-        if (canHitSecond && second.Hit(ray, new Interval(interval.Min, closest), out candidate))
+        if (canHitSecond && second.Hit(ray, new Interval(interval.Min, closest),
+            out candidate))
         {
             hitAnything = true;
             hit = candidate;

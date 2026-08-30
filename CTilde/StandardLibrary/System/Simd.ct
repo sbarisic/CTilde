@@ -7,26 +7,152 @@ public struct Mask32x4
     private uint l2;
     private uint l3;
 
-    internal Mask32x4(uint a, uint b, uint c, uint d) { l0 = a; l1 = b; l2 = c; l3 = d; }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] internal static Mask32x4 FromBools(bool a, bool b, bool c, bool d) { return new Mask32x4(Bits(a), Bits(b), Bits(c), Bits(d)); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static uint Bits(bool value) { if (value) { return 0xffffffffu; } return 0u; }
+    internal Mask32x4(uint a, uint b, uint c, uint d)
+    {
+        l0 = a;
+        l1 = b;
+        l2 = c;
+        l3 = d;
+    }
 
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 And(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 & right.l0, left.l1 & right.l1, left.l2 & right.l2, left.l3 & right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 Or(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 | right.l0, left.l1 | right.l1, left.l2 | right.l2, left.l3 | right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 Xor(Mask32x4 left, Mask32x4 right) { return new Mask32x4(left.l0 ^ right.l0, left.l1 ^ right.l1, left.l2 ^ right.l2, left.l3 ^ right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 AndNot(Mask32x4 left, Mask32x4 right) { return new Mask32x4((~left.l0) & right.l0, (~left.l1) & right.l1, (~left.l2) & right.l2, (~left.l3) & right.l3); }
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    internal static Mask32x4 FromBools(bool a, bool b, bool c, bool d)
+    {
+        return new Mask32x4(Bits(a), Bits(b), Bits(c), Bits(d));
+    }
 
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static uint Bits(bool value)
+    {
+        if (value)
+        {
+            return 0xffffffffu;
+        }
+        return 0u;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 And(Mask32x4 left, Mask32x4 right)
+    {
+        return new Mask32x4(left.l0 & right.l0, left.l1 & right.l1, left.l2 & right.l2,
+            left.l3 & right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 Or(Mask32x4 left, Mask32x4 right)
+    {
+        return new Mask32x4(left.l0 | right.l0, left.l1 | right.l1, left.l2 | right.l2,
+            left.l3 | right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 Xor(Mask32x4 left, Mask32x4 right)
+    {
+        return new Mask32x4(left.l0 ^ right.l0, left.l1 ^ right.l1, left.l2 ^ right.l2,
+            left.l3 ^ right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 AndNot(Mask32x4 left, Mask32x4 right)
+    {
+        return new Mask32x4((~left.l0) & right.l0, (~left.l1) & right.l1, (~left.l2)
+            & right.l2, (~left.l3) & right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 Not(Mask32x4 value)
+    {
+        return new Mask32x4(~value.l0, ~value.l1, ~value.l2, ~value.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public bool Any()
+    {
+        return l0 != 0u || l1 != 0u || l2 != 0u || l3 != 0u;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public bool All()
+    {
+        return l0 != 0u && l1 != 0u && l2 != 0u && l3 != 0u;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public bool None()
+    {
+        return !Any();
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint MoveMask()
+    {
+        uint result = 0u;
+        if (l0 != 0u)
+            result = result | 1u;
+        if (l1 != 0u)
+            result = result | 2u;
+        if (l2 != 0u)
+            result = result | 4u;
+        if (l3 != 0u)
+            result = result | 8u;
+        return result;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public bool GetLane<const int Lane>()
     {
-        if (Lane == 0) { return l0 != 0; }
-        else if (Lane == 1) { return l1 != 0; }
-        else if (Lane == 2) { return l2 != 0; }
-        else { return l3 != 0; }
+        if (Lane == 0)
+        {
+            return l0 != 0;
+        }
+        else if (Lane == 1)
+        {
+            return l1 != 0;
+        }
+        else if (Lane == 2)
+        {
+            return l2 != 0;
+        }
+        else
+        {
+            return l3 != 0;
+        }
     }
 }
 
@@ -37,91 +163,1368 @@ public struct F32x4
     private float l2;
     private float l3;
 
-    public F32x4(float a, float b, float c, float d) { l0 = a; l1 = b; l2 = c; l3 = d; }
+    public F32x4(float a, float b, float c, float d)
+    {
+        l0 = a;
+        l1 = b;
+        l2 = c;
+        l3 = d;
+    }
 
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 Zero { get { return new F32x4(0.0f, 0.0f, 0.0f, 0.0f); } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 Splat(float value) { return new F32x4(value, value, value, value); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 Create(float a, float b, float c, float d) { return new F32x4(a, b, c, d); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 operator +(F32x4 left, F32x4 right) { return new F32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 operator -(F32x4 left, F32x4 right) { return new F32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 operator *(F32x4 left, F32x4 right) { return new F32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 operator /(F32x4 left, F32x4 right) { return new F32x4(left.l0 / right.l0, left.l1 / right.l1, left.l2 / right.l2, left.l3 / right.l3); }
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 Zero
+    {
+        get
+        {
+            return new F32x4(0.0f, 0.0f, 0.0f, 0.0f);
+        }
+    }
 
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 Splat(float value)
+    {
+        return new F32x4(value, value, value, value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 Create(float a, float b, float c, float d)
+    {
+        return new F32x4(a, b, c, d);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 operator +(F32x4 left, F32x4 right)
+    {
+        return new F32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2,
+            left.l3 + right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 operator -(F32x4 left, F32x4 right)
+    {
+        return new F32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2,
+            left.l3 - right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 operator *(F32x4 left, F32x4 right)
+    {
+        return new F32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2,
+            left.l3 * right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 operator /(F32x4 left, F32x4 right)
+    {
+        return new F32x4(left.l0 / right.l0, left.l1 / right.l1, left.l2 / right.l2,
+            left.l3 / right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 operator -(F32x4 value)
+    {
+        return new F32x4(-value.l0, -value.l1, -value.l2, -value.l3);
+    }
+
+    [NoAlloc]
+    public static F32x4 Min(F32x4 left, F32x4 right)
+    {
+        return new F32x4(System.Math.Min(left.l0, right.l0), System.Math.Min(left.l1,
+            right.l1), System.Math.Min(left.l2, right.l2), System.Math.Min(left.l3,
+            right.l3));
+    }
+
+    [NoAlloc]
+    public static F32x4 Max(F32x4 left, F32x4 right)
+    {
+        return new F32x4(System.Math.Max(left.l0, right.l0), System.Math.Max(left.l1,
+            right.l1), System.Math.Max(left.l2, right.l2), System.Math.Max(left.l3,
+            right.l3));
+    }
+
+    [NoAlloc]
+    public static F32x4 Abs(F32x4 value)
+    {
+        return new F32x4(System.Math.Abs(value.l0), System.Math.Abs(value.l1), System.Math.Abs(value.l2),
+            System.Math.Abs(value.l3));
+    }
+
+    [NoAlloc]
+    public static F32x4 Sqrt(F32x4 value)
+    {
+        return new F32x4(System.Math.Sqrt(value.l0), System.Math.Sqrt(value.l1),
+            System.Math.Sqrt(value.l2), System.Math.Sqrt(value.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 MultiplyAdd(F32x4 left, F32x4 right, F32x4 addend)
+    {
+        return left * right + addend;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public float Sum()
+    {
+        return((l0 + l1) + l2) + l3;
+    }
+
+    [NoAlloc]
+    public float MinLane()
+    {
+        return System.Math.Min(System.Math.Min(System.Math.Min(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    public float MaxLane()
+    {
+        return System.Math.Max(System.Math.Max(System.Math.Max(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static float Dot(F32x4 left, F32x4 right)
+    {
+        return((left.l0 * right.l0 + left.l1 * right.l1) + left.l2 * right.l2) + left.l3
+            * right.l3;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public float GetLane<const int Lane>()
     {
-        if (Lane == 0) { return l0; }
-        else if (Lane == 1) { return l1; }
-        else if (Lane == 2) { return l2; }
-        else { return l3; }
+        if (Lane == 0)
+        {
+            return l0;
+        }
+        else if (Lane == 1)
+        {
+            return l1;
+        }
+        else if (Lane == 2)
+        {
+            return l2;
+        }
+        else
+        {
+            return l3;
+        }
     }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public F32x4 WithLane<const int Lane>(float value)
     {
-        if (Lane == 0) { return new F32x4(value, l1, l2, l3); }
-        else if (Lane == 1) { return new F32x4(l0, value, l2, l3); }
-        else if (Lane == 2) { return new F32x4(l0, l1, value, l3); }
-        else { return new F32x4(l0, l1, l2, value); }
+        if (Lane == 0)
+        {
+            return new F32x4(value, l1, l2, l3);
+        }
+        else if (Lane == 1)
+        {
+            return new F32x4(l0, value, l2, l3);
+        }
+        else if (Lane == 2)
+        {
+            return new F32x4(l0, l1, value, l3);
+        }
+        else
+        {
+            return new F32x4(l0, l1, l2, value);
+        }
     }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
     public F32x4 Shuffle<const int A, const int B, const int C, const int D>()
     {
         return new F32x4(GetLane<A>(), GetLane<B>(), GetLane<C>(), GetLane<D>());
     }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 CompareEqual(F32x4 left, F32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 CompareLessThan(F32x4 left, F32x4 right) { return Mask32x4.FromBools(left.l0 < right.l0, left.l1 < right.l1, left.l2 < right.l2, left.l3 < right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static F32x4 Select(Mask32x4 mask, F32x4 whenTrue, F32x4 whenFalse) { return new F32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static float Choose(bool condition, float whenTrue, float whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareEqual(F32x4 left, F32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2
+            == right.l2, left.l3 == right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThan(F32x4 left, F32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 < right.l0, left.l1 < right.l1, left.l2
+            < right.l2, left.l3 < right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareNotEqual(F32x4 left, F32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 != right.l0, left.l1 != right.l1, left.l2
+            != right.l2, left.l3 != right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThanOrEqual(F32x4 left, F32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 <= right.l0, left.l1 <= right.l1, left.l2
+            <= right.l2, left.l3 <= right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThan(F32x4 left, F32x4 right)
+    {
+        return CompareLessThan(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThanOrEqual(F32x4 left, F32x4 right)
+    {
+        return CompareLessThanOrEqual(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 Select(Mask32x4 mask, F32x4 whenTrue, F32x4 whenFalse)
+    {
+        return new F32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(),
+            whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2),
+            Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static float Choose(bool condition, float whenTrue, float whenFalse)
+    {
+        if (condition)
+        {
+            return whenTrue;
+        }
+        return whenFalse;
+    }
+
+    // CTILDE_CHECKED_SIMD_BEGIN
+    [NoAlloc]
+    public static F32x4 Load(float[] source, int index)
+    {
+        return new F32x4(source[index], source[index + 1], source[index + 2], source[index
+            + 3]);
+    }
+
+    [NoAlloc]
+    public static void Store(F32x4 value, float[] destination, int index)
+    {
+        float checkedLast = destination[index + 3];
+        destination[index] = value.l0;
+        destination[index + 1] = value.l1;
+        destination[index + 2] = value.l2;
+        destination[index + 3] = value.l3;
+    }
+
+    [NoAlloc]
+    public static unsafe F32x4 Load(System.Runtime.ReadOnlyNativeBuffer<float> source,
+        nuint index)
+    {
+        return new F32x4(source[index], source[index + (nuint)1], source[index + (nuint)2],
+            source[index + (nuint)3]);
+    }
+
+    [NoAlloc]
+    public static unsafe void Store(F32x4 value, System.Runtime.NativeBuffer<float> destination,
+        nuint index)
+    {
+        float checkedLast = destination[index + (nuint)3];
+        destination[index] = value.l0;
+        destination[index + (nuint)1] = value.l1;
+        destination[index + (nuint)2] = value.l2;
+        destination[index + (nuint)3] = value.l3;
+    }
+
+    // CTILDE_CHECKED_SIMD_END
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe F32x4 LoadUnsafe(float* source)
+    {
+        F32x4 result = default(F32x4);
+        byte* input = (byte*)source;
+        byte* output = (byte*)&result;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+        return result;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe void StoreUnsafe(F32x4 value, float* destination)
+    {
+        byte* input = (byte*)&value;
+        byte* output = (byte*)destination;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe U32x4 AsU32(F32x4 value)
+    {
+        return *((U32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe I32x4 AsI32(F32x4 value)
+    {
+        return *((I32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 FromI32(I32x4 value)
+    {
+        return new F32x4((float)value.GetLane<0>(), (float)value.GetLane<1>(), (float)value.GetLane<2>(),
+            (float)value.GetLane<3>());
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static F32x4 FromU32(U32x4 value)
+    {
+        return new F32x4((float)value.GetLane<0>(), (float)value.GetLane<1>(), (float)value.GetLane<2>(),
+            (float)value.GetLane<3>());
+    }
 }
 
 public struct I32x4
 {
-    private int l0; private int l1; private int l2; private int l3;
-    public I32x4(int a, int b, int c, int d) { l0 = a; l1 = b; l2 = c; l3 = d; }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Zero { get { return new I32x4(0, 0, 0, 0); } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Splat(int value) { return new I32x4(value, value, value, value); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static I32x4 Create(int a, int b, int c, int d) { return new I32x4(a, b, c, d); }
-    [NoAlloc] [NoBlock] public static I32x4 operator +(I32x4 left, I32x4 right) { return new I32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
-    [NoAlloc] [NoBlock] public static I32x4 operator -(I32x4 left, I32x4 right) { return new I32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
-    [NoAlloc] [NoBlock] public static I32x4 operator *(I32x4 left, I32x4 right) { return new I32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public int GetLane<const int Lane>() { if (Lane == 0) { return l0; } else if (Lane == 1) { return l1; } else if (Lane == 2) { return l2; } else { return l3; } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public I32x4 WithLane<const int Lane>(int value) { if (Lane == 0) { return new I32x4(value, l1, l2, l3); } else if (Lane == 1) { return new I32x4(l0, value, l2, l3); } else if (Lane == 2) { return new I32x4(l0, l1, value, l3); } else { return new I32x4(l0, l1, l2, value); } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 CompareEqual(I32x4 left, I32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static I32x4 Select(Mask32x4 mask, I32x4 whenTrue, I32x4 whenFalse) { return new I32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static int Choose(bool condition, int whenTrue, int whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+    private int l0;
+    private int l1;
+    private int l2;
+    private int l3;
+
+    public I32x4(int a, int b, int c, int d)
+    {
+        l0 = a;
+        l1 = b;
+        l2 = c;
+        l3 = d;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Zero
+    {
+        get
+        {
+            return new I32x4(0, 0, 0, 0);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Splat(int value)
+    {
+        return new I32x4(value, value, value, value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Create(int a, int b, int c, int d)
+    {
+        return new I32x4(a, b, c, d);
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public static I32x4 operator +(I32x4 left, I32x4 right)
+    {
+        return new I32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2,
+            left.l3 + right.l3);
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public static I32x4 operator -(I32x4 left, I32x4 right)
+    {
+        return new I32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2,
+            left.l3 - right.l3);
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public static I32x4 operator *(I32x4 left, I32x4 right)
+    {
+        return new I32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2,
+            left.l3 * right.l3);
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public static I32x4 operator -(I32x4 value)
+    {
+        return new I32x4(-value.l0, -value.l1, -value.l2, -value.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 And(I32x4 a, I32x4 b)
+    {
+        return new I32x4(a.l0 & b.l0, a.l1 & b.l1, a.l2 & b.l2, a.l3 & b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Or(I32x4 a, I32x4 b)
+    {
+        return new I32x4(a.l0 | b.l0, a.l1 | b.l1, a.l2 | b.l2, a.l3 | b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Xor(I32x4 a, I32x4 b)
+    {
+        return new I32x4(a.l0 ^ b.l0, a.l1 ^ b.l1, a.l2 ^ b.l2, a.l3 ^ b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Not(I32x4 value)
+    {
+        return new I32x4(~value.l0, ~value.l1, ~value.l2, ~value.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Min(I32x4 a, I32x4 b)
+    {
+        return new I32x4(MinValue(a.l0, b.l0), MinValue(a.l1, b.l1), MinValue(a.l2,
+            b.l2), MinValue(a.l3, b.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Max(I32x4 a, I32x4 b)
+    {
+        return new I32x4(MaxValue(a.l0, b.l0), MaxValue(a.l1, b.l1), MaxValue(a.l2,
+            b.l2), MaxValue(a.l3, b.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static int MinValue(int a, int b)
+    {
+        if (a < b)
+            return a;
+        return b;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static int MaxValue(int a, int b)
+    {
+        if (a > b)
+            return a;
+        return b;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public I32x4 ShiftLeft<const int Bits>()
+    {
+        return new I32x4(l0 << Bits, l1 << Bits, l2 << Bits, l3 << Bits);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public I32x4 ShiftRight<const int Bits>()
+    {
+        return new I32x4(l0 >> Bits, l1 >> Bits, l2 >> Bits, l3 >> Bits);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public int GetLane<const int Lane>()
+    {
+        if (Lane == 0)
+        {
+            return l0;
+        }
+        else if (Lane == 1)
+        {
+            return l1;
+        }
+        else if (Lane == 2)
+        {
+            return l2;
+        }
+        else
+        {
+            return l3;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public I32x4 WithLane<const int Lane>(int value)
+    {
+        if (Lane == 0)
+        {
+            return new I32x4(value, l1, l2, l3);
+        }
+        else if (Lane == 1)
+        {
+            return new I32x4(l0, value, l2, l3);
+        }
+        else if (Lane == 2)
+        {
+            return new I32x4(l0, l1, value, l3);
+        }
+        else
+        {
+            return new I32x4(l0, l1, l2, value);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public I32x4 Shuffle<const int A, const int B, const int C, const int D>()
+    {
+        return new I32x4(GetLane<A>(), GetLane<B>(), GetLane<C>(), GetLane<D>());
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public int Sum()
+    {
+        return((l0 + l1) + l2) + l3;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public int MinLane()
+    {
+        return MinValue(MinValue(MinValue(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public int MaxLane()
+    {
+        return MaxValue(MaxValue(MaxValue(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareEqual(I32x4 left, I32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2
+            == right.l2, left.l3 == right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThan(I32x4 left, I32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 < right.l0, left.l1 < right.l1, left.l2
+            < right.l2, left.l3 < right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareNotEqual(I32x4 left, I32x4 right)
+    {
+        return Mask32x4.Not(CompareEqual(left, right));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThanOrEqual(I32x4 left, I32x4 right)
+    {
+        return Mask32x4.Not(CompareLessThan(right, left));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThan(I32x4 left, I32x4 right)
+    {
+        return CompareLessThan(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThanOrEqual(I32x4 left, I32x4 right)
+    {
+        return CompareLessThanOrEqual(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 Select(Mask32x4 mask, I32x4 whenTrue, I32x4 whenFalse)
+    {
+        return new I32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(),
+            whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2),
+            Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static int Choose(bool condition, int whenTrue, int whenFalse)
+    {
+        if (condition)
+        {
+            return whenTrue;
+        }
+        return whenFalse;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe U32x4 AsU32(I32x4 value)
+    {
+        return *((U32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe F32x4 AsF32(I32x4 value)
+    {
+        return *((F32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static I32x4 FromF32Saturating(F32x4 value)
+    {
+        return new I32x4(Saturate(value.GetLane<0>()), Saturate(value.GetLane<1>()),
+            Saturate(value.GetLane<2>()), Saturate(value.GetLane<3>()));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static int Saturate(float value)
+    {
+        if (value != value)
+            return 0;
+        if (value >= 2147483520.0f)
+            return 2147483647;
+        if (value <= -2147483648.0f)
+            return -2147483648;
+        return(int)value;
+    }
+
+    // CTILDE_CHECKED_SIMD_BEGIN
+    [NoAlloc]
+    public static I32x4 Load(int[] source, int index)
+    {
+        return new I32x4(source[index], source[index + 1], source[index + 2], source[index
+            + 3]);
+    }
+
+    [NoAlloc]
+    public static void Store(I32x4 value, int[] destination, int index)
+    {
+        int checkedLast = destination[index + 3];
+        destination[index] = value.l0;
+        destination[index + 1] = value.l1;
+        destination[index + 2] = value.l2;
+        destination[index + 3] = value.l3;
+    }
+
+    [NoAlloc]
+    public static unsafe I32x4 Load(System.Runtime.ReadOnlyNativeBuffer<int> source,
+        nuint index)
+    {
+        return new I32x4(source[index], source[index + (nuint)1], source[index + (nuint)2],
+            source[index + (nuint)3]);
+    }
+
+    [NoAlloc]
+    public static unsafe void Store(I32x4 value, System.Runtime.NativeBuffer<int> destination,
+        nuint index)
+    {
+        int checkedLast = destination[index + (nuint)3];
+        destination[index] = value.l0;
+        destination[index + (nuint)1] = value.l1;
+        destination[index + (nuint)2] = value.l2;
+        destination[index + (nuint)3] = value.l3;
+    }
+
+    // CTILDE_CHECKED_SIMD_END
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe I32x4 LoadUnsafe(int* source)
+    {
+        I32x4 result = default(I32x4);
+        byte* input = (byte*)source;
+        byte* output = (byte*)&result;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+        return result;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe void StoreUnsafe(I32x4 value, int* destination)
+    {
+        byte* input = (byte*)&value;
+        byte* output = (byte*)destination;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+    }
 }
 
 public struct U32x4
 {
-    private uint l0; private uint l1; private uint l2; private uint l3;
-    public U32x4(uint a, uint b, uint c, uint d) { l0 = a; l1 = b; l2 = c; l3 = d; }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Zero { get { return new U32x4(0u, 0u, 0u, 0u); } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Splat(uint value) { return new U32x4(value, value, value, value); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 Create(uint a, uint b, uint c, uint d) { return new U32x4(a, b, c, d); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator +(U32x4 left, U32x4 right) { return new U32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2, left.l3 + right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator -(U32x4 left, U32x4 right) { return new U32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2, left.l3 - right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] public static U32x4 operator *(U32x4 left, U32x4 right) { return new U32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2, left.l3 * right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public uint GetLane<const int Lane>() { if (Lane == 0) { return l0; } else if (Lane == 1) { return l1; } else if (Lane == 2) { return l2; } else { return l3; } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public U32x4 WithLane<const int Lane>(uint value) { if (Lane == 0) { return new U32x4(value, l1, l2, l3); } else if (Lane == 1) { return new U32x4(l0, value, l2, l3); } else if (Lane == 2) { return new U32x4(l0, l1, value, l3); } else { return new U32x4(l0, l1, l2, value); } }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static Mask32x4 CompareEqual(U32x4 left, U32x4 right) { return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2 == right.l2, left.l3 == right.l3); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime]
-    public static U32x4 Select(Mask32x4 mask, U32x4 whenTrue, U32x4 whenFalse) { return new U32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(), whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2), Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3)); }
-    [NoAlloc] [NoThrow] [NoBlock] [NoRuntime] private static uint Choose(bool condition, uint whenTrue, uint whenFalse) { if (condition) { return whenTrue; } return whenFalse; }
+    private uint l0;
+    private uint l1;
+    private uint l2;
+    private uint l3;
+
+    public U32x4(uint a, uint b, uint c, uint d)
+    {
+        l0 = a;
+        l1 = b;
+        l2 = c;
+        l3 = d;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Zero
+    {
+        get
+        {
+            return new U32x4(0u, 0u, 0u, 0u);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Splat(uint value)
+    {
+        return new U32x4(value, value, value, value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Create(uint a, uint b, uint c, uint d)
+    {
+        return new U32x4(a, b, c, d);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 operator +(U32x4 left, U32x4 right)
+    {
+        return new U32x4(left.l0 + right.l0, left.l1 + right.l1, left.l2 + right.l2,
+            left.l3 + right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 operator -(U32x4 left, U32x4 right)
+    {
+        return new U32x4(left.l0 - right.l0, left.l1 - right.l1, left.l2 - right.l2,
+            left.l3 - right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 operator *(U32x4 left, U32x4 right)
+    {
+        return new U32x4(left.l0 * right.l0, left.l1 * right.l1, left.l2 * right.l2,
+            left.l3 * right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 And(U32x4 a, U32x4 b)
+    {
+        return new U32x4(a.l0 & b.l0, a.l1 & b.l1, a.l2 & b.l2, a.l3 & b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Or(U32x4 a, U32x4 b)
+    {
+        return new U32x4(a.l0 | b.l0, a.l1 | b.l1, a.l2 | b.l2, a.l3 | b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Xor(U32x4 a, U32x4 b)
+    {
+        return new U32x4(a.l0 ^ b.l0, a.l1 ^ b.l1, a.l2 ^ b.l2, a.l3 ^ b.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Not(U32x4 value)
+    {
+        return new U32x4(~value.l0, ~value.l1, ~value.l2, ~value.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Min(U32x4 a, U32x4 b)
+    {
+        return new U32x4(MinValue(a.l0, b.l0), MinValue(a.l1, b.l1), MinValue(a.l2,
+            b.l2), MinValue(a.l3, b.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Max(U32x4 a, U32x4 b)
+    {
+        return new U32x4(MaxValue(a.l0, b.l0), MaxValue(a.l1, b.l1), MaxValue(a.l2,
+            b.l2), MaxValue(a.l3, b.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static uint MinValue(uint a, uint b)
+    {
+        if (a < b)
+            return a;
+        return b;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static uint MaxValue(uint a, uint b)
+    {
+        if (a > b)
+            return a;
+        return b;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public U32x4 ShiftLeft<const int Bits>()
+    {
+        return new U32x4(l0 << Bits, l1 << Bits, l2 << Bits, l3 << Bits);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public U32x4 ShiftRight<const int Bits>()
+    {
+        return new U32x4(l0 >> Bits, l1 >> Bits, l2 >> Bits, l3 >> Bits);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint GetLane<const int Lane>()
+    {
+        if (Lane == 0)
+        {
+            return l0;
+        }
+        else if (Lane == 1)
+        {
+            return l1;
+        }
+        else if (Lane == 2)
+        {
+            return l2;
+        }
+        else
+        {
+            return l3;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public U32x4 WithLane<const int Lane>(uint value)
+    {
+        if (Lane == 0)
+        {
+            return new U32x4(value, l1, l2, l3);
+        }
+        else if (Lane == 1)
+        {
+            return new U32x4(l0, value, l2, l3);
+        }
+        else if (Lane == 2)
+        {
+            return new U32x4(l0, l1, value, l3);
+        }
+        else
+        {
+            return new U32x4(l0, l1, l2, value);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public U32x4 Shuffle<const int A, const int B, const int C, const int D>()
+    {
+        return new U32x4(GetLane<A>(), GetLane<B>(), GetLane<C>(), GetLane<D>());
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint Sum()
+    {
+        return((l0 + l1) + l2) + l3;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint MinLane()
+    {
+        return MinValue(MinValue(MinValue(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint MaxLane()
+    {
+        return MaxValue(MaxValue(MaxValue(l0, l1), l2), l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareEqual(U32x4 left, U32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 == right.l0, left.l1 == right.l1, left.l2
+            == right.l2, left.l3 == right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThan(U32x4 left, U32x4 right)
+    {
+        return Mask32x4.FromBools(left.l0 < right.l0, left.l1 < right.l1, left.l2
+            < right.l2, left.l3 < right.l3);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareNotEqual(U32x4 left, U32x4 right)
+    {
+        return Mask32x4.Not(CompareEqual(left, right));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareLessThanOrEqual(U32x4 left, U32x4 right)
+    {
+        return Mask32x4.Not(CompareLessThan(right, left));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThan(U32x4 left, U32x4 right)
+    {
+        return CompareLessThan(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static Mask32x4 CompareGreaterThanOrEqual(U32x4 left, U32x4 right)
+    {
+        return CompareLessThanOrEqual(right, left);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 Select(Mask32x4 mask, U32x4 whenTrue, U32x4 whenFalse)
+    {
+        return new U32x4(Choose(mask.GetLane<0>(), whenTrue.l0, whenFalse.l0), Choose(mask.GetLane<1>(),
+            whenTrue.l1, whenFalse.l1), Choose(mask.GetLane<2>(), whenTrue.l2, whenFalse.l2),
+            Choose(mask.GetLane<3>(), whenTrue.l3, whenFalse.l3));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static uint Choose(bool condition, uint whenTrue, uint whenFalse)
+    {
+        if (condition)
+        {
+            return whenTrue;
+        }
+        return whenFalse;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe I32x4 AsI32(U32x4 value)
+    {
+        return *((I32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe F32x4 AsF32(U32x4 value)
+    {
+        return *((F32x4*)&value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static U32x4 FromF32Saturating(F32x4 value)
+    {
+        return new U32x4(Saturate(value.GetLane<0>()), Saturate(value.GetLane<1>()),
+            Saturate(value.GetLane<2>()), Saturate(value.GetLane<3>()));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    private static uint Saturate(float value)
+    {
+        if (value != value || value <= 0.0f)
+            return 0u;
+        if (value >= 4294967040.0f)
+            return 4294967295u;
+        return(uint)value;
+    }
+
+    // CTILDE_CHECKED_SIMD_BEGIN
+    [NoAlloc]
+    public static U32x4 Load(uint[] source, int index)
+    {
+        return new U32x4(source[index], source[index + 1], source[index + 2], source[index
+            + 3]);
+    }
+
+    [NoAlloc]
+    public static void Store(U32x4 value, uint[] destination, int index)
+    {
+        uint checkedLast = destination[index + 3];
+        destination[index] = value.l0;
+        destination[index + 1] = value.l1;
+        destination[index + 2] = value.l2;
+        destination[index + 3] = value.l3;
+    }
+
+    [NoAlloc]
+    public static unsafe U32x4 Load(System.Runtime.ReadOnlyNativeBuffer<uint> source,
+        nuint index)
+    {
+        return new U32x4(source[index], source[index + (nuint)1], source[index + (nuint)2],
+            source[index + (nuint)3]);
+    }
+
+    [NoAlloc]
+    public static unsafe void Store(U32x4 value, System.Runtime.NativeBuffer<uint> destination,
+        nuint index)
+    {
+        uint checkedLast = destination[index + (nuint)3];
+        destination[index] = value.l0;
+        destination[index + (nuint)1] = value.l1;
+        destination[index + (nuint)2] = value.l2;
+        destination[index + (nuint)3] = value.l3;
+    }
+
+    // CTILDE_CHECKED_SIMD_END
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe U32x4 LoadUnsafe(uint* source)
+    {
+        U32x4 result = default(U32x4);
+        byte* input = (byte*)source;
+        byte* output = (byte*)&result;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+        return result;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static unsafe void StoreUnsafe(U32x4 value, uint* destination)
+    {
+        byte* input = (byte*)&value;
+        byte* output = (byte*)destination;
+        output[0] = input[0];
+        output[1] = input[1];
+        output[2] = input[2];
+        output[3] = input[3];
+        output[4] = input[4];
+        output[5] = input[5];
+        output[6] = input[6];
+        output[7] = input[7];
+        output[8] = input[8];
+        output[9] = input[9];
+        output[10] = input[10];
+        output[11] = input[11];
+        output[12] = input[12];
+        output[13] = input[13];
+        output[14] = input[14];
+        output[15] = input[15];
+    }
 }

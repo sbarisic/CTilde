@@ -26,6 +26,12 @@ public sealed class CTildeOptionsPage : DialogPage
     [Description("Write complete language-server protocol tracing to the C~ output pane.")]
     public bool TraceProtocol { get; set; }
 
+    [Category("Language server")]
+    [DisplayName("Show reference CodeLens")]
+    [Description("Show C#-style reference counts above C~ declarations when Visual Studio CodeLens is enabled.")]
+    [DefaultValue(true)]
+    public bool ShowReferenceCodeLens { get; set; } = true;
+
     [Category("Debugger")]
     [DisplayName("Debug compiler")]
     [Description("GCC, Clang, wsl:gcc, or an executable path. Blank uses the manifest and then CTILDE_CC.")]
@@ -78,6 +84,7 @@ internal static class CTildeToolPaths
     private static string _compilerPath = string.Empty;
     private static string _languageServerPath = string.Empty;
     private static bool _traceProtocol;
+    private static bool _showReferenceCodeLens = true;
     private static string _debugCompiler = string.Empty;
     private static string _gdbPath = string.Empty;
     private static string _espIdfPath = string.Empty;
@@ -97,6 +104,7 @@ internal static class CTildeToolPaths
                 _compilerPath != options.CompilerPath ||
                 _languageServerPath != options.LanguageServerPath ||
                 _traceProtocol != options.TraceProtocol ||
+                _showReferenceCodeLens != options.ShowReferenceCodeLens ||
                 _debugCompiler != options.DebugCompiler || _gdbPath != options.GdbPath ||
                 _espIdfPath != options.EspIdfPath || _espClangPath != options.EspClangPath ||
                 _debugMemory != options.DebugMemory || _stopAtEntry != options.StopAtEntry ||
@@ -105,6 +113,7 @@ internal static class CTildeToolPaths
             _compilerPath = options.CompilerPath;
             _languageServerPath = options.LanguageServerPath;
             _traceProtocol = options.TraceProtocol;
+            _showReferenceCodeLens = options.ShowReferenceCodeLens;
             _debugCompiler = options.DebugCompiler;
             _gdbPath = options.GdbPath;
             _espIdfPath = options.EspIdfPath;
@@ -124,20 +133,21 @@ internal static class CTildeToolPaths
         {
             lock (Gate)
                 return new Snapshot(_dotNetPath, _compilerPath, _languageServerPath, _traceProtocol,
-                    _debugCompiler, _gdbPath, _espIdfPath, _espClangPath, _debugMemory, _stopAtEntry, _showRuntimeFrames, _traceDebugger);
+                    _showReferenceCodeLens, _debugCompiler, _gdbPath, _espIdfPath, _espClangPath, _debugMemory, _stopAtEntry, _showRuntimeFrames, _traceDebugger);
         }
     }
 
     internal sealed class Snapshot
     {
         internal Snapshot(string dotNetPath, string compilerPath, string languageServerPath, bool traceProtocol,
-            string debugCompiler, string gdbPath, string espIdfPath, string espClangPath,
+            bool showReferenceCodeLens, string debugCompiler, string gdbPath, string espIdfPath, string espClangPath,
             CTildeDebugMemoryMode debugMemory, bool stopAtEntry, bool showRuntimeFrames, bool traceDebugger)
         {
             DotNetPath = dotNetPath;
             CompilerPath = compilerPath;
             LanguageServerPath = languageServerPath;
             TraceProtocol = traceProtocol;
+            ShowReferenceCodeLens = showReferenceCodeLens;
             DebugCompiler = debugCompiler;
             GdbPath = gdbPath;
             EspIdfPath = espIdfPath;
@@ -152,6 +162,7 @@ internal static class CTildeToolPaths
         internal string CompilerPath { get; }
         internal string LanguageServerPath { get; }
         internal bool TraceProtocol { get; }
+        internal bool ShowReferenceCodeLens { get; }
         internal string DebugCompiler { get; }
         internal string GdbPath { get; }
         internal string EspIdfPath { get; }

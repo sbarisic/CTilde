@@ -34,37 +34,55 @@ public struct Vec4
     [NoAlloc]
     public static Vec4 Zero
     {
-        get { return new Vec4(); }
+        get
+        {
+            return new Vec4();
+        }
     }
 
     [NoAlloc]
     public static Vec4 One
     {
-        get { return new Vec4(1.0f); }
+        get
+        {
+            return new Vec4(1.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec4 UnitX
     {
-        get { return new Vec4(1.0f, 0.0f, 0.0f, 0.0f); }
+        get
+        {
+            return new Vec4(1.0f, 0.0f, 0.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec4 UnitY
     {
-        get { return new Vec4(0.0f, 1.0f, 0.0f, 0.0f); }
+        get
+        {
+            return new Vec4(0.0f, 1.0f, 0.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec4 UnitZ
     {
-        get { return new Vec4(0.0f, 0.0f, 1.0f, 0.0f); }
+        get
+        {
+            return new Vec4(0.0f, 0.0f, 1.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec4 UnitW
     {
-        get { return new Vec4(0.0f, 0.0f, 0.0f, 1.0f); }
+        get
+        {
+            return new Vec4(0.0f, 0.0f, 0.0f, 1.0f);
+        }
     }
 
     [NoAlloc]
@@ -82,31 +100,36 @@ public struct Vec4
     [NoAlloc]
     public static Vec4 operator +(Vec4 left, Vec4 right)
     {
-        return new Vec4(left.X + right.X, left.Y + right.Y, left.Z + right.Z, left.W + right.W);
+        return new Vec4(left.X + right.X, left.Y + right.Y, left.Z + right.Z, left.W
+            + right.W);
     }
 
     [NoAlloc]
     public static Vec4 operator -(Vec4 left, Vec4 right)
     {
-        return new Vec4(left.X - right.X, left.Y - right.Y, left.Z - right.Z, left.W - right.W);
+        return new Vec4(left.X - right.X, left.Y - right.Y, left.Z - right.Z, left.W
+            - right.W);
     }
 
     [NoAlloc]
     public static Vec4 operator *(Vec4 left, Vec4 right)
     {
-        return new Vec4(left.X * right.X, left.Y * right.Y, left.Z * right.Z, left.W * right.W);
+        return new Vec4(left.X * right.X, left.Y * right.Y, left.Z * right.Z, left.W
+            * right.W);
     }
 
     [NoAlloc]
     public static Vec4 operator /(Vec4 left, Vec4 right)
     {
-        return new Vec4(left.X / right.X, left.Y / right.Y, left.Z / right.Z, left.W / right.W);
+        return new Vec4(left.X / right.X, left.Y / right.Y, left.Z / right.Z, left.W
+            / right.W);
     }
 
     [NoAlloc]
     public static Vec4 operator *(Vec4 value, float scale)
     {
-        return new Vec4(value.X * scale, value.Y * scale, value.Z * scale, value.W * scale);
+        return new Vec4(value.X * scale, value.Y * scale, value.Z * scale, value.W
+            * scale);
     }
 
     [NoAlloc]
@@ -118,7 +141,8 @@ public struct Vec4
     [NoAlloc]
     public static Vec4 operator /(Vec4 value, float scale)
     {
-        return new Vec4(value.X / scale, value.Y / scale, value.Z / scale, value.W / scale);
+        return new Vec4(value.X / scale, value.Y / scale, value.Z / scale, value.W
+            / scale);
     }
 
     [NoAlloc]
@@ -143,5 +167,50 @@ public struct Vec4
     public Vec4 Normalize()
     {
         return this / Length();
+    }
+
+    [NoAlloc]
+    public static Vec4 Abs(Vec4 value)
+    {
+        return new Vec4(Math.Abs(value.X), Math.Abs(value.Y), Math.Abs(value.Z),
+            Math.Abs(value.W));
+    }
+
+    [NoAlloc]
+    public static Vec4 Min(Vec4 left, Vec4 right)
+    {
+        return new Vec4(Math.Min(left.X, right.X), Math.Min(left.Y, right.Y), Math.Min(left.Z,
+            right.Z), Math.Min(left.W, right.W));
+    }
+
+    [NoAlloc]
+    public static Vec4 Max(Vec4 left, Vec4 right)
+    {
+        return new Vec4(Math.Max(left.X, right.X), Math.Max(left.Y, right.Y), Math.Max(left.Z,
+            right.Z), Math.Max(left.W, right.W));
+    }
+
+    [NoAlloc]
+    public static Vec4 Clamp(Vec4 value, Vec4 minimum, Vec4 maximum)
+    {
+        return Min(Max(value, minimum), maximum);
+    }
+
+    [NoAlloc]
+    public static Vec4 Lerp(Vec4 left, Vec4 right, float amount)
+    {
+        return left + (right - left) * amount;
+    }
+
+    [NoAlloc]
+    public static float DistanceSquared(Vec4 left, Vec4 right)
+    {
+        return(right - left).LengthSquared();
+    }
+
+    [NoAlloc]
+    public static float Distance(Vec4 left, Vec4 right)
+    {
+        return Math.Sqrt(DistanceSquared(left, right));
     }
 }

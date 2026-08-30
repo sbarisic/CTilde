@@ -6,7 +6,6 @@ namespace Examples.TCan485.Draft023;
 
 static assert(Target.Profile == TargetProfile.EspIdf, "Draft 0.23 hardware validation requires ESP-IDF");
 static assert(Target.PointerSize == 4, "ESP32 pointers must be 32 bits");
-
 public static class NativeFixture
 {
     [Extern("ct_draft023_start_timer")]
@@ -22,7 +21,9 @@ public static class NativeFixture
     [Extern("ct_draft023_ack")]
     [NoRuntime]
     [NoBlock]
-    public static unsafe void Ack([Nullable] void* context);
+    public static unsafe void Ack(
+        [Nullable]
+        void* context);
 }
 
 public static class Program
@@ -46,21 +47,18 @@ public static class Program
             Console.WriteLine("CTILDE_DRAFT_023_START_FAILED");
             return;
         }
-
         int attempts = 0;
         while (interruptCount < 8u && attempts < 200)
         {
             FreeRtos.DelayMilliseconds(10u);
             attempts++;
         }
-
         int stopResult = NativeFixture.StopTimer();
         uint nativeCount = NativeFixture.AckCount();
         if (stopResult == 0 && interruptCount >= 8u && nativeCount == interruptCount)
             Console.WriteLine("CTILDE_DRAFT_023_OK");
         else
             Console.WriteLine("CTILDE_DRAFT_023_FAILED");
-
         while (true)
             FreeRtos.DelayMilliseconds(1000u);
     }

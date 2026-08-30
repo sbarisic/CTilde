@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <member id="T:System.Vec2"><summary>A mutable two-component single-precision vector.</summary><remarks>Uses scalar natural layout and allocates no managed storage.</remarks></member>
+  <member id="T:System.Vec3"><summary>A mutable three-component single-precision vector.</summary><remarks>Uses scalar natural layout and allocates no managed storage.</remarks></member>
+  <member id="T:System.Vec4"><summary>A mutable four-component single-precision vector.</summary><remarks>Uses scalar natural layout and allocates no managed storage.</remarks></member>
+  <member id="M:System.Vec2.Abs(System.Vec2)"><summary>Returns the componentwise absolute value.</summary></member>
+  <member id="M:System.Vec2.Min(System.Vec2,System.Vec2)"><summary>Returns componentwise minima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec2.Max(System.Vec2,System.Vec2)"><summary>Returns componentwise maxima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec2.Clamp(System.Vec2,System.Vec2,System.Vec2)"><summary>Clamps each component to the supplied bounds.</summary></member>
+  <member id="M:System.Vec2.Lerp(System.Vec2,System.Vec2,float)"><summary>Interpolates components without clamping the amount.</summary></member>
+  <member id="M:System.Vec2.Distance(System.Vec2,System.Vec2)"><summary>Returns Euclidean distance.</summary></member>
+  <member id="M:System.Vec2.DistanceSquared(System.Vec2,System.Vec2)"><summary>Returns squared Euclidean distance without a square root.</summary></member>
+  <member id="M:System.Vec3.Abs(System.Vec3)"><summary>Returns the componentwise absolute value.</summary></member>
+  <member id="M:System.Vec3.Min(System.Vec3,System.Vec3)"><summary>Returns componentwise minima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec3.Max(System.Vec3,System.Vec3)"><summary>Returns componentwise maxima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec3.Clamp(System.Vec3,System.Vec3,System.Vec3)"><summary>Clamps each component to the supplied bounds.</summary></member>
+  <member id="M:System.Vec3.Lerp(System.Vec3,System.Vec3,float)"><summary>Interpolates components without clamping the amount.</summary></member>
+  <member id="M:System.Vec3.Distance(System.Vec3,System.Vec3)"><summary>Returns Euclidean distance.</summary></member>
+  <member id="M:System.Vec3.DistanceSquared(System.Vec3,System.Vec3)"><summary>Returns squared Euclidean distance without a square root.</summary></member>
+  <member id="M:System.Vec4.Abs(System.Vec4)"><summary>Returns the componentwise absolute value.</summary></member>
+  <member id="M:System.Vec4.Min(System.Vec4,System.Vec4)"><summary>Returns componentwise minima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec4.Max(System.Vec4,System.Vec4)"><summary>Returns componentwise maxima with target IEEE behavior.</summary></member>
+  <member id="M:System.Vec4.Clamp(System.Vec4,System.Vec4,System.Vec4)"><summary>Clamps each component to the supplied bounds.</summary></member>
+  <member id="M:System.Vec4.Lerp(System.Vec4,System.Vec4,float)"><summary>Interpolates components without clamping the amount.</summary></member>
+  <member id="M:System.Vec4.Distance(System.Vec4,System.Vec4)"><summary>Returns Euclidean distance.</summary></member>
+  <member id="M:System.Vec4.DistanceSquared(System.Vec4,System.Vec4)"><summary>Returns squared Euclidean distance without a square root.</summary></member>
+
+  <member id="T:System.Simd.F32x4"><summary>An explicit four-lane single-precision SIMD value.</summary><remarks>Storage is exactly 16 bytes. Operations use scalar code unless simd128 is selected. Values cannot cross native ABI boundaries.</remarks></member>
+  <member id="T:System.Simd.I32x4"><summary>An explicit four-lane signed-integer SIMD value.</summary><remarks>Storage is exactly 16 bytes and source-visible alignment is unchanged.</remarks></member>
+  <member id="T:System.Simd.U32x4"><summary>An explicit four-lane unsigned-integer SIMD value.</summary><remarks>Storage is exactly 16 bytes and source-visible alignment is unchanged.</remarks></member>
+  <member id="T:System.Simd.Mask32x4"><summary>A four-lane all-zero or all-one selection mask.</summary></member>
+  <member id="M:System.Simd.F32x4.Abs(System.Simd.F32x4)"><summary>Clears each lane sign bit while preserving NaN payload bits.</summary></member>
+  <member id="M:System.Simd.F32x4.Sqrt(System.Simd.F32x4)"><summary>Computes exact lane square roots without reciprocal approximation.</summary></member>
+  <member id="M:System.Simd.F32x4.MultiplyAdd(System.Simd.F32x4,System.Simd.F32x4,System.Simd.F32x4)"><summary>Multiplies and adds each lane.</summary><remarks>May use FMA when target macros prove support; fused and unfused builds can differ by one rounding.</remarks></member>
+  <member id="M:System.Simd.F32x4.Sum"><summary>Reduces lanes strictly from lane zero through lane three.</summary></member>
+  <member id="M:System.Simd.F32x4.MinLane"><summary>Returns the fixed-order lane minimum.</summary></member>
+  <member id="M:System.Simd.F32x4.MaxLane"><summary>Returns the fixed-order lane maximum.</summary></member>
+  <member id="M:System.Simd.F32x4.Dot(System.Simd.F32x4,System.Simd.F32x4)"><summary>Returns a fixed-order four-lane dot product.</summary></member>
+  <member id="M:System.Simd.F32x4.Load(float[],int)"><summary>Loads four checked managed-array lanes.</summary></member>
+  <member id="M:System.Simd.F32x4.Store(System.Simd.F32x4,float[],int)"><summary>Stores four lanes after validating the complete managed-array range.</summary></member>
+  <member id="M:System.Simd.F32x4.LoadUnsafe(float*)"><summary>Loads four unaligned pointer lanes.</summary><remarks>This operation is unsafe, allocation-free, and runtime-free.</remarks></member>
+  <member id="M:System.Simd.F32x4.StoreUnsafe(System.Simd.F32x4,float*)"><summary>Stores four unaligned pointer lanes.</summary><remarks>This operation is unsafe, allocation-free, and runtime-free.</remarks></member>
+  <member id="M:System.Simd.F32x4.AsI32(System.Simd.F32x4)"><summary>Reinterprets lane bits without numeric conversion.</summary></member>
+  <member id="M:System.Simd.F32x4.AsU32(System.Simd.F32x4)"><summary>Reinterprets lane bits without numeric conversion.</summary></member>
+  <member id="M:System.Simd.I32x4.FromF32Saturating(System.Simd.F32x4)"><summary>Truncates finite lanes and saturates out-of-range values; NaN becomes zero.</summary></member>
+
+  <member id="T:System.Matrix3x2"><summary>A mutable row-major two-dimensional affine matrix.</summary><remarks>Uses row-vector composition, occupies 24 bytes, and allocates no managed storage.</remarks></member>
+  <member id="P:System.Matrix3x2.Identity"><summary>Gets the identity transform.</summary></member>
+  <member id="M:System.Matrix3x2.Determinant"><summary>Returns the affine linear determinant.</summary></member>
+  <member id="M:System.Matrix3x2.CreateTranslation(float,float)"><summary>Creates a translation.</summary></member>
+  <member id="M:System.Matrix3x2.CreateScale(float,float)"><summary>Creates a scale about the origin.</summary></member>
+  <member id="M:System.Matrix3x2.CreateRotation(float)"><summary>Creates a counterclockwise rotation in radians.</summary></member>
+  <member id="M:System.Matrix3x2.CreateSkew(float,float)"><summary>Creates a two-axis skew in radians.</summary></member>
+  <member id="M:System.Matrix3x2.Lerp(System.Matrix3x2,System.Matrix3x2,float)"><summary>Interpolates fields without clamping the amount.</summary></member>
+  <member id="M:System.Matrix3x2.TryInvert(System.Matrix3x2,out System.Matrix3x2)"><summary>Attempts inversion.</summary><remarks>Failure writes the zero matrix.</remarks></member>
+  <member id="M:System.Matrix3x2.TransformPoint(System.Vec2)"><summary>Transforms a point with translation.</summary></member>
+  <member id="M:System.Matrix3x2.TransformVector(System.Vec2)"><summary>Transforms a direction without translation.</summary></member>
+
+  <member id="T:System.Matrix4x4"><summary>A mutable row-major four-by-four single-precision matrix.</summary><remarks>Uses row-vector composition, occupies 64 bytes, and allocates no managed storage.</remarks></member>
+  <member id="P:System.Matrix4x4.Identity"><summary>Gets the identity matrix.</summary></member>
+  <member id="M:System.Matrix4x4.Determinant"><summary>Returns the determinant.</summary></member>
+  <member id="M:System.Matrix4x4.Transpose(System.Matrix4x4)"><summary>Returns the transposed matrix.</summary></member>
+  <member id="M:System.Matrix4x4.Lerp(System.Matrix4x4,System.Matrix4x4,float)"><summary>Interpolates fields without clamping the amount.</summary></member>
+  <member id="M:System.Matrix4x4.CreateLookAt(System.Vec3,System.Vec3,System.Vec3)"><summary>Creates a right-handed view matrix.</summary></member>
+  <member id="M:System.Matrix4x4.CreatePerspectiveFieldOfView(float,float,float,float)"><summary>Creates a right-handed zero-to-one depth perspective projection.</summary></member>
+  <member id="M:System.Matrix4x4.CreateOrthographic(float,float,float,float)"><summary>Creates a right-handed zero-to-one depth orthographic projection.</summary></member>
+  <member id="M:System.Matrix4x4.TryInvert(System.Matrix4x4,out System.Matrix4x4)"><summary>Attempts inversion.</summary><remarks>Singular or non-finite input returns false and writes the zero matrix.</remarks></member>
+  <member id="M:System.Matrix4x4.TransformPoint(System.Vec3)"><summary>Transforms an affine point.</summary></member>
+  <member id="M:System.Matrix4x4.TransformVector(System.Vec3)"><summary>Transforms a direction without translation.</summary></member>
+  <member id="M:System.Matrix4x4.TransformProjective(System.Vec3)"><summary>Transforms a point and divides by its resulting homogeneous coordinate.</summary></member>
+  <member id="M:System.Matrix4x4.TryTransformNormal(System.Vec3,out System.Vec3)"><summary>Applies the inverse transpose to a normal.</summary><remarks>Failure writes the zero vector.</remarks></member>
+
+  <member id="T:System.Quaternion"><summary>A mutable single-precision rotation quaternion.</summary><remarks>Occupies 16 bytes, follows row-vector matrix composition, and allocates no managed storage.</remarks></member>
+  <member id="P:System.Quaternion.Identity"><summary>Gets the identity rotation.</summary></member>
+  <member id="M:System.Quaternion.TryNormalize(System.Quaternion,out System.Quaternion)"><summary>Attempts normalization.</summary><remarks>Failure writes Identity.</remarks></member>
+  <member id="M:System.Quaternion.TryInverse(System.Quaternion,out System.Quaternion)"><summary>Attempts inversion.</summary><remarks>Failure writes Identity.</remarks></member>
+  <member id="M:System.Quaternion.Lerp(System.Quaternion,System.Quaternion,float)"><summary>Interpolates and normalizes along the shortest sign-equivalent path.</summary></member>
+  <member id="M:System.Quaternion.Slerp(System.Quaternion,System.Quaternion,float)"><summary>Spherically interpolates along the shortest path.</summary></member>
+  <member id="M:System.Quaternion.CreateFromAxisAngle(System.Vec3,float)"><summary>Creates a rotation from a normalized axis and radians.</summary></member>
+  <member id="M:System.Quaternion.CreateFromYawPitchRoll(float,float,float)"><summary>Creates a rotation from yaw, pitch, and roll radians.</summary></member>
+  <member id="M:System.Quaternion.CreateFromRotationMatrix(System.Matrix4x4)"><summary>Creates a quaternion from a rotation matrix.</summary></member>
+  <member id="M:System.Quaternion.ToMatrix4x4"><summary>Returns the equivalent scalar-layout rotation matrix.</summary></member>
+  <member id="M:System.Quaternion.Transform(System.Vec3)"><summary>Rotates a vector.</summary></member>
+</doc>

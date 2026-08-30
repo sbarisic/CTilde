@@ -11,7 +11,6 @@ public static class Scene
         HittableList world = new HittableList();
         Material ground = new Lambertian(new Vec3(0.5f, 0.5f, 0.5f));
         world.Add(new Sphere(new Vec3(0.0f, -1000.0f, 0.0f), 1000.0f, ground));
-
         int a = -11;
         while (a < 11)
         {
@@ -19,11 +18,8 @@ public static class Scene
             while (b < 11)
             {
                 float materialChoice = random.NextFloat();
-                Vec3 center = new Vec3(
-                    (float)a + 0.9f * random.NextFloat(),
-                    0.2f,
+                Vec3 center = new Vec3((float)a + 0.9f * random.NextFloat(), 0.2f,
                     (float)b + 0.9f * random.NextFloat());
-
                 if ((center - new Vec3(4.0f, 0.2f, 0.0f)).Length() > 0.9f)
                 {
                     Material material;
@@ -48,10 +44,11 @@ public static class Scene
             }
             a++;
         }
-
         world.Add(new Sphere(new Vec3(0.0f, 1.0f, 0.0f), 1.0f, new Dielectric(1.5f)));
-        world.Add(new Sphere(new Vec3(-4.0f, 1.0f, 0.0f), 1.0f, new Lambertian(new Vec3(0.4f, 0.2f, 0.1f))));
-        world.Add(new Sphere(new Vec3(4.0f, 1.0f, 0.0f), 1.0f, new Metal(new Vec3(0.7f, 0.6f, 0.5f), 0.0f)));
+        world.Add(new Sphere(new Vec3(-4.0f, 1.0f, 0.0f), 1.0f, new Lambertian(new Vec3(0.4f,
+            0.2f, 0.1f))));
+        world.Add(new Sphere(new Vec3(4.0f, 1.0f, 0.0f), 1.0f, new Metal(new Vec3(0.7f,
+            0.6f, 0.5f), 0.0f)));
         return world;
     }
 

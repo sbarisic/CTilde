@@ -10,6 +10,8 @@ internal static class CTildeCommand
     {
         if (args.Length > 0 && args[0] == "clean")
             return CleanCommand.Run(args);
+        if (args.Length > 0 && args[0] == "format")
+            return FormatCommand.Run(args);
         if (args.Length > 0 && args[0] is "restore" or "update" or "vendor")
             return RunModuleCommand(args);
         if (!CommandLineOptions.TryParse(args, out var options, out var parseError, out var showHelp))
@@ -415,6 +417,7 @@ internal static class CTildeCommand
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("       ctilde restore|update|vendor --project <ctilde.json>");
         Console.Error.WriteLine("       ctilde clean --project <ctilde.json> [--trace]");
+        Console.Error.WriteLine("       ctilde format [--check] <file-or-directory>...");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");

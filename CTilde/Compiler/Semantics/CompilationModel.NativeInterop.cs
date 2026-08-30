@@ -41,7 +41,7 @@ internal sealed partial class CompilationModel
             "ct_string_from_bytes", "ct_string_from_format", "ct_to_string_int", "ct_to_string_uint", "ct_to_string_long", "ct_to_string_ulong",
             "ct_to_string_float", "ct_to_string_double", "ct_to_string_bool", "ct_to_string_char", "ct_to_string_rune", "ct_validate_rune", "ct_utf8_encode_rune", "ct_write_string", "ct_write_char", "ct_write_rune",
             "ct_write_int", "ct_write_uint", "ct_write_long", "ct_write_ulong", "ct_write_float", "ct_write_double", "ct_write_bool", "ct_write_line", "ct_environment_exit",
-            "ct_math_sqrt", "ct_math_abs", "ct_math_tan", "ct_math_min", "ct_math_max", "ct_math_sin", "ct_math_cos", "ct_math_floor", "ct_math_ceiling",
+            "ct_math_sqrt", "ct_math_abs", "ct_math_tan", "ct_math_min", "ct_math_max", "ct_math_sin", "ct_math_cos", "ct_math_acos", "ct_math_floor", "ct_math_ceiling",
             "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close",
             "ct_host_io_throw", "ct_host_utf8_valid", "ct_host_file", "ct_host_file_require", "ct_host_write_all",
             "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_stack_bytes",
@@ -190,7 +190,7 @@ internal sealed partial class CompilationModel
         CTypeKind.Void or CTypeKind.Bool or CTypeKind.Byte or CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Ushort or CTypeKind.Char or
         CTypeKind.Int or CTypeKind.Uint or CTypeKind.Long or CTypeKind.Ulong or CTypeKind.Nint or CTypeKind.Nuint or CTypeKind.Float or CTypeKind.Double or
         CTypeKind.Enum or CTypeKind.Newtype or CTypeKind.Opaque or CTypeKind.EspError or CTypeKind.Pointer or CTypeKind.NativeBuffer or CTypeKind.ReadOnlyNativeBuffer or CTypeKind.NativeUtf8String => true,
-        CTypeKind.Struct => !type.ContainsManagedReferences && type.Symbol!.Fields.Where(field => !field.IsStatic).All(field => IsExportParameterType(field.Type)),
+        CTypeKind.Struct => type.Symbol?.Namespace != "System.Simd" && !type.ContainsManagedReferences && type.Symbol!.Fields.Where(field => !field.IsStatic).All(field => IsExportParameterType(field.Type)),
         CTypeKind.InlineArray => type.InlineArrayLength > 0 && IsExportParameterType(type.ElementType!),
         _ => false,
     };

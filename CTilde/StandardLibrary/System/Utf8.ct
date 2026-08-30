@@ -13,14 +13,12 @@ public static class Utf8
         {
             return false;
         }
-
         uint first = (uint)source[offset];
         int length = SequenceLength(first);
         if (length == 0 || offset + length > source.Length)
         {
             return false;
         }
-
         uint scalar = InitialScalar(first, length);
         for (int index = 1; index < length; index++)
         {
@@ -29,22 +27,20 @@ public static class Utf8
             {
                 return false;
             }
-
             scalar = (scalar << 6) | (next & 63u);
         }
-
         if (!IsValidScalar(scalar, length))
         {
             return false;
         }
-
         value = (rune)scalar;
         bytesRead = length;
         return true;
     }
 
     [NoAlloc]
-    public static unsafe bool TryDecode(ReadOnlyNativeBuffer<byte> source, out rune value, out nuint bytesRead)
+    public static unsafe bool TryDecode(ReadOnlyNativeBuffer<byte> source, out rune value,
+        out nuint bytesRead)
     {
         value = r'\0';
         bytesRead = 0;
@@ -52,14 +48,12 @@ public static class Utf8
         {
             return false;
         }
-
         uint first = (uint)source[0];
         int length = SequenceLength(first);
         if (length == 0 || source.Length < (nuint)length)
         {
             return false;
         }
-
         uint scalar = InitialScalar(first, length);
         for (int index = 1; index < length; index++)
         {
@@ -68,22 +62,20 @@ public static class Utf8
             {
                 return false;
             }
-
             scalar = (scalar << 6) | (next & 63u);
         }
-
         if (!IsValidScalar(scalar, length))
         {
             return false;
         }
-
         value = (rune)scalar;
         bytesRead = (nuint)length;
         return true;
     }
 
     [NoAlloc]
-    public static unsafe bool TryEncode(rune value, NativeBuffer<byte> destination, out nuint bytesWritten)
+    public static unsafe bool TryEncode(rune value, NativeBuffer<byte> destination,
+        out nuint bytesWritten)
     {
         bytesWritten = 0;
         uint scalar = (uint)value;
@@ -103,12 +95,10 @@ public static class Utf8
                 required = 4;
             }
         }
-
         if (destination.Length < required)
         {
             return false;
         }
-
         if (required == 1)
         {
             destination[0] = (byte)scalar;
@@ -131,7 +121,6 @@ public static class Utf8
             destination[2] = (byte)(128u | ((scalar >> 6) & 63u));
             destination[3] = (byte)(128u | (scalar & 63u));
         }
-
         bytesWritten = required;
         return true;
     }
@@ -139,19 +128,40 @@ public static class Utf8
     [NoAlloc]
     private static int SequenceLength(uint first)
     {
-        if (first <= 127u) { return 1; }
-        if (first >= 194u && first <= 223u) { return 2; }
-        if (first >= 224u && first <= 239u) { return 3; }
-        if (first >= 240u && first <= 244u) { return 4; }
+        if (first <= 127u)
+        {
+            return 1;
+        }
+        if (first >= 194u && first <= 223u)
+        {
+            return 2;
+        }
+        if (first >= 224u && first <= 239u)
+        {
+            return 3;
+        }
+        if (first >= 240u && first <= 244u)
+        {
+            return 4;
+        }
         return 0;
     }
 
     [NoAlloc]
     private static uint InitialScalar(uint first, int length)
     {
-        if (length == 1) { return first; }
-        if (length == 2) { return first & 31u; }
-        if (length == 3) { return first & 15u; }
+        if (length == 1)
+        {
+            return first;
+        }
+        if (length == 2)
+        {
+            return first & 31u;
+        }
+        if (length == 3)
+        {
+            return first & 15u;
+        }
         return first & 7u;
     }
 
@@ -164,10 +174,22 @@ public static class Utf8
     [NoAlloc]
     private static bool IsValidScalar(uint scalar, int length)
     {
-        if (length == 2 && scalar < 128u) { return false; }
-        if (length == 3 && scalar < 2048u) { return false; }
-        if (length == 4 && scalar < 65536u) { return false; }
-        if (scalar >= 55296u && scalar <= 57343u) { return false; }
+        if (length == 2 && scalar < 128u)
+        {
+            return false;
+        }
+        if (length == 3 && scalar < 2048u)
+        {
+            return false;
+        }
+        if (length == 4 && scalar < 65536u)
+        {
+            return false;
+        }
+        if (scalar >= 55296u && scalar <= 57343u)
+        {
+            return false;
+        }
         return scalar <= 1114111u;
     }
 }

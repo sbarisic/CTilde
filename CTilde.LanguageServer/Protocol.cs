@@ -24,6 +24,7 @@ internal sealed record ServerCapabilities(
     SignatureHelpOptions SignatureHelpProvider,
     bool HoverProvider,
     bool DefinitionProvider,
+    bool ReferencesProvider,
     bool DocumentSymbolProvider,
     bool WorkspaceSymbolProvider,
     WorkspaceCapabilities Workspace,
@@ -59,6 +60,8 @@ internal sealed record SignatureHelp(SignatureInformation[] Signatures, int Acti
 internal sealed record SignatureInformation(string Label, ParameterInformation[] Parameters, MarkupContent? Documentation = null);
 internal sealed record ParameterInformation(string Label, MarkupContent? Documentation = null);
 internal sealed record DefinitionParams(TextDocumentIdentifier TextDocument, Position Position);
+internal sealed record ReferencesParams(TextDocumentIdentifier TextDocument, Position Position, ReferenceContext Context);
+internal sealed record ReferenceContext(bool IncludeDeclaration);
 internal sealed record Location(string Uri, Range Range);
 internal sealed record DocumentSymbolParams(TextDocumentIdentifier TextDocument);
 internal sealed record DocumentSymbol(string Name, string Detail, int Kind, Range Range, Range SelectionRange, DocumentSymbol[] Children);
@@ -75,6 +78,25 @@ internal sealed record StandardLibraryTextParams(string Uri);
 internal sealed record CTildeProjectContext(string ProjectUri, string ManifestUri);
 internal sealed record CTildeProjectContextsParams(CTildeProjectContext[] Projects, string? ActiveManifestUri);
 internal sealed record CTildeActiveProjectParams(string? ManifestUri);
+internal sealed record CTildeReferenceCodeLensParams(TextDocumentIdentifier TextDocument);
+internal sealed record CTildeReferenceCodeLensDetailsParams(TextDocumentIdentifier TextDocument, string SymbolKey, long Revision);
+internal sealed record CTildeReferenceCodeLens(
+    string SymbolKey,
+    string Name,
+    string Detail,
+    int Kind,
+    Range Range,
+    Range SelectionRange,
+    int ReferenceCount,
+    long Revision);
+internal sealed record CTildeReferenceDetail(
+    string Uri,
+    Range Range,
+    string ReferenceText,
+    int ReferenceStart,
+    int ReferenceEnd,
+    string ReferenceLongDescription);
+internal sealed record CTildeReferenceCodeLensDetails(string SymbolKey, long Revision, CTildeReferenceDetail[] References);
 internal sealed record ShowMessageParams(int Type, string Message);
 
 internal static class UriHelpers

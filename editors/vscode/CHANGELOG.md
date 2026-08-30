@@ -1,8 +1,8 @@
 # Changelog
 
-## 0.14.0 - 2026-08-30
+## 0.15.0 - 2026-08-30
 
-- Added Draft 0.36 generic collections, indexers, enumeration, and iterator syntax.
+- Added Draft 0.37 SIMD128, matrix, quaternion, and scalar-vector helper completion, hover, signatures, semantic tokens, and embedded-source navigation.
 - Aligned the compiler, language server, debug adapter, and extension package.
 
 ## 0.13.0 - 2026-08-30

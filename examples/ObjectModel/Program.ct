@@ -20,7 +20,10 @@ public class Base
 
     public virtual int Value
     {
-        get { return number; }
+        get
+        {
+            return number;
+        }
     }
 }
 
@@ -37,7 +40,10 @@ public class Derived : Base
 
     public override int Value
     {
-        get { return number + 2; }
+        get
+        {
+            return number + 2;
+        }
     }
 }
 

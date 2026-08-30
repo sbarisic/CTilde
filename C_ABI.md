@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.36 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
+This document defines the generated C contract for C~ draft 0.37 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
 
-Draft 0.36 retains runtime ABI 16 and debug metadata version 3. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.37 retains runtime ABI 16 and debug metadata version 3. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -368,7 +368,7 @@ An extern method, extern data symbol, inline assembly block, or assembly functio
 
 `[Register(address)]` emits no object storage. A whole-field read or write casts the checked address to a naturally sized volatile pointer and surrounds the access with `ct_mmio_barrier`. A direct bit-view write uses one volatile load and one volatile store with mask-and-shift update logic; it is deliberately non-atomic. Readonly registers omit write storage. The generated C never takes the address of a register field.
 
-Source identities normalize each input against its `SourceOwnerIdentity.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. Repository owners include their canonical module path and exact locked revision. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.36.
+Source identities normalize each input against its `SourceOwnerIdentity.SourceIdentityRoot`, preserve bundled virtual paths, and hash pathless source contents. Repository owners include their canonical module path and exact locked revision. The first 96 bits of SHA-256 over that identity form each modular source filename. Duplicate identities report `CT4112`; source input order does not affect artifacts. The broad `ctilde_internal.h` remains shared in Draft 0.37.
 
 ## Portable CPU lowering
 
@@ -415,7 +415,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.36.
+This section records constraints that remain after draft 0.37.
 
 Fixed-width SIMD values are internal C~ value types. They are rejected in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use x86/Arm intrinsics or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI.
 

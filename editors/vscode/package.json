@@ -2,7 +2,7 @@
   "name": "ctilde-language",
   "displayName": "C~ Compiler and Debugger",
   "description": "Official C~ language support with IntelliSense, diagnostics, project builds, and source-level debugging.",
-  "version": "0.14.0",
+  "version": "0.15.0",
   "publisher": "sbarisic",
   "license": "SEE LICENSE IN LICENSE",
   "preview": true,

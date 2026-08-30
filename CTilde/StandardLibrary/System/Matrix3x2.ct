@@ -1,0 +1,186 @@
+namespace System;
+
+public struct Matrix3x2
+{
+    public float M11;
+    public float M12;
+    public float M21;
+    public float M22;
+    public float M31;
+    public float M32;
+
+    public Matrix3x2(float m11, float m12, float m21, float m22, float m31, float m32)
+    {
+        M11 = m11;
+        M12 = m12;
+        M21 = m21;
+        M22 = m22;
+        M31 = m31;
+        M32 = m32;
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 Identity
+    {
+        get
+        {
+            return new Matrix3x2(1.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+        }
+    }
+
+    [NoAlloc]
+    public float Determinant()
+    {
+        return M11 * M22 - M21 * M12;
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateTranslation(float x, float y)
+    {
+        return new Matrix3x2(1.0f, 0.0f, 0.0f, 1.0f, x, y);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateTranslation(Vec2 value)
+    {
+        return CreateTranslation(value.X, value.Y);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateScale(float value)
+    {
+        return CreateScale(value, value);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateScale(float x, float y)
+    {
+        return new Matrix3x2(x, 0.0f, 0.0f, y, 0.0f, 0.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateScale(Vec2 value)
+    {
+        return CreateScale(value.X, value.Y);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateScale(Vec2 value, Vec2 center)
+    {
+        return new Matrix3x2(value.X, 0.0f, 0.0f, value.Y, center.X * (1.0f - value.X),
+            center.Y * (1.0f - value.Y));
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateRotation(float radians)
+    {
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        return new Matrix3x2(c, s, -s, c, 0.0f, 0.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateRotation(float radians, Vec2 center)
+    {
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        return new Matrix3x2(c, s, -s, c, center.X * (1.0f - c) + center.Y * s, center.Y
+            * (1.0f - c) - center.X * s);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 CreateSkew(float radiansX, float radiansY)
+    {
+        return new Matrix3x2(1.0f, Math.Tan(radiansY), Math.Tan(radiansX), 1.0f,
+            0.0f, 0.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 operator +(Matrix3x2 a, Matrix3x2 b)
+    {
+        return new Matrix3x2(a.M11 + b.M11, a.M12 + b.M12, a.M21 + b.M21, a.M22 + b.M22,
+            a.M31 + b.M31, a.M32 + b.M32);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 operator -(Matrix3x2 a, Matrix3x2 b)
+    {
+        return new Matrix3x2(a.M11 - b.M11, a.M12 - b.M12, a.M21 - b.M21, a.M22 - b.M22,
+            a.M31 - b.M31, a.M32 - b.M32);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 operator *(Matrix3x2 value, float scale)
+    {
+        return new Matrix3x2(value.M11 * scale, value.M12 * scale, value.M21 * scale,
+            value.M22 * scale, value.M31 * scale, value.M32 * scale);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 operator *(float scale, Matrix3x2 value)
+    {
+        return value * scale;
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 operator *(Matrix3x2 a, Matrix3x2 b)
+    {
+        return new Matrix3x2(a.M11 * b.M11 + a.M12 * b.M21, a.M11 * b.M12 + a.M12
+            * b.M22, a.M21 * b.M11 + a.M22 * b.M21, a.M21 * b.M12 + a.M22 * b.M22,
+            a.M31 * b.M11 + a.M32 * b.M21 + b.M31, a.M31 * b.M12 + a.M32 * b.M22
+            + b.M32);
+    }
+
+    [NoAlloc]
+    public static Matrix3x2 Lerp(Matrix3x2 a, Matrix3x2 b, float amount)
+    {
+        return a + (b - a) * amount;
+    }
+
+    [NoAlloc]
+    public static bool TryInvert(Matrix3x2 value, out Matrix3x2 result)
+    {
+        if (!IsFinite(value.M11) || !IsFinite(value.M12) || !IsFinite(value.M21)
+            || !IsFinite(value.M22) || !IsFinite(value.M31) || !IsFinite(value.M32))
+        {
+            result = default(Matrix3x2);
+            return false;
+        }
+        float determinant = value.Determinant();
+        if (determinant == 0.0f || determinant - determinant != 0.0f)
+        {
+            result = default(Matrix3x2);
+            return false;
+        }
+        float inverse = 1.0f / determinant;
+        result = new Matrix3x2(value.M22 * inverse, -value.M12 * inverse, -value.M21
+            * inverse, value.M11 * inverse, (value.M21 * value.M32 - value.M31 * value.M22)
+            * inverse, (value.M31 * value.M12 - value.M11 * value.M32) * inverse);
+        return true;
+    }
+
+    [NoAlloc]
+    private static bool IsFinite(float value)
+    {
+        return value - value == 0.0f;
+    }
+
+    [NoAlloc]
+    public Vec2 TransformPoint(Vec2 value)
+    {
+        return new Vec2(value.X * M11 + value.Y * M21 + M31, value.X * M12 + value.Y
+            * M22 + M32);
+    }
+
+    [NoAlloc]
+    public Vec2 TransformVector(Vec2 value)
+    {
+        return new Vec2(value.X * M11 + value.Y * M21, value.X * M12 + value.Y * M22);
+    }
+
+    [NoAlloc]
+    public static Vec2 operator *(Vec2 value, Matrix3x2 matrix)
+    {
+        return matrix.TransformPoint(value);
+    }
+}

@@ -4,6 +4,7 @@ using System.Runtime;
 namespace Examples;
 
 public delegate long LongTransformer(long value);
+
 public delegate int IntTransformer(int value);
 
 [NativeType("uintptr_t", "stdint.h")]
@@ -11,10 +12,7 @@ public opaque NativeResource;
 
 public enum Direction : byte
 {
-    North = 0,
-    East = 1,
-    South = 2,
-    West = 3
+    North=0, East=1, South=2, West=3
 }
 
 public struct Point
@@ -45,8 +43,14 @@ public sealed class Counter
 
     public int Value
     {
-        get { return value; }
-        private set { this.value = value; }
+        get
+        {
+            return value;
+        }
+        private set
+        {
+            this.value = value;
+        }
     }
 
     public void Increment()
@@ -68,18 +72,26 @@ public static class NativeInterop
 
     [Extern("ct_native_resource_create")]
     [NoAlloc]
-    public static int Create([Creates] out NativeResource resource);
+    public static int Create(
+        [Creates]
+        out NativeResource resource);
 
     [Extern("ct_native_resource_value")]
     [NoAlloc]
-    public static int Read([Borrowed] NativeResource resource);
+    public static int Read(
+        [Borrowed]
+        NativeResource resource);
 
     [Extern("ct_native_resource_release")]
     [NoAlloc]
-    public static void Release([Consumes] NativeResource resource);
+    public static void Release(
+        [Consumes]
+        NativeResource resource);
 
     [Extern("ct_native_invoke_delegate")]
-    public static int Invoke([SynchronousCallback] IntTransformer callback, int value);
+    public static int Invoke(
+        [SynchronousCallback]
+        IntTransformer callback, int value);
 
     [Extern("ct_native_call_export")]
     [NoAlloc]
@@ -144,23 +156,19 @@ public static class Program
         Counter counter = new Counter(3);
         counter.Increment();
         Console.WriteLine(counter.Value);
-
         int[] values = new int[3];
         for (int index = 0; index < values.Length; index++)
         {
             values[index] = index + 1;
         }
-
         int total = 0;
         foreach (int value in values)
         {
             total += value;
         }
         Console.WriteLine(Twice(total));
-
         Point point = new Point(2, 4);
         Console.WriteLine(point.Sum());
-
         Direction direction = Direction.East;
         switch (direction)
         {
@@ -174,43 +182,36 @@ public static class Program
                 Console.WriteLine("other");
                 break;
         }
-
         string text = "A" + "B";
         Console.WriteLine(text.Length);
         Console.WriteLine(text[0]);
-
-        if (text.Length < 10) {
+        if (text.Length < 10)
+        {
             Console.WriteLine("Text.Length < 10!");
         }
-
         unsafe
         {
             int number = 9;
             int* pointer = &number;
             *pointer = 10;
             Console.WriteLine(number);
-
             delegate* unmanaged<long, long> callback = &TransformLong;
             Console.WriteLine(callback(41L));
         }
-
         long signedBoundary = -9223372036854775808L;
         ulong unsignedBoundary = 18446744073709551615UL;
         Console.WriteLine(signedBoundary);
         Console.WriteLine(unsignedBoundary);
         LongTransformer transformer = TransformLong;
         Console.WriteLine(transformer(41L));
-
         nint nativeValue = 40;
         nuint nativeDelta = 2U;
         Console.WriteLine(nativeValue + (nint)nativeDelta);
-
         int updated = 40;
         readonly int delta = 2;
         uint updateResult;
         UpdateNative(ref updated, in delta, out updateResult);
         Console.WriteLine(updateResult);
-
         unsafe
         {
             NativeBuffer<byte> buffer = stackalloc byte[2];
@@ -219,19 +220,15 @@ public static class Program
             ReadOnlyNativeBuffer<byte> readable = buffer;
             Console.WriteLine(NativeBufferSum(readable));
         }
-
         NativeUtf8String nativeText = NativeUtf8String.Borrow("ctilde");
         Console.WriteLine(NativeInterop.Utf8Length(nativeText));
-
         NativeResource resource;
         int createResult = NativeInterop.Create(out resource);
         defer NativeInterop.Release(resource);
         Console.WriteLine(createResult + NativeInterop.Read(resource));
-
         IntTransformer nativeDelegate = counter.Add;
         Console.WriteLine(NativeInterop.Invoke(nativeDelegate, 38));
         Console.WriteLine(NativeInterop.CallExport(20, 22));
-
         ShowDeferredCleanup();
     }
 }

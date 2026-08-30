@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AssemblyName>CTilde.VisualStudio.CodeLens</AssemblyName>
+    <RootNamespace>CTilde.VisualStudio.CodeLens</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../CTilde.VisualStudio.Core/CTilde.VisualStudio.Core.csproj" />
+    <PackageReference Include="Microsoft.VisualStudio.Language" Version="17.14.249" ExcludeAssets="runtime" />
+    <Reference Include="System.ComponentModel.Composition" />
+  </ItemGroup>
+</Project>

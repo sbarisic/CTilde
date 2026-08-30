@@ -7,7 +7,6 @@ public sealed class RandomGenerator
     public const uint DefaultSeed = 0x00C0FFEEu;
     public const uint DefaultSceneSeed = 0x00C0FFEEu;
     public const uint DefaultRenderSeed = 0x5EED1234u;
-
     private uint state;
 
     public RandomGenerator(uint seed)
@@ -56,7 +55,7 @@ public sealed class RandomGenerator
     [NoAlloc]
     public float NextFloat()
     {
-        return (float)(NextUInt() >> 8) / 16777216.0f;
+        return(float)(NextUInt() >> 8) / 16777216.0f;
     }
 
     [NoAlloc]

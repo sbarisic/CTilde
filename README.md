@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.36 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic value containers, array algorithms, UTF-8 rune helpers, enumeration contracts, lists, stacks, queues, maps, and sets.
+Draft 0.37 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout vectors, matrices, and quaternions.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -137,6 +137,31 @@ dotnet run --project .\CTilde.Cli -- --project .\examples\Hello\ctilde.json --bu
 
 GCC releases that lack the final C23 option can use `-std=gnu2x`.
 
+### Format C~ source
+
+The compiler includes a deterministic syntax-aware formatter. Write formatted source recursively with:
+
+```powershell
+ctilde format .\src
+```
+
+Use check mode in validation without changing files:
+
+```powershell
+ctilde format --check .\src
+```
+
+From the repository root, format or verify the complete physical C~ source set with:
+
+```powershell
+ctilde format CTilde CTilde.Cli editors examples
+ctilde format --check CTilde CTilde.Cli editors examples
+```
+
+Repository C~ source uses UTF-8 without a byte-order mark, LF endings, four-space indentation, Allman braces, one attribute and statement per line, and a 120-column target. The formatter preserves comments, documentation, literals, template placeholders, and raw assembly text. A file containing intentionally malformed grammar-test text can opt out of syntax rewriting with `// ctilde-format: preserve`; line endings and trailing whitespace are still normalized.
+
+Directory inputs are recursive and deterministic. The command does not follow reparse points or enter Git metadata, build outputs, dependency directories, VS Code test state, or C~ module caches. Every non-preserved input is parsed before write mode replaces any changed file, so a syntax error leaves the complete input set unchanged.
+
 ## Projects
 
 A `ctilde.json` file defines a source set, target, build outputs, and run command:
@@ -218,7 +243,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
 
-See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.14.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
+See [the Visual Studio extension guide](editors/visualstudio/README.md). Version 0.15.0 supports hosted launch debugging with explicitly configured GCC, Clang, or WSL-GCC plus owned Debug Launch sessions for `esp32_qemu` and `esp32c3_qemu`. Attach and physical ESP debugging remain out of scope.
 
 ## Compiler API
 
@@ -237,7 +262,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.36 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.37 language rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

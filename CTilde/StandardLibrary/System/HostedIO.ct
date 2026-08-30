@@ -4,16 +4,12 @@ namespace System.IO;
 
 public enum FileMode : byte
 {
-    Open = 0,
-    Create = 1,
-    Append = 2
+    Open=0, Create=1, Append=2
 }
 
 public enum FileAccess : byte
 {
-    Read = 0,
-    Write = 1,
-    ReadWrite = 2
+    Read=0, Write=1, ReadWrite=2
 }
 
 [NativeType("uintptr_t", "stdint.h")]
@@ -34,7 +30,10 @@ public class IOException : System.Exception
 
     public int ErrorCode
     {
-        get { return errorCode; }
+        get
+        {
+            return errorCode;
+        }
     }
 }
 
@@ -45,14 +44,22 @@ public static class File
     public static FileHandle Open(string path, FileMode mode, FileAccess access);
 
     [Extern("ct_host_file_read")]
-    public static unsafe nuint Read([Borrowed] FileHandle file, NativeBuffer<byte> destination);
+    public static unsafe nuint Read(
+        [Borrowed]
+        FileHandle file, NativeBuffer<byte> destination);
 
     [Extern("ct_host_file_write_buffer")]
-    public static unsafe void Write([Borrowed] FileHandle file, ReadOnlyNativeBuffer<byte> source);
+    public static unsafe void Write(
+        [Borrowed]
+        FileHandle file, ReadOnlyNativeBuffer<byte> source);
 
     [Extern("ct_host_file_write_string")]
-    public static void Write([Borrowed] FileHandle file, string value);
+    public static void Write(
+        [Borrowed]
+        FileHandle file, string value);
 
     [Extern("ct_host_file_close")]
-    public static void Close([Consumes] FileHandle file);
+    public static void Close(
+        [Consumes]
+        FileHandle file);
 }

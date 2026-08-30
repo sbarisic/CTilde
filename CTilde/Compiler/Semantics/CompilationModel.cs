@@ -448,13 +448,16 @@ internal sealed partial class CompilationModel
     {
         if (definition.ContainingType.Namespace != "System.Simd" ||
             definition.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4" or "Mask32x4") ||
-            definition.Name is not ("GetLane" or "WithLane" or "Shuffle"))
+            definition.Name is not ("GetLane" or "WithLane" or "Shuffle" or "ShiftLeft" or "ShiftRight"))
             return;
 
         foreach (var argument in arguments)
         {
-            if (argument.Kind == CTypeKind.Constant && argument.ConstantValue is BigInteger lane && (lane < BigInteger.Zero || lane > new BigInteger(3)))
-                Diagnostics.Add("CT2220", $"SIMD lane index '{lane}' is outside the fixed range 0..3.", syntax.Source, syntax.Span);
+            if (argument.Kind != CTypeKind.Constant || argument.ConstantValue is not BigInteger value)
+                continue;
+            var maximum = definition.Name is "ShiftLeft" or "ShiftRight" ? 31 : 3;
+            if (value < BigInteger.Zero || value > new BigInteger(maximum))
+                Diagnostics.Add("CT2220", $"SIMD {(maximum == 31 ? "shift count" : "lane index")} '{value}' is outside the fixed range 0..{maximum}.", syntax.Source, syntax.Span);
         }
     }
 
@@ -983,6 +986,8 @@ internal sealed partial class CompilationModel
                 {
                     type.DelegateReturnType = ResolveType(declaration.DelegateReturnType!, tree);
                     type.DelegateParameters = DeclareParameters(declaration.DelegateParameters, tree, isExtern: false);
+                    if (IsSimdType(type.DelegateReturnType) || type.DelegateParameters.Any(parameter => IsSimdType(parameter.Type)))
+                        Diagnostics.Add("CT1279", "SIMD values cannot appear in delegate callback signatures.", declaration.Source, declaration.Span);
                     continue;
                 }
                 if (type.Kind == DeclaredTypeKind.Opaque)
@@ -1470,11 +1475,11 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1220", "A field cannot be both const and readonly.", field.Source, field.Span);
                     if (isVolatile && (symbol.IsConst || symbol.IsReadonly || !IsVolatileType(symbol.Type)))
                         Diagnostics.Add("CT1274", "volatile requires a writable Boolean, integral, native-integral, enum, or unsafe-pointer field.", field.Source, field.Span);
-                    if (sectionAttribute is not null && (!symbol.IsStatic || symbol.IsConst || !IsCompleteUnmanagedType(symbol.Type)))
+                    if (sectionAttribute is not null && (!symbol.IsStatic || symbol.IsConst || !IsCompleteUnmanagedType(symbol.Type) || ForbiddenNativeBoundaryType(symbol.Type)))
                         Diagnostics.Add("CT1287", "Section requires a non-const static field with a complete unmanaged type.", sectionAttribute.Source, sectionAttribute.Span);
-                    if (usedAttribute is not null && (!symbol.IsStatic || symbol.IsConst || externAttribute is not null || !IsCompleteUnmanagedType(symbol.Type)))
+                    if (usedAttribute is not null && (!symbol.IsStatic || symbol.IsConst || externAttribute is not null || !IsCompleteUnmanagedType(symbol.Type) || ForbiddenNativeBoundaryType(symbol.Type)))
                         Diagnostics.Add("CT1288", "Used requires an owned non-const static field with a complete unmanaged type.", usedAttribute.Source, usedAttribute.Span);
-                    if (externAttribute is not null && (!symbol.IsStatic || symbol.IsConst || symbol.Initializer is not null || type.IsGenericDefinition || !IsCompleteUnmanagedType(symbol.Type) || sectionAttribute is not null || usedAttribute is not null || isVolatile))
+                    if (externAttribute is not null && (!symbol.IsStatic || symbol.IsConst || symbol.Initializer is not null || type.IsGenericDefinition || !IsCompleteUnmanagedType(symbol.Type) || ForbiddenNativeBoundaryType(symbol.Type) || sectionAttribute is not null || usedAttribute is not null || isVolatile))
                         Diagnostics.Add("CT1289", "Extern data requires a non-generic static unmanaged field without an initializer, Section, Used, const, or C~ volatile.", externAttribute.Source, externAttribute.Span);
                     if (nativeVolatileAttribute is not null && externAttribute is null)
                         Diagnostics.Add("CT1290", "NativeVolatile is valid only on an extern data field.", nativeVolatileAttribute.Source, nativeVolatileAttribute.Span);
@@ -1894,11 +1899,15 @@ internal sealed partial class CompilationModel
     private static bool ForbiddenNativeBoundaryType(CType type)
     {
         if (type.Kind is CTypeKind.Interface or CTypeKind.TypeParameter || type.IsAtomic ||
+            type.Symbol?.Namespace == "System.Simd" ||
             type.Symbol is { Namespace: "System.Threading", Name: "Thread" or "Mutex" } ||
             type.Symbol?.IsOpenConstructed == true)
             return true;
         return type.ElementType is not null && ForbiddenNativeBoundaryType(type.ElementType);
     }
+
+    private static bool IsSimdType(CType type) =>
+        type.Symbol?.Namespace == "System.Simd" || type.ElementType is not null && IsSimdType(type.ElementType);
 
     private static bool IsInlineAssemblyValueType(CType type, bool allowVoid) =>
         allowVoid && type == CType.Void || type.Kind is

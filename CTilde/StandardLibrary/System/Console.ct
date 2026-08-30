@@ -117,8 +117,6 @@ public static class Console
         Write(value);
         WriteLine();
     }
-
     // CTILDE_HOSTED_INPUT_MEMBERS
-
     // CTILDE_NATIVE_INTEGER_OVERLOADS
 }

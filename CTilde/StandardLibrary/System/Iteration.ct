@@ -7,8 +7,13 @@ public interface IDisposable
 
 public interface IEnumerator<T> : IDisposable
 {
-    T Current { get; }
+    T Current
+    {
+        get;
+    }
+
     bool MoveNext();
+
     void Dispose();
 }
 

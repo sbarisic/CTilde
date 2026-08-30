@@ -46,6 +46,7 @@ internal sealed class CTildeCommands : IDisposable
         instance.Add(service, 0x0106, (_, _) => instance.RestartLanguageServer());
         instance.Add(service, 0x0107, (_, _) => CTildeOutput.Show());
         instance.Add(service, 0x0108, (_, _) => instance.CreateProjectFromManifest());
+        instance.Add(service, ReferenceCodeLensContracts.NavigateCommandId, instance.NavigateToReference);
         package.DisposalToken.Register(instance.Dispose);
     }
 
@@ -61,6 +62,12 @@ internal sealed class CTildeCommands : IDisposable
         ThreadHelper.ThrowIfNotOnUIThread();
         var command = (OleMenuCommand)sender;
         var id = command.CommandID.ID;
+        if (id == ReferenceCodeLensContracts.NavigateCommandId)
+        {
+            command.Enabled = true;
+            command.Visible = false;
+            return;
+        }
         var projectPath = FindSelectedProject();
         var hasProject = projectPath is not null;
         command.Enabled = id switch
@@ -237,6 +244,24 @@ internal sealed class CTildeCommands : IDisposable
                 dte.Solution.AddFromFile(projectPath);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException) { ShowError(exception.Message); }
+    }
+
+    private void NavigateToReference(object sender, EventArgs eventArgs)
+    {
+        ThreadHelper.ThrowIfNotOnUIThread();
+        var value = eventArgs is OleMenuCmdEventArgs commandArgs
+            ? commandArgs.InValue as string ?? (commandArgs.InValue as object[])?.FirstOrDefault() as string
+            : null;
+        if (!ReferenceNavigationTarget.TryParse(value, out var target) ||
+            !System.Uri.TryCreate(target.Uri, UriKind.Absolute, out var uri) || !uri.IsFile || !File.Exists(uri.LocalPath) ||
+            Package.GetGlobalService(typeof(DTE)) is not DTE dte)
+            return;
+
+        dte.ItemOperations.OpenFile(uri.LocalPath, EnvDTE.Constants.vsViewKindCode);
+        if (dte.ActiveDocument?.Selection is not TextSelection selection)
+            return;
+        selection.MoveToLineAndOffset(target.Range.Start.Line + 1, target.Range.Start.Character + 1, false);
+        selection.MoveToLineAndOffset(target.Range.End.Line + 1, target.Range.End.Character + 1, true);
     }
 
     private static string ReadManifestConfiguration(string manifestPath)

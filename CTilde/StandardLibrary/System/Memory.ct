@@ -14,5 +14,4 @@ public static class Memory
     [NoAlloc]
     public static void TestFailAllocationAfter(int successfulAllocations);
 }
-
 // CTILDE_NATIVE_UTF8_DECLARATION

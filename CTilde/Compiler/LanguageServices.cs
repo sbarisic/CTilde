@@ -9,7 +9,7 @@ public enum LanguageCompletionKind
 
 public enum LanguageSymbolKind
 {
-    Namespace, Class, Struct, Enum, EnumMember, Method, Constructor, Property, Field,
+    Namespace, Class, Struct, Enum, EnumMember, Method, Constructor, Property, Field, Parameter, Variable,
 }
 
 public sealed record LanguageCompletion(
@@ -108,7 +108,7 @@ public sealed partial class LanguageServiceSnapshot
             }
             : options.Architecture;
         _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture, options.CpuFeatures,
-            options.Environment, requireEntryPoint);
+            options.Environment, requireEntryPoint, requireRuntimeImplementations: false);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);
@@ -124,6 +124,7 @@ public sealed partial class LanguageServiceSnapshot
                 .OrderBy(entry => entry.Syntax.Span.Length)
                 .ThenBy(entry => entry.Syntax.Span.Start)];
         }
+        _referenceIndex = new Lazy<ReferenceIndex>(BuildReferenceIndex, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public CompilationOptions Options { get; }

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.36 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load the generic value containers, callback delegates, array algorithms, UTF-8 helpers, enumeration contracts, and mutable generic collections. Freestanding retains its allocation-free core and generic value containers; managed collections require the ordinary managed-allocation and exception runtime roles.
+This document is the canonical standard-library reference for C~ Draft 0.37 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load the generic collections, UTF-8 helpers, scalar geometry, matrices, quaternions, and explicit SIMD128 values. Freestanding retains its allocation-free core, generic value containers, and scalar geometry; managed collections require the ordinary managed-allocation and exception runtime roles.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -12,7 +12,7 @@ The Cosmopolitan profile reuses the hosted object, exception, console, environme
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
 
-Draft 0.36 retains the trusted target-query, CPU, SIMD, MMIO, and endian contracts. UTF-8 helpers are `[NoAlloc]`, but intentionally not `[NoRuntime]`. Callback-driven generic operations inherit the callback's effects.
+Draft 0.37 completes the explicit SIMD128 operation surface and adds scalar-layout matrices and quaternions without changing runtime ABI 16 or debug metadata version 3. UTF-8 helpers are `[NoAlloc]`, but intentionally not `[NoRuntime]`. Callback-driven generic operations inherit the callback's effects.
 
 `[Interrupt]` and `[InterruptSafe]` are compiler-defined attributes rather than ordinary runtime APIs. On ESP-IDF, an interrupt entry has the exact exported `void(void*)` signature and runs without runtime attachment, managed cleanup, exception machinery, or blocking calls. Interrupt-safe externs and assembly must also declare their ordinary effect contracts independently.
 
@@ -125,6 +125,7 @@ public static class Math
     public const double Pi64 = 3.14159265358979323846264338327950288d;
 
     [NoAlloc] public static float Sqrt(float value);
+    [NoAlloc] public static float Acos(float value);
     [NoAlloc] public static float Abs(float value);
     [NoAlloc] public static float Tan(float value);
     [NoAlloc] public static float Min(float left, float right);
@@ -135,6 +136,7 @@ public static class Math
     [NoAlloc] public static float Ceiling(float value);
 
     [NoAlloc] public static double Sqrt(double value);
+    [NoAlloc] public static double Acos(double value);
     [NoAlloc] public static double Abs(double value);
     [NoAlloc] public static double Tan(double value);
     [NoAlloc] public static double Min(double left, double right);
@@ -146,7 +148,7 @@ public static class Math
 }
 ```
 
-`Pi` is the nearest C~ `float` to pi. `Pi64` is the nearest C~ `double`. Angles use radians. Float overloads map to the target C library functions with an `f` suffix. Double overloads map to `sqrt`, `fabs`, `tan`, `fmin`, `fmax`, `sin`, `cos`, `floor`, and `ceil`.
+`Pi` is the nearest C~ `float` to pi. `Pi64` is the nearest C~ `double`. Angles use radians. Float overloads map to the target C library functions with an `f` suffix. Double overloads map to `sqrt`, `acos`, `fabs`, `tan`, `fmin`, `fmax`, `sin`, `cos`, `floor`, and `ceil`.
 
 NaN, infinity, signed-zero, rounding, and domain behavior follow the target C library. `Min` and `Max` return the numeric operand when exactly one operand is NaN. C~ does not expose `errno` or floating-point exception state. These functions do not throw C~ exceptions. The native-build driver links `libm` on Unix and WSL. Manual GNU links must place `-lm` after the generated translation unit.
 
@@ -193,7 +195,19 @@ public struct Vec3
 
 `Vec2` provides `UnitX` and `UnitY`; `Vec4` additionally provides `UnitZ` and `UnitW`. Vector-vector multiplication and division operate component by component. Dot products remain explicit. Normalization divides by the native square-root result without a special zero check, so normalizing a zero vector produces NaN components according to target floating-point behavior. Vector declarations are loaded into compilation only when the corresponding exact type name appears in source; editor services load all three for completion and embedded-source navigation.
 
-`System.Simd` provides explicit `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with deterministic 16-byte storage, scalar-default behavior, constant lanes and shuffles, comparisons, and selection. `Vec4` keeps its scalar geometry semantics. Manifest `cpuFeatures: ["simd128"]` or CLI `--cpu-feature simd128` enables compiler-verified x86 or Arm intrinsic lowering; `Target.HasFeature(CpuFeature.Simd128)` exposes the selected contract to C~ code.
+All vector types also provide componentwise `Abs`, `Min`, `Max`, `Clamp`, and `Lerp`, plus `Distance` and `DistanceSquared`. These helpers allocate no managed storage and retain ordinary IEEE behavior.
+
+`System.Simd` provides explicit `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with deterministic 16-byte storage. The surface includes unary and arithmetic operations, integer bitwise operations, comparisons, selection, lane access and shuffle, fixed-order reductions, deterministic conversions, bit-preserving reinterpretation, checked managed-array and native-buffer load/store on runtime-backed targets, and unaligned-safe unsafe pointer load/store on every target. `F32x4.MultiplyAdd` permits a fused instruction only when target compiler macros prove FMA support; otherwise it performs multiply followed by add. A fixed toolchain configuration is deterministic, while fused and non-fused builds can differ by one rounding.
+
+`Vec4` keeps scalar geometry semantics. Manifest `cpuFeatures: ["simd128"]` or CLI `--cpu-feature simd128` enables compiler-verified x86 or Arm intrinsic lowering; `Target.HasFeature(CpuFeature.Simd128)` exposes the selected contract to C~ code. Unsupported architectures retain the scalar source implementation and do not accept the feature flag. SIMD values remain forbidden in exports, externs, callbacks, unmanaged function pointers, and public native data.
+
+## Matrices and quaternions
+
+`System.Matrix3x2`, `System.Matrix4x4`, and `System.Quaternion` are mutable single-precision value types with public scalar fields. Their natural layouts are 24, 64, and 16 bytes. They allocate no managed storage, are available on every target, and follow ordinary aggregate ARC and native-layout rules.
+
+Matrices use row-major fields and row-vector composition: `A * B` applies `A` and then `B`. `Matrix3x2` supplies affine translation, scale, rotation, skew, composition, interpolation, determinant, inversion, and named point and vector transforms. `Matrix4x4` additionally supplies transpose, axis-angle and quaternion rotation, right-handed look-at, perspective and orthographic projections with zero-to-one depth, projective transforms, and inverse-transpose normal transforms. A failed matrix inversion returns false and writes the zero matrix.
+
+`Quaternion` supplies length, dot, conjugate, normalization, inversion, multiplication, interpolation, axis-angle and yaw-pitch-roll construction, matrix conversion, and `Vec3` transformation. `Slerp` follows the shortest path. Failed `TryNormalize` and `TryInverse` calls write `Identity`; the ordinary methods retain IEEE results for degenerate inputs.
 
 ## Threading
 

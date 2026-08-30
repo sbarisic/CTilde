@@ -16,6 +16,7 @@
       <Button guid="guidCTildeCommandSet" id="cmdidRestartServer" priority="0x0200" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Restart C~ Language Server</ButtonText></Strings></Button>
       <Button guid="guidCTildeCommandSet" id="cmdidShowOutput" priority="0x0210" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Show C~ Output</ButtonText></Strings></Button>
       <Button guid="guidCTildeCommandSet" id="cmdidCreateProject" priority="0x0300" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><Strings><ButtonText>Create Visual Studio Project from C~ Manifest...</ButtonText></Strings></Button>
+      <Button guid="guidCTildeCommandSet" id="cmdidNavigateReference" priority="0x0310" type="Button"><Parent guid="guidCTildeCommandSet" id="CTildeToolsGroup" /><CommandFlag>DefaultInvisible</CommandFlag><CommandFlag>DynamicVisibility</CommandFlag><Strings><ButtonText>Navigate to C~ Reference</ButtonText></Strings></Button>
     </Buttons>
   </Commands>
   <Symbols>
@@ -25,6 +26,7 @@
       <IDSymbol name="cmdidCheck" value="0x0100" /><IDSymbol name="cmdidBuild" value="0x0101" /><IDSymbol name="cmdidClean" value="0x0102" />
       <IDSymbol name="cmdidRebuild" value="0x0103" /><IDSymbol name="cmdidRun" value="0x0104" /><IDSymbol name="cmdidCancel" value="0x0105" />
       <IDSymbol name="cmdidRestartServer" value="0x0106" /><IDSymbol name="cmdidShowOutput" value="0x0107" /><IDSymbol name="cmdidCreateProject" value="0x0108" />
+      <IDSymbol name="cmdidNavigateReference" value="0x0109" />
     </GuidSymbol>
   </Symbols>
 </CommandTable>

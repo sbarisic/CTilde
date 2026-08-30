@@ -5,13 +5,19 @@ public readonly struct EspError
     [NoAlloc]
     public int Code
     {
-        get { return 0; }
+        get
+        {
+            return 0;
+        }
     }
 
     [NoAlloc]
     public bool IsSuccess
     {
-        get { return false; }
+        get
+        {
+            return false;
+        }
     }
 
     public string GetName()

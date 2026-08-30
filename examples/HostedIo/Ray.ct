@@ -56,9 +56,8 @@ public static class VectorMath
     public static bool NearZero(Vec3 value)
     {
         const float threshold = 0.00000001f;
-        return Math.Abs(value.X) < threshold &&
-            Math.Abs(value.Y) < threshold &&
-            Math.Abs(value.Z) < threshold;
+        return Math.Abs(value.X) < threshold && Math.Abs(value.Y) < threshold && Math.Abs(value.Z)
+            < threshold;
     }
 
     [NoAlloc]
@@ -72,7 +71,8 @@ public static class VectorMath
     {
         float cosine = Math.Min((-unitDirection).Dot(normal), 1.0f);
         Vec3 perpendicular = refractionRatio * (unitDirection + cosine * normal);
-        Vec3 parallel = -Math.Sqrt(Math.Abs(1.0f - perpendicular.LengthSquared())) * normal;
+        Vec3 parallel = -Math.Sqrt(Math.Abs(1.0f - perpendicular.LengthSquared()))
+            * normal;
         return perpendicular + parallel;
     }
 }

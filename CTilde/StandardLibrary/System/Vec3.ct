@@ -30,31 +30,46 @@ public struct Vec3
     [NoAlloc]
     public static Vec3 Zero
     {
-        get { return new Vec3(); }
+        get
+        {
+            return new Vec3();
+        }
     }
 
     [NoAlloc]
     public static Vec3 One
     {
-        get { return new Vec3(1.0f); }
+        get
+        {
+            return new Vec3(1.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec3 UnitX
     {
-        get { return new Vec3(1.0f, 0.0f, 0.0f); }
+        get
+        {
+            return new Vec3(1.0f, 0.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec3 UnitY
     {
-        get { return new Vec3(0.0f, 1.0f, 0.0f); }
+        get
+        {
+            return new Vec3(0.0f, 1.0f, 0.0f);
+        }
     }
 
     [NoAlloc]
     public static Vec3 UnitZ
     {
-        get { return new Vec3(0.0f, 0.0f, 1.0f); }
+        get
+        {
+            return new Vec3(0.0f, 0.0f, 1.0f);
+        }
     }
 
     [NoAlloc]
@@ -120,10 +135,8 @@ public struct Vec3
     [NoAlloc]
     public Vec3 Cross(Vec3 other)
     {
-        return new Vec3(
-            Y * other.Z - Z * other.Y,
-            Z * other.X - X * other.Z,
-            X * other.Y - Y * other.X);
+        return new Vec3(Y * other.Z - Z * other.Y, Z * other.X - X * other.Z, X * other.Y
+            - Y * other.X);
     }
 
     [NoAlloc]
@@ -142,5 +155,49 @@ public struct Vec3
     public Vec3 Normalize()
     {
         return this / Length();
+    }
+
+    [NoAlloc]
+    public static Vec3 Abs(Vec3 value)
+    {
+        return new Vec3(Math.Abs(value.X), Math.Abs(value.Y), Math.Abs(value.Z));
+    }
+
+    [NoAlloc]
+    public static Vec3 Min(Vec3 left, Vec3 right)
+    {
+        return new Vec3(Math.Min(left.X, right.X), Math.Min(left.Y, right.Y), Math.Min(left.Z,
+            right.Z));
+    }
+
+    [NoAlloc]
+    public static Vec3 Max(Vec3 left, Vec3 right)
+    {
+        return new Vec3(Math.Max(left.X, right.X), Math.Max(left.Y, right.Y), Math.Max(left.Z,
+            right.Z));
+    }
+
+    [NoAlloc]
+    public static Vec3 Clamp(Vec3 value, Vec3 minimum, Vec3 maximum)
+    {
+        return Min(Max(value, minimum), maximum);
+    }
+
+    [NoAlloc]
+    public static Vec3 Lerp(Vec3 left, Vec3 right, float amount)
+    {
+        return left + (right - left) * amount;
+    }
+
+    [NoAlloc]
+    public static float DistanceSquared(Vec3 left, Vec3 right)
+    {
+        return(right - left).LengthSquared();
+    }
+
+    [NoAlloc]
+    public static float Distance(Vec3 left, Vec3 right)
+    {
+        return Math.Sqrt(DistanceSquared(left, right));
     }
 }

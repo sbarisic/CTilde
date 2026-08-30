@@ -167,3 +167,5 @@ int recovered = 1;
 /* block
  * comment */
 // <---------- comment.block.ctilde
+
+// ctilde-format: preserve

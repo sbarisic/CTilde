@@ -4,6 +4,8 @@ VisualStudioVersion = 17.0.31903.59
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.VisualStudio.Core", "editors\visualstudio\CTilde.VisualStudio.Core\CTilde.VisualStudio.Core.csproj", "{854525F7-B4D7-4AB0-B9A5-86EAAB0BA5A9}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.VisualStudio.CodeLens", "editors\visualstudio\CTilde.VisualStudio.CodeLens\CTilde.VisualStudio.CodeLens.csproj", "{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.VisualStudio", "editors\visualstudio\CTilde.VisualStudio\CTilde.VisualStudio.csproj", "{313EE553-5965-4445-9E22-CA2BCECF72DB}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CTilde.VisualStudio.Tests", "editors\visualstudio\CTilde.VisualStudio.Tests\CTilde.VisualStudio.Tests.csproj", "{343D3D1E-9D46-47AF-AAF8-191EE25BFD2E}"
@@ -30,6 +32,18 @@ Global
 		{854525F7-B4D7-4AB0-B9A5-86EAAB0BA5A9}.Release|x64.Build.0 = Release|Any CPU
 		{854525F7-B4D7-4AB0-B9A5-86EAAB0BA5A9}.Release|x86.ActiveCfg = Release|Any CPU
 		{854525F7-B4D7-4AB0-B9A5-86EAAB0BA5A9}.Release|x86.Build.0 = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|x64.Build.0 = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Debug|x86.Build.0 = Debug|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|x64.ActiveCfg = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|x64.Build.0 = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|x86.ActiveCfg = Release|Any CPU
+		{D181D1FD-A39F-4F96-A960-5CA4E5B2A97A}.Release|x86.Build.0 = Release|Any CPU
 		{313EE553-5965-4445-9E22-CA2BCECF72DB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{313EE553-5965-4445-9E22-CA2BCECF72DB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{313EE553-5965-4445-9E22-CA2BCECF72DB}.Debug|x64.ActiveCfg = Debug|Any CPU

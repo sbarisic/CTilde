@@ -1,10 +1,10 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.36 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.37 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Draft 0.36 completed the mutable generic collection and enumeration tranche. Remaining follow-ups are:
+Draft 0.37 completed explicit SIMD128 foundations and scalar-layout matrices and quaternions. Remaining follow-ups are:
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
@@ -18,11 +18,11 @@ Draft 0.36 completed the mutable generic collection and enumeration tranche. Rem
 
 ## Fixed-width SIMD
 
-Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte lane types, scalar-default contract, constant lane validation, and explicit x86/Arm `simd128` lowering are implemented. Remaining measured stages are:
+Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte lane types, conversions, loads/stores, reductions, semantic operations, and explicit x86/Arm `simd128` lowering are implemented. Remaining measured stages are:
 
-- [ ] Add reinterpretation and checked/unchecked buffer load/store APIs with alias-safe lowering.
 - [ ] Add symbol-map/debug lane metadata and complete MSVC, GCC, Clang, Cosmopolitan, freestanding, and ESP-IDF acceptance across supported architectures.
-- [ ] Record scalar and intrinsic baselines, then benchmark transparent `Vec4` lowering and a structure-of-arrays `Vec3x4` four-ray workload without changing geometry layout or source semantics.
+- [ ] Record broader scalar and intrinsic baselines, then investigate a structure-of-arrays `Vec3x4` four-ray workload without changing geometry layout or source semantics.
+- [ ] Consider double-precision matrices, decomposition, dynamic matrices, AVX-width vectors, and scalable vectors as separate revisions.
 
 ## Compiler optimization
 

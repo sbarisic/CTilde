@@ -2,8 +2,10 @@ using System;
 
 namespace Examples;
 
-public static class Wat {
-    public static void Print(string Str) {
+public static class Wat
+{
+    public static void Print(string Str)
+    {
         Console.WriteLine("You wrote: " + Str);
     }
 }

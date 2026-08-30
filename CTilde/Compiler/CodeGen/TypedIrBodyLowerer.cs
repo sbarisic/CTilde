@@ -151,8 +151,10 @@ internal sealed partial class TypedIrBodyLowerer
 
     public string EmitDefinition()
     {
-        if (!_analysisOnly && TryEmitHardwareSimdOperator(out var simdDefinition))
+        if (!_analysisOnly && TryEmitHardwareSimdOperation(out var simdDefinition))
             return simdDefinition;
+        if (!_analysisOnly && TryEmitHardwareGeometryKernel(out var geometryDefinition))
+            return geometryDefinition;
         if (_method.IsAssemblyFunction && !_method.IsNaked)
             return EmitAssemblyFunctionDefinition();
         if (_method.IsNaked)
@@ -251,35 +253,205 @@ internal sealed partial class TypedIrBodyLowerer
                 ValidateYieldPlacement(child.Node, childForbidden);
     }
 
-    private bool TryEmitHardwareSimdOperator(out string definition)
+    private bool TryEmitHardwareSimdOperation(out string definition)
     {
         definition = string.Empty;
-        if (!_emitter.HasCpuFeature(CpuFeature.Simd128) || !_method.IsOperator || !_method.IsStatic || _method.Parameters.Length != 2 ||
-            _method.ContainingType.Namespace != "System.Simd" || _method.ContainingType.Name is not ("F32x4" or "I32x4" or "U32x4"))
+        if (!_emitter.HasCpuFeature(CpuFeature.Simd128) || !SimdOperation.TryClassify(_method, out var operation))
             return false;
-        var intrinsic = (_emitter.Architecture, _method.ContainingType.Name, _method.OperatorKind) switch
-        {
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.PlusToken) => "_mm_add_ps",
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.MinusToken) => "_mm_sub_ps",
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.StarToken) => "_mm_mul_ps",
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "F32x4", SyntaxKind.SlashToken) => "_mm_div_ps",
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "I32x4" or "U32x4", SyntaxKind.PlusToken) => "_mm_add_epi32",
-            (CompilationArchitecture.X86 or CompilationArchitecture.X64, "I32x4" or "U32x4", SyntaxKind.MinusToken) => "_mm_sub_epi32",
-            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.PlusToken) => "vaddq_f32",
-            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.MinusToken) => "vsubq_f32",
-            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "F32x4", SyntaxKind.StarToken) => "vmulq_f32",
-            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "I32x4" or "U32x4", SyntaxKind.PlusToken) => "vaddq_u32",
-            (CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64, "I32x4" or "U32x4", SyntaxKind.MinusToken) => "vsubq_u32",
-            _ => null,
-        };
+        if (operation.Kind == SimdOperationKind.MultiplyAdd && operation.LaneKind == SimdLaneKind.Float32 && operation.InputCount == 3)
+            return TryEmitHardwareMultiplyAdd(out definition);
+        if (operation.Kind == SimdOperationKind.Abs && operation.LaneKind == SimdLaneKind.Float32 && _emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64)
+            return TryEmitX86FloatAbs(out definition);
+        var intrinsic = SimdBackendTable.Intrinsic(_emitter.Architecture, operation);
         if (intrinsic is null)
             return false;
+        var arguments = string.Join(", ", _method.Parameters.Select(parameter => $"{NameMangler.Identifier(parameter.Name)}.ct_simd"));
+        var type = _emitter.CTypeName(_method.ReturnType);
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    ct_result.ct_simd = {intrinsic}({arguments});\n    return ct_result;\n}}";
+        return true;
+    }
+
+    private bool TryEmitX86FloatAbs(out string definition)
+    {
+        var value = NameMangler.Identifier(_method.Parameters[0].Name);
+        var type = _emitter.CTypeName(_method.ReturnType);
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    ct_result.ct_simd = _mm_andnot_ps(_mm_set1_ps(-0.0f), {value}.ct_simd);\n    return ct_result;\n}}";
+        return true;
+    }
+
+    private bool TryEmitHardwareMultiplyAdd(out string definition)
+    {
+        var left = NameMangler.Identifier(_method.Parameters[0].Name);
+        var right = NameMangler.Identifier(_method.Parameters[1].Name);
+        var addend = NameMangler.Identifier(_method.Parameters[2].Name);
+        var type = _emitter.CTypeName(_method.ReturnType);
+        var expression = _emitter.Architecture switch
+        {
+            CompilationArchitecture.X86 or CompilationArchitecture.X64 => $"#if defined(__FMA__)\n    ct_result.ct_simd = _mm_fmadd_ps({left}.ct_simd, {right}.ct_simd, {addend}.ct_simd);\n#else\n    ct_result.ct_simd = _mm_add_ps(_mm_mul_ps({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);\n#endif",
+            CompilationArchitecture.Arm64 => $"#if defined(__ARM_FEATURE_FMA)\n    ct_result.ct_simd = vfmaq_f32({addend}.ct_simd, {left}.ct_simd, {right}.ct_simd);\n#else\n    ct_result.ct_simd = vaddq_f32(vmulq_f32({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);\n#endif",
+            CompilationArchitecture.Arm32 => $"ct_result.ct_simd = vaddq_f32(vmulq_f32({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);",
+            _ => string.Empty,
+        };
+        if (expression.Length == 0)
+        {
+            definition = string.Empty;
+            return false;
+        }
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    {expression}\n    return ct_result;\n}}";
+        return true;
+    }
+
+    private bool TryEmitHardwareGeometryKernel(out string definition)
+    {
+        definition = string.Empty;
+        if (!_emitter.HasCpuFeature(CpuFeature.Simd128))
+            return false;
+        if (_method.IsOperator && _method.IsStatic && _method.OperatorKind == SyntaxKind.StarToken && _method.Parameters.Length == 2)
+        {
+            if (_method.ContainingType.FullName == "System.Matrix4x4" && _method.Parameters.All(parameter => parameter.Type.Symbol?.FullName == "System.Matrix4x4"))
+                return TryEmitMatrix4Multiply(out definition);
+            if (_method.ContainingType.FullName == "System.Quaternion" && _method.Parameters.All(parameter => parameter.Type.Symbol?.FullName == "System.Quaternion"))
+                return TryEmitQuaternionMultiply(out definition);
+        }
+        if (!_method.IsStatic && _method.ContainingType.FullName == "System.Matrix4x4" && _method.Name == "Transform" && _method.Parameters.Length == 1 && _method.ReturnType.Symbol?.FullName == "System.Vec4")
+            return TryEmitMatrix4VectorTransform(out definition);
+        return false;
+    }
+
+    private bool TryEmitMatrix4Multiply(out string definition)
+    {
         var left = NameMangler.Identifier(_method.Parameters[0].Name);
         var right = NameMangler.Identifier(_method.Parameters[1].Name);
         var type = _emitter.CTypeName(_method.ReturnType);
-        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    ct_result.ct_simd = {intrinsic}({left}.ct_simd, {right}.ct_simd);\n    return ct_result;\n}}";
+        string body;
+        if (_emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64)
+        {
+            body = $"""
+                __m128 ct_b0 = _mm_loadu_ps(&{right}.u_3_M11);
+                __m128 ct_b1 = _mm_loadu_ps(&{right}.u_3_M21);
+                __m128 ct_b2 = _mm_loadu_ps(&{right}.u_3_M31);
+                __m128 ct_b3 = _mm_loadu_ps(&{right}.u_3_M41);
+                #if defined(__FMA__)
+                #define CT_MAT4_ROW(ROW) _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##4), ct_b3, _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##3), ct_b2, _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##2), ct_b1, _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##1), ct_b0))))
+                #else
+                #define CT_MAT4_ROW(ROW) _mm_add_ps(_mm_add_ps(_mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##1), ct_b0), _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##2), ct_b1)), _mm_add_ps(_mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##3), ct_b2), _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##4), ct_b3)))
+                #endif
+                _mm_storeu_ps(&ct_result.u_3_M11, CT_MAT4_ROW(1));
+                _mm_storeu_ps(&ct_result.u_3_M21, CT_MAT4_ROW(2));
+                _mm_storeu_ps(&ct_result.u_3_M31, CT_MAT4_ROW(3));
+                _mm_storeu_ps(&ct_result.u_3_M41, CT_MAT4_ROW(4));
+                #undef CT_MAT4_ROW
+                """;
+        }
+        else if (_emitter.Architecture is CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64)
+        {
+            body = $"""
+                float32x4_t ct_b0 = vld1q_f32(&{right}.u_3_M11);
+                float32x4_t ct_b1 = vld1q_f32(&{right}.u_3_M21);
+                float32x4_t ct_b2 = vld1q_f32(&{right}.u_3_M31);
+                float32x4_t ct_b3 = vld1q_f32(&{right}.u_3_M41);
+                #if defined(__ARM_FEATURE_FMA) && defined(__aarch64__)
+                #define CT_MAT4_ROW(ROW) vfmaq_n_f32(vfmaq_n_f32(vfmaq_n_f32(vmulq_n_f32(ct_b0, {left}.u_3_M##ROW##1), ct_b1, {left}.u_3_M##ROW##2), ct_b2, {left}.u_3_M##ROW##3), ct_b3, {left}.u_3_M##ROW##4)
+                #else
+                #define CT_MAT4_ROW(ROW) vaddq_f32(vaddq_f32(vmulq_n_f32(ct_b0, {left}.u_3_M##ROW##1), vmulq_n_f32(ct_b1, {left}.u_3_M##ROW##2)), vaddq_f32(vmulq_n_f32(ct_b2, {left}.u_3_M##ROW##3), vmulq_n_f32(ct_b3, {left}.u_3_M##ROW##4)))
+                #endif
+                vst1q_f32(&ct_result.u_3_M11, CT_MAT4_ROW(1));
+                vst1q_f32(&ct_result.u_3_M21, CT_MAT4_ROW(2));
+                vst1q_f32(&ct_result.u_3_M31, CT_MAT4_ROW(3));
+                vst1q_f32(&ct_result.u_3_M41, CT_MAT4_ROW(4));
+                #undef CT_MAT4_ROW
+                """;
+        }
+        else
+        {
+            definition = string.Empty;
+            return false;
+        }
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n{IndentKernel(body)}    return ct_result;\n}}";
         return true;
     }
+
+    private bool TryEmitMatrix4VectorTransform(out string definition)
+    {
+        var value = NameMangler.Identifier(_method.Parameters[0].Name);
+        var type = _emitter.CTypeName(_method.ReturnType);
+        string body;
+        if (_emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64)
+        {
+            body = $"""
+                __m128 ct_r0 = _mm_loadu_ps(&ct_self->u_3_M11);
+                __m128 ct_r1 = _mm_loadu_ps(&ct_self->u_3_M21);
+                __m128 ct_r2 = _mm_loadu_ps(&ct_self->u_3_M31);
+                __m128 ct_r3 = _mm_loadu_ps(&ct_self->u_3_M41);
+                #if defined(__FMA__)
+                __m128 ct_value = _mm_fmadd_ps(_mm_set1_ps({value}.u_1_W), ct_r3, _mm_fmadd_ps(_mm_set1_ps({value}.u_1_Z), ct_r2, _mm_fmadd_ps(_mm_set1_ps({value}.u_1_Y), ct_r1, _mm_mul_ps(_mm_set1_ps({value}.u_1_X), ct_r0))));
+                #else
+                __m128 ct_value = _mm_add_ps(_mm_add_ps(_mm_mul_ps(_mm_set1_ps({value}.u_1_X), ct_r0), _mm_mul_ps(_mm_set1_ps({value}.u_1_Y), ct_r1)), _mm_add_ps(_mm_mul_ps(_mm_set1_ps({value}.u_1_Z), ct_r2), _mm_mul_ps(_mm_set1_ps({value}.u_1_W), ct_r3)));
+                #endif
+                _mm_storeu_ps(&ct_result.u_1_X, ct_value);
+                """;
+        }
+        else if (_emitter.Architecture is CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64)
+        {
+            body = $"""
+                float32x4_t ct_r0 = vld1q_f32(&ct_self->u_3_M11);
+                float32x4_t ct_r1 = vld1q_f32(&ct_self->u_3_M21);
+                float32x4_t ct_r2 = vld1q_f32(&ct_self->u_3_M31);
+                float32x4_t ct_r3 = vld1q_f32(&ct_self->u_3_M41);
+                #if defined(__ARM_FEATURE_FMA) && defined(__aarch64__)
+                float32x4_t ct_value = vfmaq_n_f32(vfmaq_n_f32(vfmaq_n_f32(vmulq_n_f32(ct_r0, {value}.u_1_X), ct_r1, {value}.u_1_Y), ct_r2, {value}.u_1_Z), ct_r3, {value}.u_1_W);
+                #else
+                float32x4_t ct_value = vaddq_f32(vaddq_f32(vmulq_n_f32(ct_r0, {value}.u_1_X), vmulq_n_f32(ct_r1, {value}.u_1_Y)), vaddq_f32(vmulq_n_f32(ct_r2, {value}.u_1_Z), vmulq_n_f32(ct_r3, {value}.u_1_W)));
+                #endif
+                vst1q_f32(&ct_result.u_1_X, ct_value);
+                """;
+        }
+        else
+        {
+            definition = string.Empty;
+            return false;
+        }
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n{IndentKernel(body)}    return ct_result;\n}}";
+        return true;
+    }
+
+    private bool TryEmitQuaternionMultiply(out string definition)
+    {
+        var left = NameMangler.Identifier(_method.Parameters[0].Name);
+        var right = NameMangler.Identifier(_method.Parameters[1].Name);
+        var type = _emitter.CTypeName(_method.ReturnType);
+        var x = $"{left}.u_1_W*{right}.u_1_X+{left}.u_1_X*{right}.u_1_W+{left}.u_1_Y*{right}.u_1_Z-{left}.u_1_Z*{right}.u_1_Y";
+        var y = $"{left}.u_1_W*{right}.u_1_Y-{left}.u_1_X*{right}.u_1_Z+{left}.u_1_Y*{right}.u_1_W+{left}.u_1_Z*{right}.u_1_X";
+        var z = $"{left}.u_1_W*{right}.u_1_Z+{left}.u_1_X*{right}.u_1_Y-{left}.u_1_Y*{right}.u_1_X+{left}.u_1_Z*{right}.u_1_W";
+        var w = $"{left}.u_1_W*{right}.u_1_W-{left}.u_1_X*{right}.u_1_X-{left}.u_1_Y*{right}.u_1_Y-{left}.u_1_Z*{right}.u_1_Z";
+        var lanes = $"""
+            #if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+            float ct_x = fmaf({left}.u_1_W, {right}.u_1_X, fmaf({left}.u_1_X, {right}.u_1_W, fmaf({left}.u_1_Y, {right}.u_1_Z, -{left}.u_1_Z*{right}.u_1_Y)));
+            float ct_y = fmaf({left}.u_1_W, {right}.u_1_Y, fmaf(-{left}.u_1_X, {right}.u_1_Z, fmaf({left}.u_1_Y, {right}.u_1_W, {left}.u_1_Z*{right}.u_1_X)));
+            float ct_z = fmaf({left}.u_1_W, {right}.u_1_Z, fmaf({left}.u_1_X, {right}.u_1_Y, fmaf(-{left}.u_1_Y, {right}.u_1_X, {left}.u_1_Z*{right}.u_1_W)));
+            float ct_w = fmaf({left}.u_1_W, {right}.u_1_W, fmaf(-{left}.u_1_X, {right}.u_1_X, fmaf(-{left}.u_1_Y, {right}.u_1_Y, -{left}.u_1_Z*{right}.u_1_Z)));
+            #else
+            float ct_x = {x};
+            float ct_y = {y};
+            float ct_z = {z};
+            float ct_w = {w};
+            #endif
+            """;
+        string body;
+        if (_emitter.Architecture is CompilationArchitecture.X86 or CompilationArchitecture.X64)
+            body = $"{lanes}\n_mm_storeu_ps(&ct_result.u_1_X, _mm_set_ps(ct_w, ct_z, ct_y, ct_x));\n";
+        else if (_emitter.Architecture is CompilationArchitecture.Arm32 or CompilationArchitecture.Arm64)
+            body = $"{lanes}\nfloat ct_lanes[4] = {{ ct_x, ct_y, ct_z, ct_w }};\n    vst1q_f32(&ct_result.u_1_X, vld1q_f32(ct_lanes));\n";
+        else
+        {
+            definition = string.Empty;
+            return false;
+        }
+        definition = $"{_emitter.MethodSignature(_method)}\n{{\n    {type} ct_result;\n    {body}    return ct_result;\n}}";
+        return true;
+    }
+
+    private static string IndentKernel(string body) => string.Join("\n", body.Replace("\r", string.Empty, StringComparison.Ordinal).Split('\n').Where(line => line.Length != 0).Select(line => "    " + line)) + "\n";
 
     private string EmitNakedDefinition()
     {

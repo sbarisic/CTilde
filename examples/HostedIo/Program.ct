@@ -10,7 +10,6 @@ public static class Program
     {
         FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
         defer File.Close(image);
-
         Console.WriteLine("Rendering image.ppm...");
         HittableList world = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
         Hittable renderWorld = world.BuildBvh();

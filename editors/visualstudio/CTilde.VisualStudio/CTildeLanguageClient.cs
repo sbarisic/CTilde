@@ -18,7 +18,7 @@ namespace CTilde.VisualStudio;
 [RunOnContext(RunningContext.RunOnHost)]
 public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCustomMessage2
 {
-    private const string ServerVersion = "0.14.0";
+    private const string ServerVersion = "0.15.0";
     private Process? _process;
     private JsonRpc? _rpc;
     private SolutionEvents? _solutionEvents;
@@ -27,11 +27,13 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     private int _workspaceSyncVersion;
     private string? _lastProjectState;
     private readonly StandardLibraryMiddleLayer _middleLayer;
+    private readonly ReferenceCodeLensMessageTarget _referenceCodeLensMessageTarget;
 
     public CTildeLanguageClient()
     {
         Instance = this;
         _middleLayer = new StandardLibraryMiddleLayer(() => _rpc);
+        _referenceCodeLensMessageTarget = new ReferenceCodeLensMessageTarget();
     }
 
     internal static CTildeLanguageClient? Instance { get; private set; }
@@ -40,7 +42,7 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     public object? InitializationOptions => new { ctilde = new { client = "visualstudio", version = ServerVersion } };
     public IEnumerable<string> FilesToWatch => new[] { "**/*.ct", "**/ctilde*.json", "**/*.bindings.json", "**/*.ctproj" };
     public object MiddleLayer => _middleLayer;
-    public object? CustomMessageTarget => null;
+    public object? CustomMessageTarget => _referenceCodeLensMessageTarget;
     public bool ShowNotificationOnInitializeFailed => true;
 
     public event AsyncEventHandler<EventArgs>? StartAsync;
@@ -123,6 +125,42 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     {
         _rpc = rpc;
         return Task.CompletedTask;
+    }
+
+    internal static event Action? ReferenceCodeLensesChanged;
+
+    internal async Task<ReferenceCodeLensItem[]> GetReferenceCodeLensesAsync(string uri, CancellationToken cancellationToken)
+    {
+        var rpc = _rpc;
+        if (rpc is null)
+            return Array.Empty<ReferenceCodeLensItem>();
+        return await rpc.InvokeWithParameterObjectAsync<ReferenceCodeLensItem[]>("ctilde/referenceCodeLenses",
+            new ReferenceCodeLensRequest { TextDocument = new TextDocumentIdentifier { Uri = uri } }, cancellationToken).ConfigureAwait(false)
+            ?? Array.Empty<ReferenceCodeLensItem>();
+    }
+
+    internal async Task<ReferenceCodeLensDetails> GetReferenceCodeLensDetailsAsync(string uri, string symbolKey, long revision, CancellationToken cancellationToken)
+    {
+        var rpc = _rpc;
+        if (rpc is null)
+            return new ReferenceCodeLensDetails { SymbolKey = symbolKey, Revision = revision };
+        var token = await rpc.InvokeWithParameterObjectAsync<JToken>("ctilde/referenceCodeLensDetails",
+            new ReferenceCodeLensDetailsRequest
+            {
+                TextDocument = new TextDocumentIdentifier { Uri = uri },
+                SymbolKey = symbolKey,
+                Revision = revision,
+            }, cancellationToken).ConfigureAwait(false);
+        if (token is null)
+            return new ReferenceCodeLensDetails { SymbolKey = symbolKey, Revision = revision };
+        await _middleLayer.RewriteAsync(token, cancellationToken).ConfigureAwait(false);
+        return token.ToObject<ReferenceCodeLensDetails>() ?? new ReferenceCodeLensDetails { SymbolKey = symbolKey, Revision = revision };
+    }
+
+    private sealed class ReferenceCodeLensMessageTarget
+    {
+        [JsonRpcMethod("ctilde/referenceCodeLens/refresh")]
+        public void Refresh() => ReferenceCodeLensesChanged?.Invoke();
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100:Avoid async void methods", Justification = "EnvDTE solution events require void callbacks.")]
@@ -313,7 +351,9 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
                 CTildeOutput.WriteLine($"[LSP {direction}] {methodName}: {payload?.ToString(Newtonsoft.Json.Formatting.None) ?? "null"}");
         }
 
-        private async Task RewriteAsync(JToken token)
+        internal Task RewriteAsync(JToken token, CancellationToken cancellationToken = default) => RewriteCoreAsync(token, cancellationToken);
+
+        private async Task RewriteCoreAsync(JToken token, CancellationToken cancellationToken)
         {
             var descendants = token is JContainer container ? container.DescendantsAndSelf() : new[] { token };
             var values = descendants.OfType<JValue>()
@@ -321,14 +361,15 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
                 .ToArray();
             foreach (var value in values)
             {
+                cancellationToken.ThrowIfCancellationRequested();
                 var uri = value.Value<string>()!;
-                var path = await MaterializeAsync(uri);
+                var path = await MaterializeAsync(uri, cancellationToken);
                 if (path is not null)
                     value.Value = StandardLibraryUri.FileUri(path).AbsoluteUri;
             }
         }
 
-        private async Task<string?> MaterializeAsync(string uri)
+        private async Task<string?> MaterializeAsync(string uri, CancellationToken cancellationToken)
         {
             var rpc = _rpc();
             if (rpc is null)
@@ -337,7 +378,7 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
             var path = StandardLibraryUri.CachePath(cacheRoot, ServerVersion, uri);
             if (File.Exists(path))
                 return path;
-            var text = await rpc.InvokeWithParameterObjectAsync<string?>("ctilde/standardLibraryText", new { uri }, CancellationToken.None);
+            var text = await rpc.InvokeWithParameterObjectAsync<string?>("ctilde/standardLibraryText", new { uri }, cancellationToken);
             if (text is null)
                 return null;
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);

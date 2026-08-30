@@ -5,7 +5,6 @@ namespace Examples.TCan485.Draft019;
 
 static assert(Target.Profile == TargetProfile.EspIdf, "Draft 0.19 hardware validation requires ESP-IDF");
 static assert(Target.PointerSize == 4, "ESP32 pointers must be 32 bits");
-
 public newtype HardwareCounter : uint;
 
 [Align(64)]
@@ -27,18 +26,16 @@ public static class Program
     [EntryPoint]
     public static void Main()
     {
-        [Align(32)] ValidationBuffer<4> buffer = new ValidationBuffer<4>();
+        [Align(32)]
+        ValidationBuffer<4> buffer = new ValidationBuffer<4>();
         buffer.Values[0] = Transform<4>(0x01020304u);
         buffer.Values[1] = (uint)Cpu.PopCount(buffer.Values[0]);
         buffer.Values[2] = (uint)Cpu.LeadingZeroCount((uint)0);
         HardwareCounter counter = (HardwareCounter)(uint)buffer.Values.Length;
-
         static if (Target.Architecture == TargetArchitecture.Xtensa)
         {
-            if (buffer.Values[0] == 0x04030205u &&
-                buffer.Values[1] == 6u &&
-                buffer.Values[2] == 32u &&
-                (uint)counter == 4u)
+            if (buffer.Values[0] == 0x04030205u && buffer.Values[1] == 6u && buffer.Values[2]
+                == 32u && (uint)counter == 4u)
                 Console.WriteLine("CTILDE_DRAFT_019_OK");
             else
                 Console.WriteLine("CTILDE_DRAFT_019_FAILED");
@@ -47,7 +44,6 @@ public static class Program
         {
             ArchitectureApiUnavailableOnEsp32.Fail();
         }
-
         while (true)
             Esp.Idf.FreeRtos.DelayMilliseconds(1000u);
     }

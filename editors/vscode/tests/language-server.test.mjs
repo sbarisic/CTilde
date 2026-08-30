@@ -33,6 +33,7 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
       ["declaration", "static", "readonly", "defaultLibrary"]);
     assert.equal(initialized.capabilities.semanticTokensProvider.full, true);
     assert.equal(initialized.capabilities.semanticTokensProvider.range, false);
+    assert.equal(initialized.capabilities.referencesProvider, true);
     client.notify("initialized", {});
     client.notify("textDocument/didOpen", { textDocument: { uri, languageId: "ctilde", version: 1, text: source } });
 
@@ -112,6 +113,88 @@ test("language server provides diagnostics, semantic tokens, completion, hover, 
   }
 });
 
+test("language server provides reference locations and lazy reference CodeLens details", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-references-"));
+  const libraryPath = path.join(directory, "Library.ct");
+  const programPath = path.join(directory, "Program.ct");
+  const libraryUri = pathToFileURL(libraryPath).href;
+  const programUri = pathToFileURL(programPath).href;
+  const library = "public static class Library { public static void Ping(int value) { } public static void Unused() { } }";
+  const program = "public static class Program { [EntryPoint] public static void Main() { Library.Ping(1); Library.Ping(2); } }";
+  const changedProgram = program.replace(" Library.Ping(2);", "");
+  await writeFile(path.join(directory, "ctilde.json"), JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
+  await writeFile(libraryPath, library);
+  await writeFile(programPath, program);
+
+  const client = new LspClient(serverDll);
+  try {
+    const initialized = await client.request("initialize", {
+      processId: process.pid,
+      rootUri: pathToFileURL(directory).href,
+      workspaceFolders: [{ uri: pathToFileURL(directory).href, name: "reference-fixture" }],
+      capabilities: {}
+    });
+    assert.equal(initialized.capabilities.referencesProvider, true);
+    client.notify("initialized", {});
+    client.notify("textDocument/didOpen", { textDocument: { uri: libraryUri, languageId: "ctilde", version: 1, text: library } });
+    client.notify("textDocument/didOpen", { textDocument: { uri: programUri, languageId: "ctilde", version: 1, text: program } });
+
+    const lenses = await client.request("ctilde/referenceCodeLenses", { textDocument: { uri: libraryUri } });
+    const ping = lenses.find(lens => lens.name === "Ping");
+    const unused = lenses.find(lens => lens.name === "Unused");
+    assert.ok(ping);
+    assert.equal(ping.referenceCount, 2);
+    assert.equal(unused?.referenceCount, 0);
+    assert.ok(ping.symbolKey);
+    assert.ok(ping.revision > 0);
+
+    const usePosition = positionAt(program, program.indexOf("Ping") + 1);
+    const references = await client.request("textDocument/references", {
+      textDocument: { uri: programUri }, position: usePosition, context: { includeDeclaration: false }
+    });
+    assert.equal(references.length, 2);
+    assert.ok(references.every(reference => reference.uri === programUri));
+    const withDeclaration = await client.request("textDocument/references", {
+      textDocument: { uri: programUri }, position: usePosition, context: { includeDeclaration: true }
+    });
+    assert.equal(withDeclaration.length, 3);
+    assert.ok(withDeclaration.some(reference => reference.uri === libraryUri));
+
+    const details = await client.request("ctilde/referenceCodeLensDetails", {
+      textDocument: { uri: libraryUri }, symbolKey: ping.symbolKey, revision: ping.revision
+    });
+    assert.equal(details.references.length, 2);
+    assert.ok(details.references.every(reference => reference.referenceText.includes("Library.Ping")));
+    assert.ok(details.references.every(reference => reference.referenceEnd > reference.referenceStart));
+    assert.ok(details.references.every(reference => reference.referenceLongDescription.includes("Library.Ping")));
+
+    client.notify("textDocument/didChange", {
+      textDocument: { uri: programUri, version: 2 }, contentChanges: [{ text: changedProgram }]
+    });
+    await client.waitForNotification("textDocument/publishDiagnostics", value => value.uri === programUri && value.version === 2);
+    await client.waitForNotification("ctilde/referenceCodeLens/refresh", () => true);
+    const changedLenses = await client.request("ctilde/referenceCodeLenses", { textDocument: { uri: libraryUri } });
+    const changedPing = changedLenses.find(lens => lens.name === "Ping");
+    assert.equal(changedPing.referenceCount, 1);
+    assert.notEqual(changedPing.revision, ping.revision);
+    const staleDetails = await client.request("ctilde/referenceCodeLensDetails", {
+      textDocument: { uri: libraryUri }, symbolKey: ping.symbolKey, revision: ping.revision
+    });
+    assert.deepEqual(staleDetails.references, []);
+    const changedDetails = await client.request("ctilde/referenceCodeLensDetails", {
+      textDocument: { uri: libraryUri }, symbolKey: changedPing.symbolKey, revision: changedPing.revision
+    });
+    assert.equal(changedDetails.references.length, 1);
+
+    await client.request("shutdown");
+    client.notify("exit");
+    assert.equal(await client.exited, 0);
+  } finally {
+    client.dispose();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("language server resolves a non-main document through its loaded project and recovers incomplete member completion", async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), "ctilde-lsp-multi-project-"));
   const helloDirectory = path.join(directory, "Hello");
@@ -126,7 +209,7 @@ test("language server resolves a non-main document through its loaded project an
   const validScene = "using System; namespace Hosted; public static class Scene { public static void Build() { Console.WriteLine(); Sibling value = new Sibling(); } }";
   const incompleteScene = validScene.replace("Console.WriteLine();", "Console.Wri\n");
   await writeFile(helloManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
-  await writeFile(path.join(helloDirectory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
+  await writeFile(path.join(helloDirectory, "Program.ct"), "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(); } }");
   await writeFile(hostedManifest, JSON.stringify({ target: "hosted", sources: ["*.ct"] }));
   await writeFile(path.join(hostedDirectory, "Program.ct"), "namespace Hosted; public static class Program { [EntryPoint] public static void Main() { Scene.Build(); } }");
   await writeFile(siblingPath, "namespace Hosted; public class Sibling { }");
@@ -156,6 +239,13 @@ test("language server resolves a non-main document through its loaded project an
     const semantic = await client.request("textDocument/semanticTokens/full", { textDocument: { uri: sceneUri } });
     const decoded = decodeSemanticTokens(semantic.data, initialized.capabilities.semanticTokensProvider.legend, validScene);
     assert.ok(decoded.some(token => token.text === "Sibling" && token.type === "class"));
+    const writeLineOffset = validScene.indexOf("WriteLine") + 1;
+    const crossProjectReferences = await client.request("textDocument/references", {
+      textDocument: { uri: sceneUri }, position: positionAt(validScene, writeLineOffset), context: { includeDeclaration: false }
+    });
+    assert.ok(crossProjectReferences.length >= 2);
+    assert.equal(crossProjectReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(helloDirectory)).length, 1);
+    assert.equal(crossProjectReferences.filter(reference => reference.uri.startsWith("file:") && fileURLToPath(reference.uri).startsWith(hostedDirectory)).length, 1);
 
     client.notify("textDocument/didChange", { textDocument: { uri: sceneUri, version: 2 }, contentChanges: [{ text: incompleteScene }] });
     const completionOffset = incompleteScene.indexOf("Console.Wri") + "Console.Wri".length;

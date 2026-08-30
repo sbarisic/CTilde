@@ -1,0 +1,379 @@
+namespace System;
+
+public struct Matrix4x4
+{
+    public float M11;
+    public float M12;
+    public float M13;
+    public float M14;
+    public float M21;
+    public float M22;
+    public float M23;
+    public float M24;
+    public float M31;
+    public float M32;
+    public float M33;
+    public float M34;
+    public float M41;
+    public float M42;
+    public float M43;
+    public float M44;
+
+    public Matrix4x4(float m11, float m12, float m13, float m14, float m21, float m22,
+        float m23, float m24, float m31, float m32, float m33, float m34, float m41,
+        float m42, float m43, float m44)
+    {
+        M11 = m11;
+        M12 = m12;
+        M13 = m13;
+        M14 = m14;
+        M21 = m21;
+        M22 = m22;
+        M23 = m23;
+        M24 = m24;
+        M31 = m31;
+        M32 = m32;
+        M33 = m33;
+        M34 = m34;
+        M41 = m41;
+        M42 = m42;
+        M43 = m43;
+        M44 = m44;
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 Identity
+    {
+        get
+        {
+            return new Matrix4x4(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f,
+                0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+        }
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateTranslation(float x, float y, float z)
+    {
+        Matrix4x4 r = Identity;
+        r.M41 = x;
+        r.M42 = y;
+        r.M43 = z;
+        return r;
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateTranslation(Vec3 value)
+    {
+        return CreateTranslation(value.X, value.Y, value.Z);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateScale(float value)
+    {
+        return CreateScale(value, value, value);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateScale(float x, float y, float z)
+    {
+        return new Matrix4x4(x, 0.0f, 0.0f, 0.0f, 0.0f, y, 0.0f, 0.0f, 0.0f, 0.0f,
+            z, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateScale(Vec3 value)
+    {
+        return CreateScale(value.X, value.Y, value.Z);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateRotationX(float radians)
+    {
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        return new Matrix4x4(1.0f, 0.0f, 0.0f, 0.0f, 0.0f, c, s, 0.0f, 0.0f, -s,
+            c, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateRotationY(float radians)
+    {
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        return new Matrix4x4(c, 0.0f, -s, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, s, 0.0f,
+            c, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateRotationZ(float radians)
+    {
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        return new Matrix4x4(c, s, 0.0f, 0.0f, -s, c, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f,
+            0.0f, 0.0f, 0.0f, 0.0f, 1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateFromAxisAngle(Vec3 axis, float radians)
+    {
+        float x = axis.X;
+        float y = axis.Y;
+        float z = axis.Z;
+        float c = Math.Cos(radians);
+        float s = Math.Sin(radians);
+        float t = 1.0f - c;
+        return new Matrix4x4(t * x * x + c, t * x * y + s * z, t * x * z - s * y,
+            0.0f, t * x * y - s * z, t * y * y + c, t * y * z + s * x, 0.0f, t * x
+            * z + s * y, t * y * z - s * x, t * z * z + c, 0.0f, 0.0f, 0.0f, 0.0f,
+            1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateFromQuaternion(Quaternion value)
+    {
+        return value.ToMatrix4x4();
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateLookAt(Vec3 cameraPosition, Vec3 cameraTarget,
+        Vec3 cameraUp)
+    {
+        Vec3 z = (cameraPosition - cameraTarget).Normalize();
+        Vec3 x = cameraUp.Cross(z).Normalize();
+        Vec3 y = z.Cross(x);
+        return new Matrix4x4(x.X, y.X, z.X, 0.0f, x.Y, y.Y, z.Y, 0.0f, x.Z, y.Z,
+            z.Z, 0.0f, -x.Dot(cameraPosition), -y.Dot(cameraPosition), -z.Dot(cameraPosition),
+            1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreatePerspectiveFieldOfView(float fieldOfView, float aspectRatio,
+        float nearPlane, float farPlane)
+    {
+        float y = 1.0f / Math.Tan(fieldOfView * 0.5f);
+        float x = y / aspectRatio;
+        float range = farPlane / (nearPlane - farPlane);
+        return new Matrix4x4(x, 0.0f, 0.0f, 0.0f, 0.0f, y, 0.0f, 0.0f, 0.0f, 0.0f,
+            range, -1.0f, 0.0f, 0.0f, nearPlane * range, 0.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 CreateOrthographic(float width, float height, float nearPlane,
+        float farPlane)
+    {
+        return new Matrix4x4(2.0f / width, 0.0f, 0.0f, 0.0f, 0.0f, 2.0f / height,
+            0.0f, 0.0f, 0.0f, 0.0f, 1.0f / (nearPlane - farPlane), 0.0f, 0.0f, 0.0f,
+            nearPlane / (nearPlane - farPlane), 1.0f);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 operator +(Matrix4x4 a, Matrix4x4 b)
+    {
+        return new Matrix4x4(a.M11 + b.M11, a.M12 + b.M12, a.M13 + b.M13, a.M14 + b.M14,
+            a.M21 + b.M21, a.M22 + b.M22, a.M23 + b.M23, a.M24 + b.M24, a.M31 + b.M31,
+            a.M32 + b.M32, a.M33 + b.M33, a.M34 + b.M34, a.M41 + b.M41, a.M42 + b.M42,
+            a.M43 + b.M43, a.M44 + b.M44);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 operator -(Matrix4x4 a, Matrix4x4 b)
+    {
+        return new Matrix4x4(a.M11 - b.M11, a.M12 - b.M12, a.M13 - b.M13, a.M14 - b.M14,
+            a.M21 - b.M21, a.M22 - b.M22, a.M23 - b.M23, a.M24 - b.M24, a.M31 - b.M31,
+            a.M32 - b.M32, a.M33 - b.M33, a.M34 - b.M34, a.M41 - b.M41, a.M42 - b.M42,
+            a.M43 - b.M43, a.M44 - b.M44);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 operator *(Matrix4x4 a, float s)
+    {
+        return new Matrix4x4(a.M11 * s, a.M12 * s, a.M13 * s, a.M14 * s, a.M21 * s,
+            a.M22 * s, a.M23 * s, a.M24 * s, a.M31 * s, a.M32 * s, a.M33 * s, a.M34
+            * s, a.M41 * s, a.M42 * s, a.M43 * s, a.M44 * s);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 operator *(float s, Matrix4x4 a)
+    {
+        return a * s;
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 operator *(Matrix4x4 a, Matrix4x4 b)
+    {
+        return new Matrix4x4(a.M11 * b.M11 + a.M12 * b.M21 + a.M13 * b.M31 + a.M14
+            * b.M41, a.M11 * b.M12 + a.M12 * b.M22 + a.M13 * b.M32 + a.M14 * b.M42,
+            a.M11 * b.M13 + a.M12 * b.M23 + a.M13 * b.M33 + a.M14 * b.M43, a.M11
+            * b.M14 + a.M12 * b.M24 + a.M13 * b.M34 + a.M14 * b.M44, a.M21 * b.M11
+            + a.M22 * b.M21 + a.M23 * b.M31 + a.M24 * b.M41, a.M21 * b.M12 + a.M22
+            * b.M22 + a.M23 * b.M32 + a.M24 * b.M42, a.M21 * b.M13 + a.M22 * b.M23
+            + a.M23 * b.M33 + a.M24 * b.M43, a.M21 * b.M14 + a.M22 * b.M24 + a.M23
+            * b.M34 + a.M24 * b.M44, a.M31 * b.M11 + a.M32 * b.M21 + a.M33 * b.M31
+            + a.M34 * b.M41, a.M31 * b.M12 + a.M32 * b.M22 + a.M33 * b.M32 + a.M34
+            * b.M42, a.M31 * b.M13 + a.M32 * b.M23 + a.M33 * b.M33 + a.M34 * b.M43,
+            a.M31 * b.M14 + a.M32 * b.M24 + a.M33 * b.M34 + a.M34 * b.M44, a.M41
+            * b.M11 + a.M42 * b.M21 + a.M43 * b.M31 + a.M44 * b.M41, a.M41 * b.M12
+            + a.M42 * b.M22 + a.M43 * b.M32 + a.M44 * b.M42, a.M41 * b.M13 + a.M42
+            * b.M23 + a.M43 * b.M33 + a.M44 * b.M43, a.M41 * b.M14 + a.M42 * b.M24
+            + a.M43 * b.M34 + a.M44 * b.M44);
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 Lerp(Matrix4x4 a, Matrix4x4 b, float amount)
+    {
+        return a + (b - a) * amount;
+    }
+
+    [NoAlloc]
+    public static Matrix4x4 Transpose(Matrix4x4 v)
+    {
+        return new Matrix4x4(v.M11, v.M21, v.M31, v.M41, v.M12, v.M22, v.M32, v.M42,
+            v.M13, v.M23, v.M33, v.M43, v.M14, v.M24, v.M34, v.M44);
+    }
+
+    [NoAlloc]
+    public float Determinant()
+    {
+        float a = M11;
+        float b = M12;
+        float c = M13;
+        float d = M14;
+        float e = M21;
+        float f = M22;
+        float g = M23;
+        float h = M24;
+        float i = M31;
+        float j = M32;
+        float k = M33;
+        float l = M34;
+        float m = M41;
+        float n = M42;
+        float o = M43;
+        float p = M44;
+        return a * (f * (k * p - l * o) - g * (j * p - l * n) + h * (j * o - k * n))
+            - b * (e * (k * p - l * o) - g * (i * p - l * m) + h * (i * o - k * m))
+            + c * (e * (j * p - l * n) - f * (i * p - l * m) + h * (i * n - j * m))
+            - d * (e * (j * o - k * n) - f * (i * o - k * m) + g * (i * n - j * m));
+    }
+
+    [NoAlloc]
+    public static bool TryInvert(Matrix4x4 v, out Matrix4x4 result)
+    {
+        if (!IsFinite(v.M11) || !IsFinite(v.M12) || !IsFinite(v.M13) || !IsFinite(v.M14)
+            || !IsFinite(v.M21) || !IsFinite(v.M22) || !IsFinite(v.M23) || !IsFinite(v.M24)
+            || !IsFinite(v.M31) || !IsFinite(v.M32) || !IsFinite(v.M33) || !IsFinite(v.M34)
+            || !IsFinite(v.M41) || !IsFinite(v.M42) || !IsFinite(v.M43) || !IsFinite(v.M44))
+        {
+            result = default(Matrix4x4);
+            return false;
+        }
+        float a00 = v.M11;
+        float a01 = v.M12;
+        float a02 = v.M13;
+        float a03 = v.M14;
+        float a10 = v.M21;
+        float a11 = v.M22;
+        float a12 = v.M23;
+        float a13 = v.M24;
+        float a20 = v.M31;
+        float a21 = v.M32;
+        float a22 = v.M33;
+        float a23 = v.M34;
+        float a30 = v.M41;
+        float a31 = v.M42;
+        float a32 = v.M43;
+        float a33 = v.M44;
+        float b00 = a00 * a11 - a01 * a10;
+        float b01 = a00 * a12 - a02 * a10;
+        float b02 = a00 * a13 - a03 * a10;
+        float b03 = a01 * a12 - a02 * a11;
+        float b04 = a01 * a13 - a03 * a11;
+        float b05 = a02 * a13 - a03 * a12;
+        float b06 = a20 * a31 - a21 * a30;
+        float b07 = a20 * a32 - a22 * a30;
+        float b08 = a20 * a33 - a23 * a30;
+        float b09 = a21 * a32 - a22 * a31;
+        float b10 = a21 * a33 - a23 * a31;
+        float b11 = a22 * a33 - a23 * a32;
+        float determinant = b00 * b11 - b01 * b10 + b02 * b09 + b03 * b08 - b04 * b07
+            + b05 * b06;
+        if (determinant == 0.0f || determinant - determinant != 0.0f)
+        {
+            result = default(Matrix4x4);
+            return false;
+        }
+        float inv = 1.0f / determinant;
+        result = new Matrix4x4((a11 * b11 - a12 * b10 + a13 * b09) * inv, (-a01 * b11
+            + a02 * b10 - a03 * b09) * inv, (a31 * b05 - a32 * b04 + a33 * b03) * inv,
+            (-a21 * b05 + a22 * b04 - a23 * b03) * inv, (-a10 * b11 + a12 * b08 - a13
+            * b07) * inv, (a00 * b11 - a02 * b08 + a03 * b07) * inv, (-a30 * b05
+            + a32 * b02 - a33 * b01) * inv, (a20 * b05 - a22 * b02 + a23 * b01) * inv,
+            (a10 * b10 - a11 * b08 + a13 * b06) * inv, (-a00 * b10 + a01 * b08 - a03
+            * b06) * inv, (a30 * b04 - a31 * b02 + a33 * b00) * inv, (-a20 * b04
+            + a21 * b02 - a23 * b00) * inv, (-a10 * b09 + a11 * b07 - a12 * b06)
+            * inv, (a00 * b09 - a01 * b07 + a02 * b06) * inv, (-a30 * b03 + a31 * b01
+            - a32 * b00) * inv, (a20 * b03 - a21 * b01 + a22 * b00) * inv);
+        return true;
+    }
+
+    [NoAlloc]
+    private static bool IsFinite(float value)
+    {
+        return value - value == 0.0f;
+    }
+
+    [NoAlloc]
+    public Vec4 Transform(Vec4 v)
+    {
+        return new Vec4(v.X * M11 + v.Y * M21 + v.Z * M31 + v.W * M41, v.X * M12
+            + v.Y * M22 + v.Z * M32 + v.W * M42, v.X * M13 + v.Y * M23 + v.Z * M33
+            + v.W * M43, v.X * M14 + v.Y * M24 + v.Z * M34 + v.W * M44);
+    }
+
+    [NoAlloc]
+    public Vec3 TransformPoint(Vec3 v)
+    {
+        Vec4 r = Transform(new Vec4(v.X, v.Y, v.Z, 1.0f));
+        return new Vec3(r.X, r.Y, r.Z);
+    }
+
+    [NoAlloc]
+    public Vec3 TransformVector(Vec3 v)
+    {
+        Vec4 r = Transform(new Vec4(v.X, v.Y, v.Z, 0.0f));
+        return new Vec3(r.X, r.Y, r.Z);
+    }
+
+    [NoAlloc]
+    public Vec3 TransformProjective(Vec3 v)
+    {
+        Vec4 r = Transform(new Vec4(v.X, v.Y, v.Z, 1.0f));
+        return new Vec3(r.X / r.W, r.Y / r.W, r.Z / r.W);
+    }
+
+    [NoAlloc]
+    public bool TryTransformNormal(Vec3 v, out Vec3 result)
+    {
+        Matrix4x4 inverse;
+        if (!TryInvert(this, out inverse))
+        {
+            result = default(Vec3);
+            return false;
+        }
+        Matrix4x4 t = Transpose(inverse);
+        result = t.TransformVector(v);
+        return true;
+    }
+
+    [NoAlloc]
+    public static Vec3 operator *(Vec3 value, Matrix4x4 matrix)
+    {
+        return matrix.TransformPoint(value);
+    }
+
+    [NoAlloc]
+    public static Vec4 operator *(Vec4 value, Matrix4x4 matrix)
+    {
+        return matrix.Transform(value);
+    }
+}

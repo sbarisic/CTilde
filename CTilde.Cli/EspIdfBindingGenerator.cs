@@ -437,9 +437,10 @@ internal static class EspIdfBindingGenerator
             }
             declarations.Append("}\n\n");
         }
+        var declarationText = declarations.ToString().TrimEnd() + "\n";
         return new GeneratedBinding(
             manifest,
-            declarations.ToString().TrimEnd() + "\n",
+            CTildeFormatter.Format(SourceText.From(declarationText, manifest.DeclarationsPath)),
             adapter.ToString().TrimEnd() + "\n");
     }
 

@@ -1,12 +1,13 @@
 # C~ for Visual Studio
 
-Version 0.14.0 of this preview extension adds C~ Draft 0.36 editor and manifest-backed project support to Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.15.0 of this preview extension adds C~ Draft 0.37 SIMD128, matrix, quaternion, and manifest-backed project support to Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 
 - TextMate syntax highlighting for `.ct` files.
 - Theme-adaptive C#-style classifications for types, methods, locals, strings, numbers, comments, operators, and punctuation in Visual Studio.
 - C~ language-server diagnostics, completion, completion resolve, hover, signatures, definitions, references, document symbols, workspace symbols, and semantic tokens.
+- C#-style `0 references`, `1 reference`, and plural reference CodeLens indicators above named declarations, with lazy reference details and source navigation.
 - Read-only navigation into the bundled standard library.
 - `.ctproj` CPS projects backed by an authoritative `ctilde.json` manifest.
 - Check, Build, Clean, Rebuild, cancellation, and external-console Run commands under **Tools**.
@@ -29,6 +30,8 @@ Syntax colors use Visual Studio's built-in classifications instead of fixed C~ c
 - The native toolchain required by the selected manifest target.
 
 Optional `dotnet`, compiler, language-server, and tracing settings are under **Tools > Options > C~**. Debugger settings add the debug compiler, GDB path, memory diagnostics, stop-at-entry, runtime-frame visibility, and DAP/GDB tracing. The compiler, language server, and debug adapter are bundled; .NET 10 and the native debugger remain external requirements.
+
+Reference CodeLens is enabled by default under **Tools > Options > C~ > Language server > Show reference CodeLens** and also follows Visual Studio's global CodeLens setting. Counts cover all loaded C~ projects, refresh after saved or unsaved source changes, and exclude the declaration itself. **Find All References** uses the same semantic index.
 
 ## Project contract
 
@@ -102,7 +105,7 @@ Run this identical checklist on Visual Studio 2022 17.14 and Visual Studio 2026:
 1. Install the AMD64 VSIX, create the hosted-console template, and reopen the solution.
 2. Wrap an existing `ctilde.json` with **Create Visual Studio Project from C~ Manifest** and verify no existing file is overwritten.
 3. Verify hierarchy exclusions and lexical plus semantic highlighting.
-4. Verify diagnostics, completion and resolve, hover, signatures, user and standard-library definitions, references, and symbols.
+4. Verify diagnostics, completion and resolve, hover, signatures, user and standard-library definitions, Find All References, symbols, and reference CodeLens counts/details/navigation. Add and remove a call in another file and verify the count refreshes without restarting Visual Studio.
 5. Verify Check, Build, Clean, Rebuild, **Run C~ Project**, and `Ctrl+F5`, including cancellation, full C~ output, duplicate-process protection, and Error List navigation.
 6. Configure GCC, Clang, or WSL-GCC and verify `F5` source/function/data breakpoints, conditions, logpoints, cross-file stepping, locals, arrays, objects, statics, watches, memory, runtime exceptions, restart, stop, and external-console I/O. Verify `auto`, MSVC, and missing GDB report actionable errors before adapter launch.
 7. Configure ESP-IDF and Espressif Clang, then verify both T-CAN485 QEMU targets reach `CTILDE_ESP_QEMU_OK`, stop on mapped C~ breakpoints, step, restart, stop, leave no owned QEMU/GDB process, and release port 3333.
@@ -112,3 +115,5 @@ Run this identical checklist on Visual Studio 2022 17.14 and Visual Studio 2026:
 11. Update the installed VSIX, uninstall it, and confirm the extension's files are removed.
 
 Do not publish a Visual Studio 2026 compatibility claim until that environment passes every item.
+
+Visual Studio does not currently expose document formatting or format-on-save for C~. Use `ctilde format <path>` to write canonical source or `ctilde format --check <path>` for validation.

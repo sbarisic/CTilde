@@ -28,10 +28,10 @@ internal sealed class LanguageServer
                 new TextDocumentSyncOptions(true, 2, true),
                 new CompletionOptions(true, ["."]),
                 new SignatureHelpOptions(["(", ","], [","]),
-                true, true, true, true,
+                true, true, true, true, true,
                 new WorkspaceCapabilities(new WorkspaceFoldersCapabilities(true, true)),
                 new SemanticTokensOptions(new SemanticTokensLegend(SemanticTokenTypes, SemanticTokenModifiers), true, false)),
-            new ServerInfo("C~ Language Server", "0.14.0"));
+            new ServerInfo("C~ Language Server", "0.15.0"));
     }
 
     [JsonRpcMethod("initialized", UseSingleObjectParameterDeserialization = true)]
@@ -145,6 +145,52 @@ internal sealed class LanguageServer
         return definition is null ? null : ToLocation(project, definition);
     }
 
+    [JsonRpcMethod("textDocument/references", UseSingleObjectParameterDeserialization = true)]
+    public Location[] References(ReferencesParams parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var project = _workspace.GetProject(parameters.TextDocument.Uri);
+        var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
+        var position = PositionToOffset(project, path, parameters.Position);
+        var symbol = project.LanguageService.GetReferences(path, position, includeDeclaration: true).FirstOrDefault();
+        if (symbol is null)
+            return [];
+        return [.. WorkspaceReferences(symbol.SymbolKey, parameters.Context.IncludeDeclaration, cancellationToken)
+            .Select(item => ToLocation(item.Project, item.Reference))];
+    }
+
+    [JsonRpcMethod("ctilde/referenceCodeLenses", UseSingleObjectParameterDeserialization = true)]
+    public CTildeReferenceCodeLens[] ReferenceCodeLenses(CTildeReferenceCodeLensParams parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var project = _workspace.GetProject(parameters.TextDocument.Uri);
+        var path = UriHelpers.ToPath(parameters.TextDocument.Uri);
+        return [.. project.LanguageService.GetReferenceLenses(path).Select(lens => new CTildeReferenceCodeLens(
+            lens.SymbolKey,
+            lens.Name,
+            lens.Detail,
+            SymbolKind(lens.Kind),
+            ToRange(project, path, lens.Range),
+            ToRange(project, path, lens.SelectionRange),
+            WorkspaceReferences(lens.SymbolKey, includeDeclaration: false, cancellationToken).Length,
+            project.Revision))];
+    }
+
+    [JsonRpcMethod("ctilde/referenceCodeLensDetails", UseSingleObjectParameterDeserialization = true)]
+    public CTildeReferenceCodeLensDetails ReferenceCodeLensDetails(CTildeReferenceCodeLensDetailsParams parameters, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var project = _workspace.GetProject(parameters.TextDocument.Uri);
+        if (parameters.Revision != project.Revision)
+            return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, project.Revision, []);
+        var description = _workspace.GetWorkspaceProjects()
+            .Select(candidate => candidate.LanguageService.GetReferenceDescription(parameters.SymbolKey))
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value)) ?? parameters.SymbolKey;
+        var details = WorkspaceReferences(parameters.SymbolKey, includeDeclaration: false, cancellationToken)
+            .Select(item => ToReferenceDetail(item.Project, item.Reference, description)).ToArray();
+        return new CTildeReferenceCodeLensDetails(parameters.SymbolKey, project.Revision, details);
+    }
+
     [JsonRpcMethod("textDocument/documentSymbol", UseSingleObjectParameterDeserialization = true)]
     public DocumentSymbol[] DocumentSymbols(DocumentSymbolParams parameters, CancellationToken cancellationToken)
     {
@@ -215,6 +261,8 @@ internal sealed class LanguageServer
             await PublishDiagnosticsAsync(next.Token).ConfigureAwait(false);
             if (_semanticRefreshSupported && _rpc is { } rpc)
                 await rpc.InvokeAsync("workspace/semanticTokens/refresh", Array.Empty<object>()).ConfigureAwait(false);
+            if (_rpc is { } referenceRpc)
+                await referenceRpc.NotifyWithParameterObjectAsync("ctilde/referenceCodeLens/refresh", new { }).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (next.IsCancellationRequested) { }
         catch (Exception exception)
@@ -256,6 +304,45 @@ internal sealed class LanguageServer
         [.. symbol.Children.Select(child => ToDocumentSymbol(project, path, child))]);
 
     private static Location ToLocation(ProjectSnapshot project, LanguageDefinition definition) => new(UriHelpers.ToUri(definition.FilePath), ToRange(project, definition.FilePath, definition.Span));
+
+    private static Location ToLocation(ProjectSnapshot project, LanguageReference reference) =>
+        new(UriHelpers.ToUri(reference.FilePath), ToRange(project, reference.FilePath, reference.Span));
+
+    private (ProjectSnapshot Project, LanguageReference Reference)[] WorkspaceReferences(string symbolKey, bool includeDeclaration, CancellationToken cancellationToken)
+    {
+        var result = new List<(ProjectSnapshot Project, LanguageReference Reference)>();
+        var seen = new HashSet<(string Uri, int Start, int Length, bool Declaration)>();
+        foreach (var candidate in _workspace.GetWorkspaceProjects())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            foreach (var reference in candidate.LanguageService.GetReferences(symbolKey, includeDeclaration))
+            {
+                var identity = (UriHelpers.ToUri(reference.FilePath), reference.Span.Start, reference.Span.Length, reference.IsDeclaration);
+                if (seen.Add(identity))
+                    result.Add((candidate, reference));
+            }
+        }
+        return [.. result.OrderBy(item => UriHelpers.ToUri(item.Reference.FilePath), StringComparer.OrdinalIgnoreCase).ThenBy(item => item.Reference.Span.Start)];
+    }
+
+    private static CTildeReferenceDetail ToReferenceDetail(ProjectSnapshot project, LanguageReference reference, string description)
+    {
+        if (!project.LanguageService.TryGetSourceText(reference.FilePath, out var source))
+            return new CTildeReferenceDetail(UriHelpers.ToUri(reference.FilePath), ToRange(project, reference.FilePath, reference.Span), string.Empty, 0, 0, $"{description} — {reference.FilePath}");
+        var location = source.GetLocation(reference.Span);
+        var lineStart = source.GetPosition(location.Line - 1, 0);
+        var lineEnd = source.GetPosition(location.Line - 1, int.MaxValue);
+        var text = source.Text[lineStart..lineEnd];
+        var start = Math.Clamp(reference.Span.Start - lineStart, 0, text.Length);
+        var end = Math.Clamp(reference.Span.End - lineStart, start, text.Length);
+        return new CTildeReferenceDetail(
+            UriHelpers.ToUri(reference.FilePath),
+            ToRange(project, reference.FilePath, reference.Span),
+            text,
+            start,
+            end,
+            $"{description} — {reference.FilePath} ({location.Line},{location.Column})");
+    }
 
     private static int PositionToOffset(ProjectSnapshot project, string path, Position position) =>
         project.LanguageService.TryGetSourceText(path, out var source) ? source.GetPosition(position.Line, position.Character) : 0;
@@ -301,6 +388,8 @@ internal sealed class LanguageServer
         LanguageSymbolKind.Enum => 10,
         LanguageSymbolKind.Struct => 23,
         LanguageSymbolKind.EnumMember => 22,
+        LanguageSymbolKind.Parameter => 26,
+        LanguageSymbolKind.Variable => 13,
         _ => 13,
     };
 

@@ -33,6 +33,10 @@ public static class Math
     [NoAlloc]
     public static float Cos(float value);
 
+    [Extern("ct_math_acos")]
+    [NoAlloc]
+    public static float Acos(float value);
+
     [Extern("ct_math_floor")]
     [NoAlloc]
     public static float Floor(float value);
@@ -68,6 +72,10 @@ public static class Math
     [Extern("ct_math_cos_double")]
     [NoAlloc]
     public static double Cos(double value);
+
+    [Extern("ct_math_acos_double")]
+    [NoAlloc]
+    public static double Acos(double value);
 
     [Extern("ct_math_floor_double")]
     [NoAlloc]

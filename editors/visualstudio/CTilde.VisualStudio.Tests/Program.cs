@@ -197,6 +197,7 @@ Run("repository C~ project contracts", () =>
     AssertSolutionProjects(root, "Editors.sln",
     [
         "editors/visualstudio/CTilde.VisualStudio.Core/CTilde.VisualStudio.Core.csproj",
+        "editors/visualstudio/CTilde.VisualStudio.CodeLens/CTilde.VisualStudio.CodeLens.csproj",
         "editors/visualstudio/CTilde.VisualStudio/CTilde.VisualStudio.csproj",
         "editors/visualstudio/CTilde.VisualStudio.Tests/CTilde.VisualStudio.Tests.csproj",
     ]);
@@ -237,11 +238,56 @@ Run("standard-library URI mapping", () =>
     True(StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/System.Console.ct", out var document));
     Equal("System.Console.ct", document);
     True(!StandardLibraryUri.TryGetDocumentId("ctilde-stdlib:/../secret.ct", out _));
-    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.14.0", "ctilde-stdlib:/System.Console.ct");
-    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.14.0", "ctilde-stdlib:/System.Console.ct");
+    var first = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.15.0", "ctilde-stdlib:/System.Console.ct");
+    var second = StandardLibraryUri.CachePath(Path.GetTempPath(), "0.15.0", "ctilde-stdlib:/System.Console.ct");
     Equal(first, second);
-    True(first.Contains($"{Path.DirectorySeparatorChar}0.14.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
+    True(first.Contains($"{Path.DirectorySeparatorChar}0.15.0{Path.DirectorySeparatorChar}", StringComparison.Ordinal));
     Equal(new Uri(Path.GetFullPath(first)), StandardLibraryUri.FileUri(first));
+});
+Run("reference CodeLens contracts and VSIX registration", () =>
+{
+    Equal("0 references", ReferenceCodeLensContracts.Label(0));
+    Equal("1 reference", ReferenceCodeLensContracts.Label(1));
+    Equal("12 references", ReferenceCodeLensContracts.Label(12));
+    var reference = new ReferenceDetail
+    {
+        Uri = new Uri(Path.Combine(Path.GetTempPath(), "Source.ct")).AbsoluteUri,
+        Range = new ProtocolRange
+        {
+            Start = new ProtocolPosition { Line = 4, Character = 7 },
+            End = new ProtocolPosition { Line = 4, Character = 11 },
+        },
+        ReferenceText = "    Call();",
+        ReferenceLongDescription = "Source.ct (5,8)",
+    };
+    var row = ReferenceCodeLensContracts.DetailRows([reference]).Single();
+    Equal(Path.Combine(Path.GetTempPath(), "Source.ct"), row.FilePath);
+    Equal(4, row.LineNumber);
+    Equal(7, row.ColumnNumber);
+    Equal("    Call();", row.ReferenceText);
+    True(ReferenceNavigationTarget.TryParse(row.NavigationArgument, out var target));
+    Equal(reference.Uri, target.Uri);
+    Equal(4, target.Range.Start.Line);
+    var empty = ReferenceCodeLensContracts.DetailRows([]).Single();
+    Equal("No references found", empty.ReferenceText);
+    Equal<string?>(null, empty.NavigationArgument);
+
+    var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+    var manifest = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "source.extension.vsixmanifest"));
+    True(manifest.Contains("Microsoft.VisualStudio.CodeLensComponent", StringComparison.Ordinal));
+    True(manifest.Contains("CTilde.VisualStudio.CodeLens", StringComparison.Ordinal));
+    var project = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "CTilde.VisualStudio.csproj"));
+    True(project.Contains("CTilde.VisualStudio.CodeLens.csproj", StringComparison.Ordinal));
+    var tagger = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ReferenceCodeLensTagger.cs"));
+    True(tagger.Contains("ICodeLensTag3", StringComparison.Ordinal));
+    True(tagger.Contains("ShowReferenceCodeLens", StringComparison.Ordinal));
+    True(tagger.Contains("5 => CodeElementKinds.Class", StringComparison.Ordinal));
+    True(tagger.Contains("6 => CodeElementKinds.Method", StringComparison.Ordinal));
+    True(tagger.Contains("7 => CodeElementKinds.Property", StringComparison.Ordinal));
+    True(tagger.Contains("9 => CodeElementKinds.Constructor", StringComparison.Ordinal));
+    var provider = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio.CodeLens", "ReferenceDataPointProvider.cs"));
+    True(provider.Contains("IAsyncCodeLensDataPointProvider", StringComparison.Ordinal));
+    True(provider.Contains("ReferenceCodeLensContracts.DetailRows", StringComparison.Ordinal));
 });
 Run("Visual Studio TextMate registration", () =>
 {
@@ -304,7 +350,7 @@ Run("Visual Studio debug launch registration", () =>
     True(project.Contains("<VSIXSourceItem Include=\"ProjectSystem/CTildeDebugger.xaml\"", StringComparison.Ordinal));
     True(project.Contains("CTilde.DebugAdapter.csproj", StringComparison.Ordinal));
     True(project.Contains("Tools\\DebugAdapter", StringComparison.Ordinal));
-    True(project.Contains("<AssemblyVersion>0.14.0.0</AssemblyVersion>", StringComparison.Ordinal));
+    True(project.Contains("<AssemblyVersion>0.15.0.0</AssemblyVersion>", StringComparison.Ordinal));
     var registration = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "debug-adapter.pkgdef"));
     var normalizedRegistration = registration.Replace("\r\n", "\n", StringComparison.Ordinal);
     True(registration.Contains("{A8D3FECE-E5AE-4BB9-9483-23B1951FD115}", StringComparison.OrdinalIgnoreCase));

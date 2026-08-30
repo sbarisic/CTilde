@@ -150,26 +150,23 @@ public static class Program
             structures[0] = references;
             Console.WriteLine(scalarBox != null && structureBox != null);
         }
-
         uint liveAllocationsBefore = NativeMemoryDiagnostics.LiveAllocations();
         uint liveObjectsBefore = NativeMemoryDiagnostics.LiveObjects();
         uint totalAllocationsBefore = NativeMemoryDiagnostics.TotalAllocations();
-
         NativeMemoryDiagnostics.ReportLayout();
         ReportResult("OOM class", ClassAllocationFails());
         ReportResult("OOM array", ArrayAllocationFails());
         ReportResult("OOM box", BoxAllocationFails());
         ReportResult("OOM string", StringAllocationFails());
-
         {
             LayoutEmpty recoveredClass = new LayoutEmpty();
             int[] recoveredArray = new int[2];
             object recoveredBox = 99;
             string recoveredString = BuildDynamicString("recovered");
-            bool recovered = recoveredClass != null && recoveredArray.Length == 2 && recoveredBox != null && recoveredString.Length > 0;
+            bool recovered = recoveredClass != null && recoveredArray.Length == 2
+                && recoveredBox != null && recoveredString.Length > 0;
             ReportResult("OOM recovery", recovered);
         }
-
         Console.Write("MEMORY baseline ");
         Console.Write(liveAllocationsBefore);
         Console.Write(" ");

@@ -7,7 +7,9 @@ public sealed class List<T> : System.IEnumerable<T>
     private int version;
     private int callbackDepth;
 
-    public List() : this(0) { }
+    public List() : this(0)
+    {
+    }
 
     public List(int capacity)
     {
@@ -19,7 +21,13 @@ public sealed class List<T> : System.IEnumerable<T>
         callbackDepth = 0;
     }
 
-    public int Count { get { return count; } }
+    public int Count
+    {
+        get
+        {
+            return count;
+        }
+    }
 
     public T this[int index]
     {
@@ -137,9 +145,26 @@ public sealed class List<T> : System.IEnumerable<T>
         return GetEnumerator();
     }
 
-    internal int InternalVersion { get { return version; } }
-    internal int InternalCount { get { return count; } }
-    internal T InternalGet(int index) { return items[index]; }
+    internal int InternalVersion
+    {
+        get
+        {
+            return version;
+        }
+    }
+
+    internal int InternalCount
+    {
+        get
+        {
+            return count;
+        }
+    }
+
+    internal T InternalGet(int index)
+    {
+        return items[index];
+    }
 
     private void CheckIndex(int index)
     {
@@ -252,10 +277,27 @@ public sealed class Stack<T> : System.IEnumerable<T>
 {
     private List<T> values;
 
-    public Stack() : this(0) { }
-    public Stack(int capacity) { values = new List<T>(capacity); }
-    public int Count { get { return values.Count; } }
-    public void Push(T value) { values.Add(value); }
+    public Stack() : this(0)
+    {
+    }
+
+    public Stack(int capacity)
+    {
+        values = new List<T>(capacity);
+    }
+
+    public int Count
+    {
+        get
+        {
+            return values.Count;
+        }
+    }
+
+    public void Push(T value)
+    {
+        values.Add(value);
+    }
 
     public T Pop()
     {
@@ -296,10 +338,25 @@ public sealed class Stack<T> : System.IEnumerable<T>
         return true;
     }
 
-    public bool Contains(T value, System.Equality<T> equality) { return values.Contains(value, equality); }
-    public void Clear() { values.Clear(); }
-    public StackEnumerator<T> GetEnumerator() { return new StackEnumerator<T>(values); }
-    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator() { return GetEnumerator(); }
+    public bool Contains(T value, System.Equality<T> equality)
+    {
+        return values.Contains(value, equality);
+    }
+
+    public void Clear()
+    {
+        values.Clear();
+    }
+
+    public StackEnumerator<T> GetEnumerator()
+    {
+        return new StackEnumerator<T>(values);
+    }
+
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 }
 
 public struct StackEnumerator<T> : System.IEnumerator<T>
@@ -343,7 +400,12 @@ public struct StackEnumerator<T> : System.IEnumerator<T>
         return true;
     }
 
-    public void Dispose() { disposed = true; collection = null; }
+    public void Dispose()
+    {
+        disposed = true;
+        collection = null;
+    }
+
     private void Validate()
     {
         if (disposed || collection == null || collection.InternalVersion != expectedVersion)
@@ -359,7 +421,10 @@ public sealed class Queue<T> : System.IEnumerable<T>
     private int version;
     private int callbackDepth;
 
-    public Queue() : this(0) { }
+    public Queue() : this(0)
+    {
+    }
+
     public Queue(int capacity)
     {
         if (capacity < 0)
@@ -371,7 +436,13 @@ public sealed class Queue<T> : System.IEnumerable<T>
         callbackDepth = 0;
     }
 
-    public int Count { get { return count; } }
+    public int Count
+    {
+        get
+        {
+            return count;
+        }
+    }
 
     public void Enqueue(T value)
     {
@@ -439,8 +510,14 @@ public sealed class Queue<T> : System.IEnumerable<T>
             int index = PhysicalIndex(offset);
             callbackDepth++;
             bool equal = false;
-            try { equal = equality(items[index], value); }
-            finally { callbackDepth--; }
+            try
+            {
+                equal = equality(items[index], value);
+            }
+            finally
+            {
+                callbackDepth--;
+            }
             if (equal)
                 return true;
             offset++;
@@ -464,11 +541,36 @@ public sealed class Queue<T> : System.IEnumerable<T>
         version++;
     }
 
-    public QueueEnumerator<T> GetEnumerator() { return new QueueEnumerator<T>(this); }
-    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator() { return GetEnumerator(); }
-    internal int InternalVersion { get { return version; } }
-    internal int InternalCount { get { return count; } }
-    internal T InternalGet(int offset) { return items[PhysicalIndex(offset)]; }
+    public QueueEnumerator<T> GetEnumerator()
+    {
+        return new QueueEnumerator<T>(this);
+    }
+
+    System.IEnumerator<T> System.IEnumerable<T>.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
+
+    internal int InternalVersion
+    {
+        get
+        {
+            return version;
+        }
+    }
+
+    internal int InternalCount
+    {
+        get
+        {
+            return count;
+        }
+    }
+
+    internal T InternalGet(int offset)
+    {
+        return items[PhysicalIndex(offset)];
+    }
 
     private int PhysicalIndex(int offset)
     {
@@ -546,7 +648,12 @@ public struct QueueEnumerator<T> : System.IEnumerator<T>
         return true;
     }
 
-    public void Dispose() { disposed = true; collection = null; }
+    public void Dispose()
+    {
+        disposed = true;
+        collection = null;
+    }
+
     private void Validate()
     {
         if (disposed || collection == null || collection.InternalVersion != expectedVersion)

@@ -7,6 +7,7 @@ using Examples.TCan485.Bindings;
 namespace Examples.TCan485;
 
 public delegate int ValueReader();
+
 public delegate int NativeTransformer(int value);
 
 public interface IHardwareValue<T>
@@ -53,25 +54,37 @@ public static class NativeInterop
 
     [Extern("ct_esp_test_resource_create")]
     [NoAlloc]
-    public static EspError Create([Creates] [Nullable] out NativeTestHandle handle);
+    public static EspError Create(
+        [Creates]
+        [Nullable]
+        out NativeTestHandle handle);
 
     [Extern("ct_esp_test_resource_value")]
     [NoAlloc]
-    public static int Read([Borrowed] NativeTestHandle handle);
+    public static int Read(
+        [Borrowed]
+        NativeTestHandle handle);
 
     [Extern("ct_esp_test_resource_release")]
     [NoAlloc]
-    public static void Release([Consumes] [Nullable] NativeTestHandle handle);
+    public static void Release(
+        [Consumes]
+        [Nullable]
+        NativeTestHandle handle);
 
     [Extern("ct_esp_invoke_delegate")]
-    public static int Invoke([SynchronousCallback] NativeTransformer callback, int value);
+    public static int Invoke(
+        [SynchronousCallback]
+        NativeTransformer callback, int value);
 
     [Extern("ct_esp_call_export")]
     [NoAlloc]
     public static int CallExport(int left, int right);
 
     [Extern("ct_esp_threading_self_test")]
-    public static int ThreadingSelfTest([SynchronousCallback] NativeTransformer callback);
+    public static int ThreadingSelfTest(
+        [SynchronousCallback]
+        NativeTransformer callback);
 
     [Extern("ct_esp_thread_cleanup")]
     [NoAlloc]
@@ -138,23 +151,20 @@ public static class Program
         ManagedProtected = 0;
         ManagedPublished = 0;
         ManagedMutex = new Mutex();
-
         IHardwareValue<int> value = new HardwareBox<int>(42);
         ArcNode node = new ArcNode();
         node.Text = "generic ARC";
         IHardwareValue<ArcNode> owner = new HardwareBox<ArcNode>(node);
-
         Thread first = new Thread(ManagedWorker, 4096u, ThreadPriority.Normal);
         Thread second = new Thread(ManagedWorker, 4096u, ThreadPriority.Normal);
         first.Start();
         second.Start();
         first.Join();
         second.Join();
-
-        bool succeeded = value.Read() == 42 && owner.Read().Text == "generic ARC" &&
-            ManagedCounter.Load(MemoryOrder.Acquire) == 500 && ManagedProtected == 2 &&
-            ManagedPublished == 1 && first.Id != 0u && second.Id != 0u && !first.IsAlive && !second.IsAlive;
-
+        bool succeeded = value.Read() == 42 && owner.Read().Text == "generic ARC"
+            && ManagedCounter.Load(MemoryOrder.Acquire) == 500 && ManagedProtected
+            == 2 && ManagedPublished == 1 && first.Id != 0u && second.Id != 0u && !first.IsAlive
+            && !second.IsAlive;
         ManagedMutex = null;
         return succeeded;
     }
@@ -225,22 +235,18 @@ public static class Program
         {
             Console.WriteLine("C~ ESP-IDF hardware test");
         }
-
         Probe probe = new DerivedProbe();
         Console.Write("virtual: ");
         Console.WriteLine(probe.Value());
-
         ValueReader reader = probe.Value;
         Console.Write("delegate: ");
         Console.WriteLine(reader());
-
         unsafe
         {
             delegate* unmanaged<long, long> callback = &DoubleLong;
             Console.Write("function pointer: ");
             Console.WriteLine(NativeCallback.Invoke(callback, 21L));
         }
-
         long timerStart = EspTimer.GetTimeMicroseconds();
         FreeRtos.DelayMilliseconds(1u);
         long timerEnd = EspTimer.GetTimeMicroseconds();
@@ -248,7 +254,6 @@ public static class Program
             Console.WriteLine("timer64: ok");
         else
             Console.WriteLine("TIMER64_FAILED");
-
         static if (Target.Environment == TargetEnvironment.Qemu)
         {
             if (EspTimer.GetTimeMicroseconds() >= 0L)
@@ -267,19 +272,16 @@ public static class Program
             else
                 Console.WriteLine("GENERATED_BINDINGS_FAILED");
         }
-
         NativeBuffer<byte> nativeBuffer = stackalloc byte[1];
         if (NativeBufferApi.Fill(nativeBuffer) == 42U && nativeBuffer[0] == (byte)42)
             Console.WriteLine("native buffer: 42");
         else
             Console.WriteLine("NATIVE_BUFFER_FAILED");
-
         NativeUtf8String nativeText = NativeUtf8String.Borrow("ctilde");
         if (NativeInterop.Utf8Length(nativeText) == 6u)
             Console.WriteLine("native utf8: ok");
         else
             Console.WriteLine("NATIVE_UTF8_FAILED");
-
         NativeTestHandle handle;
         EspError createError = NativeInterop.Create(out handle);
         defer NativeInterop.Release(handle);
@@ -287,29 +289,23 @@ public static class Program
             Console.WriteLine("opaque defer: ok");
         else
             Console.WriteLine("OPAQUE_DEFER_FAILED");
-
         NativeTransformer transformer = AddOne;
         Console.Write("delegate context: ");
         Console.WriteLine(NativeInterop.Invoke(transformer, 41));
-
         Console.Write("export: ");
         Console.WriteLine(NativeInterop.CallExport(20, 22));
-
         Console.Write("threading: ");
         if (NativeInterop.ThreadingSelfTest(transformer) == 86)
             Console.WriteLine("ok");
         else
             Console.WriteLine("FAILED");
-
         if (ExerciseManagedConcurrency())
             Console.WriteLine("draft16 concurrency: ok");
         else
             Console.WriteLine("DRAFT15_CONCURRENCY_FAILED");
-
         object boxed = 7;
         Console.Write("boxed: ");
         Console.WriteLine((int)boxed);
-
         try
         {
             throw new Exception("caught on ESP32");
@@ -319,7 +315,6 @@ public static class Program
             Console.Write("exception: ");
             Console.WriteLine(exception.Message);
         }
-
         uint heapBeforeArc = EspSystem.GetFreeHeapSize();
         int arcRound = 0;
         while (arcRound < 50)
@@ -328,7 +323,8 @@ public static class Program
             arcRound++;
         }
         uint heapAfterArc = EspSystem.GetFreeHeapSize();
-        bool arcRecovered = heapAfterArc >= heapBeforeArc || heapBeforeArc - heapAfterArc <= 512u;
+        bool arcRecovered = heapAfterArc >= heapBeforeArc || heapBeforeArc - heapAfterArc
+            <= 512u;
         Console.Write("arc heap recovery: ");
         Console.WriteLine(arcRecovered);
         if (!arcRecovered)
@@ -349,7 +345,8 @@ public static class Program
             Console.WriteLine((int)Target.Architecture);
             Console.WriteLine("target environment: qemu");
             [NoAlloc]
-            asm { nop }
+            asm
+            { nop }
             Console.WriteLine("inline assembly: ok");
             RunManagedSelfTests();
             Console.Write("free heap: ");
@@ -375,25 +372,20 @@ public static class Program
                 return;
             }
             Console.WriteLine("esp error: ESP_OK");
-
             Ws2812.SetPixel(0u, 16u, 16u, 16u);
             Ws2812.Refresh();
-
             RunManagedSelfTests();
-
-        Console.Write("free heap: ");
-        Console.WriteLine(EspSystem.GetFreeHeapSize());
-        Console.Write("minimum free heap: ");
-        Console.WriteLine(EspSystem.GetMinimumFreeHeapSize());
-        Console.Write("stack high water: ");
-        Console.WriteLine(FreeRtos.GetStackHighWaterMark());
-        Console.Write("tick: ");
-        Console.WriteLine(FreeRtos.GetTickCount());
-        Console.WriteLine("CTILDE_ESP_OK");
-        Console.WriteLine("Running WiFi Demo");
-
-        WifiDemo.Run();
-
+            Console.Write("free heap: ");
+            Console.WriteLine(EspSystem.GetFreeHeapSize());
+            Console.Write("minimum free heap: ");
+            Console.WriteLine(EspSystem.GetMinimumFreeHeapSize());
+            Console.Write("stack high water: ");
+            Console.WriteLine(FreeRtos.GetStackHighWaterMark());
+            Console.Write("tick: ");
+            Console.WriteLine(FreeRtos.GetTickCount());
+            Console.WriteLine("CTILDE_ESP_OK");
+            Console.WriteLine("Running WiFi Demo");
+            WifiDemo.Run();
             Console.WriteLine("Demo completed! Entering loop");
             uint count = 0u;
             bool ledOn = false;

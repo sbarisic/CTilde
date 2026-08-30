@@ -21,19 +21,15 @@ public static class BootImage
     [Used]
     [Section(".multiboot")]
     [Align(4)]
-    private static readonly MultibootHeader Header = new MultibootHeader(
-        0x1BADB002u,
-        0x00000003u,
-        0u - 0x1BADB002u - 0x00000003u);
+    private static readonly MultibootHeader Header = new MultibootHeader(0x1BADB002u,
+        0x00000003u, 0u - 0x1BADB002u - 0x00000003u);
 
     static assert(sizeof(MultibootHeader) == 12u);
-
     [NoAlloc]
     [NoThrow]
     [NoBlock]
     [NoRuntime]
-    private static unsafe asm void DebugWrite(char value)
-        (in("a") value as output)
+    private static unsafe asm void DebugWrite(char value)(in("a") value as output)
     {
         outb output, $0xe9
     }
@@ -50,8 +46,7 @@ public static class BootImage
     [NoThrow]
     [NoBlock]
     [NoRuntime]
-    private static unsafe asm void Exit(uint code)
-        (in("a") code as status)
+    private static unsafe asm void Exit(uint code)(in("a") code as status)
     {
         outl status, $0xf4
     }
@@ -74,11 +69,9 @@ public static class BootImage
     public static unsafe int Main()
     {
         Write("CTILDE_QEMU_OK\n");
-
         while (true)
         {
         }
-
         return 0;
     }
 

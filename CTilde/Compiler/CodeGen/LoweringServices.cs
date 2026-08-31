@@ -43,6 +43,7 @@ internal interface ILoweringServices
     MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter);
     void RegisterExceptions();
     void RegisterExternUse(MethodSymbol method, SyntaxNode syntax);
+    string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax);
     void RegisterType(CType type);
     void RegisterBox(CType type);
 }

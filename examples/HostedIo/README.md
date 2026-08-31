@@ -1,25 +1,27 @@
 # Hosted path tracer
 
-This hosted C~ project renders the final randomized sphere scene from the first [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html) book to `image.ppm`. It is an original single-precision C~ adaptation with deterministic random sampling.
+This hosted C~ project renders the final randomized sphere scene from the first [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html) book into a progressively updated Raylib 6.0 window. It is an original single-precision C~ adaptation with deterministic random sampling.
 
-The renderer demonstrates the object model, scalar-layout geometry, and opt-in hosted-x64 SIMD pipeline. Production rendering traces four columns at a time through `System.Simd.Vec3x4`; `RenderScalar` retains the independent one-ray implementation for benchmarks and focused correctness comparisons. The project also uses managed references, automatic reference counting, recursive ray scattering, `System.Math`, and an owned file handle closed through `defer`.
+The renderer demonstrates the object model, scalar-layout geometry, Draft 0.39 native imports, hosted runtime-file staging, and the opt-in hosted-x64 SIMD pipeline. Production rendering traces four columns at a time through `System.Simd.Vec3x4`; `RenderScalar` retains the independent one-ray, in-memory implementation for benchmarks and focused correctness comparisons.
 
 ## Build and render
 
-Run from the example directory so the image is written beside this README:
+From the repository root:
 
 ```powershell
-Push-Location .\examples\HostedIo
-dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --project .\ctilde.json --run
-Pop-Location
+dotnet run --project .\CTilde.Cli -c Release --no-launch-profile -- --project .\examples\HostedIo\ctilde.json --run
 ```
 
-`--run` rebuilds before it launches the renderer. Use `--build` when you only want to produce `build/HostedIo.exe`.
+The manifest selects and stages `raylib.dll` beside the executable for native Windows builds. WSL GCC and Clang builds instead stage the official `libraylib.so.6.0.0` payload as `libraylib.so` and link the executable with an `$ORIGIN` runtime search path. No system Raylib installation is required.
 
-The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The executable reports every newly reached whole percentage without printing duplicate percentages:
+`--run` rebuilds before it launches the renderer. Use `--build` when you only want to produce the executable and its selected runtime library.
+
+The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The program opens its window before constructing the scene, writes every completed pixel to Raylib's CPU image immediately, and uploads dirty regions no more than 60 times per second. Closing the window cancels rendering cleanly. When rendering completes, the final image remains visible until the window is closed.
+
+Console progress reports every newly reached whole percentage without duplicates:
 
 ```text
-Rendering image.ppm...
+Rendering image...
 Progress: 1%.
 Progress: 2%.
 ...
@@ -27,33 +29,20 @@ Progress: 100%.
 Done: 1200x675.
 ```
 
-The output is a plain-text P3 PPM:
+## Performance and determinism
 
-```text
-P3
-1200 675
-255
-```
+The Draft 0.38 performance gate uses modular MSVC Release with LTO, `CreateFinal`, width 320, 16 samples, and depth 16. After two warmups, nine interleaved pairs measured 8,069.56 ms for `RenderScalar` and 3,041.98 ms for packet rendering: a 2.65x median speedup, with packets faster in all nine pairs. Those figures predate the Raylib window refactor; the benchmark now hashes an in-memory RGBA buffer and excludes file and presentation work. Run `Test/Test-HostedSimd.ps1` from the repository root to produce a current machine-specific report.
 
-Open it with a PPM-capable viewer such as GIMP or ImageMagick.
-
-The Draft 0.38 performance gate uses modular MSVC Release with LTO, `CreateFinal`, width 320, 16 samples, and depth 16. After two warmups, nine interleaved pairs measured 8,069.56 ms for `RenderScalar` and 3,041.98 ms for packet rendering: a 2.65x median speedup, with packets faster in all nine pairs. The optimized checksum for this profile is `3FA451E880DA69D2E30663F957053760085AA5C37D2CAF2E6454A4A4BFE7837B`. Run `Test/Test-HostedSimd.ps1` from the repository root to reproduce the machine-specific report.
-
-The report-only full 1200x675, 500-sample, depth-50 comparison completed in 3,623.72 seconds (1:00:23.72) for `RenderScalar` and 1,495.34 seconds (24:55.34) for packets, a 2.42x speedup. The scalar checksum remains `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`; the optimized checksum is `723C4DCFEC3776326D17E04C42AB83B84FFCF847F4A4F59464C31C173D243671`. These elapsed times are machine-specific; the checksums are the reproducibility records.
+The conformance runner uses the same sources with small odd-width cameras. Its checked RGBA buffer hashes cover deterministic packet output and repeated rendering. Focused checks cover tail masks, list/BVH hit behavior, AABB edge cases, divergent child order and materials, rejection sampling, and scalar formulas without running the full production profile during every compiler test.
 
 ## Renderer structure
 
-- `RandomGenerator.ct` supplies both scalar xorshift32 and masked `U32x4` packet generators. Every `(column, row, sample)` lane is reseeded through the same documented 32-bit avalanche mix, so output does not depend on row scheduling. It is not a cryptographic generator.
-- `Hittables.ct` contains scalar and structure-of-arrays hit records, robust slab-tested bounds, spheres, the fixed-capacity 512-object reference world, and a deterministic midpoint BVH. Packet traversal keeps per-lane closest distances and prunes children without scalar fallback. ARC owns the sphere array, BVH nodes, and material references without creating cycles.
+- `RandomGenerator.ct` supplies scalar xorshift32 and masked `U32x4` packet generators. Every `(column, row, sample)` lane is reseeded through the same documented 32-bit avalanche mix, so output does not depend on row scheduling. It is not a cryptographic generator.
+- `Hittables.ct` contains scalar and structure-of-arrays hit records, robust slab-tested bounds, spheres, the fixed-capacity 512-object reference world, and a deterministic midpoint BVH. Packet traversal keeps per-lane closest distances and prunes children without scalar fallback.
 - `Materials.ct` implements scalar and masked packet Lambertian, fuzzy-metal, and dielectric scattering, including divergent reflection, refraction, total internal reflection, and Schlick reflectance.
-- `Camera.ct` constructs rays directly from packed columns, jitter, and defocus samples. It implements recursive masked color evaluation, gamma-2 correction, a positionable camera, thin-lens defocus blur, and final-lane-only extraction for PPM output.
-- `Scene.ct` constructs the randomized small spheres, ground, and three large feature spheres, then builds the BVH once. Production rendering uses the BVH; conformance compares it with the original list traversal.
+- `Camera.ct` constructs rays directly from packed columns, jitter, and defocus samples. It implements recursive masked color evaluation, gamma-2 correction, a positionable camera, thin-lens defocus blur, `PixelPacket` output, and complete in-memory scalar and packet renders.
+- `Pixels.ct` defines the exact four-byte RGBA pixel and deterministic buffer checksum.
+- `Raylib.ct` contains the minimal natural-layout Raylib ABI, `[NativeImport("raylib")]` declarations, CPU-image ownership, dirty-region uploads, and window lifecycle.
+- `Scene.ct` constructs the randomized small spheres, ground, and three large feature spheres, then builds the BVH once.
 
-The conformance runner uses the same sources with a small odd-width camera. Its optimized golden is SHA-256 `799529CAE793F5C425EB3A15805991ACA7926EE66733906D940935093CAA6FB0` under MSVC, GCC 13.3, and Clang 18.1. Focused checks cover tail masks, list/BVH hit behavior, AABB edge cases, divergent child order and materials, rejection sampling, and deterministic repeated renders without running the full production profile during every compiler test.
-
-Emit-only and manual native compilation remain available:
-
-```powershell
-dotnet run --project ..\..\CTilde.Cli -c Release --no-launch-profile -- --project .\ctilde.json --c-layout unity -o .\build\generated\ctilde_program.c
-cl /nologo /std:clatest /O2 /W4 /WX /wd4702 /Fe:.\build\HostedIo.exe .\build\generated\ctilde_program.c
-```
+Raylib 6.0 runtime files, the public header, license, release URLs, and SHA-256 provenance are recorded under `third_party/raylib/6.0`. Only the native functions reached by HostedIo are emitted into its import table.

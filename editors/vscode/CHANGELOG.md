@@ -1,6 +1,6 @@
 # Changelog
 
-- Added Draft 0.38 hosted x64 scalar-geometry SIMD optimization, `Vec3x4`, packet-renderer editor metadata, and the `simdOptimizations` manifest schema.
+- Added Draft 0.39 `[NativeImport]` diagnostics, navigation, semantic metadata, and schema support for platform-selected `hosted.runtimeFiles` while retaining the Draft 0.38 hosted x64 SIMD and `Vec3x4` support.
 
 ## 0.15.0 - 2026-08-30
 

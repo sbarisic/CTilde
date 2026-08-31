@@ -1079,6 +1079,7 @@ internal sealed partial class TypedIrBodyLowerer
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
+        var nativeImportSlot = selected.IsNativeImport ? _emitter.RegisterNativeImportUse(selected, syntax) : null;
         _emitter.Effects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
         if (selected.ExternName == "ct_native_utf8_borrow" &&
             syntax.Arguments is [{ Expression: LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string utf8Literal } }] &&
@@ -1155,7 +1156,7 @@ internal sealed partial class TypedIrBodyLowerer
                 callArguments[0] = selected.ContainingType.FullName == "Esp.Idf.EspError"
                     ? $"(esp_err_t*)(void*){receiverCode}"
                     : $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
-            call = $"{selected.CName}({string.Join(", ", callArguments)})";
+            call = $"{nativeImportSlot ?? selected.CName}({string.Join(", ", callArguments)})";
         }
         if (captureForDefer)
             _deferId++;

@@ -98,12 +98,27 @@
     "hosted": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Hosted-only native inputs linked with generated C.",
+      "description": "Hosted-only native inputs and runtime assets.",
       "properties": {
         "nativeSources": {
           "type": "array",
           "uniqueItems": true,
           "items": { "type": "string", "pattern": "\\.c$" }
+        },
+        "runtimeFiles": {
+          "type": "array",
+          "description": "Platform-specific runtime files staged beside the hosted executable after a successful native link.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["os", "architecture", "source", "output"],
+            "properties": {
+              "os": { "type": "string", "enum": ["windows", "linux"] },
+              "architecture": { "type": "string", "enum": ["x86", "x64", "arm32", "arm64", "riscv32", "riscv64"] },
+              "source": { "type": "string", "minLength": 1, "description": "Explicit file path relative to the project manifest; globs and directories are not accepted." },
+              "output": { "type": "string", "minLength": 1, "pattern": "^[^/\\\\]+$", "description": "Destination file name beside the executable." }
+            }
+          }
         }
       }
     },

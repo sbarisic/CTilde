@@ -1028,6 +1028,11 @@ internal sealed partial class TypedIrBodyLowerer
             _emitter.RegisterExternUse(selected, syntax);
             return new IrExpressionValue { Type = target, Code = $"&{selected.CName}", Prelude = expression.Prelude };
         }
+        if (selected.IsNativeImport)
+        {
+            var slot = _emitter.RegisterNativeImportUse(selected, syntax);
+            return new IrExpressionValue { Type = target, Code = slot, Prelude = expression.Prelude };
+        }
         var trampoline = _emitter.RegisterFunctionPointerTrampoline(target, selected);
         return new IrExpressionValue { Type = target, Code = $"&{trampoline}", Prelude = expression.Prelude };
     }

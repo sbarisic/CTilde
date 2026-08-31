@@ -26,7 +26,7 @@ internal static class BoundProgramBuilder
                     AnalyzeBody(services, constructor, bodies);
                     changed = true;
                 }
-                foreach (var method in type.Methods.Where(method => method.ExternName is null && !method.IsAbstract && !method.IsGenericDefinition).Where(analyzedMethods.Add).ToArray())
+                foreach (var method in type.Methods.Where(method => !method.IsNativeBoundary && !method.IsAbstract && !method.IsGenericDefinition).Where(analyzedMethods.Add).ToArray())
                 {
                     AnalyzeBody(services, method, bodies);
                     changed = true;

@@ -393,12 +393,16 @@ internal static partial class ConformanceTests
             {
                 File.WriteAllText(Path.Combine(directory, "Program.ct"), "public static class Program { [EntryPoint] public static void Main() { } }");
                 File.WriteAllText(Path.Combine(directory, "native", "shim.c"), "int shim(void) { return 0; }");
+                File.WriteAllText(Path.Combine(directory, "native", "runtime.dll"), "windows-runtime");
+                File.WriteAllText(Path.Combine(directory, "native", "libruntime.so.1"), "linux-runtime");
                 var manifest = Path.Combine(directory, "ctilde.json");
-                File.WriteAllText(manifest, "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"native/shim.c\"]}}");
+                File.WriteAllText(manifest, "{\"sources\":[\"Program.ct\"],\"hosted\":{\"nativeSources\":[\"native/shim.c\"],\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"},{\"os\":\"linux\",\"architecture\":\"x64\",\"source\":\"native/libruntime.so.1\",\"output\":\"libruntime.so\"}]}}");
                 var application = CTildeProjectFile.Load(manifest);
                 Assert(application.Configuration.Kind == CTildeProjectKind.Application, "The default project kind changed.");
                 Assert(application.Configuration.Hosted?.NativeSources.SequenceEqual([Path.Combine(directory, "native", "shim.c")]) == true,
                     "Hosted native sources were not resolved.");
+                Assert(application.Configuration.Hosted?.RuntimeFiles.Select(file => file.OutputFileName).SequenceEqual(["runtime.dll", "libruntime.so"]) == true,
+                    "Hosted runtime files were not resolved deterministically.");
 
                 foreach (var invalidHosted in new[]
                 {
@@ -413,6 +417,24 @@ internal static partial class ConformanceTests
                     try { CTildeProjectFile.Load(manifest); }
                     catch (CTildeProjectException) { rejected = true; }
                     Assert(rejected, "An invalid hosted native source was accepted.");
+                }
+
+                foreach (var invalidRuntime in new[]
+                {
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"macos\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"auto\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/missing.dll\",\"output\":\"runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"../runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"},{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"source\":\"native/runtime.dll\",\"output\":\"runtime.dll\"}]}}",
+                    "{\"sources\":[\"Program.ct\"],\"hosted\":{\"runtimeFiles\":[{\"os\":\"windows\",\"architecture\":\"x64\",\"source\":\"native/runtime.dll\",\"output\":\"program.exe\"}]},\"build\":{\"executable\":\"build/program.exe\"}}",
+                })
+                {
+                    File.WriteAllText(manifest, invalidRuntime);
+                    var rejected = false;
+                    try { CTildeProjectFile.Load(manifest); }
+                    catch (CTildeProjectException) { rejected = true; }
+                    Assert(rejected, "An invalid hosted runtime file was accepted.");
                 }
 
                 File.WriteAllText(manifest, "{\"kind\":\"standard-library\",\"sources\":[\"Program.ct\"],\"target\":\"hosted\"}");

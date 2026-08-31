@@ -1,20 +1,68 @@
 using System;
-using System.IO;
 
 namespace HostedIoExample;
 
 public static class Program
 {
     [EntryPoint]
-    public static void Main()
+    public static unsafe void Main()
     {
-        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
-        defer File.Close(image);
-        Console.WriteLine("Rendering image.ppm...");
+        Camera camera = Scene.CreateBookCamera();
+        camera.InitializeForRender();
+        RaylibWindow window = new RaylibWindow(camera.ImageWidth, camera.ImageHeight,
+            "C~ HostedIo");
+        defer window.Close();
+        Console.WriteLine("Rendering HostedIo window...");
         HittableList world = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
         Hittable renderWorld = world.BuildBvh();
-        Camera camera = Scene.CreateBookCamera();
-        camera.Render(image, renderWorld, RandomGenerator.DefaultRenderSeed);
-        Console.WriteLine("Done: 1200x675.");
+        bool completed = RenderToWindow(camera, window, renderWorld, RandomGenerator.DefaultRenderSeed);
+        if (!completed)
+        {
+            Console.WriteLine("Rendering cancelled.");
+            return;
+        }
+        window.Present();
+        Console.WriteLine("Done: " + camera.ImageWidth.ToString() + "x" + camera.ImageHeight.ToString()
+            + ". Close the window to exit.");
+        window.WaitUntilClosed();
+    }
+
+    private static unsafe bool RenderToWindow(Camera camera, RaylibWindow window,
+        Hittable world, uint renderSeed)
+    {
+        PacketRandomGenerator random = new PacketRandomGenerator(renderSeed);
+        int row = 0;
+        int lastProgressPercent = 0;
+        while (row < camera.ImageHeight)
+        {
+            int column = 0;
+            while (column < camera.ImageWidth)
+            {
+                PixelPacket packet = camera.RenderPacket(column, row, world, renderSeed,
+                    random);
+                if (!window.SetPixel(column, row, packet.Lane0))
+                    return false;
+                if (packet.Count > 1 && !window.SetPixel(column + 1, row, packet.Lane1))
+                    return false;
+                if (packet.Count > 2 && !window.SetPixel(column + 2, row, packet.Lane2))
+                    return false;
+                if (packet.Count > 3 && !window.SetPixel(column + 3, row, packet.Lane3))
+                    return false;
+                column += 4;
+            }
+            int completed = row + 1;
+            if (camera.ProgressRows > 0 && (completed % camera.ProgressRows == 0
+                || completed == camera.ImageHeight))
+            {
+                int percent = completed * 100 / camera.ImageHeight;
+                if (percent > lastProgressPercent)
+                {
+                    Console.WriteLine("Progress: " + percent.ToString() + "%.");
+                    lastProgressPercent = percent;
+                }
+            }
+            row++;
+        }
+        return true;
     }
 }

@@ -1,10 +1,10 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.38 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.39 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Draft 0.38 completed hosted x64 scalar-geometry SIMD optimization, `Vec3x4`, debug lane metadata, and four-ray HostedIo production batching. Remaining follow-ups are:
+Draft 0.39 adds hosted native imports after Draft 0.38 completed hosted x64 scalar-geometry SIMD optimization, `Vec3x4`, debug lane metadata, and four-ray HostedIo production batching. Remaining follow-ups are:
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
@@ -61,6 +61,8 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 
 ## Native interop
 
+- [ ] Add macOS `libfoo.dylib` mapping after a hosted macOS build and runtime acceptance environment is available.
+- [ ] Add versioned `.so` and project-specific logical-name mappings without allowing source-level paths or platform extensions.
 - [ ] Add weak imports and definitions with explicit target semantics. Do not emulate weak linkage on MSVC.
 - [ ] Add privileged CPU intrinsics for interrupt control and halt only after defining target-specific safety and execution-context contracts. Keep CPUID/control registers, RISC-V CSRs, and similar operations in explicit target namespaces.
 - [ ] Generalize freestanding naked startup beyond parameterless complete raw bodies to target-specific naked parameters, compiler-bound operands, and additional interrupt signatures.
@@ -68,7 +70,7 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 
 ## Deferred research
 
-- [ ] Design independent DLL loading, dynamic runtime registration, unloading safety, and module-lifetime tracking only as a future ABI revision.
+- [ ] Design dynamic C~-module descriptor registration, dependency ordering, and module-lifetime tracking as a future runtime ABI revision. Draft 0.39 native imports load ordinary C ABI libraries only.
 - [ ] Add parallel path-tracer workers only if the existing per-sample deterministic output gate remains byte-identical across schedules.
 - [ ] Record a comparable pre-optimization renderer timing only if a representative historical build can be reconstructed; current elapsed-time measurements remain non-gating.
 - [ ] Add architecture-specific inline-assembly validation only if C~ gains a native backend. The GNU C backend intentionally delegates instruction validation to the assembler.

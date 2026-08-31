@@ -83,6 +83,79 @@ internal static partial class ConformanceTests
         }
     }
 
+    static ProcessResult CompileAndRunNativeImportFixture(string source, string fixtureSource, string libraryName = "ctilde_native_import_fixture")
+        => CompileAndRunNativeImportFixture([SyntaxTree.ParseText(source, "test.ct")], fixtureSource, libraryName);
+
+    static ProcessResult CompileAndRunNativeImportFixture(IEnumerable<SyntaxTree> sources, string fixtureSource, string libraryName = "ctilde_native_import_fixture")
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "ctilde-native-import-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var cPath = Path.Combine(directory, "program.c");
+            var fixturePath = Path.Combine(directory, "fixture.c");
+            var executablePath = Path.Combine(directory, OperatingSystem.IsWindows() ? "program.exe" : "program");
+            File.WriteAllText(cPath, Emit(sources), new UTF8Encoding(false));
+            File.WriteAllText(fixturePath, fixtureSource, new UTF8Encoding(false));
+            var fixtureResult = CompileNativeImportFixture(fixturePath, directory, libraryName);
+            Assert(fixtureResult.ExitCode == 0, $"Native-import fixture compiler failed:{Environment.NewLine}{fixtureResult.StandardOutput}{fixtureResult.StandardError}");
+            var compilerResult = RunCompiler(cPath, executablePath, threads: true);
+            Assert(compilerResult.ExitCode == 0, $"C compiler failed:{Environment.NewLine}{compilerResult.StandardOutput}{compilerResult.StandardError}");
+
+            var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+            if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                var linuxDirectory = WslPath(directory);
+                return RunProcess("wsl", ["--cd", linuxDirectory, "--exec", "env", $"LD_LIBRARY_PATH={linuxDirectory}", WslPath(executablePath)]);
+            }
+            if (!OperatingSystem.IsWindows())
+                return RunProcess(executablePath, [], workingDirectory: directory,
+                    environment: new Dictionary<string, string> { ["LD_LIBRARY_PATH"] = directory });
+            return RunProcess(executablePath, [], workingDirectory: directory);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+                Directory.Delete(directory, true);
+        }
+    }
+
+    static ProcessResult CompileNativeImportFixture(string fixturePath, string directory, string libraryName = "ctilde_native_import_fixture")
+    {
+        var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+        if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            var compiler = configured[4..];
+            var result = RunProcess("wsl", ["--exec", compiler, "-std=gnu23", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o",
+                WslPath(Path.Combine(directory, $"lib{libraryName}.so")), WslPath(fixturePath)]);
+            return RejectedCStandard(result)
+                ? RunProcess("wsl", ["--exec", compiler, "-std=gnu2x", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o",
+                    WslPath(Path.Combine(directory, $"lib{libraryName}.so")), WslPath(fixturePath)])
+                : result;
+        }
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (Path.GetFileNameWithoutExtension(configured).Equals("cl", StringComparison.OrdinalIgnoreCase))
+                return RunProcess(configured, ["/nologo", "/std:clatest", "/LD", "/W4", "/WX", $"/Fo:{Path.Combine(directory, "fixture.obj")}",
+                    $"/Fe:{Path.Combine(directory, $"{libraryName}.dll")}", fixturePath]);
+            return RunProcess(configured, ["-std=gnu23", "-shared", "-Wall", "-Wextra", "-Werror", "-o",
+                Path.Combine(directory, OperatingSystem.IsWindows() ? $"{libraryName}.dll" : $"lib{libraryName}.so"), fixturePath]);
+        }
+        if (!OperatingSystem.IsWindows())
+            return RunProcess("cc", ["-std=gnu23", "-shared", "-fPIC", "-Wall", "-Wextra", "-Werror", "-o", Path.Combine(directory, $"lib{libraryName}.so"), fixturePath]);
+
+        var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
+        Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
+        var discovery = RunProcess(vsWhere, ["-latest", "-products", "*", "-requires", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64", "-property", "installationPath"]);
+        Assert(discovery.ExitCode == 0 && !string.IsNullOrWhiteSpace(discovery.StandardOutput), "Visual Studio C tools were not found.");
+        var vcVars = Path.Combine(discovery.StandardOutput.Trim(), "VC", "Auxiliary", "Build", "vcvars64.bat");
+        var commandFile = Path.Combine(directory, "fixture.cmd");
+        File.WriteAllText(commandFile,
+            $"@echo off{Environment.NewLine}call \"{vcVars}\" >nul{Environment.NewLine}cl /nologo /std:clatest /LD /W4 /WX /Fo:\"{Path.Combine(directory, "fixture.obj")}\" /Fe:\"{Path.Combine(directory, $"{libraryName}.dll")}\" \"{fixturePath}\"{Environment.NewLine}",
+            Encoding.ASCII);
+        return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
+    }
+
     static NativeObjectInspection CompileAndInspectObject(string source)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ctilde-section-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
@@ -236,6 +309,7 @@ internal static partial class ConformanceTests
 
     static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false, bool layoutDiagnostics = false)
     {
+        var usesDynamicLoader = File.ReadAllText(cPath).Contains("dlopen(", StringComparison.Ordinal);
         var diagnosticDefines = new List<string>();
         if (memoryDiagnostics)
             diagnosticDefines.Add("CT_MEMORY_DIAGNOSTICS");
@@ -251,7 +325,7 @@ internal static partial class ConformanceTests
                 var compiler = configured[4..];
                 var linuxSource = WslPath(cPath);
                 var linuxOutput = WslPath(executablePath);
-                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics, threads, conformance, layoutDiagnostics);
+                return RunGnuCompiler("wsl", ["--exec", compiler], linuxSource, linuxOutput, memoryDiagnostics, threads, conformance, layoutDiagnostics, usesDynamicLoader);
             }
             var compilerName = Path.GetFileNameWithoutExtension(configured);
             var arguments = compilerName.Equals("cl", StringComparison.OrdinalIgnoreCase)
@@ -266,11 +340,11 @@ internal static partial class ConformanceTests
             }
             return arguments is not null
                 ? RunProcess(configured, arguments)
-                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics, threads, conformance, layoutDiagnostics);
+                : RunGnuCompiler(configured, [], cPath, executablePath, memoryDiagnostics, threads, conformance, layoutDiagnostics, usesDynamicLoader);
         }
 
         if (!OperatingSystem.IsWindows())
-            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics, threads, conformance, layoutDiagnostics);
+            return RunGnuCompiler("cc", [], cPath, executablePath, memoryDiagnostics, threads, conformance, layoutDiagnostics, usesDynamicLoader);
 
         var vsWhere = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "Microsoft Visual Studio", "Installer", "vswhere.exe");
         Assert(File.Exists(vsWhere), "No C compiler was configured and vswhere.exe was not found.");
@@ -285,7 +359,8 @@ internal static partial class ConformanceTests
         return RunProcess("cmd.exe", ["/d", "/c", commandFile]);
     }
 
-    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false, bool layoutDiagnostics = false)
+    static ProcessResult RunGnuCompiler(string command, IReadOnlyList<string> prefix, string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false, bool layoutDiagnostics = false,
+        bool usesDynamicLoader = false)
     {
         var configuredStandard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
         var standard = string.IsNullOrWhiteSpace(configuredStandard) ? "gnu23" : configuredStandard;
@@ -307,10 +382,13 @@ internal static partial class ConformanceTests
         var mathArguments = command.Equals("wsl", StringComparison.OrdinalIgnoreCase) || !OperatingSystem.IsWindows()
             ? new[] { "-lm" }
             : [];
-        var result = RunProcess(command, [.. prefix, $"-std={standard}", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
+        var loaderArguments = usesDynamicLoader && (command.Equals("wsl", StringComparison.OrdinalIgnoreCase) || !OperatingSystem.IsWindows())
+            ? new[] { "-ldl" }
+            : [];
+        var result = RunProcess(command, [.. prefix, $"-std={standard}", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments, .. loaderArguments]);
         if (!string.IsNullOrWhiteSpace(configuredStandard) || standard != "gnu23" || !RejectedCStandard(result))
             return result;
-        return RunProcess(command, [.. prefix, "-std=gnu2x", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments]);
+        return RunProcess(command, [.. prefix, "-std=gnu2x", optimization, "-Wall", "-Wextra", "-Werror", .. diagnosticArguments, .. threadArguments, .. sanitizerArguments, "-o", executablePath, cPath, .. mathArguments, .. loaderArguments]);
     }
 
     static bool RejectedCStandard(ProcessResult result)
@@ -356,7 +434,8 @@ internal static partial class ConformanceTests
         return RunProcess(executablePath, [], standardInput, standardInputBytes, workingDirectory);
     }
 
-    static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string? standardInput = null, byte[]? standardInputBytes = null, string? workingDirectory = null)
+    static ProcessResult RunProcess(string fileName, IEnumerable<string> arguments, string? standardInput = null, byte[]? standardInputBytes = null, string? workingDirectory = null,
+        IReadOnlyDictionary<string, string>? environment = null)
     {
         var startInfo = new ProcessStartInfo(fileName)
         {
@@ -368,6 +447,9 @@ internal static partial class ConformanceTests
         };
         if (workingDirectory is not null)
             startInfo.WorkingDirectory = workingDirectory;
+        if (environment is not null)
+            foreach (var item in environment)
+                startInfo.Environment[item.Key] = item.Value;
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException($"Could not start '{fileName}'.");

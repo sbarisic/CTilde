@@ -153,7 +153,7 @@ internal sealed class EffectAnalysis
                 effects |= direct;
                 continue;
             }
-            if (operation.Target.ExternName is not null || operation.RequiresContract || operation.Target.IsAbstract)
+            if (operation.Target.IsNativeBoundary || operation.RequiresContract || operation.Target.IsAbstract)
             {
                 if (!operation.Target.IsNoAlloc)
                     effects |= EffectKind.Allocates | EffectKind.Throws | EffectKind.UsesRuntime;
@@ -232,7 +232,7 @@ internal static class EffectAnalyzer
             var edges = new HashSet<MethodSymbol>();
             foreach (var operation in operations.GetValueOrDefault(method))
             {
-                if (operation.Target is not { ExternName: null } target)
+                if (operation.Target is not { IsNativeBoundary: false } target)
                 {
                     if (operation.Target is null && operation.Reason is var reason &&
                         (reason.StartsWith("indirect invocation", StringComparison.Ordinal) || reason.StartsWith("unmanaged function-pointer", StringComparison.Ordinal)))
@@ -321,7 +321,7 @@ internal static class EffectAnalyzer
         {
             var target = operation.Target;
             trusted = target.DeclaredEffects | operation.TrustedContracts;
-            effects = target.ExternName is not null || target.IsAbstract || operation.RequiresContract || !operations.ContainsKey(target)
+            effects = target.IsNativeBoundary || target.IsAbstract || operation.RequiresContract || !operations.ContainsKey(target)
                 ? EffectKind.All
                 : inferred.GetValueOrDefault(target);
         }
@@ -375,6 +375,8 @@ internal static class EffectAnalyzer
             return operation.Reason;
         if (target.ExternName is not null)
             return $"extern call to '{EffectRegistry.Display(target)}' has no {RequiredContract(effect)} contract";
+        if (target.IsNativeImport)
+            return $"native-import call to '{EffectRegistry.Display(target)}' has no {RequiredContract(effect)} contract";
         if (operation.RequiresContract || target.IsAbstract)
             return $"virtual call to '{EffectRegistry.Display(target)}' has no {RequiredContract(effect)} contract";
         if (!visited.Add(target))

@@ -31,8 +31,8 @@ Push-Location $extensionRoot
 try {
     Invoke-ReleaseCommand npm ci
     Invoke-ReleaseCommand npm test
-    Invoke-ReleaseCommand npm run test:extension
-    Invoke-ReleaseCommand npm run test:extension:minimum
+    Invoke-ReleaseCommand npm run test:extension:no-build
+    Invoke-ReleaseCommand npm run test:extension:minimum:no-build
     Invoke-ReleaseCommand npm audit --omit=dev
     Invoke-ReleaseCommand npx vsce package --no-dependencies --out $OutputPath
 }

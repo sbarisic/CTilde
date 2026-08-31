@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.38 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
+Draft 0.39 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, link-time and dynamically loaded native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -171,6 +171,16 @@ A `ctilde.json` file defines a source set, target, build outputs, and run comman
   "target": "hosted",
   "sources": ["src/**/*.ct"],
   "exclude": ["src/generated/**"],
+  "hosted": {
+    "runtimeFiles": [
+      {
+        "os": "windows",
+        "architecture": "x64",
+        "source": "native/example.dll",
+        "output": "example.dll"
+      }
+    ]
+  },
   "build": {
     "cLayout": "modules",
     "configuration": "release",
@@ -193,7 +203,7 @@ ctilde --project .\ctilde.json --run
 
 `--run` rebuilds first and starts the configured command only after a successful build. The runner uses argument arrays without shell evaluation. It supports host and WSL executors plus `${projectRoot}` and `${buildOutput}` placeholders.
 
-Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
+Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
@@ -220,7 +230,7 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 ## Native interop and ownership
 
-C~ supports `[Extern]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations.
+C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path.
 
 The generated header exposes exported methods and runtime ABI 16 lifecycle functions. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
@@ -262,7 +272,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.38 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.39 language rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.
@@ -273,17 +283,13 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Validation
 
+The fixed fast gate builds managed projects once, runs every conformance case under MSVC, repeats only toolchain-sensitive cases under WSL GCC and Clang, and reuses those outputs for the managed editor tests:
+
 ```powershell
-dotnet build .\CTilde.sln --nologo
-dotnet run --project .\Test\Test.csproj --no-build
-dotnet build .\Editors.sln --nologo
-dotnet run --project .\editors\visualstudio\CTilde.VisualStudio.Tests\CTilde.VisualStudio.Tests.csproj --no-build
-.\Test\Test-QemuFreestanding.ps1
-Push-Location .\editors\vscode
-npm test
-npm run test:extension
-Pop-Location
+.\Test\Test-Validation.ps1
 ```
+
+Use `-Tier Release` to add the reduced native-import and HostedIo/SIMD matrices, bundled and minimum-version VS Code extension-host tests, formatting, and diff checks. QEMU, Cosmopolitan, ESP-IDF, connected hardware, full VSIX packaging, and `Test-HostedSimd.ps1` remain explicit target, packaging, or benchmark gates rather than ordinary hosted validation.
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for measured host, WSL, ESP-IDF, QEMU, and Cosmopolitan results.
 

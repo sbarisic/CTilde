@@ -1,6 +1,6 @@
 # Changelog
 
-- Added Draft 0.38 hosted x64 scalar-geometry SIMD optimization, `Vec3x4` lane-aware debug presentation, and `simdOptimizations` project support while retaining extension version 0.15.0.
+- Added Draft 0.39 `[NativeImport]` diagnostics, semantic metadata, and schema support for platform-selected `hosted.runtimeFiles` while retaining hosted x64 SIMD, `Vec3x4` debug presentation, and extension version 0.15.0.
 
 ## 0.15.0 - Preview
 

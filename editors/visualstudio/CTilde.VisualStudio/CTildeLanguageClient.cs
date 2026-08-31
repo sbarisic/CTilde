@@ -166,11 +166,18 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100:Avoid async void methods", Justification = "EnvDTE solution events require void callbacks.")]
     private async void QueueWorkspaceSync()
     {
-        var version = Interlocked.Increment(ref _workspaceSyncVersion);
-        await Task.Delay(100);
-        if (version != Volatile.Read(ref _workspaceSyncVersion))
-            return;
-        await SyncWorkspaceFoldersAsync();
+        try
+        {
+            var version = Interlocked.Increment(ref _workspaceSyncVersion);
+            await Task.Delay(100);
+            if (version != Volatile.Read(ref _workspaceSyncVersion))
+                return;
+            await SyncWorkspaceFoldersAsync();
+        }
+        catch (Exception exception)
+        {
+            CTildeOutput.WriteLine($"C~ workspace synchronization failed: {exception.Message}");
+        }
     }
     private void QueueWorkspaceSync(Project _) => QueueWorkspaceSync();
     private void QueueWorkspaceSync(Project _, string __) => QueueWorkspaceSync();
@@ -186,10 +193,9 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
             dte = currentDte;
             foreach (var project in EnumerateProjects(currentDte.Solution.Projects))
             {
-                var projectPath = project.FullName;
-                if (!string.IsNullOrWhiteSpace(projectPath) && Path.GetExtension(projectPath).Equals(".ctproj", StringComparison.OrdinalIgnoreCase))
+                var projectPath = CTildeProjectPath(project);
+                if (projectPath is not null)
                 {
-                    projectPath = Path.GetFullPath(projectPath);
                     try
                     {
                         var contract = CTildeProjectContract.Load(projectPath);
@@ -256,9 +262,20 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     private static string? CTildeProjectPath(Project? project)
     {
         ThreadHelper.ThrowIfNotOnUIThread();
-        if (project is null || string.IsNullOrWhiteSpace(project.FullName) || !Path.GetExtension(project.FullName).Equals(".ctproj", StringComparison.OrdinalIgnoreCase))
+        if (project is null)
             return null;
-        return Path.GetFullPath(project.FullName);
+        string path;
+        try
+        {
+            path = project.FullName;
+        }
+        catch (Exception exception) when (exception is NotImplementedException or System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
+        return !string.IsNullOrWhiteSpace(path) && Path.GetExtension(path).Equals(".ctproj", StringComparison.OrdinalIgnoreCase)
+            ? Path.GetFullPath(path)
+            : null;
     }
 
     private static bool PathEquals(string left, string? right) =>

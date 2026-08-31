@@ -130,6 +130,9 @@ internal sealed class AnalysisServices : ILoweringServices
             _externUses.Add((method, syntax));
     }
 
+    public string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax) =>
+        NameMangler.Artifact("ct_ni_", NameMangler.NativeImportIdentity(method));
+
     public string CTypeName(CType type) => type.Kind switch
     {
         CTypeKind.Void => "void",
@@ -328,7 +331,7 @@ internal sealed class AnalysisServices : ILoweringServices
         foreach (var parameter in method.Parameters)
         {
             var parameterName = NameMangler.Identifier(parameter.Name);
-            parameters.Add(parameter.Type.IsNativeUtf8String && method.ExternName is null
+            parameters.Add(parameter.Type.IsNativeUtf8String && !method.IsNativeBoundary
                 ? CDeclaration(parameter.Type, parameterName)
                 : CParameterDeclaration(parameter, parameterName));
             if (parameter.IsSynchronousCallback)

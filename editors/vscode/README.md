@@ -6,7 +6,7 @@
 
 This extension adds C~ (`.ct`) IntelliSense plus lexical and compiler-aware highlighting. It launches the repository's .NET language server as a separate process and uses the same compiler declarations, diagnostics, targets, and bundled standard library as command-line builds.
 
-This is a preview for the experimental C~ Draft 0.38 language. The extension, language server, compiler, and debug adapter are versioned and released together.
+This is a preview for the experimental C~ Draft 0.39 language. The extension, language server, compiler, and debug adapter are versioned and released together.
 
 ## Requirements
 
@@ -34,7 +34,7 @@ code --install-extension .\ctilde-language-0.15.0.vsix --force
 - Comment toggling for `//` and `/* */` comments.
 - Bracket matching, automatic closing, surrounding pairs, brace indentation, and region folding.
 - Unicode identifiers and keyword identifiers escaped with `@`.
-- Draft 0.38 syntax and semantic classification, including `simdOptimizations`, `Vec3x4`, generic collections, indexers, iterators, explicit SIMD128 values, scalar geometry, repository modules, source owners, closures, interrupts, effect contracts, target profiles, runtime roles, and native interop.
+- Draft 0.39 syntax and semantic classification, including `[NativeImport]`, `simdOptimizations`, `Vec3x4`, generic collections, indexers, iterators, explicit SIMD128 values, scalar geometry, repository modules, source owners, closures, interrupts, effect contracts, target profiles, runtime roles, and native interop.
 - Target-aware standard-library completion and documentation: hosted and Cosmopolitan supply console/file APIs, ESP-IDF supplies its bindings, and freestanding exposes only its core runtime-independent surface.
 - Cosmopolitan manifests are schema-validated and participate in check, build, and run tasks. C~-aware APE debugging remains deferred to a retained ELF-carrier workflow.
 - Context-aware completion for keywords, types, locals, parameters, fields, properties, methods, enum members, and namespaces.
@@ -74,7 +74,7 @@ Put `ctilde.json` at a project root to select the target and source set:
 
 The nearest ancestor manifest owns a file. Source and exclusion globs are relative to the manifest and cannot escape its directory. A file excluded from that source set is analyzed independently with the manifest target. Without a manifest, the extension treats each file as a standalone hosted program.
 
-The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `kind` defaults to `application`, `target` defaults to `hosted`, and `sources` is required. Hosted projects can compile protected checked-in `.c` files from `hosted.nativeSources`. A `standard-library` project permits only `kind`, `sources`, and `exclude`; it validates the physical library matrix without an executable and cannot run. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. The optional `run` object selects a host or WSL executor, command, argument array, working directory, environment, and accepted exit codes. Hosted and Cosmopolitan projects can omit `run.command` to execute their build output. Freestanding and ESP-IDF projects require an explicit command. An ESP-IDF project can add `espIdf.bindings` with project-relative binding manifests. All manifest paths remain inside the project root.
+The compiler accepts the same manifest through `ctilde --project <ctilde.json>`. `kind` defaults to `application`, `target` defaults to `hosted`, and `sources` is required. Hosted projects can compile protected checked-in `.c` files from `hosted.nativeSources` and can select explicit `hosted.runtimeFiles` by OS and architecture for staging beside a linked executable. Runtime-file sources are manifest-relative files, destinations are filenames, and Clean preserves modified staged copies. A `standard-library` project permits only `kind`, `sources`, and `exclude`; it validates the physical library matrix without an executable and cannot run. The optional `build` object overrides generated output, hosted compiler/configuration/executable, or the ESP-IDF project directory. The optional `run` object selects a host or WSL executor, command, argument array, working directory, environment, and accepted exit codes. Hosted and Cosmopolitan projects can omit `run.command` to execute their build output. Freestanding and ESP-IDF projects require an explicit command. An ESP-IDF project can add `espIdf.bindings` with project-relative binding manifests.
 
 ## Project builds
 
@@ -163,11 +163,13 @@ Install dependencies, build the TypeScript client and .NET server, and run the g
 cd .\editors\vscode
 npm ci
 npm test
-npm run test:extension
-npm run test:extension:minimum
+npm run test:extension:no-build
+npm run test:extension:minimum:no-build
 npm run build
 npm run package
 ```
+
+`npm test` prepares the TypeScript bundle, compiler, and language server once. The `:no-build` extension-host commands reuse those prepared outputs. Use the unsuffixed extension-host commands only when running them independently.
 
 For a clean upload-ready package, `Build-Vsix.ps1` runs `npm ci`, the source and protocol tests, bundled-server Extension Host tests on current and minimum VS Code, the production dependency audit, and `vsce package`. It prints the final path, size, and SHA-256 digest.
 

@@ -115,13 +115,14 @@
       <BundledToolsRoot>$(IntermediateOutputPath)BundledTools</BundledToolsRoot>
     </PropertyGroup>
     <RemoveDir Directories="$(BundledToolsRoot)\DebugAdapter;$(BundledToolsRoot)\DebugAdapterBuild" />
-    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.Cli\CTilde.Cli.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\CompilerBuild&quot; -o &quot;$(BundledToolsRoot)\Compiler&quot;" />
-    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.LanguageServer\CTilde.LanguageServer.csproj&quot; -c Release --no-self-contained -p:BaseOutputPath=&quot;$(BundledToolsRoot)\LanguageServerBuild&quot; -o &quot;$(BundledToolsRoot)\LanguageServer&quot;" />
-    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.DebugAdapter\CTilde.DebugAdapter.csproj&quot; -c Release --no-self-contained -p:DebugType=None -p:DebugSymbols=false -p:BaseOutputPath=&quot;$(BundledToolsRoot)\DebugAdapterBuild&quot; -o &quot;$(BundledToolsRoot)\DebugAdapter&quot;" />
+    <Exec Command="dotnet build &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.sln&quot; -c Release --nologo" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.Cli\CTilde.Cli.csproj&quot; -c Release --no-build --no-restore --no-self-contained -o &quot;$(BundledToolsRoot)\Compiler&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.LanguageServer\CTilde.LanguageServer.csproj&quot; -c Release --no-build --no-restore --no-self-contained -o &quot;$(BundledToolsRoot)\LanguageServer&quot;" />
+    <Exec Command="dotnet publish &quot;$(MSBuildProjectDirectory)\..\..\..\CTilde.DebugAdapter\CTilde.DebugAdapter.csproj&quot; -c Release --no-build --no-restore --no-self-contained -o &quot;$(BundledToolsRoot)\DebugAdapter&quot;" />
     <ItemGroup>
       <VSIXSourceItem Include="$(BundledToolsRoot)\Compiler\**\*" VsixSubPath="Tools\Compiler\%(RecursiveDir)" />
       <VSIXSourceItem Include="$(BundledToolsRoot)\LanguageServer\**\*" VsixSubPath="Tools\LanguageServer\%(RecursiveDir)" />
-      <VSIXSourceItem Include="$(BundledToolsRoot)\DebugAdapter\*" VsixSubPath="Tools\DebugAdapter" />
+      <VSIXSourceItem Include="$(BundledToolsRoot)\DebugAdapter\*" Exclude="$(BundledToolsRoot)\DebugAdapter\*.pdb" VsixSubPath="Tools\DebugAdapter" />
     </ItemGroup>
   </Target>
   <Import Sdk="Microsoft.NET.Sdk" Project="Sdk.targets" />

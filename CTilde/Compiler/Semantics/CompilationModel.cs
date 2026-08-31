@@ -408,6 +408,8 @@ internal sealed partial class CompilationModel
             ReturnsOwned = method.ReturnsOwned,
             ReturnsNullable = method.ReturnsNullable,
             ExternName = method.ExternName,
+            NativeImportLibrary = method.NativeImportLibrary,
+            NativeImportSymbol = method.NativeImportSymbol,
             ExportName = method.ExportName,
             SectionName = method.SectionName,
             IsUsed = method.IsUsed,
@@ -662,6 +664,8 @@ internal sealed partial class CompilationModel
             ReturnsOwned = method.ReturnsOwned,
             ReturnsNullable = method.ReturnsNullable,
             ExternName = method.ExternName,
+            NativeImportLibrary = method.NativeImportLibrary,
+            NativeImportSymbol = method.NativeImportSymbol,
             ExportName = method.ExportName,
             SectionName = method.SectionName,
             IsUsed = method.IsUsed,
@@ -1684,9 +1688,10 @@ internal sealed partial class CompilationModel
                     var hasBody = method.Body is not null || method.AssemblyBody is not null;
                     var isAssemblyFunction = method.AssemblyBody is not null;
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NativeImport", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
+                    var nativeImport = FindAttribute(method.Attributes, "NativeImport");
                     var export = FindAttribute(method.Attributes, "Export");
                     var noAlloc = FindAttribute(method.Attributes, "NoAlloc");
                     var methodEffects = ParseEffectContracts(method.Attributes);
@@ -1745,17 +1750,17 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1270", "An abstract method requires an abstract class.", method.Source, method.Span);
                     if (isAbstractMethod && hasBody)
                         Diagnostics.Add("CT1270", "An abstract or interface method cannot have a body.", method.Source, method.Span);
-                    if (sectionAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null))
+                    if (sectionAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null || nativeImport is not null))
                         Diagnostics.Add("CT1287", "Section requires a body-bearing static non-extern method.", sectionAttribute.Source, sectionAttribute.Span);
                     if (entry is not null && entry.Arguments.Length != 0)
                         Diagnostics.Add("CT1223", "EntryPoint does not accept arguments.", entry.Source, entry.Span);
                     if (noRecursion is not null && noRecursion.Arguments.Length != 0)
                         Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
-                    if (noRecursion is not null && (!hasBody || isAbstractMethod || external is not null))
+                    if (noRecursion is not null && (!hasBody || isAbstractMethod || external is not null || nativeImport is not null))
                         Diagnostics.Add("CT1294", "NoRecursion requires a body-bearing non-extern method.", noRecursion.Source, noRecursion.Span);
                     if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
-                    if (usedAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null))
+                    if (usedAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null || nativeImport is not null))
                         Diagnostics.Add("CT1288", "Used requires a body-bearing static non-extern method.", usedAttribute.Source, usedAttribute.Span);
                     if (nakedAttribute is not null && nakedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1302", "Naked does not accept arguments.", nakedAttribute.Source, nakedAttribute.Span);
@@ -1764,6 +1769,8 @@ internal sealed partial class CompilationModel
                     if (interruptSafeAttribute is not null && !interruptSafeAttribute.Arguments.IsEmpty)
                         Diagnostics.Add("CT1306", "InterruptSafe does not accept arguments.", interruptSafeAttribute.Source, interruptSafeAttribute.Span);
                     string? externalName = null;
+                    string? nativeImportLibrary = null;
+                    string? nativeImportSymbol = null;
                     string? exportName = null;
                     if (external is not null)
                     {
@@ -1774,8 +1781,35 @@ internal sealed partial class CompilationModel
                         if (!isStatic || hasBody)
                             Diagnostics.Add("CT1205", "An Extern method must be static and bodyless.", method.Source, method.Span);
                     }
-                    else if (!hasBody && !isAbstractMethod)
-                        Diagnostics.Add("CT1206", "A bodyless method requires Extern or abstract.", method.Source, method.Span);
+                    if (nativeImport is not null)
+                    {
+                        if (nativeImport.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string library }] &&
+                            IsPortableNativeLibraryName(library) && IsPortableExternalIdentifier(method.Name))
+                        {
+                            nativeImportLibrary = library;
+                            nativeImportSymbol = method.Name;
+                        }
+                        else if (nativeImport.Arguments is
+                                 [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string explicitLibrary },
+                                  LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string explicitSymbol }] &&
+                                 IsPortableNativeLibraryName(explicitLibrary) && IsPortableExternalIdentifier(explicitSymbol))
+                        {
+                            nativeImportLibrary = explicitLibrary;
+                            nativeImportSymbol = explicitSymbol;
+                        }
+                        else
+                            Diagnostics.Add("CT1312", "NativeImport requires an extensionless portable library base name and an optional portable C symbol name.", nativeImport.Source, nativeImport.Span);
+
+                        if (_target != CompilationTarget.Hosted)
+                            Diagnostics.Add("CT1314", "NativeImport is supported only for hosted targets.", nativeImport.Source, nativeImport.Span);
+                        if (!isStatic || hasBody || isAbstractMethod || !method.TypeParameters.IsDefaultOrEmpty || type.IsGenericDefinition || type.IsOpenConstructed)
+                            Diagnostics.Add("CT1313", "NativeImport requires a static bodyless non-generic method in a closed type.", method.Source, method.Span);
+                        if (external is not null || export is not null || entry is not null || runtimeImplAttribute is not null || nakedAttribute is not null ||
+                            interruptAttribute is not null || interruptSafeAttribute is not null || sectionAttribute is not null || usedAttribute is not null || taskEntryAttribute is not null)
+                            Diagnostics.Add("CT1313", "NativeImport cannot be combined with native entry, export, runtime implementation, placement, retention, or interrupt attributes.", nativeImport.Source, nativeImport.Span);
+                    }
+                    if (!hasBody && !isAbstractMethod && external is null && nativeImport is null)
+                        Diagnostics.Add("CT1206", "A bodyless method requires Extern, NativeImport, or abstract.", method.Source, method.Span);
                     if (export is not null)
                     {
                         if (export.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] &&
@@ -1783,8 +1817,8 @@ internal sealed partial class CompilationModel
                             exportName = value;
                         else
                             Diagnostics.Add("CT1243", "Export requires one string containing a portable C identifier.", export.Source, export.Span);
-                        if (external is not null || entry is not null || !isStatic || !hasBody || accessibility != Accessibility.Public)
-                            Diagnostics.Add("CT1244", "Export requires a public static body-bearing method and cannot be combined with EntryPoint or Extern.", method.Source, method.Span);
+                        if (external is not null || nativeImport is not null || entry is not null || !isStatic || !hasBody || accessibility != Accessibility.Public)
+                            Diagnostics.Add("CT1244", "Export requires a public static body-bearing method and cannot be combined with EntryPoint, Extern, or NativeImport.", method.Source, method.Span);
                     }
                     var returnType = ResolveType(method.ReturnType, tree);
                     var explicitInterfaceType = method.ExplicitInterfaceType is null ? null : ResolveType(method.ExplicitInterfaceType, tree);
@@ -1799,19 +1833,19 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1266", "NativeUtf8String is scoped and cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
                     if (returnType.ContainsAtomic)
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be returned by value.", method.ReturnType.Source, method.ReturnType.Span);
-                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null || export is not null);
+                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null || nativeImport is not null || export is not null);
                     foreach (var parameter in methodParameters.Where(parameter => parameter.Type.ContainsAtomic && parameter.PassingKind == ParameterPassingKind.Value))
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be passed by value.", parameter.Syntax!.Source, parameter.Syntax.Span);
-                    if (external is not null || export is not null)
+                    if (external is not null || nativeImport is not null || export is not null)
                     {
                         if (!method.TypeParameters.IsDefaultOrEmpty || ForbiddenNativeBoundaryType(returnType))
-                            Diagnostics.Add("CT1279", "Open generic, interface, atomic, and runtime-backed threading types cannot cross an extern or export boundary.", method.ReturnType.Source, method.ReturnType.Span);
+                            Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", method.ReturnType.Source, method.ReturnType.Span);
                         foreach (var parameter in methodParameters.Where(parameter => ForbiddenNativeBoundaryType(parameter.Type)))
-                            Diagnostics.Add("CT1279", "Open generic, interface, atomic, and runtime-backed threading types cannot cross an extern or export boundary.", parameter.Syntax!.Source, parameter.Syntax.Span);
+                            Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", parameter.Syntax!.Source, parameter.Syntax.Span);
                     }
                     if (returnsBorrowed is not null &&
-                        (returnsBorrowed.Arguments.Length != 0 || external is null || !(returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)))
-                        Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern method with a managed-reference, opaque-handle, or pointer return type.", returnsBorrowed.Source, returnsBorrowed.Span);
+                        (returnsBorrowed.Arguments.Length != 0 || external is null && nativeImport is null || !(returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)))
+                        Diagnostics.Add("CT1235", "ReturnsBorrowed accepts no arguments and is valid only on an extern or native-import method with a managed-reference, opaque-handle, or pointer return type.", returnsBorrowed.Source, returnsBorrowed.Span);
                     if (returnsOwned is not null &&
                         (returnsOwned.Arguments.Length != 0 || returnType.Kind is not CTypeKind.Opaque and not CTypeKind.Pointer))
                         Diagnostics.Add("CT1245", "ReturnsOwned accepts no arguments and requires an opaque-handle or pointer return type.", returnsOwned.Source, returnsOwned.Span);
@@ -1820,8 +1854,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1246", "ReturnsNullable accepts no arguments and requires an opaque-handle or pointer return type.", returnsNullable.Source, returnsNullable.Span);
                     if (returnsOwned is not null && returnsBorrowed is not null)
                         Diagnostics.Add("CT1247", "A return value cannot be both owned and borrowed.", method.Source, method.Span);
-                    if (external is not null && returnType.Kind == CTypeKind.Opaque && returnsOwned is null && returnsBorrowed is null)
-                        Diagnostics.Add("CT1248", "An extern opaque-handle result must declare ReturnsOwned or ReturnsBorrowed.", method.ReturnType.Source, method.ReturnType.Span);
+                    if ((external is not null || nativeImport is not null) && returnType.Kind == CTypeKind.Opaque && returnsOwned is null && returnsBorrowed is null)
+                        Diagnostics.Add("CT1248", "An extern or native-import opaque-handle result must declare ReturnsOwned or ReturnsBorrowed.", method.ReturnType.Source, method.ReturnType.Span);
                     var symbol = new MethodSymbol
                     {
                         Name = method.Name,
@@ -1837,10 +1871,12 @@ internal sealed partial class CompilationModel
                         DeclaredEffects = methodEffects,
                         IsNoRecursion = noRecursion is not null,
                         IsUnsafe = method.Modifiers.Contains("unsafe", StringComparer.Ordinal),
-                        ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && external is not null && (returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer),
+                        ReturnsBorrowed = returnsBorrowed is not null && returnsBorrowed.Arguments.Length == 0 && (external is not null || nativeImport is not null) && (returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer),
                         ReturnsOwned = returnsOwned is not null,
                         ReturnsNullable = returnsNullable is not null,
                         ExternName = externalName,
+                        NativeImportLibrary = nativeImportLibrary,
+                        NativeImportSymbol = nativeImportSymbol,
                         ExportName = exportName,
                         SectionName = sectionName,
                         IsUsed = usedAttribute is not null,
@@ -1939,21 +1975,21 @@ internal sealed partial class CompilationModel
             if (type.IsNativeUtf8String && parameter.PassingKind != ParameterPassingKind.Value)
                 Diagnostics.Add("CT1264", "NativeUtf8String parameters cannot use ref, in, or out.", parameter.Source, parameter.Span);
             if (isExtern && parameter.PassingKind != ParameterPassingKind.Value && !IsCompleteUnmanagedType(type))
-                Diagnostics.Add("CT2188", $"Extern by-reference parameter type '{type.DisplayName}' is not unmanaged ABI-safe.", parameter.Source, parameter.Span);
+                Diagnostics.Add("CT2188", $"Native-boundary by-reference parameter type '{type.DisplayName}' is not unmanaged ABI-safe.", parameter.Source, parameter.Span);
             var ownershipAttributes = new[] { borrowed, consumes, retained, creates }.Where(attribute => attribute is not null).ToArray();
             if (ownershipAttributes.Any(attribute => attribute!.Arguments.Length != 0) || ownershipAttributes.Length > 1)
                 Diagnostics.Add("CT1249", "Borrowed, Consumes, Retained, and Creates accept no arguments and are mutually exclusive.", parameter.Source, parameter.Span);
             var nativeResource = type.Kind is CTypeKind.Opaque or CTypeKind.Pointer;
             if (retained is not null && (retained.Arguments.Length != 0 || !isExtern || !(type.IsReference && parameter.PassingKind == ParameterPassingKind.Value || nativeResource && parameter.PassingKind == ParameterPassingKind.Value)))
-                Diagnostics.Add("CT1234", "Retained requires a value parameter of an extern method and a managed reference, opaque handle, or pointer type.", retained.Source, retained.Span);
+                Diagnostics.Add("CT1234", "Retained requires a value parameter of an extern or native-import method and a managed reference, opaque handle, or pointer type.", retained.Source, retained.Span);
             if ((borrowed is not null || consumes is not null) && (!isExtern || !nativeResource || parameter.PassingKind != ParameterPassingKind.Value))
-                Diagnostics.Add("CT1250", "Borrowed and Consumes require a value opaque-handle or pointer parameter of an extern method.", parameter.Source, parameter.Span);
+                Diagnostics.Add("CT1250", "Borrowed and Consumes require a value opaque-handle or pointer parameter of an extern or native-import method.", parameter.Source, parameter.Span);
             if (creates is not null && (!isExtern || !nativeResource || parameter.PassingKind != ParameterPassingKind.Out))
-                Diagnostics.Add("CT1251", "Creates requires an out opaque-handle or pointer parameter of an extern method.", creates.Source, creates.Span);
+                Diagnostics.Add("CT1251", "Creates requires an out opaque-handle or pointer parameter of an extern or native-import method.", creates.Source, creates.Span);
             if (nullable is not null && (nullable.Arguments.Length != 0 || !(nativeResource || type.Kind == CTypeKind.Delegate || type.IsNativeUtf8String)))
                 Diagnostics.Add("CT1252", "Nullable accepts no arguments and requires an opaque handle, pointer, delegate, or NativeUtf8String parameter.", nullable.Source, nullable.Span);
             if (synchronousCallback is not null && (synchronousCallback.Arguments.Length != 0 || !isExtern || type.Kind != CTypeKind.Delegate || parameter.PassingKind != ParameterPassingKind.Value))
-                Diagnostics.Add("CT1253", "SynchronousCallback requires a value delegate parameter of an extern method.", synchronousCallback.Source, synchronousCallback.Span);
+                Diagnostics.Add("CT1253", "SynchronousCallback requires a value delegate parameter of an extern or native-import method.", synchronousCallback.Source, synchronousCallback.Span);
             result.Add(new ParameterSymbol
             {
                 Name = parameter.Name,
@@ -2524,6 +2560,16 @@ internal sealed partial class CompilationModel
 
     private static bool IsPortableExternalIdentifier(string value) =>
         CIdentifier.IsMatch(value) && !value.StartsWith('_') && !CKeywords.Contains(value);
+
+    private static bool IsPortableNativeLibraryName(string value)
+    {
+        if (string.IsNullOrEmpty(value) || value.StartsWith("lib", StringComparison.OrdinalIgnoreCase))
+            return false;
+        foreach (var character in value)
+            if (character is not (>= 'A' and <= 'Z') and not (>= 'a' and <= 'z') and not (>= '0' and <= '9') and not '_' and not '+' and not '-')
+                return false;
+        return true;
+    }
 
     private static bool IsLinkerSymbolIdentifier(string value) =>
         CIdentifier.IsMatch(value) && !CKeywords.Contains(value);

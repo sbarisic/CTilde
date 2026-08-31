@@ -1,0 +1,27 @@
+<Project ToolsVersion="Current" DefaultTargets="Build">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
+  <PropertyGroup>
+    <ProjectGuid>{3A165596-159B-4396-8BB1-E47EA31B6797}</ProjectGuid>
+    <CTildeManifest>ctilde.json</CTildeManifest>
+    <CTildeProjectSystemPath>C:\Users\cartm\AppData\Local\Microsoft\VisualStudio\18.0_3330effd\Extensions\rxv45uzf.wxj\ProjectSystem</CTildeProjectSystemPath>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>
+    <OutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\</OutputPath>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <DefineCommonItemSchemas>true</DefineCommonItemSchemas>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|AnyCPU"><Configuration>Debug</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|AnyCPU"><Configuration>Release</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectCapability Include="CTilde" />
+    <ProjectCapability Include="UseFileGlobs" />
+    <ProjectCapability Include="OpenProjectFile" />
+    <ProjectCapability Include="HandlesOwnReload" />
+    <ProjectCapability Include="ProjectConfigurationsDeclaredAsItems" />
+  </ItemGroup>
+  <ItemGroup><None Include="*.ct;ctilde.json" /></ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
+  <Import Project="$(CTildeProjectSystemPath)\CTilde.targets" />
+</Project>

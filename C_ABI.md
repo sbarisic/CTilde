@@ -4,7 +4,7 @@
 
 This document defines the generated C contract for C~ draft 0.37 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
 
-Draft 0.37 retains runtime ABI 16 and debug metadata version 3. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.39 retains runtime ABI 16 and debug metadata version 3. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]` uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -342,6 +342,18 @@ An extern declaration is linked only when generated code calls it. The compiler 
 
 An extern function must not raise a C~ exception or call `longjmp` into C~ handler state. A generated synchronous callback trampoline uses the invoking attached thread's handler state, catches escaping C~ exceptions, and terminates with `CTE0003`. Other exception propagation across native boundaries is unsupported.
 
+## Hosted native imports
+
+`[NativeImport("foo")]` and `[NativeImport("foo", "symbol")]` reuse the extern C ABI mappings but resolve through private function-pointer slots during hosted runtime startup. Source names are logical and extensionless. Windows maps `foo` to the compile-time wide name `foo.dll` and uses `LoadLibraryExW` with default loader directories, `GetProcAddress`, and `FreeLibrary`. Linux maps it to `libfoo.so` and uses `dlopen(RTLD_NOW | RTLD_LOCAL)`, `dlsym`, `dlerror`, and `dlclose`. Linux links `-ldl` only when reachable generated output contains loader support. The operating-system search path remains authoritative; there is no application-directory fallback in C~.
+
+An application can make an ordinary native dependency available beside its executable through `hosted.runtimeFiles` in `ctilde.json`. Entries select an explicit source by operating system and architecture and name one destination file. This is build packaging, not a loader-handle API or a change to native-import name mapping. Selected Linux outputs receive `$ORIGIN` runtime search metadata so an extensionless import can resolve a staged `libfoo.so` through the operating-system loader.
+
+Reachable imports are ordered by ordinal logical library and symbol. Compatible declarations with the same `(library, symbol, native signature)` share one slot; the slot identity includes passing, ownership, nullability, and callback adaptation facts. Distinct libraries may expose the same symbol. Unreachable imports emit no handle, filename, symbol lookup, or linker dependency. Symbol maps record the logical library and symbol; public native headers do not expose loader handles or slots.
+
+The loader address is transferred into the structurally typed function-pointer slot with a checked size assertion and byte copy. Generated code does not alias data and function pointers or rely on a warning-producing cast. Taking the C~ method address reads the resolved slot directly. Resolution runs after panic and runtime-fault setup and before C~ static initialization. Libraries remain loaded through reverse static finalization and unload afterward in reverse load order. Failures report `CTI0001`, `CTI0002`, or `CTI0003` with logical and mapped names, symbol when applicable, declaration location, and native loader details before entering the configured panic path.
+
+This facility loads ordinary native C ABI libraries only. It does not expose handles, provide automatic marshalling, register C~-managed module descriptors, or change runtime ABI 16. Cosmopolitan, ESP-IDF, freestanding, macOS, versioned `.so` names, and non-default calling conventions are outside Draft 0.39 native-import support.
+
 ## Native section placement
 
 The emitter creates deterministic placement macros ordered by ordinal section name and identified by a stable hash of section kind and name. Code declarations and definitions use the same macro. MSVC and clang-cl lower it to `__declspec(code_seg("name"))`; GCC and Clang lower it to `__attribute__((section("name")))`.
@@ -465,7 +477,7 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 | `CTM0001` after attachment | `OutOfMemoryException` |
 | `CTM0002` | Reference-count overflow or invalid retain |
 | `CTM0003` | Invalid release, underflow, or cleanup corruption |
-| `CTI0001` | `DivideByZeroException` |
+| `CTD0001` | `DivideByZeroException` |
 | `CTS0002` | Native scalar formatting failure |
 | `CTS0003` | `ArgumentException` at a native UTF-8 boundary |
 | `CTO0001`, `CTO0003` | `InvalidCastException` |
@@ -475,6 +487,8 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 | `CTT0002` | Attachment, detachment, task exit, or runtime shutdown violated the thread lifecycle |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
+
+Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the integer divide-by-zero runtime fault is `CTD0001`.
 
 `CTM0002`, `CTM0003`, `CTE0003`, `CTT0001`, `CTT0002`, ABI mismatch, and cleanup corruption remain panics. Allocation failure before thread attachment is also a panic. `CTILDE_CONFORMANCE` enables allocation-failure injection for tests only; production builds expose no injection API. `Environment.Exit`, native `abort`, reset, and power loss bypass managed cleanup.
 

@@ -80,6 +80,9 @@ internal static class CleanCommand
 
         var protectedFiles = ProtectedFiles(project);
         var failed = false;
+        if (project.Configuration.Target == CompilationTarget.Hosted && build.ExecutablePath is not null &&
+            !HostedRuntimeFileStager.Clean(Path.GetDirectoryName(build.ExecutablePath)!, trace))
+            failed = true;
         foreach (var path in files.OrderBy(path => path, PathComparer))
         {
             if (protectedFiles.Contains(path))

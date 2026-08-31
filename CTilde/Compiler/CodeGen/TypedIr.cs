@@ -172,12 +172,12 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
 
             var uses = new Dictionary<int, List<int>>();
             foreach (var block in function.Blocks)
-            foreach (var input in block.Instructions.SelectMany(instruction => instruction.Inputs))
-            {
-                if (!uses.TryGetValue(input.Id, out var blocks))
-                    uses[input.Id] = blocks = [];
-                blocks.Add(block.Id);
-            }
+                foreach (var input in block.Instructions.SelectMany(instruction => instruction.Inputs))
+                {
+                    if (!uses.TryGetValue(input.Id, out var blocks))
+                        uses[input.Id] = blocks = [];
+                    blocks.Add(block.Id);
+                }
 
             foreach (var block in function.Blocks)
             {
@@ -268,7 +268,7 @@ internal sealed class TypedIrLowerer(BoundProgram program)
                 continue;
             foreach (var constructor in type.Constructors)
                 AddFunction(FindBoundBody(constructor));
-            foreach (var method in type.Methods.Where(method => method.ExternName is null && !method.IsAbstract && !method.IsGenericDefinition))
+            foreach (var method in type.Methods.Where(method => !method.IsNativeBoundary && !method.IsAbstract && !method.IsGenericDefinition))
                 AddFunction(FindBoundBody(method));
             foreach (var property in type.Properties)
             {

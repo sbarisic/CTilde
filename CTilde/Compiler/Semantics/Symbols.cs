@@ -341,6 +341,10 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool ReturnsOwned { get; init; }
     public bool ReturnsNullable { get; init; }
     public string? ExternName { get; init; }
+    public string? NativeImportLibrary { get; init; }
+    public string? NativeImportSymbol { get; init; }
+    public bool IsNativeImport => NativeImportLibrary is not null;
+    public bool IsNativeBoundary => ExternName is not null || IsNativeImport;
     public string? ExportName { get; init; }
     public string? SectionName { get; init; }
     public bool IsUsed { get; init; }
@@ -435,6 +439,13 @@ internal static class NameMangler
         var parameters = string.Join(",", method.Parameters.Select(parameter => $"{PassingCode(parameter.PassingKind)}:{CanonicalType(parameter.Type)}"));
         var explicitInterface = method.ExplicitInterfaceType is null ? string.Empty : $"[{CanonicalType(method.ExplicitInterfaceType)}]";
         return $"method:{method.ContainingType.FullName}::{explicitInterface}{name}({parameters})->{CanonicalType(method.IsConstructor ? method.ContainingType.Type : method.ReturnType)}";
+    }
+
+    public static string NativeImportIdentity(MethodSymbol method)
+    {
+        var parameters = string.Join(",", method.Parameters.Select(parameter =>
+            $"{PassingCode(parameter.PassingKind)}:{CanonicalType(parameter.Type)}:retain={parameter.IsRetained}:ownership={parameter.NativeOwnership}:nullable={parameter.IsNullable}:sync={parameter.IsSynchronousCallback}"));
+        return $"native-import:{method.NativeImportLibrary}:{method.NativeImportSymbol}({parameters})->{CanonicalType(method.ReturnType)}:borrowed={method.ReturnsBorrowed}:owned={method.ReturnsOwned}:nullable={method.ReturnsNullable}";
     }
 
     public static string CanonicalType(CType type) => type.Kind switch

@@ -1,6 +1,27 @@
 using CTilde.Tests;
 
-var suite = new ConformanceSuite();
+var crossToolchainOnly = false;
+string? commandLineFilter = null;
+for (var index = 0; index < args.Length; index++)
+{
+    switch (args[index])
+    {
+        case "--cross-toolchain-only":
+            crossToolchainOnly = true;
+            break;
+        case "--filter" when index + 1 < args.Length:
+            commandLineFilter = args[++index];
+            break;
+        case "--filter":
+            Console.Error.WriteLine("Missing value after --filter.");
+            return 2;
+        default:
+            Console.Error.WriteLine($"Unknown conformance argument '{args[index]}'.");
+            return 2;
+    }
+}
+
+var suite = new ConformanceSuite(crossToolchainOnly, commandLineFilter);
 ConformanceTests.RegisterPart1(suite);
 ConformanceTests.RegisterPart2(suite);
 ConformanceTests.RegisterPart3(suite);
@@ -32,20 +53,45 @@ ConformanceTests.RegisterPart28(suite);
 ConformanceTests.RegisterPart29(suite);
 ConformanceTests.RegisterPart30(suite);
 ConformanceTests.RegisterPart31(suite);
+ConformanceTests.RegisterPart32(suite);
 return suite.Complete();
 
 internal sealed class ConformanceSuite
 {
     private readonly List<string> _failures = [];
-    private readonly string? _filter = Environment.GetEnvironmentVariable("CTILDE_TEST_FILTER");
+    private readonly HashSet<string> _registered = new(StringComparer.Ordinal);
+    private readonly bool _crossToolchainOnly;
+    private readonly string? _filter;
+    private int _passed;
+    private int _skipped;
+
+    public ConformanceSuite(bool crossToolchainOnly, string? commandLineFilter)
+    {
+        _crossToolchainOnly = crossToolchainOnly;
+        _filter = commandLineFilter ?? Environment.GetEnvironmentVariable("CTILDE_TEST_FILTER");
+    }
 
     public void Run(string name, Action test)
     {
-        if (_filter is not null && !name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+        if (!_registered.Add(name))
+        {
+            _failures.Add($"FAIL duplicate conformance registration: {name}");
             return;
+        }
+        if (_crossToolchainOnly && !ConformanceTestCatalog.CrossToolchain.Contains(name))
+        {
+            _skipped++;
+            return;
+        }
+        if (_filter is not null && !name.Contains(_filter, StringComparison.OrdinalIgnoreCase))
+        {
+            _skipped++;
+            return;
+        }
         try
         {
             test();
+            _passed++;
             Console.WriteLine($"PASS {name}");
         }
         catch (Exception exception)
@@ -56,9 +102,13 @@ internal sealed class ConformanceSuite
 
     public int Complete()
     {
+        var unknownTags = ConformanceTestCatalog.CrossToolchain.Except(_registered, StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+        if (unknownTags.Length != 0)
+            _failures.Add($"FAIL stale cross-toolchain tags: {string.Join(", ", unknownTags)}");
         if (_failures.Count == 0)
         {
             Console.WriteLine("Conformance: all tests passed.");
+            Console.WriteLine($"Conformance summary: {_passed} passed, {_skipped} skipped, {_registered.Count} registered.");
             return 0;
         }
         foreach (var failure in _failures)

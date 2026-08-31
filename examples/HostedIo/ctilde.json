@@ -1,7 +1,24 @@
 {
   "target": "hosted",
+  "architecture": "x64",
   "simdOptimizations": true,
   "sources": ["*.ct"],
+  "hosted": {
+    "runtimeFiles": [
+      {
+        "os": "windows",
+        "architecture": "x64",
+        "source": "../../third_party/raylib/6.0/windows-x64/raylib.dll",
+        "output": "raylib.dll"
+      },
+      {
+        "os": "linux",
+        "architecture": "x64",
+        "source": "../../third_party/raylib/6.0/linux-x64/libraylib.so.6.0.0",
+        "output": "libraylib.so"
+      }
+    ]
+  },
   "build": {
     "cLayout": "modules",
     "generatedDirectory": "build/generated/modules",

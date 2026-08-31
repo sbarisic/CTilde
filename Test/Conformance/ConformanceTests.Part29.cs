@@ -127,7 +127,7 @@ internal static partial class ConformanceTests
                 .SelectMany(directory => Directory.EnumerateFiles(Path.Combine(repositoryRoot, directory), "*.ct", SearchOption.AllDirectories))
                 .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj" or ".artifacts" or "artifacts" or "node_modules" or ".vscode-test"))
                 .ToArray();
-            Assert(physicalSources.Length == 58, $"Expected 58 physical C~ sources, found {physicalSources.Length}.");
+            Assert(physicalSources.Length == 60, $"Expected 60 physical C~ sources, found {physicalSources.Length}.");
             var repositoryCheck = RunProcess("dotnet", [CliPath(), "format", "--check", "CTilde", "CTilde.Cli", "editors", "examples"], workingDirectory: repositoryRoot);
             Assert(repositoryCheck.ExitCode == 0, repositoryCheck.StandardError);
         });

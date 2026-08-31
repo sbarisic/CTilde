@@ -41,7 +41,8 @@ internal static partial class ConformanceTests
                     }
                     private static void ThrowFromLoop()
                     {
-                        foreach (int value in new CounterSequence()) throw new Exception();
+                        foreach (int value in new CounterSequence())
+                            if (value > 0) throw new Exception();
                     }
 
                     [EntryPoint]
@@ -64,7 +65,7 @@ internal static partial class ConformanceTests
                         foreach (int value in Values()) sum = sum + value;
                         foreach (int value in setValue) sum = sum + value;
                         sum = sum + First();
-                        try { ThrowFromLoop(); } catch (Exception error) { sum = sum + Tracker.Disposed; }
+                        try { ThrowFromLoop(); } catch { sum = sum + Tracker.Disposed; }
                         Console.WriteLine(sum);
                     }
                 }

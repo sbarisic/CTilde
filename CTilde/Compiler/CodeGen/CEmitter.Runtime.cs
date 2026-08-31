@@ -30,6 +30,16 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <stdlib.h>");
             writer.WriteLine("#include <string.h>");
         }
+        if (HasNativeImports)
+        {
+            writer.WriteLine("#if defined(_WIN32)");
+            writer.WriteLine("#include <windows.h>");
+            writer.WriteLine("#elif defined(__linux__)");
+            writer.WriteLine("#include <dlfcn.h>");
+            writer.WriteLine("#else");
+            writer.WriteLine("#error \"C~ native imports are not implemented for this hosted operating system\"");
+            writer.WriteLine("#endif");
+        }
         if (_usesHostedIo || _usesManagedThreading)
         {
             writer.WriteLine("#include <errno.h>");
@@ -282,6 +292,11 @@ internal sealed partial class CEmitter
         writer.WriteLine("}");
         writer.WriteLine("static void* ct_require_nonnull(void* value, const char* file, int line) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", file, line); return value; }");
         EmitPlatformAllocation(writer);
+        if (HasNativeImports)
+        {
+            writer.WriteLine("static void ct_native_imports_init(void);");
+            writer.WriteLine("static void ct_native_imports_fini(void);");
+        }
         EmitThreadRuntime(writer);
         if (EmitDebugInstrumentation)
             EmitInstrumentedDebugRuntime(writer);
@@ -401,10 +416,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("static int32_t ct_i32_sub(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a - (uint32_t)b); }");
         writer.WriteLine("static int32_t ct_i32_mul(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a * (uint32_t)b); }");
         writer.WriteLine("static int32_t ct_i32_neg(int32_t value) { return ct_i32_bits(0u - (uint32_t)value); }");
-        writer.WriteLine("static int32_t ct_i32_div(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INT32_MIN && b == -1) return INT32_MIN; return a / b; }");
-        writer.WriteLine("static int32_t ct_i32_mod(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INT32_MIN && b == -1) return 0; return a % b; }");
-        writer.WriteLine("static uint32_t ct_u32_div(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a / b; }");
-        writer.WriteLine("static uint32_t ct_u32_mod(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a % b; }");
+        writer.WriteLine("static int32_t ct_i32_div(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT32_MIN && b == -1) return INT32_MIN; return a / b; }");
+        writer.WriteLine("static int32_t ct_i32_mod(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT32_MIN && b == -1) return 0; return a % b; }");
+        writer.WriteLine("static uint32_t ct_u32_div(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
+        writer.WriteLine("static uint32_t ct_u32_mod(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
         writer.WriteLine("static int32_t ct_i32_shl(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a << ((uint32_t)b & 31u)); }");
         writer.WriteLine("static int32_t ct_i32_shr(int32_t a, int32_t b) { uint32_t n = (uint32_t)b & 31u; if (n == 0u) return a; return a >= 0 ? (int32_t)((uint32_t)a >> n) : ct_i32_bits(((uint32_t)a >> n) | (~UINT32_C(0) << (32u - n))); }");
         writer.WriteLine("static int64_t ct_i64_bits(uint64_t value) { int64_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
@@ -412,10 +427,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("static int64_t ct_i64_sub(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a - (uint64_t)b); }");
         writer.WriteLine("static int64_t ct_i64_mul(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a * (uint64_t)b); }");
         writer.WriteLine("static int64_t ct_i64_neg(int64_t value) { return ct_i64_bits(UINT64_C(0) - (uint64_t)value); }");
-        writer.WriteLine("static int64_t ct_i64_div(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INT64_MIN && b == -1) return INT64_MIN; return a / b; }");
-        writer.WriteLine("static int64_t ct_i64_mod(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INT64_MIN && b == -1) return 0; return a % b; }");
-        writer.WriteLine("static uint64_t ct_u64_div(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a / b; }");
-        writer.WriteLine("static uint64_t ct_u64_mod(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a % b; }");
+        writer.WriteLine("static int64_t ct_i64_div(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT64_MIN && b == -1) return INT64_MIN; return a / b; }");
+        writer.WriteLine("static int64_t ct_i64_mod(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT64_MIN && b == -1) return 0; return a % b; }");
+        writer.WriteLine("static uint64_t ct_u64_div(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
+        writer.WriteLine("static uint64_t ct_u64_mod(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
         writer.WriteLine("static int64_t ct_i64_shl(int64_t a, int32_t b) { return ct_i64_bits((uint64_t)a << ((uint32_t)b & 63u)); }");
         writer.WriteLine("static int64_t ct_i64_shr(int64_t a, int32_t b) { uint32_t n = (uint32_t)b & 63u; if (n == 0u) return a; return a >= 0 ? (int64_t)((uint64_t)a >> n) : ct_i64_bits(((uint64_t)a >> n) | (~UINT64_C(0) << (64u - n))); }");
         if (_usesNativeIntegers)
@@ -425,10 +440,10 @@ internal sealed partial class CEmitter
             writer.WriteLine("static intptr_t ct_ni_sub(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a - (uintptr_t)b); }");
             writer.WriteLine("static intptr_t ct_ni_mul(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a * (uintptr_t)b); }");
             writer.WriteLine("static intptr_t ct_ni_neg(intptr_t value) { return ct_ni_bits((uintptr_t)0 - (uintptr_t)value); }");
-            writer.WriteLine("static intptr_t ct_ni_div(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return INTPTR_MIN; return a / b; }");
-            writer.WriteLine("static intptr_t ct_ni_mod(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); if (a == INTPTR_MIN && b == -1) return 0; return a % b; }");
-            writer.WriteLine("static uintptr_t ct_nu_div(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a / b; }");
-            writer.WriteLine("static uintptr_t ct_nu_mod(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTI0001\", file, line); return a % b; }");
+            writer.WriteLine("static intptr_t ct_ni_div(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INTPTR_MIN && b == -1) return INTPTR_MIN; return a / b; }");
+            writer.WriteLine("static intptr_t ct_ni_mod(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INTPTR_MIN && b == -1) return 0; return a % b; }");
+            writer.WriteLine("static uintptr_t ct_nu_div(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
+            writer.WriteLine("static uintptr_t ct_nu_mod(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
             writer.WriteLine("static intptr_t ct_ni_shl(intptr_t a, int32_t b) { const uint32_t mask = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u); return ct_ni_bits((uintptr_t)a << ((uint32_t)b & mask)); }");
             writer.WriteLine("static intptr_t ct_ni_shr(intptr_t a, int32_t b) { const uint32_t width = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT); uint32_t n = (uint32_t)b & (width - 1u); if (n == 0u) return a; return a >= 0 ? (intptr_t)((uintptr_t)a >> n) : ct_ni_bits(((uintptr_t)a >> n) | (~(uintptr_t)0 << (width - n))); }");
         }
@@ -1064,6 +1079,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_thread_attach_primary(&ct_primary_thread_state);");
         writer.WriteLine("    if (ct_program_module.AbiVersion != CTILDE_RUNTIME_ABI_VERSION) ct_fail(\"CTT0003\", \"<runtime-init>\", 0);");
         writer.WriteLine("    ct_runtime_faults_init();");
+        if (HasNativeImports)
+            writer.WriteLine("    ct_native_imports_init();");
         if (_usesExceptions)
         {
             writer.WriteLine("    jmp_buf ct_init_jump;");
@@ -1075,6 +1092,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("        ct_primary_thread_state.CurrentException = NULL;");
             writer.WriteLine("        ct_primary_thread_state.ExceptionTop = ct_init_frame.Previous;");
             writer.WriteLine("        ct_program_module.Finalize();");
+            if (HasNativeImports)
+                writer.WriteLine("        ct_native_imports_fini();");
             writer.WriteLine("        ct_unhandled_exception(exception);");
             writer.WriteLine("    }");
             writer.WriteLine("    ct_program_module.Initialize();");
@@ -1089,6 +1108,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    if (ct_thread_current() != &ct_primary_thread_state) ct_fail(\"CTT0002\", \"<runtime-shutdown>\", 0);");
         writer.WriteLine("    ct_thread_begin_shutdown();");
         writer.WriteLine("    ct_program_module.Finalize();");
+        if (HasNativeImports)
+            writer.WriteLine("    ct_native_imports_fini();");
         if (EmitDebugObjects)
             writer.WriteLine("    ct_debug_report_leaks();");
         writer.WriteLine("    ct_thread_detach();");

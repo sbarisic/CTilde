@@ -1,6 +1,6 @@
 # C~ for Visual Studio
 
-Version 0.15.0 of this preview extension supports C~ Draft 0.38 hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.15.0 of this preview extension supports C~ Draft 0.39 hosted native imports, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 
@@ -17,6 +17,8 @@ Version 0.15.0 of this preview extension supports C~ Draft 0.38 hosted x64 geome
 - **Create Visual Studio Project from C~ Manifest** for existing projects.
 
 Visual Studio's Debug/Release selection is for solution organization only. C~ always uses `build.configuration` and all other build settings from `ctilde.json`.
+
+Hosted manifests can use `hosted.runtimeFiles` to select explicit native runtime assets by OS and architecture. A successful project build stages the selected files beside the executable; Clean removes only unchanged compiler-staged copies.
 
 Completion collapses method overloads into one C#-style row while preserving every overload in signature help. Each source document is analyzed with the loaded manifest that contains it, so completion and navigation use sibling files even when another project is selected as the startup project.
 

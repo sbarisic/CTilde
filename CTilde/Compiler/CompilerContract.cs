@@ -2,7 +2,7 @@ namespace CTilde;
 
 public static class CompilerContract
 {
-    public const string DraftVersion = "0.38";
+    public const string DraftVersion = "0.39";
     public const int RuntimeAbiVersion = 16;
     public const int DebugMetadataVersion = 3;
 }

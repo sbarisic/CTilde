@@ -147,6 +147,23 @@ internal sealed partial class CompilationModel
                     first.Syntax?.Source.GetLocation(first.Syntax.Span));
             }
         }
+        var nativeImports = Types.Values.SelectMany(type => type.Methods)
+            .Where(method => method.IsNativeImport)
+            .OrderBy(method => method.NativeImportLibrary, StringComparer.Ordinal)
+            .ThenBy(method => method.NativeImportSymbol, StringComparer.Ordinal)
+            .ThenBy(method => method.ContainingType.FullName, StringComparer.Ordinal)
+            .ToArray();
+        foreach (var group in nativeImports.GroupBy(method => (method.NativeImportLibrary!, method.NativeImportSymbol!)))
+        {
+            var first = group.First();
+            foreach (var method in group.Skip(1))
+            {
+                if (HaveSameAbiSignature(first, method))
+                    continue;
+                Diagnostics.Add("CT4102", $"Native import '{group.Key.Item1}:{group.Key.Item2}' has incompatible ABI signatures.", method.Syntax!.Source, method.Syntax.Span,
+                    first.Syntax?.Source.GetLocation(first.Syntax.Span));
+            }
+        }
         foreach (var group in externFields.GroupBy(field => field.ExternName!, StringComparer.Ordinal))
         {
             var first = group.First();

@@ -51,6 +51,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(CType Type, MethodSymbol Method), string> _functionPointerTrampolines = [];
     private readonly Dictionary<MethodSymbol, (ImmutableArray<KeyValuePair<string, CType>> Fields, ImmutableArray<DirectDeferThunk> Thunks)> _directDeferStates = [];
     private readonly List<(MethodSymbol Method, SyntaxNode Syntax)> _externUses = [];
+    private readonly Dictionary<string, (MethodSymbol Method, SyntaxNode Syntax)> _nativeImportUses = new(StringComparer.Ordinal);
     private readonly Dictionary<(PropertySymbol Property, bool Getter), MethodSymbol> _accessorMethods = [];
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
@@ -164,6 +165,7 @@ internal sealed partial class CEmitter : ILoweringServices
         return path.Replace('\\', '/');
     }
     private bool HasExports => _reachableMethods.Any(method => method.ExportName is not null);
+    private bool HasNativeImports => _nativeImportUses.Count != 0;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
@@ -253,6 +255,26 @@ internal sealed partial class CEmitter : ILoweringServices
         }
     }
 
+    public string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax)
+    {
+        var name = NameMangler.Artifact("ct_ni_", NameMangler.NativeImportIdentity(method));
+        if (method.IsNativeImport)
+        {
+            if (!_nativeImportUses.TryGetValue(name, out var current) || CompareDeclaration(method, current.Method) < 0)
+                _nativeImportUses[name] = (method, syntax);
+        }
+        return name;
+
+        static int CompareDeclaration(MethodSymbol left, MethodSymbol right)
+        {
+            var path = string.Compare(left.Syntax?.Source.FilePath, right.Syntax?.Source.FilePath, StringComparison.Ordinal);
+            if (path != 0)
+                return path;
+            var span = (left.Syntax?.Span.Start ?? -1).CompareTo(right.Syntax?.Span.Start ?? -1);
+            return span != 0 ? span : string.Compare(left.ContainingType.FullName, right.ContainingType.FullName, StringComparison.Ordinal);
+        }
+    }
+
     public string Emit(TypedIrProgram program) => EmitOutput(program, string.Empty).Unity;
 
     public CEmitterOutput EmitOutput(TypedIrProgram program, string runtimeHeader)
@@ -283,6 +305,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitUsedAnchors(prefix);
         EmitObjectMetadata(prefix);
         EmitRuntimeFaultSupport(prefix);
+        EmitNativeImportSupport(prefix);
         EmitScalarAtomicSupport(prefix);
         EmitManagedThreadingSupport(prefix);
         EmitMathSupport(prefix);
@@ -536,6 +559,14 @@ internal sealed partial class CEmitter : ILoweringServices
                 declaration = declaration.Replace("DRAM_ATTR ", string.Empty, StringComparison.Ordinal);
                 declaration = declaration.Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal);
                 declaration = NativeSection.StripDataDefinitionMacro(declaration);
+                var topLevelInitializer = FindTopLevelInitializer(declaration);
+                if (topLevelInitializer >= 0)
+                {
+                    writer.Append("extern ").Append(declaration.AsSpan(0, topLevelInitializer).TrimEnd()).Append(";\n");
+                    if (!line.TrimEnd().EndsWith(';'))
+                        skipInitializer = true;
+                    continue;
+                }
                 if (LooksLikeFunctionDeclaration(declaration))
                 {
                     var openBrace = declaration.IndexOf('{');
@@ -551,17 +582,7 @@ internal sealed partial class CEmitter : ILoweringServices
                     }
                     continue;
                 }
-                var equals = declaration.IndexOf('=');
                 var openParenthesis = declaration.IndexOf('(');
-                var initializerBrace = declaration.IndexOf('{');
-                var isVariableInitializer = equals >= 0 && (initializerBrace < 0 || equals < initializerBrace || declaration.StartsWith("struct ", StringComparison.Ordinal));
-                if (isVariableInitializer)
-                {
-                    writer.Append("extern ").Append(declaration.AsSpan(0, equals).TrimEnd()).Append(";\n");
-                    if (!line.TrimEnd().EndsWith(';'))
-                        skipInitializer = true;
-                    continue;
-                }
                 var isTentativeVariable = declaration.EndsWith(';') && openParenthesis < 0;
                 if (isTentativeVariable)
                 {
@@ -800,6 +821,17 @@ internal sealed partial class CEmitter : ILoweringServices
                 .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             entry["inferredEffects"] = EffectAnalyzer.IndividualEffects(Model.Effects.GetEffects(method))
                 .Select(EffectFacts.EffectName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+            symbols.Add(entry);
+        }
+        foreach (var import in _nativeImportUses.OrderBy(item => item.Key, StringComparer.Ordinal))
+        {
+            var method = import.Value.Method;
+            var entry = SymbolMapEntry(import.Key, NameMangler.NativeImportIdentity(method), "nativeImport",
+                NameMangler.CanonicalType(method.ReturnType), method.Syntax);
+            entry["library"] = method.NativeImportLibrary;
+            entry["nativeSymbol"] = method.NativeImportSymbol;
+            entry["declaredEffects"] = EffectFacts.IndividualContracts(method.DeclaredEffects)
+                .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             symbols.Add(entry);
         }
 
@@ -1642,7 +1674,7 @@ internal sealed partial class CEmitter : ILoweringServices
         foreach (var parameter in method.Parameters)
         {
             var parameterName = NameMangler.Identifier(parameter.Name);
-            parameters.Add(parameter.Type.IsNativeUtf8String && method.ExternName is null
+            parameters.Add(parameter.Type.IsNativeUtf8String && !method.IsNativeBoundary
                 ? CDeclaration(parameter.Type, parameterName)
                 : CParameterDeclaration(parameter, parameterName));
             if (parameter.IsSynchronousCallback)

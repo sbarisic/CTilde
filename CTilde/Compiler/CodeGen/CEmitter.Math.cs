@@ -35,6 +35,18 @@ internal sealed partial class CEmitter
         {
             var parameters = function.ParameterCount == 1 ? $"{function.CType} value" : $"{function.CType} left, {function.CType} right";
             var arguments = function.ParameterCount == 1 ? "value" : "left, right";
+            if (function.RuntimeName is "ct_math_min" or "ct_math_min_double")
+            {
+                var zero = function.CType == "float" ? "0.0f" : "0.0";
+                writer.WriteLine($"{function.CType} {function.RuntimeName}({parameters}) {{ {function.CType} value = {function.NativeName}({arguments}); if (left == {zero} && right == {zero}) return signbit(left) || signbit(right) ? -{zero} : {zero}; return value; }}");
+                continue;
+            }
+            if (function.RuntimeName is "ct_math_max" or "ct_math_max_double")
+            {
+                var zero = function.CType == "float" ? "0.0f" : "0.0";
+                writer.WriteLine($"{function.CType} {function.RuntimeName}({parameters}) {{ {function.CType} value = {function.NativeName}({arguments}); if (left == {zero} && right == {zero}) return signbit(left) && signbit(right) ? -{zero} : {zero}; return value; }}");
+                continue;
+            }
             writer.WriteLine($"{function.CType} {function.RuntimeName}({parameters}) {{ return {function.NativeName}({arguments}); }}");
         }
         if (_usedMathSymbols.Count != 0)

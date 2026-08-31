@@ -27,11 +27,20 @@ internal static class HostedBuildDriver
         var compiler = await ResolveCompilerAsync(request.Compiler, request.RootDirectory, cancellationToken);
         if (usesInlineAssembly && compiler.Kind == HostedCompilerKind.Msvc)
             throw new NativeBuildException("Inline assembly requires a GNU-compatible GCC or Clang compiler; MSVC is not supported for programs containing asm.");
+        var operatingSystem = ResolveOperatingSystem(compiler);
+        var configuredRuntimeFiles = request.Hosted?.RuntimeFiles ?? [];
+        if (operatingSystem is null && configuredRuntimeFiles.Length != 0)
+            throw new NativeBuildException("Hosted runtime files are currently supported only for Windows and Linux native toolchains.");
+        var runtimeFiles = operatingSystem is null
+            ? []
+            : HostedRuntimeFileStager.Select(request, operatingSystem.Value);
         if (request.Trace)
             Console.Error.WriteLine($"trace: native compiler {compiler.Command}");
         var result = compiler.Kind == HostedCompilerKind.Msvc
             ? await CompileMsvcAsync(compiler, request, cancellationToken)
-            : await CompileGnuAsync(compiler, request, cancellationToken);
+            : await CompileGnuAsync(compiler, request, runtimeFiles.Count != 0, cancellationToken);
+        if (result == 0)
+            HostedRuntimeFileStager.Stage(request, runtimeFiles);
         if (result == 0 && request.Trace)
             Console.Error.WriteLine($"trace: wrote native executable {request.ExecutablePath}");
         return new NativeBuildOutcome(result, compiler.Kind == HostedCompilerKind.Msvc ? "msvc" : "gdb",
@@ -194,7 +203,11 @@ internal static class HostedBuildDriver
         return linked.ExitCode;
     }
 
-    private static async Task<int> CompileGnuAsync(HostedCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
+    private static async Task<int> CompileGnuAsync(
+        HostedCompiler compiler,
+        BuildRequest request,
+        bool useExecutableRuntimePath,
+        CancellationToken cancellationToken)
     {
         var executable = request.ExecutablePath!;
         var prefix = Array.Empty<string>();
@@ -213,6 +226,7 @@ internal static class HostedBuildDriver
         common.AddRange(configuration);
         var hostedSources = request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []).ToArray();
         var usesPthreads = hostedSources.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
+        var usesDynamicLoader = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("dlopen(", StringComparison.Ordinal));
         if (usesPthreads)
             common.Add("-pthread");
         if (request.Lto)
@@ -271,6 +285,10 @@ internal static class HostedBuildDriver
             link.Add("-pthread");
         if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
             link.Add("-lm");
+        if (usesDynamicLoader && (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows()))
+            link.Add("-ldl");
+        if (useExecutableRuntimePath && (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows()))
+            link.Add("-Wl,-rpath,$ORIGIN");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
         return linked.ExitCode;
@@ -324,6 +342,15 @@ internal static class HostedBuildDriver
         IReadOnlyDictionary<string, string>? Environment,
         string? WslCompiler);
     private enum HostedCompilerKind { Msvc, Gnu, WslGnu }
+
+    private static HostedOperatingSystem? ResolveOperatingSystem(HostedCompiler compiler)
+    {
+        if (compiler.Kind == HostedCompilerKind.Msvc || compiler.Kind == HostedCompilerKind.Gnu && OperatingSystem.IsWindows())
+            return HostedOperatingSystem.Windows;
+        if (compiler.Kind == HostedCompilerKind.WslGnu || OperatingSystem.IsLinux())
+            return HostedOperatingSystem.Linux;
+        return null;
+    }
 }
 
 internal static class FreestandingBuildDriver

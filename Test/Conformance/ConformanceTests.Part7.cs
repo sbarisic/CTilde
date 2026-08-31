@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Text;
 using CTilde;
 
 namespace CTilde.Tests;
@@ -234,7 +232,6 @@ internal static partial class ConformanceTests
 
             const string harness = """
                 using System;
-                using System.IO;
                 namespace HostedIoExample;
 
                 public static class TestProgram
@@ -242,8 +239,6 @@ internal static partial class ConformanceTests
                     [EntryPoint]
                     public static void Main()
                     {
-                        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
-                        defer File.Close(image);
                         Console.WriteLine("Rendering test image...");
                         HittableList world = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
                         Hittable accelerated = world.BuildBvh();
@@ -252,7 +247,54 @@ internal static partial class ConformanceTests
                         camera.SamplesPerPixel = 4;
                         camera.MaxDepth = 8;
                         camera.ProgressRows = 48;
-                        camera.Render(image, accelerated, RandomGenerator.DefaultRenderSeed);
+                        Rgba32[] pixels = new Rgba32[camera.ImageWidth * camera.ImageHeight];
+                        camera.Render(pixels, accelerated, RandomGenerator.DefaultRenderSeed);
+                        bool[] colors = new bool[4096];
+                        int distinctColors = 0;
+                        int darkPixels = 0;
+                        int nonSkyBottomPixels = 0;
+                        bool allOpaque = true;
+                        long topRed = 0L;
+                        long topGreen = 0L;
+                        long topBlue = 0L;
+                        int y = 0;
+                        while (y < camera.ImageHeight)
+                        {
+                            int x = 0;
+                            while (x < camera.ImageWidth)
+                            {
+                                Rgba32 pixel = pixels[y * camera.ImageWidth + x];
+                                int colorKey = ((int)pixel.Red >> 4) * 256
+                                    + ((int)pixel.Green >> 4) * 16 + ((int)pixel.Blue >> 4);
+                                if (!colors[colorKey])
+                                {
+                                    colors[colorKey] = true;
+                                    distinctColors++;
+                                }
+                                if ((int)pixel.Red + (int)pixel.Green + (int)pixel.Blue < 240)
+                                    darkPixels++;
+                                if (y < camera.ImageHeight / 3)
+                                {
+                                    topRed += (long)pixel.Red;
+                                    topGreen += (long)pixel.Green;
+                                    topBlue += (long)pixel.Blue;
+                                }
+                                if (y >= camera.ImageHeight * 2 / 3
+                                    && !((int)pixel.Blue > (int)pixel.Green
+                                        && (int)pixel.Green > (int)pixel.Red))
+                                    nonSkyBottomPixels++;
+                                if (pixel.Alpha != (byte)255)
+                                    allOpaque = false;
+                                x++;
+                            }
+                            y++;
+                        }
+                        Console.WriteLine(PixelBuffer.Checksum(pixels));
+                        Console.WriteLine(distinctColors > 64);
+                        Console.WriteLine(darkPixels > camera.ImageWidth);
+                        Console.WriteLine(topBlue > topGreen && topGreen > topRed);
+                        Console.WriteLine(nonSkyBottomPixels > camera.ImageWidth);
+                        Console.WriteLine(allOpaque);
                         Console.WriteLine("Done: 256x144.");
                     }
                 }
@@ -261,61 +303,16 @@ internal static partial class ConformanceTests
             var generated = Emit(sources);
             Assert(generated.Contains("ct_math_sqrt(", StringComparison.Ordinal) && generated.Contains("ct_math_tan(", StringComparison.Ordinal), "The path tracer omitted its camera or scattering math dependencies.");
             Assert(generated.Contains("ct_h_", StringComparison.Ordinal), "The path tracer did not emit virtual hittable/material dispatch.");
-            Assert(generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The path tracer did not emit hosted file output.");
+            Assert(!generated.Contains("ct_host_file_open(", StringComparison.Ordinal) && !generated.Contains("ct_host_file_write_string(", StringComparison.Ordinal), "The in-memory path tracer retained hosted file output.");
+            Assert(!generated.Contains("ct_native_imports_init", StringComparison.Ordinal), "Unused Raylib bindings were retained by the headless renderer.");
             Assert(!generated.Contains("ct_console_read()", StringComparison.Ordinal) && !generated.Contains("ct_console_read_line()", StringComparison.Ordinal), "The path tracer unexpectedly reads console input.");
 
-            var first = CompileAndRun(sources, captureFile: "image.ppm");
-            var second = CompileAndRun(sources, captureFile: "image.ppm");
+            var first = CompileAndRun(sources);
+            var second = CompileAndRun(sources);
             Assert(first.ExitCode == 0, first.StandardError);
             Assert(second.ExitCode == 0, second.StandardError);
-            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nCreate final!\nProgress: 33%.\nProgress: 66%.\nProgress: 100%.\nDone: 256x144.\n", first.StandardOutput);
+            Assert(Normalize(first.StandardOutput) == "Rendering test image...\nCreate final!\nProgress: 33%.\nProgress: 66%.\nProgress: 100%.\n2478002559\nTrue\nTrue\nTrue\nTrue\nTrue\nDone: 256x144.\n", first.StandardOutput);
             Assert(Normalize(second.StandardOutput) == Normalize(first.StandardOutput), second.StandardOutput);
-            var firstImage = first.CapturedFile ?? throw new InvalidOperationException("The first path-tracer run did not produce image.ppm.");
-            var secondImage = second.CapturedFile ?? throw new InvalidOperationException("The second path-tracer run did not produce image.ppm.");
-            Assert(firstImage.SequenceEqual(secondImage), "Repeated seeded path-tracer runs were not byte-identical.");
-
-            const int width = 256;
-            const int height = 144;
-            var imageHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(firstImage));
-            Assert(imageHash == "5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF", $"The deterministic 256x144 PPM hash changed: {imageHash}.");
-            var tokens = Encoding.ASCII.GetString(firstImage).Split([' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
-            Assert(tokens.Length == 4 + width * height * 3, $"The PPM contained {tokens.Length} tokens instead of {4 + width * height * 3}.");
-            Assert(tokens[0] == "P3" && tokens[1] == "256" && tokens[2] == "144" && tokens[3] == "255", "The acceptance-render PPM header was incorrect.");
-
-            var components = new int[width * height * 3];
-            var colors = new HashSet<(int Red, int Green, int Blue)>();
-            var darkPixels = 0;
-            var nonSkyBottomPixels = 0;
-            long topRed = 0;
-            long topGreen = 0;
-            long topBlue = 0;
-            for (var index = 0; index < components.Length; index++)
-            {
-                Assert(int.TryParse(tokens[index + 4], NumberStyles.None, CultureInfo.InvariantCulture, out components[index]), $"PPM component {index} was not an integer.");
-                Assert(components[index] is >= 0 and <= 255, $"PPM component {index} was outside 0 through 255.");
-            }
-            for (var y = 0; y < height; y++)
-            {
-                for (var x = 0; x < width; x++)
-                {
-                    var pixel = ReadPixel(components, width, x, y);
-                    colors.Add(pixel);
-                    if (pixel.Red + pixel.Green + pixel.Blue < 240)
-                        darkPixels++;
-                    if (y < height / 3)
-                    {
-                        topRed += pixel.Red;
-                        topGreen += pixel.Green;
-                        topBlue += pixel.Blue;
-                    }
-                    if (y >= height * 2 / 3 && !(pixel.Blue > pixel.Green && pixel.Green > pixel.Red))
-                        nonSkyBottomPixels++;
-                }
-            }
-            Assert(colors.Count > 64, $"The acceptance render contained only {colors.Count} distinct colors.");
-            Assert(darkPixels > width, "The acceptance render did not contain shaded object pixels.");
-            Assert(topBlue > topGreen && topGreen > topRed, "The upper image region was not the expected blue-biased sky.");
-            Assert(nonSkyBottomPixels > width, "The lower image region did not contain enough ground or object pixels.");
         });
 
         suite.Run("hosted console EOF and I/O exceptions", () =>
@@ -487,9 +484,4 @@ internal static partial class ConformanceTests
         return [.. sources];
     }
 
-    private static (int Red, int Green, int Blue) ReadPixel(int[] components, int width, int x, int y)
-    {
-        var offset = (y * width + x) * 3;
-        return (components[offset], components[offset + 1], components[offset + 2]);
-    }
 }

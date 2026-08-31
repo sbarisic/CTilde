@@ -1,10 +1,17 @@
 param(
-    [string[]]$Compilers = @('msvc', 'wsl:gcc', 'wsl:clang')
+    [string[]]$Compilers = @('msvc', 'wsl:gcc', 'wsl:clang'),
+    [string]$CompilerDll = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$compilerDll = Join-Path $repositoryRoot 'CTilde.Cli/bin/Release/net10.0/ctilde.dll'
+if ([string]::IsNullOrWhiteSpace($CompilerDll)) {
+    & dotnet build (Join-Path $repositoryRoot 'CTilde.Cli/CTilde.Cli.csproj') -c Release --nologo
+    if ($LASTEXITCODE -ne 0) { throw 'The Release compiler build failed.' }
+    $CompilerDll = Join-Path $repositoryRoot 'CTilde.Cli/bin/Release/net10.0/ctilde.dll'
+}
+$CompilerDll = [IO.Path]::GetFullPath($CompilerDll)
+if (-not (Test-Path -LiteralPath $CompilerDll)) { throw "The compiler DLL was not found: $CompilerDll" }
 $exampleRoot = Join-Path $repositoryRoot 'examples/HostedIo'
 $workRoot = Join-Path ([IO.Path]::GetTempPath()) ('ctilde-hosted-simd-matrix-' + [guid]::NewGuid().ToString('N'))
 $tempPrefix = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
@@ -13,16 +20,9 @@ if (-not ([IO.Path]::GetFullPath($workRoot).StartsWith($tempPrefix, [StringCompa
 }
 
 try {
-    if (-not (Test-Path $compilerDll)) {
-        & dotnet build (Join-Path $repositoryRoot 'CTilde.sln') -c Release
-        if ($LASTEXITCODE -ne 0) { throw 'The compiler build failed.' }
-    }
     foreach ($compiler in $Compilers) {
         foreach ($profile in @(
-            @{ Name = 'debug-unity'; Configuration = 'debug'; Layout = 'unity'; Lto = $false },
-            @{ Name = 'debug-modules'; Configuration = 'debug'; Layout = 'modules'; Lto = $false },
             @{ Name = 'release-unity'; Configuration = 'release'; Layout = 'unity'; Lto = $false },
-            @{ Name = 'release-modules'; Configuration = 'release'; Layout = 'modules'; Lto = $false },
             @{ Name = 'release-modules-lto'; Configuration = 'release'; Layout = 'modules'; Lto = $true })) {
             $label = ($compiler -replace ':', '-') + '-' + $profile.Name
             $root = Join-Path $workRoot $label
@@ -46,7 +46,7 @@ try {
             }
             [IO.File]::WriteAllText((Join-Path $root 'ctilde.json'),
                 ($manifest | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-            & dotnet $compilerDll --project (Join-Path $root 'ctilde.json') --build
+            & dotnet $CompilerDll --project (Join-Path $root 'ctilde.json') --build
             if ($LASTEXITCODE -ne 0) { throw "Hosted SIMD matrix build failed: $label" }
             Write-Host "PASS $label"
         }

@@ -1,0 +1,246 @@
+using System;
+using System.Runtime;
+
+namespace HostedIoExample;
+
+public struct Color
+{
+    public byte Red;
+    public byte Green;
+    public byte Blue;
+    public byte Alpha;
+
+    [NoAlloc]
+    public Color(byte red, byte green, byte blue, byte alpha)
+    {
+        Red = red;
+        Green = green;
+        Blue = blue;
+        Alpha = alpha;
+    }
+}
+
+public struct Image
+{
+    public unsafe void* Data;
+    public int Width;
+    public int Height;
+    public int Mipmaps;
+    public int Format;
+}
+
+public struct Texture2D
+{
+    public uint Id;
+    public int Width;
+    public int Height;
+    public int Mipmaps;
+    public int Format;
+}
+
+public struct Rectangle
+{
+    public float X;
+    public float Y;
+    public float Width;
+    public float Height;
+
+    [NoAlloc]
+    public Rectangle(float x, float y, float width, float height)
+    {
+        X = x;
+        Y = y;
+        Width = width;
+        Height = height;
+    }
+}
+
+public static class Raylib
+{
+    [NativeImport("raylib")]
+    public static void InitWindow(int width, int height, NativeUtf8String title);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static bool WindowShouldClose();
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void CloseWindow();
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void SetTargetFPS(int fps);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static double GetTime();
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static unsafe Image GenImageColor(int width, int height, Color color);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static unsafe void UnloadImage(Image image);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static unsafe Texture2D LoadTextureFromImage(Image image);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void UnloadTexture(Texture2D texture);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static unsafe void UpdateTextureRec(Texture2D texture, Rectangle rectangle,
+        void* pixels);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void BeginDrawing();
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void ClearBackground(Color color);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void DrawTexture(Texture2D texture, int x, int y, Color tint);
+
+    [NativeImport("raylib")]
+    [NoRuntime]
+    public static void EndDrawing();
+}
+
+public sealed class RaylibWindow
+{
+    private const double FrameInterval = 0.016666666666666666;
+    private unsafe Image image;
+    private Texture2D texture;
+    private int width;
+    private int height;
+    private int firstDirty;
+    private int lastDirty;
+    private double nextPresent;
+    private bool open;
+
+    public unsafe RaylibWindow(int imageWidth, int imageHeight, string title)
+    {
+        width = imageWidth;
+        height = imageHeight;
+        firstDirty = -1;
+        lastDirty = -1;
+        NativeUtf8String nativeTitle = NativeUtf8String.Borrow(title);
+        Raylib.InitWindow(width, height, nativeTitle);
+        image = Raylib.GenImageColor(width, height, new Color((byte)0, (byte)0, (byte)0,
+            (byte)255));
+        if (image.Data == null)
+        {
+            Raylib.CloseWindow();
+            throw new Exception("raylib could not allocate the HostedIo image.");
+        }
+        texture = Raylib.LoadTextureFromImage(image);
+        if (texture.Id == 0u)
+        {
+            Raylib.UnloadImage(image);
+            Raylib.CloseWindow();
+            throw new Exception("raylib could not create the HostedIo texture.");
+        }
+        Raylib.SetTargetFPS(60);
+        open = true;
+        nextPresent = 0.0;
+        Present();
+    }
+
+    [NoAlloc]
+    public unsafe bool SetPixel(int x, int y, Rgba32 color)
+    {
+        int index = y * width + x;
+        Rgba32* pixels = (Rgba32*)image.Data;
+        pixels[index] = color;
+        if (firstDirty < 0)
+            firstDirty = index;
+        lastDirty = index;
+        double now = Raylib.GetTime();
+        if (now >= nextPresent)
+        {
+            if (!Present())
+                return false;
+            nextPresent = now + FrameInterval;
+        }
+        return true;
+    }
+
+    [NoAlloc]
+    public unsafe bool Present()
+    {
+        if (!open)
+            return false;
+        UploadDirty();
+        Raylib.BeginDrawing();
+        Raylib.ClearBackground(new Color((byte)0, (byte)0, (byte)0, (byte)255));
+        Raylib.DrawTexture(texture, 0, 0, new Color((byte)255, (byte)255, (byte)255,
+            (byte)255));
+        Raylib.EndDrawing();
+        return !Raylib.WindowShouldClose();
+    }
+
+    public unsafe void WaitUntilClosed()
+    {
+        while (Present())
+        {
+        }
+    }
+
+    public unsafe void Close()
+    {
+        if (!open)
+            return;
+        open = false;
+        Raylib.UnloadTexture(texture);
+        Raylib.UnloadImage(image);
+        Raylib.CloseWindow();
+    }
+
+    [NoAlloc]
+    private unsafe void UploadDirty()
+    {
+        if (firstDirty < 0)
+            return;
+        Rgba32* pixels = (Rgba32*)image.Data;
+        int firstRow = firstDirty / width;
+        int firstColumn = firstDirty - firstRow * width;
+        int lastRow = lastDirty / width;
+        int lastColumn = lastDirty - lastRow * width;
+        if (firstRow == lastRow)
+        {
+            UploadRectangle(firstColumn, firstRow, lastColumn - firstColumn + 1,
+                1, &pixels[firstDirty]);
+        }
+        else
+        {
+            UploadRectangle(firstColumn, firstRow, width - firstColumn, 1, &pixels[firstDirty]);
+            if (lastRow > firstRow + 1)
+            {
+                int middleRow = firstRow + 1;
+                UploadRectangle(0, middleRow, width, lastRow - middleRow, &pixels[middleRow
+                    * width]);
+            }
+            UploadRectangle(0, lastRow, lastColumn + 1, 1, &pixels[lastRow * width]);
+        }
+        firstDirty = -1;
+        lastDirty = -1;
+    }
+
+    [NoAlloc]
+    private unsafe void UploadRectangle(int x, int y, int rectangleWidth, int rectangleHeight,
+        Rgba32* pixels)
+    {
+        if (rectangleWidth <= 0 || rectangleHeight <= 0)
+            return;
+        Raylib.UpdateTextureRec(texture, new Rectangle((float)x, (float)y, (float)rectangleWidth,
+            (float)rectangleHeight), (void*)pixels);
+    }
+}

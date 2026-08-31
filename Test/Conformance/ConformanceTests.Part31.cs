@@ -250,15 +250,12 @@ internal static partial class ConformanceTests
         {
             static string Harness(bool packet) => $$"""
                 using System;
-                using System.IO;
                 namespace HostedIoExample;
 
                 public static class PacketTestProgram
                 {
                     [EntryPoint] public static void Main()
                     {
-                        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
-                        defer File.Close(image);
                         HittableList objects = new HittableList();
                         objects.Add(new Sphere(new Vec3(0.0f, 0.0f, -1.0f), 0.5f,
                             new Lambertian(new Vec3(0.7f, 0.3f, 0.2f))));
@@ -273,19 +270,20 @@ internal static partial class ConformanceTests
                         camera.DefocusAngle = 0.25f;
                         camera.FocusDistance = 1.0f;
                         camera.ProgressRows = 0;
-                        camera.{{(packet ? "Render" : "RenderScalar")}}(image, world,
+                        Rgba32[] pixels = new Rgba32[camera.ImageWidth * camera.ImageHeight];
+                        camera.{{(packet ? "Render" : "RenderScalar")}}(pixels, world,
                             RandomGenerator.DefaultRenderSeed);
+                        Console.WriteLine(PixelBuffer.Checksum(pixels));
                     }
                 }
                 """;
 
-            var packet = CompileAndRun(HostedIoSources(Harness(true)), captureFile: "image.ppm");
+            var packet = CompileAndRun(HostedIoSources(Harness(true)));
             Assert(packet.ExitCode == 0, packet.StandardError);
-            var packetHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(packet.CapturedFile ?? []));
-            Assert(packetHash == "799529CAE793F5C425EB3A15805991ACA7926EE66733906D940935093CAA6FB0",
-                $"The optimized odd-width PPM golden changed: {packetHash}.");
-            var repeated = CompileAndRun(HostedIoSources(Harness(true)), captureFile: "image.ppm");
-            Assert(repeated.ExitCode == 0 && (packet.CapturedFile ?? []).SequenceEqual(repeated.CapturedFile ?? []),
+            var packetHash = Normalize(packet.StandardOutput).Trim();
+            Assert(packetHash == "1657345586", $"The optimized odd-width RGBA golden changed: {packetHash}.");
+            var repeated = CompileAndRun(HostedIoSources(Harness(true)));
+            Assert(repeated.ExitCode == 0 && Normalize(packet.StandardOutput) == Normalize(repeated.StandardOutput),
                 "The optimized packet renderer was not deterministic across repeated seeded renders.");
 
             const string traversalHarness = """

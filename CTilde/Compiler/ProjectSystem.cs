@@ -54,7 +54,21 @@ public enum CosmopolitanRuntimeMode
 
 public sealed record CosmopolitanProjectConfiguration(CosmopolitanRuntimeMode Mode);
 
-public sealed record HostedProjectConfiguration(ImmutableArray<string> NativeSources);
+public enum HostedOperatingSystem
+{
+    Windows,
+    Linux,
+}
+
+public sealed record HostedRuntimeFile(
+    HostedOperatingSystem OperatingSystem,
+    CompilationArchitecture Architecture,
+    string SourcePath,
+    string OutputFileName);
+
+public sealed record HostedProjectConfiguration(
+    ImmutableArray<string> NativeSources,
+    ImmutableArray<HostedRuntimeFile> RuntimeFiles);
 
 public sealed record FreestandingProjectConfiguration(
     string? LinkerScriptPath,
@@ -240,7 +254,7 @@ public static class CTildeProjectFile
                 throw new CTildeProjectException($"ESP-IDF binding output '{output}' conflicts with compiler output in '{fullManifestPath}'.");
         var panicPolicy = ParsePanicPolicy(document.PanicPolicy, target, fullManifestPath);
         var hosted = target == CompilationTarget.Hosted
-            ? CreateHostedConfiguration(document.Hosted, root, fullManifestPath)
+            ? CreateHostedConfiguration(document.Hosted, root, fullManifestPath, build, files)
             : null;
         var freestanding = target == CompilationTarget.Freestanding
             ? CreateFreestandingConfiguration(document.Freestanding, root, fullManifestPath)
@@ -591,11 +605,58 @@ public static class CTildeProjectFile
     private static HostedProjectConfiguration CreateHostedConfiguration(
         HostedDocument? document,
         string root,
-        string manifestPath)
+        string manifestPath,
+        CTildeProjectBuildConfiguration build,
+        ImmutableArray<string> sourceFiles)
     {
         var nativeSources = ResolveExistingFiles(document?.NativeSources ?? [], "hosted.nativeSources", root, manifestPath,
             path => Path.GetExtension(path).Equals(".c", StringComparison.OrdinalIgnoreCase));
-        return new HostedProjectConfiguration(nativeSources);
+        var runtimeFiles = ImmutableArray.CreateBuilder<HostedRuntimeFile>();
+        var destinations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var runtimeFile in document?.RuntimeFiles ?? [])
+        {
+            if (string.IsNullOrWhiteSpace(runtimeFile.OperatingSystem) ||
+                string.IsNullOrWhiteSpace(runtimeFile.Architecture) ||
+                string.IsNullOrWhiteSpace(runtimeFile.Source) ||
+                string.IsNullOrWhiteSpace(runtimeFile.Output))
+                throw new CTildeProjectException($"Each 'hosted.runtimeFiles' entry in '{manifestPath}' requires non-empty os, architecture, source, and output properties.");
+            var operatingSystem = runtimeFile.OperatingSystem switch
+            {
+                "windows" => HostedOperatingSystem.Windows,
+                "linux" => HostedOperatingSystem.Linux,
+                _ => throw new CTildeProjectException($"Unknown hosted runtime-file operating system '{runtimeFile.OperatingSystem}' in '{manifestPath}'; expected windows or linux."),
+            };
+            var architecture = ParseArchitecture(runtimeFile.Architecture, manifestPath);
+            if (architecture == CompilationArchitecture.Auto)
+                throw new CTildeProjectException($"Property 'hosted.runtimeFiles.architecture' in '{manifestPath}' must name a concrete architecture.");
+            var source = ResolveExplicitInputPath(runtimeFile.Source, "hosted.runtimeFiles.source", root, manifestPath);
+            if (!File.Exists(source))
+                throw new CTildeProjectException($"Hosted runtime file '{source}' in '{manifestPath}' does not exist.");
+            if ((File.GetAttributes(source) & FileAttributes.Directory) != 0)
+                throw new CTildeProjectException($"Hosted runtime file '{source}' in '{manifestPath}' must name a file.");
+            var output = runtimeFile.Output;
+            if (string.IsNullOrWhiteSpace(output) || output is "." or ".." || Path.GetFileName(output) != output ||
+                output.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || output.Contains(Path.DirectorySeparatorChar) || output.Contains(Path.AltDirectorySeparatorChar))
+                throw new CTildeProjectException($"Property 'hosted.runtimeFiles.output' in '{manifestPath}' must be a portable file name without directory separators.");
+            var destinationKey = $"{operatingSystem}:{architecture}:{output}";
+            if (!destinations.Add(destinationKey))
+                throw new CTildeProjectException($"Hosted runtime destination '{output}' for {operatingSystem.ToString().ToLowerInvariant()} {ArchitectureName(architecture)} appears more than once in '{manifestPath}'.");
+            var destination = Path.Combine(Path.GetDirectoryName(build.ExecutablePath!)!, output);
+            if (PathsEqual(source, destination) || PathsEqual(destination, build.ExecutablePath!) ||
+                PathsEqual(destination, build.GeneratedCPath) || PathsEqual(destination, build.GeneratedHeaderPath) ||
+                sourceFiles.Any(path => PathsEqual(path, destination)) || nativeSources.Any(path => PathsEqual(path, destination)))
+                throw new CTildeProjectException($"Hosted runtime destination '{destination}' in '{manifestPath}' conflicts with a source or compiler-owned output.");
+            runtimeFiles.Add(new HostedRuntimeFile(operatingSystem, architecture, source, output));
+        }
+        return new HostedProjectConfiguration(nativeSources, runtimeFiles.ToImmutable());
+    }
+
+    private static string ResolveExplicitInputPath(string value, string property, string root, string manifestPath)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value) || Path.EndsInDirectorySeparator(value) ||
+            value.IndexOfAny(['*', '?']) >= 0)
+            throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' must be a non-empty explicit relative file path.");
+        return Path.GetFullPath(Path.Combine(root, value));
     }
 
     private static CosmopolitanProjectConfiguration CreateCosmopolitanConfiguration(
@@ -741,7 +802,15 @@ public static class CTildeProjectFile
 
     private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
 
-    private sealed record HostedDocument([property: JsonPropertyName("nativeSources")] string[]? NativeSources);
+    private sealed record HostedDocument(
+        [property: JsonPropertyName("nativeSources")] string[]? NativeSources,
+        [property: JsonPropertyName("runtimeFiles")] HostedRuntimeFileDocument[]? RuntimeFiles);
+
+    private sealed record HostedRuntimeFileDocument(
+        [property: JsonPropertyName("os")] string OperatingSystem,
+        [property: JsonPropertyName("architecture")] string Architecture,
+        [property: JsonPropertyName("source")] string Source,
+        [property: JsonPropertyName("output")] string Output);
 
     private sealed record FreestandingDocument(
         [property: JsonPropertyName("linkerScript")] string? LinkerScript,

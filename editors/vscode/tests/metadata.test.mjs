@@ -134,6 +134,12 @@ test("project schema includes native build configuration", async () => {
   assert.equal(schema.properties.kind.default, "application");
   assert.equal(schema.properties.hosted.additionalProperties, false);
   assert.equal(schema.properties.hosted.properties.nativeSources.uniqueItems, true);
+  const runtimeFiles = schema.properties.hosted.properties.runtimeFiles;
+  assert.equal(runtimeFiles.type, "array");
+  assert.equal(runtimeFiles.items.additionalProperties, false);
+  assert.deepEqual(runtimeFiles.items.required, ["os", "architecture", "source", "output"]);
+  assert.deepEqual(runtimeFiles.items.properties.os.enum, ["windows", "linux"]);
+  assert.equal(runtimeFiles.items.properties.output.pattern, "^[^/\\\\]+$");
   assert.equal(schema.properties.simdOptimizations.type, "boolean");
   assert.equal(schema.properties.simdOptimizations.default, false);
   assert.match(schema.properties.simdOptimizations.description, /hosted x64/i);

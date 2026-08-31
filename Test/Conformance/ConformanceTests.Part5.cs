@@ -96,7 +96,7 @@ internal static partial class ConformanceTests
                 """;
             var result = CompileAndRun(source);
             Assert(result.ExitCode != 0, "Division by zero returned success.");
-            Assert(result.StandardError.Contains("CTI0001", StringComparison.Ordinal), result.StandardError);
+            Assert(result.StandardError.Contains("CTD0001", StringComparison.Ordinal), result.StandardError);
         });
 
         suite.Run("allocation overflow guard emitted", () =>

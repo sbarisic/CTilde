@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using System.Simd;
 
 namespace HostedIoExample;
@@ -53,11 +52,11 @@ public sealed class Camera
         }
     }
 
-    public void Render(FileHandle image, Hittable world, uint renderSeed)
+    public void Render(Rgba32[] pixels, Hittable world, uint renderSeed)
     {
-        Initialize();
-        File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString()
-            + "\n255\n");
+        InitializeForRender();
+        if (pixels.Length < ImageWidth * imageHeight)
+            throw new Exception("The pixel buffer is smaller than the configured camera image.");
         PacketRandomGenerator random = new PacketRandomGenerator(renderSeed);
         int row = 0;
         int lastProgressPercent = 0;
@@ -66,21 +65,16 @@ public sealed class Camera
             int column = 0;
             while (column < ImageWidth)
             {
-                int laneCount = ImageWidth - column;
-                if (laneCount > 4)
-                    laneCount = 4;
-                Mask32x4 active = PacketMasks.First(laneCount);
-                Vec3x4 colors = Vec3x4.Zero;
-                int sample = 0;
-                while (sample < SamplesPerPixel)
-                {
-                    random.Reseed(PacketRandomGenerator.SampleSeeds(renderSeed, column,
-                        row, sample, active));
-                    RayPacket rays = GetRay4(column, row, active, random);
-                    colors += RayColor4(ref rays, active, MaxDepth, world, random);
-                    sample++;
-                }
-                WritePacketColors(image, colors, active);
+                PixelPacket packet = RenderPacket(column, row, world, renderSeed,
+                    random);
+                int destination = row * ImageWidth + column;
+                pixels[destination] = packet.Lane0;
+                if (packet.Count > 1)
+                    pixels[destination + 1] = packet.Lane1;
+                if (packet.Count > 2)
+                    pixels[destination + 2] = packet.Lane2;
+                if (packet.Count > 3)
+                    pixels[destination + 3] = packet.Lane3;
                 column += 4;
             }
             int completed = row + 1;
@@ -97,12 +91,33 @@ public sealed class Camera
         }
     }
 
-    // Retained as a deterministic oracle for packet-renderer acceptance tests.
-    public void RenderScalar(FileHandle image, Hittable world, uint renderSeed)
+    [NoAlloc]
+    public PixelPacket RenderPacket(int column, int row, Hittable world, uint renderSeed,
+        PacketRandomGenerator random)
     {
-        Initialize();
-        File.Write(image, "P3\n" + ImageWidth.ToString() + " " + imageHeight.ToString()
-            + "\n255\n");
+        int laneCount = ImageWidth - column;
+        if (laneCount > 4)
+            laneCount = 4;
+        Mask32x4 active = PacketMasks.First(laneCount);
+        Vec3x4 colors = Vec3x4.Zero;
+        int sample = 0;
+        while (sample < SamplesPerPixel)
+        {
+            random.Reseed(PacketRandomGenerator.SampleSeeds(renderSeed, column, row,
+                sample, active));
+            RayPacket rays = GetRay4(column, row, active, random);
+            colors += RayColor4(ref rays, active, MaxDepth, world, random);
+            sample++;
+        }
+        return ToPixelPacket(colors, laneCount);
+    }
+
+    // Retained as a deterministic oracle for packet-renderer acceptance tests.
+    public void RenderScalar(Rgba32[] pixels, Hittable world, uint renderSeed)
+    {
+        InitializeForRender();
+        if (pixels.Length < ImageWidth * imageHeight)
+            throw new Exception("The pixel buffer is smaller than the configured camera image.");
         RandomGenerator random = new RandomGenerator(renderSeed);
         int row = 0;
         int lastProgressPercent = 0;
@@ -121,7 +136,7 @@ public sealed class Camera
                     color += RayColor(ray, MaxDepth, world, random);
                     sample++;
                 }
-                WriteColor(image, color);
+                pixels[row * ImageWidth + column] = ToPixelColor(color);
                 column++;
             }
             int completed = row + 1;
@@ -139,7 +154,7 @@ public sealed class Camera
     }
 
     [NoAlloc]
-    private void Initialize()
+    public void InitializeForRender()
     {
         imageHeight = ImageHeight;
         sampleScale = 1.0f / (float)SamplesPerPixel;
@@ -264,25 +279,32 @@ public sealed class Camera
             0.7f, 1.0f)) * blend;
     }
 
-    private void WriteColor(FileHandle image, Vec3 accumulated)
+    [NoAlloc]
+    private Rgba32 ToPixelColor(Vec3 accumulated)
     {
         int red = ToColorByte(LinearToGamma(accumulated.X * sampleScale));
         int green = ToColorByte(LinearToGamma(accumulated.Y * sampleScale));
         int blue = ToColorByte(LinearToGamma(accumulated.Z * sampleScale));
-        File.Write(image, red.ToString() + " " + green.ToString() + " " + blue.ToString()
-            + "\n");
+        return new Rgba32((byte)red, (byte)green, (byte)blue, (byte)255);
     }
 
-    private void WritePacketColors(FileHandle image, Vec3x4 accumulated, Mask32x4 active)
+    [NoAlloc]
+    private PixelPacket ToPixelPacket(Vec3x4 accumulated, int laneCount)
     {
-        if (active.GetLane<0>())
-            WriteColor(image, accumulated.GetLane<0>());
-        if (active.GetLane<1>())
-            WriteColor(image, accumulated.GetLane<1>());
-        if (active.GetLane<2>())
-            WriteColor(image, accumulated.GetLane<2>());
-        if (active.GetLane<3>())
-            WriteColor(image, accumulated.GetLane<3>());
+        Rgba32 black = Rgba32.Black();
+        Rgba32 lane0 = black;
+        Rgba32 lane1 = black;
+        Rgba32 lane2 = black;
+        Rgba32 lane3 = black;
+        if (laneCount > 0)
+            lane0 = ToPixelColor(accumulated.GetLane<0>());
+        if (laneCount > 1)
+            lane1 = ToPixelColor(accumulated.GetLane<1>());
+        if (laneCount > 2)
+            lane2 = ToPixelColor(accumulated.GetLane<2>());
+        if (laneCount > 3)
+            lane3 = ToPixelColor(accumulated.GetLane<3>());
+        return new PixelPacket(lane0, lane1, lane2, lane3, laneCount);
     }
 
     [NoAlloc]

@@ -89,6 +89,89 @@ internal static partial class ConformanceTests
             }
         });
 
+        suite.Run("hosted runtime files stage atomically and clean by receipt", () =>
+        {
+            var root = CreateCleanProject("runtime-files", new
+            {
+                target = "hosted",
+                architecture = "x64",
+                sources = new[] { "src/**/*.ct" },
+                hosted = new
+                {
+                    runtimeFiles = new object[]
+                    {
+                        new { os = "windows", architecture = "x64", source = "native/runtime.win", output = "runtime.dll" },
+                        new { os = "linux", architecture = "x64", source = "native/runtime.linux", output = "libruntime.so" },
+                    },
+                },
+                build = new { executable = "out/program.exe" },
+            });
+            try
+            {
+                Directory.CreateDirectory(Path.Combine(root, "native"));
+                File.WriteAllText(Path.Combine(root, "native", "runtime.win"), "windows-one");
+                File.WriteAllText(Path.Combine(root, "native", "runtime.linux"), "linux-one");
+                var configuration = new DirectoryInfo(AppContext.BaseDirectory).Parent?.Name ?? "Debug";
+                var cliDll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "CTilde.Cli", "bin", configuration, "net10.0", "ctilde.dll"));
+                var configuredCompiler = Environment.GetEnvironmentVariable("CTILDE_CC");
+                var linux = configuredCompiler?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true || !OperatingSystem.IsWindows();
+                var source = Path.Combine(root, "native", linux ? "runtime.linux" : "runtime.win");
+                var destination = Path.Combine(root, "out", linux ? "libruntime.so" : "runtime.dll");
+
+                var first = RunProcess("dotnet", [cliDll, "--project", Path.Combine(root, "ctilde.json"), "--build", "--trace"]);
+                Assert(first.ExitCode == 0, first.StandardOutput + first.StandardError);
+                Assert(File.ReadAllText(destination) == (linux ? "linux-one" : "windows-one"), "The selected hosted runtime file was not staged beside the executable.");
+                Assert(File.Exists(Path.Combine(root, "out", ".ctilde", "ctilde-runtime-files.json")), "The hosted runtime staging receipt was not written.");
+                if (linux && OperatingSystem.IsWindows())
+                {
+                    var dynamic = RunProcess("wsl", ["--exec", "readelf", "-d", WslPath(Path.Combine(root, "out", "program.exe"))]);
+                    Assert(dynamic.ExitCode == 0 && dynamic.StandardOutput.Contains("$ORIGIN", StringComparison.Ordinal), "The WSL hosted executable omitted its $ORIGIN runtime search path.");
+                }
+
+                File.WriteAllText(source, linux ? "linux-two" : "windows-two");
+                var restaged = RunProcess("dotnet", [cliDll, "--project", Path.Combine(root, "ctilde.json"), "--build"]);
+                Assert(restaged.ExitCode == 0 && File.ReadAllText(destination) == (linux ? "linux-two" : "windows-two"),
+                    "A changed hosted runtime source was not atomically restaged.");
+                var cleaned = RunClean(root, "--trace");
+                Assert(cleaned.ExitCode == 0 && !File.Exists(destination), "Clean retained an unchanged staged hosted runtime file.");
+
+                var rebuilt = RunProcess("dotnet", [cliDll, "--project", Path.Combine(root, "ctilde.json"), "--build"]);
+                Assert(rebuilt.ExitCode == 0, rebuilt.StandardOutput + rebuilt.StandardError);
+                File.WriteAllText(destination, "user-modified");
+                var preserved = RunClean(root, "--trace");
+                Assert(preserved.ExitCode == 1 && File.ReadAllText(destination) == "user-modified",
+                    "Clean removed a modified staged hosted runtime file.");
+
+                var unmatchedOperatingSystem = linux ? "windows" : "linux";
+                var unmatchedSource = linux ? "native/runtime.win" : "native/runtime.linux";
+                File.WriteAllText(Path.Combine(root, "ctilde.json"), $$"""
+                    {
+                      "target": "hosted",
+                      "architecture": "x64",
+                      "sources": ["src/**/*.ct"],
+                      "hosted": {
+                        "runtimeFiles": [
+                          {
+                            "os": "{{unmatchedOperatingSystem}}",
+                            "architecture": "x64",
+                            "source": "{{unmatchedSource}}",
+                            "output": "unmatched.bin"
+                          }
+                        ]
+                      },
+                      "build": { "executable": "out/program.exe" }
+                    }
+                    """);
+                var unmatched = RunProcess("dotnet", [cliDll, "--project", Path.Combine(root, "ctilde.json"), "--build"]);
+                Assert(unmatched.ExitCode == 1 && unmatched.StandardError.Contains("No hosted runtime files match", StringComparison.Ordinal),
+                    "A hosted runtime-file configuration with no matching OS/architecture was accepted.");
+            }
+            finally
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        });
+
         suite.Run("standard-library clean is a no-op", () =>
         {
             var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));

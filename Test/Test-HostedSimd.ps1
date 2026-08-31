@@ -11,12 +11,12 @@ param(
     [int]$MaxDepth = 16,
     [ValidateRange(0, 10)]
     [int]$WarmupCount = 2,
-    [switch]$ReportOnly
+    [switch]$ReportOnly,
+    [string]$CompilerDll = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$compilerDll = Join-Path $repositoryRoot 'CTilde.Cli/bin/Release/net10.0/ctilde.dll'
 $exampleRoot = Join-Path $repositoryRoot 'examples/HostedIo'
 $reportRoot = Join-Path $repositoryRoot 'artifacts/hosted-simd'
 $workRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("ctilde-hosted-simd-" + [guid]::NewGuid().ToString('N'))
@@ -74,12 +74,18 @@ function Get-AssemblyEvidence([string]$Executable) {
 }
 
 function Invoke-BenchmarkProgram([string]$Executable, [string]$WorkingDirectory) {
-    if ($Compiler.StartsWith('wsl:', [StringComparison]::OrdinalIgnoreCase)) {
-        Invoke-Checked 'wsl' @('--cd', (Get-WslPath $WorkingDirectory), '--exec', (Get-WslPath $Executable)) $WorkingDirectory
+    Push-Location $WorkingDirectory
+    try {
+        if ($Compiler.StartsWith('wsl:', [StringComparison]::OrdinalIgnoreCase)) {
+            $output = & wsl --cd (Get-WslPath $WorkingDirectory) --exec (Get-WslPath $Executable) 2>&1
+        }
+        else {
+            $output = & $Executable 2>&1
+        }
+        if ($LASTEXITCODE -ne 0) { throw "Benchmark program failed with exit code ${LASTEXITCODE}: $Executable" }
+        return ($output -join "`n")
     }
-    else {
-        Invoke-Checked $Executable @() $WorkingDirectory
-    }
+    finally { Pop-Location }
 }
 
 function Get-Median([double[]]$Values) {
@@ -95,14 +101,11 @@ function New-Variant([string]$Name, [bool]$Enabled, [bool]$PacketRenderer) {
     Get-ChildItem $exampleRoot -Filter '*.ct' | Where-Object Name -ne 'Program.ct' | Copy-Item -Destination $root
     $program = @"
 using System;
-using System.IO;
 namespace HostedIoExample;
 public static class SimdBenchmarkProgram
 {
     [EntryPoint] public static void Main()
     {
-        FileHandle image = File.Open("image.ppm", FileMode.Create, FileAccess.Write);
-        defer File.Close(image);
         HittableList objects = Scene.CreateFinal(RandomGenerator.DefaultSceneSeed);
         Hittable world = objects.BuildBvh();
         Camera camera = Scene.CreateBookCamera();
@@ -110,7 +113,9 @@ public static class SimdBenchmarkProgram
         camera.SamplesPerPixel = $SamplesPerPixel;
         camera.MaxDepth = $MaxDepth;
         camera.ProgressRows = 0;
-        camera.$(if ($PacketRenderer) { 'Render' } else { 'RenderScalar' })(image, world, RandomGenerator.DefaultRenderSeed);
+        Rgba32[] pixels = new Rgba32[camera.ImageWidth * camera.ImageHeight];
+        camera.$(if ($PacketRenderer) { 'Render' } else { 'RenderScalar' })(pixels, world, RandomGenerator.DefaultRenderSeed);
+        Console.WriteLine("PIXEL_CHECKSUM:" + PixelBuffer.Checksum(pixels).ToString());
     }
 }
 "@
@@ -136,17 +141,20 @@ public static class SimdBenchmarkProgram
 }
 
 try {
-    if (-not (Test-Path $compilerDll)) {
-        Invoke-Checked 'dotnet' @('build', (Join-Path $repositoryRoot 'CTilde.sln'), '-c', 'Release') $repositoryRoot
+    if ([string]::IsNullOrWhiteSpace($CompilerDll)) {
+        Invoke-Checked 'dotnet' @('build', (Join-Path $repositoryRoot 'CTilde.Cli/CTilde.Cli.csproj'), '-c', 'Release', '--nologo') $repositoryRoot
+        $CompilerDll = Join-Path $repositoryRoot 'CTilde.Cli/bin/Release/net10.0/ctilde.dll'
     }
+    $CompilerDll = [IO.Path]::GetFullPath($CompilerDll)
+    if (-not (Test-Path -LiteralPath $CompilerDll)) { throw "The compiler DLL was not found: $CompilerDll" }
+
     $variants = @()
     foreach ($variant in @(
         @{ Name = 'scalar'; Enabled = $false; Packet = $false },
         @{ Name = 'packet'; Enabled = $true; Packet = $true })) {
         $root = New-Variant $variant.Name $variant.Enabled $variant.Packet
-        Invoke-Checked 'dotnet' @($compilerDll, '--project', (Join-Path $root 'ctilde.json'), '--build') $root
+        Invoke-Checked 'dotnet' @($CompilerDll, '--project', (Join-Path $root 'ctilde.json'), '--build') $root
         $executable = Join-Path $root 'build/HostedIoBenchmark.exe'
-        $image = Join-Path $root 'image.ppm'
         $generated = Get-ChildItem (Join-Path $root 'build/generated/modules') -Filter '*.c'
         $generatedText = ($generated | ForEach-Object { [IO.File]::ReadAllText($_.FullName) }) -join "`n"
         $symbolMapText = [IO.File]::ReadAllText((Join-Path $root 'build/generated/ctilde_symbols.json'))
@@ -157,7 +165,7 @@ try {
             root = $root
             executable = $executable
             milliseconds = [Collections.Generic.List[double]]::new()
-            imageSha256 = $null
+            pixelChecksum = $null
             executableBytes = (Get-Item $executable).Length
             generatedCBytes = ($generated | Measure-Object Length -Sum).Sum
             instructionEvidence = [ordered]@{
@@ -176,7 +184,7 @@ try {
 
     foreach ($variant in $variants) {
         for ($warmup = 0; $warmup -lt $WarmupCount; $warmup++) {
-            Invoke-BenchmarkProgram $variant.executable $variant.root
+            $null = Invoke-BenchmarkProgram $variant.executable $variant.root
         }
     }
     $optimizedWins = 0
@@ -186,8 +194,15 @@ try {
         foreach ($variantIndex in $order) {
             $variant = $variants[$variantIndex]
             $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-            Invoke-BenchmarkProgram $variant.executable $variant.root
+            $programOutput = Invoke-BenchmarkProgram $variant.executable $variant.root
             $stopwatch.Stop()
+            if ($programOutput -notmatch 'PIXEL_CHECKSUM:(\d+)') {
+                throw "Benchmark program did not report an RGBA pixel checksum: $programOutput"
+            }
+            if ($null -ne $variant.pixelChecksum -and $variant.pixelChecksum -ne $Matches[1]) {
+                throw "Benchmark program produced a non-deterministic RGBA pixel checksum."
+            }
+            $variant.pixelChecksum = $Matches[1]
             $variant.milliseconds.Add($stopwatch.Elapsed.TotalMilliseconds)
             $pair[$variant.name] = $stopwatch.Elapsed.TotalMilliseconds
         }
@@ -195,7 +210,6 @@ try {
     }
     foreach ($variant in $variants) {
         $variant.medianMilliseconds = Get-Median $variant.milliseconds.ToArray()
-        $variant.imageSha256 = (Get-FileHash (Join-Path $variant.root 'image.ppm') -Algorithm SHA256).Hash
         $variant.Remove('root')
         $variant.Remove('executable')
     }
@@ -208,7 +222,7 @@ try {
     }
     $report = [ordered]@{
         timestampUtc = [DateTime]::UtcNow.ToString('O')
-        draft = '0.38'
+        draft = '0.39'
         machine = $env:COMPUTERNAME
         compiler = $Compiler
         compilerVersion = $toolVersion

@@ -1,0 +1,142 @@
+namespace System.Diagnostics;
+
+internal static class MonotonicClock
+{
+    [Extern("ct_monotonic_nanoseconds")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static long GetTimestampNanoseconds();
+}
+
+public struct Stopwatch
+{
+    private long startedAtNanoseconds;
+    private long accumulatedNanoseconds;
+    private bool running;
+
+    public Stopwatch()
+    {
+        startedAtNanoseconds = 0L;
+        accumulatedNanoseconds = 0L;
+        running = false;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public static Stopwatch StartNew()
+    {
+        Stopwatch result = new Stopwatch();
+        result.Start();
+        return result;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public static long GetTimestampNanoseconds()
+    {
+        return MonotonicClock.GetTimestampNanoseconds();
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public bool IsRunning
+    {
+        get
+        {
+            return running;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public TimeSpan Elapsed
+    {
+        get
+        {
+            return TimeSpan.FromNanoseconds(CurrentElapsedNanoseconds());
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public long ElapsedNanoseconds
+    {
+        get
+        {
+            return CurrentElapsedNanoseconds();
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public long ElapsedMilliseconds
+    {
+        get
+        {
+            return CurrentElapsedNanoseconds() / TimeSpan.NanosecondsPerMillisecond;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public void Start()
+    {
+        if (!running)
+        {
+            startedAtNanoseconds = GetTimestampNanoseconds();
+            running = true;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public void Stop()
+    {
+        if (running)
+        {
+            accumulatedNanoseconds += GetTimestampNanoseconds() - startedAtNanoseconds;
+            running = false;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public void Reset()
+    {
+        startedAtNanoseconds = 0L;
+        accumulatedNanoseconds = 0L;
+        running = false;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public void Restart()
+    {
+        accumulatedNanoseconds = 0L;
+        startedAtNanoseconds = GetTimestampNanoseconds();
+        running = true;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    private long CurrentElapsedNanoseconds()
+    {
+        if (running)
+        {
+            return accumulatedNanoseconds + GetTimestampNanoseconds() - startedAtNanoseconds;
+        }
+        return accumulatedNanoseconds;
+    }
+}

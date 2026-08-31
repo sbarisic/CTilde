@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.37 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load the generic collections, UTF-8 helpers, scalar geometry, matrices, quaternions, and explicit SIMD128 values. Freestanding retains its allocation-free core, generic value containers, and scalar geometry; managed collections require the ordinary managed-allocation and exception runtime roles.
+This document is the canonical standard-library reference for C~ Draft 0.40 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load monotonic timing, deterministic random generation, spin primitives, generic collections, UTF-8 helpers, scalar geometry, matrices, quaternions, and explicit SIMD128 values. Freestanding retains its allocation-free core, including `TimeSpan`, `Random`, generic value containers, and scalar geometry; managed collections require the ordinary managed-allocation and exception runtime roles.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -12,7 +12,7 @@ The Cosmopolitan profile reuses the hosted object, exception, console, environme
 
 `System.Runtime.Cpu` provides allocation-free ordinary-memory barriers, pause hints, byte swaps, population counts, and leading-zero counts. `System.Endian` converts `ushort` and `uint` values to and from the nominal `be16`, `be32`, `le16`, and `le32` wire-order types. `PhysicalAddress`, `VirtualAddress`, and `IoAddress` are strict `nuint` newtypes; conversion between address domains requires an explicit conversion through `nuint`.
 
-Draft 0.37 completes the explicit SIMD128 operation surface and adds scalar-layout matrices and quaternions without changing runtime ABI 16 or debug metadata version 3. UTF-8 helpers are `[NoAlloc]`, but intentionally not `[NoRuntime]`. Callback-driven generic operations inherit the callback's effects.
+Draft 0.40 adds nanosecond durations, monotonic timing, deterministic PCG32 random generation, spin primitives, and common scalar math without changing runtime ABI 16 or debug metadata version 3. Draft 0.39 remains the historical native-import revision; Drafts 0.38 and 0.37 remain the SIMD geometry and scalar-layout geometry revisions. UTF-8 helpers are `[NoAlloc]`, but intentionally not `[NoRuntime]`. Callback-driven generic operations inherit the callback's effects.
 
 `[Interrupt]` and `[InterruptSafe]` are compiler-defined attributes rather than ordinary runtime APIs. On ESP-IDF, an interrupt entry has the exact exported `void(void*)` signature and runs without runtime attachment, managed cleanup, exception machinery, or blocking calls. Interrupt-safe externs and assembly must also declare their ordinary effect contracts independently.
 
@@ -64,7 +64,7 @@ The parameterless constructor uses an empty message. The string constructor also
 
 `ToString()` returns the fully qualified runtime type name. It appends `": "` and `Message` when the message is not empty. Derived exception classes inherit this behavior, so the result uses the derived runtime type name.
 
-The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `OutOfMemoryException`, `ThreadStateException`, and `SynchronizationLockException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
+The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `ArgumentOutOfRangeException`, `OutOfMemoryException`, `ThreadStateException`, and `SynchronizationLockException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
 
 ## Console
 
@@ -122,7 +122,11 @@ On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at E
 public static class Math
 {
     public const float Pi = 3.14159265358979323846f;
+    public const float E = 2.71828182845904523536f;
+    public const float Tau = 6.28318530717958647692f;
     public const double Pi64 = 3.14159265358979323846264338327950288d;
+    public const double E64 = 2.71828182845904523536028747135266250d;
+    public const double Tau64 = 6.28318530717958647692528676655900576d;
 
     [NoAlloc] public static float Sqrt(float value);
     [NoAlloc] public static float Acos(float value);
@@ -134,6 +138,16 @@ public static class Math
     [NoAlloc] public static float Cos(float value);
     [NoAlloc] public static float Floor(float value);
     [NoAlloc] public static float Ceiling(float value);
+    [NoAlloc] public static float Asin(float value);
+    [NoAlloc] public static float Atan(float value);
+    [NoAlloc] public static float Atan2(float y, float x);
+    [NoAlloc] public static float Exp(float value);
+    [NoAlloc] public static float Log(float value);
+    [NoAlloc] public static float Log2(float value);
+    [NoAlloc] public static float Log10(float value);
+    [NoAlloc] public static float Pow(float value, float power);
+    [NoAlloc] public static float Round(float value);
+    [NoAlloc] public static float Truncate(float value);
 
     [NoAlloc] public static double Sqrt(double value);
     [NoAlloc] public static double Acos(double value);
@@ -145,10 +159,20 @@ public static class Math
     [NoAlloc] public static double Cos(double value);
     [NoAlloc] public static double Floor(double value);
     [NoAlloc] public static double Ceiling(double value);
+    [NoAlloc] public static double Asin(double value);
+    [NoAlloc] public static double Atan(double value);
+    [NoAlloc] public static double Atan2(double y, double x);
+    [NoAlloc] public static double Exp(double value);
+    [NoAlloc] public static double Log(double value);
+    [NoAlloc] public static double Log2(double value);
+    [NoAlloc] public static double Log10(double value);
+    [NoAlloc] public static double Pow(double value, double power);
+    [NoAlloc] public static double Round(double value);
+    [NoAlloc] public static double Truncate(double value);
 }
 ```
 
-`Pi` is the nearest C~ `float` to pi. `Pi64` is the nearest C~ `double`. Angles use radians. Float overloads map to the target C library functions with an `f` suffix. Double overloads map to `sqrt`, `acos`, `fabs`, `tan`, `fmin`, `fmax`, `sin`, `cos`, `floor`, and `ceil`.
+`Pi`, `E`, and `Tau` are the nearest C~ `float` constants; the `64` variants are the nearest `double` constants. Angles use radians. Float overloads map to the corresponding target C library functions with an `f` suffix, and double overloads map to their unsuffixed forms.
 
 NaN, infinity, signed-zero, rounding, and domain behavior follow the target C library. `Min` and `Max` return the numeric operand when exactly one operand is NaN. C~ does not expose `errno` or floating-point exception state. These functions do not throw C~ exceptions. The native-build driver links `libm` on Unix and WSL. Manual GNU links must place `-lm` after the generated translation unit.
 
@@ -209,6 +233,14 @@ Matrices use row-major fields and row-vector composition: `A * B` applies `A` an
 
 `Quaternion` supplies length, dot, conjugate, normalization, inversion, multiplication, interpolation, axis-angle and yaw-pitch-roll construction, matrix conversion, and `Vec3` transformation. `Slerp` follows the shortest path. Failed `TryNormalize` and `TryInverse` calls write `Identity`; the ordinary methods retain IEEE results for degenerate inputs.
 
+## Time and random generation
+
+`System.TimeSpan` is an eight-byte readonly value containing one signed nanosecond count. It is available on every target. `Zero`, exact nanoseconds, truncated whole microseconds, milliseconds, and seconds, fractional millisecond and second totals, integer unit factories, arithmetic, equality, and ordering allocate no storage. Negative durations are valid, and integer construction and arithmetic use the language's wrapping rules.
+
+`System.Diagnostics.Stopwatch` is available on hosted, Cosmopolitan, and ESP-IDF targets. It is a mutable allocation-free value with `StartNew`, `Start`, `Stop`, `Reset`, `Restart`, `IsRunning`, `Elapsed`, `ElapsedNanoseconds`, and truncated `ElapsedMilliseconds`. `GetTimestampNanoseconds()` reads the same monotonic clock directly. Repeated starts and stops are idempotent, copied values have independent state, and instances are not thread-safe. The runtime uses `QueryPerformanceCounter`, `clock_gettime(CLOCK_MONOTONIC)`, or `esp_timer_get_time` according to the target. Clock support is omitted unless reachable; a native clock failure is fatal code `CTK0001`.
+
+`System.Random` is an allocation-free value available on every target. Its default constructor uses seed zero; the `ulong` constructor and `Reseed` select another stable sequence. `NextUInt()` implements PCG-XSH-RR 64/32 with the fixed Draft 0.40 state transition. `NextUInt(maxExclusive)` and `NextInt(minInclusive, maxExclusive)` use rejection sampling for unbiased half-open ranges. `NextFloat()` returns a value in `[0,1)` from 24 random bits. Invalid ranges throw `ArgumentOutOfRangeException`. Seeded sequences are a cross-target compatibility contract.
+
 ## Threading
 
 `System.Threading` is available on hosted and ESP-IDF targets:
@@ -255,11 +287,29 @@ public sealed class Mutex
     [NoAlloc] public bool TryEnter();
     [NoAlloc] public void Exit();
 }
+
+public struct SpinWait
+{
+    public int Count { [NoAlloc] get; }
+    public bool NextSpinWillYield { [NoAlloc] get; }
+    [NoAlloc] public void SpinOnce();
+    [NoAlloc] public void Reset();
+}
+
+public struct SpinLock
+{
+    public bool IsHeld { [NoAlloc] get; }
+    [NoAlloc] public bool TryEnter();
+    [NoAlloc] public void Enter();
+    [NoAlloc] public void Exit();
+}
 ```
 
 Atomics accept Boolean, integral, native-integral, enum, and unsafe-pointer storage. They are non-copyable. Pointer atomics omit fetch operations; arithmetic fetches require integral storage and bitwise fetches require Boolean or integral storage. Invalid dynamic memory orders throw `ArgumentException` without managed allocation.
 
 Threads run on `_beginthreadex`, POSIX threads, or FreeRTOS tasks. `Start` publishes delegate state, `Join` acquires worker completion, and non-default priority failures are explicit. The runtime retains the worker state through completion. Mutexes are recursive and provide acquire/release ordering. Prefer `lock (mutex) { ... }` when lexical cleanup is possible.
+
+`SpinWait` performs exponentially increasing `Cpu.Pause` work for ten calls and then calls `Thread.Yield`; its counter saturates. `SpinLock` is non-recursive and unfair, does not track thread ownership, and uses acquire compare-exchange plus release store. It contains `Atomic<int>` and is therefore non-copyable. The caller that successfully enters must call `Exit`.
 
 ## Hosted file I/O
 

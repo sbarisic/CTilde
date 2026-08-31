@@ -70,6 +70,9 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool _usesNativeIntegers;
     private bool _usesNativeUtf8;
     private bool _usesManagedThreading;
+    private bool _usesMonotonicClock;
+    private bool _usesRandomRangeFailure;
+    private bool _usesSpinPause;
     private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
@@ -252,6 +255,12 @@ internal sealed partial class CEmitter : ILoweringServices
             }
             if (IsMathSymbol(method.ExternName))
                 _usedMathSymbols.Add(method.ExternName);
+            if (method.ExternName == "ct_monotonic_nanoseconds")
+                _usesMonotonicClock = true;
+            if (method.ExternName == "ct_random_argument_out_of_range")
+                _usesRandomRangeFailure = true;
+            if (method.ExternName == "ct_spin_pause")
+                _usesSpinPause = true;
         }
     }
 
@@ -306,6 +315,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitObjectMetadata(prefix);
         EmitRuntimeFaultSupport(prefix);
         EmitNativeImportSupport(prefix);
+        EmitStandardUtilitySupport(prefix);
         EmitScalarAtomicSupport(prefix);
         EmitManagedThreadingSupport(prefix);
         EmitMathSupport(prefix);

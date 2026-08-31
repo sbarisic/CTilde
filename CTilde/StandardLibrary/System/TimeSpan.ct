@@ -1,0 +1,224 @@
+namespace System;
+
+public readonly struct TimeSpan
+{
+    public const long NanosecondsPerMicrosecond = 1000L;
+    public const long NanosecondsPerMillisecond = 1000000L;
+    public const long NanosecondsPerSecond = 1000000000L;
+    private readonly long nanoseconds;
+
+    public TimeSpan(long nanoseconds)
+    {
+        this.nanoseconds = nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan Zero
+    {
+        get
+        {
+            return new TimeSpan(0L);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public long Nanoseconds
+    {
+        get
+        {
+            return nanoseconds;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public long WholeMicroseconds
+    {
+        get
+        {
+            return nanoseconds / NanosecondsPerMicrosecond;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public long WholeMilliseconds
+    {
+        get
+        {
+            return nanoseconds / NanosecondsPerMillisecond;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public long WholeSeconds
+    {
+        get
+        {
+            return nanoseconds / NanosecondsPerSecond;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public double TotalMilliseconds
+    {
+        get
+        {
+            return(double)nanoseconds / 1000000.0d;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public double TotalSeconds
+    {
+        get
+        {
+            return(double)nanoseconds / 1000000000.0d;
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan FromNanoseconds(long value)
+    {
+        return new TimeSpan(value);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan FromMicroseconds(long value)
+    {
+        return new TimeSpan(value * NanosecondsPerMicrosecond);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan FromMilliseconds(long value)
+    {
+        return new TimeSpan(value * NanosecondsPerMillisecond);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan FromSeconds(long value)
+    {
+        return new TimeSpan(value * NanosecondsPerSecond);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan operator +(TimeSpan value)
+    {
+        return value;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan operator -(TimeSpan value)
+    {
+        return new TimeSpan(-value.nanoseconds);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan operator +(TimeSpan left, TimeSpan right)
+    {
+        return new TimeSpan(left.nanoseconds + right.nanoseconds);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static TimeSpan operator -(TimeSpan left, TimeSpan right)
+    {
+        return new TimeSpan(left.nanoseconds - right.nanoseconds);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator ==(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds == right.nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator !=(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds != right.nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator<(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds < right.nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator <=(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds <= right.nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator>(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds > right.nanoseconds;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public static bool operator >=(TimeSpan left, TimeSpan right)
+    {
+        return left.nanoseconds >= right.nanoseconds;
+    }
+}

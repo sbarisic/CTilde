@@ -89,7 +89,8 @@ public sealed partial class LanguageServiceSnapshot
                 nativeIntegers,
                 nativeUtf8,
                 options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan,
-                StandardVectorTypes.All))
+                StandardVectorTypes.All,
+                StandardFoundationTypes.All))
             .AddRange(_userTrees);
         var declarationDiagnostics = new DiagnosticBag();
         foreach (var tree in _allTrees)

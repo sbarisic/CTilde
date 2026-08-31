@@ -1,17 +1,18 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.39 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.40 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Draft 0.39 adds hosted native imports after Draft 0.38 completed hosted x64 scalar-geometry SIMD optimization, `Vec3x4`, debug lane metadata, and four-ray HostedIo production batching. Remaining follow-ups are:
+Draft 0.40 adds nanosecond durations, monotonic timing, deterministic random generation, spin primitives, common scalar math, and user-defined equality and ordering operators. Draft 0.39 remains the historical hosted-native-import and four-worker HostedIo revision. Remaining follow-ups are:
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
 - [ ] Extend closure source-debug metadata beyond the current generated-method mapping and add dedicated lambda editor-service fixtures.
 - [ ] Permit iterator suspension across cleanup regions after defining state-machine ownership for `try`, `catch`, `finally`, `lock`, and `defer`.
 
-- [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include equality, comparison, bitwise, logical, remainder, increment, and decrement.
+- [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include bitwise, logical, remainder, increment, and decrement; arithmetic, equality, and ordering are implemented.
+- [ ] Add wall-clock time, calendars, time zones, timeout and cancellation abstractions only after defining their runtime and portability contracts. Draft 0.40 provides monotonic elapsed time only.
 - [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.

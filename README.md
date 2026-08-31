@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.39 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, link-time and dynamically loaded native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes generic collections, UTF-8 rune helpers, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
+Draft 0.40 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, link-time and dynamically loaded native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes nanosecond durations, monotonic timing, deterministic random generation, spin primitives, generic collections, UTF-8 rune helpers, expanded scalar math, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -272,7 +272,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.39 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.40 language rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

@@ -122,11 +122,18 @@ public sealed class PacketRandomGenerator
     public static U32x4 SampleSeeds(uint globalSeed, int firstColumn, int row, int sample,
         Mask32x4 active)
     {
-        U32x4 value = U32x4.Splat(globalSeed);
         U32x4 columns = U32x4.Create((uint)firstColumn, (uint)(firstColumn + 1),
             (uint)(firstColumn + 2), (uint)(firstColumn + 3));
+        return SampleSeeds(globalSeed, columns, U32x4.Splat((uint)row), sample, active);
+    }
+
+    [NoAlloc]
+    public static U32x4 SampleSeeds(uint globalSeed, U32x4 columns, U32x4 rows, int sample,
+        Mask32x4 active)
+    {
+        U32x4 value = U32x4.Splat(globalSeed);
         value = U32x4.Xor(value, columns * U32x4.Splat(0x9E3779B9u));
-        value = U32x4.Xor(value, U32x4.Splat((uint)row) * U32x4.Splat(0x85EBCA6Bu));
+        value = U32x4.Xor(value, rows * U32x4.Splat(0x85EBCA6Bu));
         value = U32x4.Xor(value, U32x4.Splat((uint)sample) * U32x4.Splat(0xC2B2AE35u));
         value = U32x4.Xor(value, value.ShiftRight<16>());
         value = value * U32x4.Splat(0x7FEB352Du);

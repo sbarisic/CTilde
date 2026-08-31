@@ -8,8 +8,8 @@ internal abstract record IrInstruction(IrValue? Output, SyntaxNode Syntax, Immut
 internal sealed record IrConstant(IrValue Result, SyntaxNode Syntax, object? Value) : IrInstruction(Result, Syntax, []);
 internal sealed record IrLoad(IrValue Result, SyntaxNode Syntax, object? Symbol, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
 internal sealed record IrStore(IrValue Result, SyntaxNode Syntax, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Syntax, Inputs);
-internal sealed record IrUnary(IrValue Result, UnaryExpressionSyntax Expression, IrValue Operand) : IrInstruction(Result, Expression, [Operand]);
-internal sealed record IrBinary(IrValue Result, BinaryExpressionSyntax Expression, IrValue Left, IrValue Right) : IrInstruction(Result, Expression, [Left, Right]);
+internal sealed record IrUnary(IrValue Result, UnaryExpressionSyntax Expression, IrValue Operand, object? Target) : IrInstruction(Result, Expression, [Operand]);
+internal sealed record IrBinary(IrValue Result, BinaryExpressionSyntax Expression, IrValue Left, IrValue Right, object? Target) : IrInstruction(Result, Expression, [Left, Right]);
 internal sealed record IrStringBuild(IrValue Result, BinaryExpressionSyntax Expression, ImmutableArray<IrValue> Segments) : IrInstruction(Result, Expression, Segments);
 internal sealed record IrConvert(IrValue Result, SyntaxNode Syntax, IrValue Operand) : IrInstruction(Result, Syntax, [Operand]);
 internal sealed record IrCall(IrValue Result, CallExpressionSyntax Expression, object? Target, ImmutableArray<IrValue> Inputs) : IrInstruction(Result, Expression, Inputs);
@@ -127,6 +127,10 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
             {
                 foreach (var call in function.Blocks.SelectMany(block => block.Instructions).OfType<IrCall>())
                     Add(call.Target as MethodSymbol);
+                foreach (var unary in function.Blocks.SelectMany(block => block.Instructions).OfType<IrUnary>())
+                    Add(unary.Target as MethodSymbol);
+                foreach (var binary in function.Blocks.SelectMany(block => block.Instructions).OfType<IrBinary>())
+                    Add(binary.Target as MethodSymbol);
                 AddDependencies(function.Body);
             }
             Add(method.ConstructorInitializerTarget);
@@ -197,8 +201,8 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
                         var kernel = instruction switch
                         {
                             IrCall call => call.Target as MethodSymbol,
-                            IrUnary unary => function.Body.Semantics.GetValueOrDefault(unary.Expression)?.Symbol as MethodSymbol,
-                            IrBinary binary => function.Body.Semantics.GetValueOrDefault(binary.Expression)?.Symbol as MethodSymbol,
+                            IrUnary unary => unary.Target as MethodSymbol,
+                            IrBinary binary => binary.Target as MethodSymbol,
                             _ => null,
                         };
                         if (kernel is not null && SimdOperation.IsPureFusionKernel(kernel) &&
@@ -326,9 +330,9 @@ internal sealed class TypedIrLowerer(BoundProgram program)
                 {
                     LiteralExpressionSyntax or SizeOfExpressionSyntax or AlignOfExpressionSyntax or OffsetOfExpressionSyntax => new IrConstant(result, expression.Syntax, expression.ConstantValue),
                     AssignmentExpressionSyntax => new IrStore(result, expression.Syntax, inputs),
-                    UnaryExpressionSyntax unary when inputs.Length != 0 => new IrUnary(result, unary, inputs[0]),
+                    UnaryExpressionSyntax unary when inputs.Length != 0 => new IrUnary(result, unary, inputs[0], expression.Symbol),
                     BinaryExpressionSyntax binary when expression.Type == CType.String && binary.OperatorKind == SyntaxKind.PlusToken => new IrStringBuild(result, binary, inputs),
-                    BinaryExpressionSyntax binary when inputs.Length >= 2 => new IrBinary(result, binary, inputs[0], inputs[1]),
+                    BinaryExpressionSyntax binary when inputs.Length >= 2 => new IrBinary(result, binary, inputs[0], inputs[1], expression.Symbol),
                     CastExpressionSyntax or ParenthesizedExpressionSyntax when inputs.Length != 0 => new IrConvert(result, expression.Syntax, inputs[0]),
                     CallExpressionSyntax call => new IrCall(result, call, expression.Symbol, inputs),
                     NewExpressionSyntax allocation => new IrAllocate(result, allocation, inputs),

@@ -4,7 +4,7 @@
 
 The C~ compiler is a .NET 10 library with one backend, deterministic GNU C23, two artifact layouts, and four target profiles: hosted, ESP-IDF, GNU/ELF freestanding, and x86-64 Cosmopolitan.
 
-Draft 0.34 retains the x86-64 Cosmopolitan profile and adds exact repository modules to the same compiler pipeline. Source-owner identities, binary64 and Unicode scalars, fixed-width SIMD, immutable embedded resources, lambdas, and ARC closures all reach the existing typed IR and C backend. The target-specific Cosmopolitan design is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+Draft 0.40 retains the x86-64 Cosmopolitan profile and the exact repository-module pipeline. Source-owner identities, binary64 and Unicode scalars, fixed-width SIMD, immutable embedded resources, lambdas, ARC closures, native imports, and reachability-pruned monotonic timing all reach the existing typed IR and C backend. `TimeSpan`, deterministic `Random`, and spin primitives are ordinary standard-library source; only the clock and scalar-math native leaves require emitter support. The target-specific Cosmopolitan design is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 ```text
 UTF-8 source files

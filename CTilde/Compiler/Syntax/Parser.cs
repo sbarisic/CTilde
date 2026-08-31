@@ -317,11 +317,13 @@ internal sealed partial class Parser
         {
             NextToken();
             SyntaxToken operatorToken;
-            if (Current.Kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken)
+            if (Current.Kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken or
+                SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken or SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or
+                SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken)
                 operatorToken = NextToken();
             else
             {
-                Report("CT0108", "Expected one of +, -, *, or / in an operator declaration.", Current);
+                Report("CT0108", "Expected an arithmetic or comparison operator in an operator declaration.", Current);
                 operatorToken = new SyntaxToken(SyntaxKind.BadToken, _source, new TextSpan(Current.Span.Start, 0), string.Empty) { IsMissing = true };
                 _missingTokens.Add(operatorToken);
                 if (Current.Kind is not SyntaxKind.OpenParenToken and not SyntaxKind.EndOfFileToken)

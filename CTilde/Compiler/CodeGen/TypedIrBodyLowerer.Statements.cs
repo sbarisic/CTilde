@@ -457,7 +457,7 @@ internal sealed partial class TypedIrBodyLowerer
             Report("CT2103", "var requires an initializer.", syntax);
         if (type.ContainsPointer)
             RequireUnsafe(syntax);
-        if (type.ContainsAtomic && (syntax.Initializer is not NewExpressionSyntax || initializer?.Type.IsAtomic != true))
+        if (type.ContainsAtomic && (syntax.Initializer is not NewExpressionSyntax || initializer?.Type != type))
             Report("CT1278", "Atomic<T> locals require direct construction and cannot be initialized by copying.", syntax);
         _emitter.RegisterType(type);
         if (syntax.IsConst && initializer is not null && !initializer.IsConstant)

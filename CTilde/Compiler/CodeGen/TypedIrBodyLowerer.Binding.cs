@@ -219,6 +219,9 @@ internal sealed partial class TypedIrBodyLowerer
             return OwnResult(CType.String, $"ct_string_concat({left.Code}, {right.Code}, {_emitter.SourceArgument(syntax)})", prelude);
         }
 
+        if (OperatorFacts.IsComparison(syntax.OperatorKind) && HasUserDefinedOperatorCandidate(syntax.OperatorKind, left, right))
+            return LowerOperatorCall(syntax.OperatorKind, [left, right], [syntax.Left, syntax.Right], syntax);
+
         if (syntax.OperatorKind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken)
             return LowerEquality(syntax, left, right);
 
@@ -445,7 +448,10 @@ internal sealed partial class TypedIrBodyLowerer
                 Report("CT2132", "The left side of an assignment must be assignable.", syntax.Left);
             return ErrorExpression(target.Prelude);
         }
-        if (target.Type.ContainsAtomic)
+        var directAtomicFieldInitialization = (_method.IsConstructor || _method.Name == "<module_init>") &&
+            target.LValue.Field is not null && syntax.OperatorKind == SyntaxKind.EqualsToken &&
+            syntax.Right is NewExpressionSyntax && target.Type.ContainsAtomic;
+        if (target.Type.ContainsAtomic && !directAtomicFieldInitialization)
         {
             Report("CT1278", "Atomic<T> values are non-copyable and cannot be assigned.", syntax);
             return ErrorExpression(target.Prelude);
@@ -627,10 +633,8 @@ internal sealed partial class TypedIrBodyLowerer
 
     private string NumericOperation(SyntaxKind operation, CType type, string left, string right, SyntaxNode syntax, bool provenSafe = false)
     {
-        var checkedArithmetic = type.Kind is CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint &&
-            operation is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken;
         var checkedDivision = type.IsIntegral && operation is SyntaxKind.SlashToken or SyntaxKind.PercentToken;
-        if (!provenSafe && (checkedArithmetic || checkedDivision))
+        if (!provenSafe && checkedDivision)
             RecordRuntimeFault(syntax, $"potentially failing {OperatorText(operation)} operation");
         if (type == CType.Int)
         {

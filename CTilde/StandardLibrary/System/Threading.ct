@@ -1,4 +1,16 @@
+using System.Runtime;
+
 namespace System.Threading;
+
+internal static class SpinRuntime
+{
+    [Extern("ct_spin_pause")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    internal static void Pause();
+}
 
 public enum MemoryOrder
 {
@@ -224,5 +236,104 @@ public sealed class Mutex
     [NoAlloc]
     public void Exit()
     {
+    }
+}
+
+public struct SpinWait
+{
+    private int count;
+
+    public SpinWait()
+    {
+        count = 0;
+    }
+
+    [NoAlloc]
+    public int Count
+    {
+        get
+        {
+            return count;
+        }
+    }
+
+    [NoAlloc]
+    public bool NextSpinWillYield
+    {
+        get
+        {
+            return count >= 10;
+        }
+    }
+
+    [NoAlloc]
+    public void Reset()
+    {
+        count = 0;
+    }
+
+    [NoAlloc]
+    public void SpinOnce()
+    {
+        if (count < 10)
+        {
+            int iterations = 1 << count;
+            int index = 0;
+            while (index < iterations)
+            {
+                SpinRuntime.Pause();
+                index++;
+            }
+        }
+        else
+        {
+            Thread.Yield();
+        }
+        if (count < 2147483647)
+        {
+            count++;
+        }
+    }
+}
+
+public struct SpinLock
+{
+    private Atomic<int> state;
+
+    public SpinLock()
+    {
+        state = new Atomic<int>(0);
+    }
+
+    [NoAlloc]
+    public bool IsHeld
+    {
+        get
+        {
+            return state.Load(MemoryOrder.Relaxed) != 0;
+        }
+    }
+
+    [NoAlloc]
+    public bool TryEnter()
+    {
+        return state.CompareExchange(1, 0, MemoryOrder.Acquire, MemoryOrder.Relaxed)
+            == 0;
+    }
+
+    [NoAlloc]
+    public void Enter()
+    {
+        SpinWait wait = new SpinWait();
+        while (!TryEnter())
+        {
+            wait.SpinOnce();
+        }
+    }
+
+    [NoAlloc]
+    public void Exit()
+    {
+        state.Store(0, MemoryOrder.Release);
     }
 }

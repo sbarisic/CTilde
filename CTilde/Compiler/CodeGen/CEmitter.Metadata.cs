@@ -27,10 +27,14 @@ internal sealed partial class CEmitter
         ("CT_FAULT_CAST", "System.InvalidCastException", "ct_fault_cast"),
         ("CT_FAULT_OVERFLOW", "System.OverflowException", "ct_fault_overflow"),
         ("CT_FAULT_ARGUMENT", "System.ArgumentException", "ct_fault_argument"),
+        ("CT_FAULT_ARGUMENT_OUT_OF_RANGE", "System.ArgumentOutOfRangeException", "ct_fault_argument_out_of_range"),
         ("CT_FAULT_OUT_OF_MEMORY", "System.OutOfMemoryException", "ct_fault_out_of_memory"),
         ("CT_FAULT_THREAD_STATE", "System.ThreadStateException", "ct_fault_thread_state"),
         ("CT_FAULT_SYNCHRONIZATION_LOCK", "System.SynchronizationLockException", "ct_fault_synchronization_lock"),
     ];
+
+    private IEnumerable<(string Kind, string TypeName, string StorageName)> ActiveRuntimeFaultTypes =>
+        RuntimeFaultTypes.Where(entry => entry.TypeName != "System.ArgumentOutOfRangeException" || _usesRandomRangeFailure);
 
     private void EmitOwnershipHelpers(CWriter writer)
     {
@@ -284,7 +288,7 @@ internal sealed partial class CEmitter
 
         var exceptionType = Model.Types["System.Exception"];
         var messageField = exceptionType.Fields.Single(field => field.Name == "message");
-        foreach (var (_, typeName, storageName) in RuntimeFaultTypes)
+        foreach (var (_, typeName, storageName) in ActiveRuntimeFaultTypes)
         {
             var type = Model.Types[typeName];
             writer.WriteLine($"static {NameMangler.Type(type)} {storageName};");
@@ -292,7 +296,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void ct_runtime_faults_init(void)");
         writer.WriteLine("{");
         writer.WriteLine("    if (ct_runtime_faults_ready) ct_fail(\"CTT0003\", \"<runtime-fault-init>\", 0);");
-        foreach (var (_, typeName, storageName) in RuntimeFaultTypes)
+        foreach (var (_, typeName, storageName) in ActiveRuntimeFaultTypes)
         {
             var type = Model.Types[typeName];
             writer.WriteLine($"    {storageName}.ct_base.{messageField.CName} = ct_empty_string;");
@@ -309,7 +313,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_object* exception;");
         writer.WriteLine("    switch (kind)");
         writer.WriteLine("    {");
-        foreach (var (kind, _, storageName) in RuntimeFaultTypes)
+        foreach (var (kind, _, storageName) in ActiveRuntimeFaultTypes)
             writer.WriteLine($"        case {kind}: exception = (ct_object*)(void*)&{storageName}; break;");
         writer.WriteLine("        default: ct_fail(\"CTM0003\", file, line);");
         writer.WriteLine("    }");

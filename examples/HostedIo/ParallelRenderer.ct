@@ -1,0 +1,304 @@
+using System;
+using System.Simd;
+using System.Threading;
+
+namespace HostedIoExample;
+
+public sealed class ParallelRenderSession
+{
+    private const int WorkerCount = 12;
+    private RenderWorkState workState;
+    private RenderWorker[] workers;
+    private Thread[] threads;
+    private int[] presentedCounts;
+    private Rgba32[] pixels;
+    private int presentedPixelCount;
+    private int startedThreadCount;
+    private bool started;
+    private bool joined;
+
+    public ParallelRenderSession(Camera camera, Hittable world, uint renderSeed)
+    {
+        int pixelCount = camera.ImageWidth * camera.ImageHeight;
+        pixels = new Rgba32[pixelCount];
+        workState = new RenderWorkState(camera.ImageWidth, camera.ImageHeight);
+        workers = new RenderWorker[WorkerCount];
+        threads = new Thread[WorkerCount];
+        presentedCounts = new int[WorkerCount];
+        int workerIndex = 0;
+        while (workerIndex < WorkerCount)
+        {
+            int firstRow = camera.ImageHeight * workerIndex / WorkerCount;
+            int lastRow = camera.ImageHeight * (workerIndex + 1) / WorkerCount;
+            RenderWorker worker = new RenderWorker(workState, camera, world, pixels,
+                renderSeed, firstRow, lastRow);
+            workers[workerIndex] = worker;
+            threads[workerIndex] = new Thread([worker]()=>worker.Run());
+            presentedCounts[workerIndex] = 0;
+            workerIndex++;
+        }
+        presentedPixelCount = 0;
+        startedThreadCount = 0;
+        started = false;
+        joined = false;
+    }
+
+    [NoAlloc]
+    public int PixelCount
+    {
+        get
+        {
+            return pixels.Length;
+        }
+    }
+
+    [NoAlloc]
+    public int PresentedPixelCount
+    {
+        get
+        {
+            return presentedPixelCount;
+        }
+    }
+
+    [NoAlloc]
+    public bool IsComplete
+    {
+        get
+        {
+            int workerIndex = 0;
+            while (workerIndex < WorkerCount)
+            {
+                if (!workers[workerIndex].IsComplete)
+                    return false;
+                workerIndex++;
+            }
+            return true;
+        }
+    }
+
+    [NoAlloc]
+    public bool HasUnpresentedPixels
+    {
+        get
+        {
+            int workerIndex = 0;
+            while (workerIndex < WorkerCount)
+            {
+                if (presentedCounts[workerIndex] < workers[workerIndex].PublishedCount)
+                    return true;
+                workerIndex++;
+            }
+            return false;
+        }
+    }
+
+    [NoAlloc]
+    public uint PixelChecksum()
+    {
+        return PixelBuffer.Checksum(pixels);
+    }
+
+    public void Start()
+    {
+        if (started)
+            throw new ThreadStateException();
+        started = true;
+        int workerIndex = 0;
+        while (workerIndex < WorkerCount)
+        {
+            threads[workerIndex].Start();
+            startedThreadCount++;
+            workerIndex++;
+        }
+    }
+
+    [NoAlloc]
+    public unsafe bool PresentAvailable(RaylibWindow window)
+    {
+        int workerIndex = 0;
+        while (workerIndex < startedThreadCount)
+        {
+            RenderWorker worker = workers[workerIndex];
+            int consumed = presentedCounts[workerIndex];
+            int published = worker.PublishedCount;
+            while (consumed < published)
+            {
+                int pixelIndex = worker.CompletedPixelAt(consumed);
+                int row = pixelIndex / workState.ImageWidth;
+                int column = pixelIndex - row * workState.ImageWidth;
+                bool open = window.SetPixel(column, row, pixels[pixelIndex]);
+                consumed++;
+                presentedPixelCount++;
+                presentedCounts[workerIndex] = consumed;
+                if (!open)
+                    return false;
+            }
+            workerIndex++;
+        }
+        return true;
+    }
+
+    [NoAlloc]
+    public void Cancel()
+    {
+        workState.Cancel();
+    }
+
+    [NoAlloc]
+    public void Join()
+    {
+        if (!started || joined)
+            return;
+        int workerIndex = 0;
+        while (workerIndex < startedThreadCount)
+        {
+            threads[workerIndex].Join();
+            workerIndex++;
+        }
+        joined = true;
+    }
+
+    [NoAlloc]
+    public void CancelAndJoin()
+    {
+        Cancel();
+        Join();
+    }
+}
+
+internal sealed class RenderWorkState
+{
+    private Atomic<bool> cancelled = new Atomic<bool>(false);
+    public int ImageWidth;
+    public int ImageHeight;
+
+    public RenderWorkState(int imageWidth, int imageHeight)
+    {
+        ImageWidth = imageWidth;
+        ImageHeight = imageHeight;
+    }
+
+    [NoAlloc]
+    public bool IsCancellationRequested
+    {
+        get
+        {
+            return cancelled.Load(MemoryOrder.Acquire);
+        }
+    }
+
+    [NoAlloc]
+    public void Cancel()
+    {
+        cancelled.Store(true, MemoryOrder.Release);
+    }
+}
+
+internal sealed class RenderWorker
+{
+    private RenderWorkState workState;
+    private Camera camera;
+    private Hittable world;
+    private Rgba32[] pixels;
+    private uint renderSeed;
+    private PacketRandomGenerator packetRandom;
+    private int firstPixel;
+    private int pixelCount;
+    private int completedCount;
+    private Atomic<int> publishedCount = new Atomic<int>(0);
+    private Atomic<bool> complete = new Atomic<bool>(false);
+
+    public RenderWorker(RenderWorkState sharedWorkState, Camera renderCamera, Hittable renderWorld,
+        Rgba32[] outputPixels, uint seed, int firstRow, int lastRow)
+    {
+        workState = sharedWorkState;
+        camera = renderCamera;
+        world = renderWorld;
+        pixels = outputPixels;
+        renderSeed = seed;
+        packetRandom = new PacketRandomGenerator(seed);
+        firstPixel = firstRow * workState.ImageWidth;
+        pixelCount = (lastRow - firstRow) * workState.ImageWidth;
+        completedCount = 0;
+    }
+
+    [NoAlloc]
+    public int PublishedCount
+    {
+        get
+        {
+            return publishedCount.Load(MemoryOrder.Acquire);
+        }
+    }
+
+    [NoAlloc]
+    public bool IsComplete
+    {
+        get
+        {
+            return complete.Load(MemoryOrder.Acquire);
+        }
+    }
+
+    [NoAlloc]
+    public int CompletedPixelAt(int index)
+    {
+        return firstPixel + index;
+    }
+
+    public void Run()
+    {
+        int rendered = 0;
+        while (rendered < pixelCount && !workState.IsCancellationRequested)
+        {
+            int laneCount = pixelCount - rendered;
+            if (laneCount > 4)
+                laneCount = 4;
+            int pixel0 = firstPixel + rendered;
+            int pixel1 = pixel0;
+            int pixel2 = pixel0;
+            int pixel3 = pixel0;
+            if (laneCount > 1)
+                pixel1++;
+            if (laneCount > 2)
+                pixel2 += 2;
+            if (laneCount > 3)
+                pixel3 += 3;
+            RenderPacket(pixel0, pixel1, pixel2, pixel3, laneCount);
+            rendered += laneCount;
+        }
+        complete.Store(true, MemoryOrder.Release);
+    }
+
+    private void RenderPacket(int pixel0, int pixel1, int pixel2, int pixel3, int laneCount)
+    {
+        int row0 = pixel0 / workState.ImageWidth;
+        int row1 = pixel1 / workState.ImageWidth;
+        int row2 = pixel2 / workState.ImageWidth;
+        int row3 = pixel3 / workState.ImageWidth;
+        int column0 = pixel0 - row0 * workState.ImageWidth;
+        int column1 = pixel1 - row1 * workState.ImageWidth;
+        int column2 = pixel2 - row2 * workState.ImageWidth;
+        int column3 = pixel3 - row3 * workState.ImageWidth;
+        U32x4 columns = U32x4.Create((uint)column0, (uint)column1, (uint)column2,
+            (uint)column3);
+        U32x4 rows = U32x4.Create((uint)row0, (uint)row1, (uint)row2, (uint)row3);
+        PixelPacket packet = camera.RenderPacket(columns, rows, laneCount, world,
+            renderSeed, packetRandom);
+        Publish(pixel0, packet.Lane0);
+        if (laneCount > 1)
+            Publish(pixel1, packet.Lane1);
+        if (laneCount > 2)
+            Publish(pixel2, packet.Lane2);
+        if (laneCount > 3)
+            Publish(pixel3, packet.Lane3);
+        publishedCount.Store(completedCount, MemoryOrder.Release);
+    }
+
+    private void Publish(int pixelIndex, Rgba32 color)
+    {
+        pixels[pixelIndex] = color;
+        completedCount++;
+    }
+}

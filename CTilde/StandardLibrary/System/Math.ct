@@ -3,7 +3,11 @@ namespace System;
 public static class Math
 {
     public const float Pi = 3.14159265358979323846f;
+    public const float E = 2.71828182845904523536f;
+    public const float Tau = 6.28318530717958647692f;
     public const double Pi64 = 3.14159265358979323846264338327950288d;
+    public const double E64 = 2.71828182845904523536028747135266250d;
+    public const double Tau64 = 6.28318530717958647692528676655900576d;
 
     [Extern("ct_math_sqrt")]
     [NoAlloc]
@@ -45,6 +49,46 @@ public static class Math
     [NoAlloc]
     public static float Ceiling(float value);
 
+    [Extern("ct_math_asin")]
+    [NoAlloc]
+    public static float Asin(float value);
+
+    [Extern("ct_math_atan")]
+    [NoAlloc]
+    public static float Atan(float value);
+
+    [Extern("ct_math_atan2")]
+    [NoAlloc]
+    public static float Atan2(float y, float x);
+
+    [Extern("ct_math_exp")]
+    [NoAlloc]
+    public static float Exp(float value);
+
+    [Extern("ct_math_log")]
+    [NoAlloc]
+    public static float Log(float value);
+
+    [Extern("ct_math_log2")]
+    [NoAlloc]
+    public static float Log2(float value);
+
+    [Extern("ct_math_log10")]
+    [NoAlloc]
+    public static float Log10(float value);
+
+    [Extern("ct_math_pow")]
+    [NoAlloc]
+    public static float Pow(float value, float power);
+
+    [Extern("ct_math_round")]
+    [NoAlloc]
+    public static float Round(float value);
+
+    [Extern("ct_math_truncate")]
+    [NoAlloc]
+    public static float Truncate(float value);
+
     [Extern("ct_math_sqrt_double")]
     [NoAlloc]
     public static double Sqrt(double value);
@@ -84,4 +128,44 @@ public static class Math
     [Extern("ct_math_ceiling_double")]
     [NoAlloc]
     public static double Ceiling(double value);
+
+    [Extern("ct_math_asin_double")]
+    [NoAlloc]
+    public static double Asin(double value);
+
+    [Extern("ct_math_atan_double")]
+    [NoAlloc]
+    public static double Atan(double value);
+
+    [Extern("ct_math_atan2_double")]
+    [NoAlloc]
+    public static double Atan2(double y, double x);
+
+    [Extern("ct_math_exp_double")]
+    [NoAlloc]
+    public static double Exp(double value);
+
+    [Extern("ct_math_log_double")]
+    [NoAlloc]
+    public static double Log(double value);
+
+    [Extern("ct_math_log2_double")]
+    [NoAlloc]
+    public static double Log2(double value);
+
+    [Extern("ct_math_log10_double")]
+    [NoAlloc]
+    public static double Log10(double value);
+
+    [Extern("ct_math_pow_double")]
+    [NoAlloc]
+    public static double Pow(double value, double power);
+
+    [Extern("ct_math_round_double")]
+    [NoAlloc]
+    public static double Round(double value);
+
+    [Extern("ct_math_truncate_double")]
+    [NoAlloc]
+    public static double Truncate(double value);
 }

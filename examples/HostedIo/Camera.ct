@@ -98,14 +98,25 @@ public sealed class Camera
         int laneCount = ImageWidth - column;
         if (laneCount > 4)
             laneCount = 4;
+        U32x4 columns = U32x4.Create((uint)column, (uint)(column + 1), (uint)(column
+            + 2), (uint)(column + 3));
+        return RenderPacket(columns, U32x4.Splat((uint)row), laneCount, world, renderSeed,
+            random);
+    }
+
+    [NoAlloc]
+    public PixelPacket RenderPacket(U32x4 columns, U32x4 rows, int laneCount, Hittable world,
+        uint renderSeed, PacketRandomGenerator random)
+    {
         Mask32x4 active = PacketMasks.First(laneCount);
         Vec3x4 colors = Vec3x4.Zero;
         int sample = 0;
         while (sample < SamplesPerPixel)
         {
-            random.Reseed(PacketRandomGenerator.SampleSeeds(renderSeed, column, row,
-                sample, active));
-            RayPacket rays = GetRay4(column, row, active, random);
+            random.Reseed(PacketRandomGenerator.SampleSeeds(renderSeed, columns,
+                rows, sample, active));
+            RayPacket rays = GetRay4(F32x4.FromU32(columns), F32x4.FromU32(rows),
+                active, random);
             colors += RayColor4(ref rays, active, MaxDepth, world, random);
             sample++;
         }
@@ -197,15 +208,13 @@ public sealed class Camera
     }
 
     [NoAlloc]
-    private RayPacket GetRay4(int column, int row, Mask32x4 active, PacketRandomGenerator random)
+    private RayPacket GetRay4(F32x4 columns, F32x4 rows, Mask32x4 active, PacketRandomGenerator random)
     {
         F32x4 offsetX = random.NextFloat(active) - F32x4.Splat(0.5f);
         F32x4 offsetY = random.NextFloat(active) - F32x4.Splat(0.5f);
-        F32x4 columns = F32x4.Create((float)column, (float)(column + 1), (float)(column
-            + 2), (float)(column + 3));
         Vec3x4 pixelSample = Vec3x4.Splat(pixel00Location);
         pixelSample += Vec3x4.Splat(pixelDeltaU) * (columns + offsetX);
-        pixelSample += Vec3x4.Splat(pixelDeltaV) * (F32x4.Splat((float)row) + offsetY);
+        pixelSample += Vec3x4.Splat(pixelDeltaV) * (rows + offsetY);
         Vec3x4 origins = Vec3x4.Splat(center);
         if (DefocusAngle > 0.0f)
         {

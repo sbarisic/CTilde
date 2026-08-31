@@ -23,12 +23,15 @@ internal static class FreestandingValidator
 
         var allBodies = bodies.ToImmutable();
         var bodyByMethod = allBodies.GroupBy(body => body.Method).ToDictionary(group => group.Key, group => group.First());
+        bool IsUserSource(SyntaxNode? syntax) => syntax is not null &&
+            model.UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, syntax.Source));
         var roots = model.UserTypes.SelectMany(type => type.Methods)
-            .Where(method => !method.IsNaked && (method.ExportName is not null || method.IsUsed))
-            .Concat(allBodies.Where(body => body.Method.Name == "<module_init>").Select(body => body.Method))
+            .Where(method => IsUserSource(method.Syntax) && !method.IsNaked && (method.ExportName is not null || method.IsUsed))
+            .Concat(allBodies.Where(body => body.Method.Name == "<module_init>" && IsUserSource(body.Method.Syntax)).Select(body => body.Method))
             .Distinct()
             .ToArray();
-        model.FreestandingRuntimeRequired = roots.Length != 0 || model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsUsed && !field.IsConstInit);
+        model.FreestandingRuntimeRequired = roots.Length != 0 || model.UserTypes.SelectMany(type => type.Fields)
+            .Any(field => IsUserSource(field.Syntax) && field.IsUsed && !field.IsConstInit);
 
         var reachable = model.Effects.ReachableMethods(roots);
         model.FreestandingHeapRequired = reachable.Any(method => (model.Effects.GetEffects(method) & EffectKind.Allocates) != 0);

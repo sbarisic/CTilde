@@ -160,9 +160,10 @@ public sealed class RaylibWindow
         int index = y * width + x;
         Rgba32* pixels = (Rgba32*)image.Data;
         pixels[index] = color;
-        if (firstDirty < 0)
+        if (firstDirty < 0 || index < firstDirty)
             firstDirty = index;
-        lastDirty = index;
+        if (lastDirty < 0 || index > lastDirty)
+            lastDirty = index;
         double now = Raylib.GetTime();
         if (now >= nextPresent)
         {

@@ -21,7 +21,7 @@ internal sealed partial class CompilationModel
         var arity = parameters.Length;
         var validArity = operatorKind is SyntaxKind.PlusToken or SyntaxKind.MinusToken
             ? arity is 1 or 2
-            : operatorKind is SyntaxKind.StarToken or SyntaxKind.SlashToken && arity == 2;
+            : arity == 2 && (operatorKind is SyntaxKind.StarToken or SyntaxKind.SlashToken || OperatorFacts.IsComparison(operatorKind));
         var mentionsContainingType = arity == 1
             ? parameters[0].Type == type.Type
             : parameters.Any(parameter => parameter.Type == type.Type);
@@ -32,7 +32,7 @@ internal sealed partial class CompilationModel
             syntax.Parameters.Any(parameter => !parameter.Attributes.IsDefaultOrEmpty) ||
             !OperatorFacts.IsSupported(operatorKind) || !validArity ||
             parameters.Any(parameter => parameter.PassingKind != ParameterPassingKind.Value) ||
-            !mentionsContainingType || returnType == CType.Void || syntax.Body is null;
+            !mentionsContainingType || returnType == CType.Void || OperatorFacts.IsComparison(operatorKind) && returnType != CType.Bool || syntax.Body is null;
         if (invalid)
         {
             Diagnostics.Add(

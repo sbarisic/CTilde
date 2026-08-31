@@ -104,6 +104,7 @@ try {
         # editor may have the language-server output loaded while this script runs.
         Invoke-Checked "dotnet" @("build", ".\Test\Test.csproj", "-c", "Release", "--nologo")
 
+        $helloSource = Join-Path $temporaryDirectory "hello.ct"
         $hello = Join-Path $temporaryDirectory "hello.c"
         $exceptions = Join-Path $temporaryDirectory "exceptions.c"
         $mathSource = Join-Path $temporaryDirectory "math.ct"
@@ -112,17 +113,22 @@ try {
         $operators = Join-Path $temporaryDirectory "operators.c"
         $vectorsSource = Join-Path $temporaryDirectory "vectors.ct"
         $vectors = Join-Path $temporaryDirectory "vectors.c"
+        $foundationsSource = Join-Path $temporaryDirectory "foundations.ct"
+        $foundations = Join-Path $temporaryDirectory "foundations.c"
         $assemblySource = Join-Path $temporaryDirectory "inline-assembly.ct"
         $assembly = Join-Path $temporaryDirectory "inline-assembly.c"
+        [IO.File]::WriteAllText($helloSource, 'public static class Program { [EntryPoint] public static void Main() { Console.WriteLine("Hello from C~."); } }')
         [IO.File]::WriteAllText($mathSource, 'public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(Math.Sqrt(9.0f) + Math.Abs(-1.0f) + Math.Tan(0.0f) + Math.Min(1.0f, 2.0f) + Math.Max(1.0f, 2.0f) + Math.Sin(0.0f) + Math.Cos(0.0f) + Math.Floor(1.5f) + Math.Ceiling(1.5f) + Math.Pi); } }')
         [IO.File]::WriteAllText($operatorsSource, 'public struct Vector2 { public float X; public float Y; public Vector2(float x, float y) { X = x; Y = y; } public static Vector2 operator +(Vector2 left, Vector2 right) { return new Vector2(left.X + right.X, left.Y + right.Y); } public static Vector2 operator *(Vector2 value, float scale) { return new Vector2(value.X * scale, value.Y * scale); } } public static class Program { [EntryPoint] public static void Main() { Vector2 value = new Vector2(1.0f, 2.0f); value += new Vector2(2.0f, 3.0f); Console.WriteLine((value * 2.0f).X); } }')
         [IO.File]::WriteAllText($vectorsSource, 'public static class Program { [EntryPoint] public static void Main() { Vec2 two = Vec2.UnitX + Vec2.UnitY; Vec3 three = Vec3.UnitX.Cross(Vec3.UnitY).Normalize(); Vec4 four = Vec4.One * new Vec4(1.0f, 2.0f, 3.0f, 4.0f); Console.WriteLine(two.Dot(two) + three.Z + four.W); } }')
+        [IO.File]::WriteAllText($foundationsSource, 'using System; using System.Diagnostics; public static class Program { [EntryPoint] public static void Main() { Random random = new Random(1UL); TimeSpan duration = TimeSpan.FromMilliseconds(2L); Stopwatch watch = Stopwatch.StartNew(); Console.WriteLine(random.NextUInt() + (uint)duration.WholeMilliseconds + (uint)watch.ElapsedMilliseconds); Console.WriteLine(Math.Pow(2.0f, 3.0f)); } }')
         [IO.File]::WriteAllText($assemblySource, 'public static class Program { [Export("ctilde_add")] public static int Add(int left, int right) { return left + right; } [EntryPoint] public static unsafe void Main() { int value = 1; [NoAlloc] asm (ref value) { } [NoAlloc] asm { nop } Console.WriteLine(value); } }')
-        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Hello\Program.ct", "-o", $hello, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $helloSource, "-o", $hello, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", ".\examples\Exceptions\Program.ct", "-o", $exceptions, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $mathSource, "-o", $math, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $operatorsSource, "-o", $operators, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $vectorsSource, "-o", $vectors, "--target", "esp-idf")
+        Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $foundationsSource, "-o", $foundations, "--target", "esp-idf")
         Invoke-Checked "dotnet" @("run", "--project", ".\CTilde.Cli", "-c", "Release", "--no-build", "--", $assemblySource, "-o", $assembly, "--target", "esp-idf")
 
         $xtensa = Find-Compiler (Join-Path $ToolsPath "xtensa-esp-elf") "xtensa-esp32-elf-gcc.exe"
@@ -132,7 +138,7 @@ try {
             # directory. Runtime-backed Thread/Mutex code requires ESP-IDF's FreeRTOS
             # headers and configuration and is therefore validated by the complete
             # firmware builds below instead of this context-free syntax pass.
-            foreach ($source in @($hello, $exceptions, $math, $operators, $vectors, $assembly)) {
+            foreach ($source in @($hello, $exceptions, $math, $operators, $vectors, $foundations, $assembly)) {
                 Invoke-Checked $compiler @(
                     "-std=gnu23", "-O2", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
                     "-I", (Join-Path $exampleDirectory "main"),

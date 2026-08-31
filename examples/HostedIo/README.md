@@ -2,7 +2,7 @@
 
 This hosted C~ project renders the final randomized sphere scene from the first [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html) book into a progressively updated Raylib 6.0 window. It is an original single-precision C~ adaptation with deterministic random sampling.
 
-The renderer demonstrates the object model, scalar-layout geometry, Draft 0.39 native imports, hosted runtime-file staging, and the opt-in hosted-x64 SIMD pipeline. Production rendering traces four columns at a time through `System.Simd.Vec3x4`; `RenderScalar` retains the independent one-ray, in-memory implementation for benchmarks and focused correctness comparisons.
+The renderer demonstrates the object model, managed threads and atomics, scalar-layout geometry, Draft 0.39 native imports, hosted runtime-file staging, and the opt-in hosted-x64 SIMD pipeline. Production rendering divides the image into twelve horizontal rectangles, one per worker thread. Each worker fills its rectangle linearly from left to right and top to bottom while tracing four independently positioned pixels at a time through `System.Simd.Vec3x4`; `RenderScalar` retains the independent one-ray, in-memory implementation for benchmarks and focused correctness comparisons.
 
 ## Build and render
 
@@ -16,7 +16,7 @@ The manifest selects and stages `raylib.dll` beside the executable for native Wi
 
 `--run` rebuilds before it launches the renderer. Use `--build` when you only want to produce the executable and its selected runtime library.
 
-The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. The program opens its window before constructing the scene, writes every completed pixel to Raylib's CPU image immediately, and uploads dirty regions no more than 60 times per second. Closing the window cancels rendering cleanly. When rendering completes, the final image remains visible until the window is closed.
+The default is the book-quality profile: 1200×675 pixels, 500 samples per pixel, and at most 50 reflected or refracted bounces. This is intentionally expensive and can take a long time. Workers publish completed pixels through release/acquire counters; the main thread alone writes them to Raylib's CPU image, uploads dirty regions, and pumps window events at no more than 60 frames per second. Closing the window atomically cancels the shared render state and joins all workers before native resources are released. When rendering completes, the final image remains visible until the window is closed.
 
 Console progress reports every newly reached whole percentage without duplicates:
 
@@ -41,6 +41,7 @@ The conformance runner uses the same sources with small odd-width cameras. Its c
 - `Hittables.ct` contains scalar and structure-of-arrays hit records, robust slab-tested bounds, spheres, the fixed-capacity 512-object reference world, and a deterministic midpoint BVH. Packet traversal keeps per-lane closest distances and prunes children without scalar fallback.
 - `Materials.ct` implements scalar and masked packet Lambertian, fuzzy-metal, and dielectric scattering, including divergent reflection, refraction, total internal reflection, and Schlick reflectance.
 - `Camera.ct` constructs rays directly from packed columns, jitter, and defocus samples. It implements recursive masked color evaluation, gamma-2 correction, a positionable camera, thin-lens defocus blur, `PixelPacket` output, and complete in-memory scalar and packet renders.
+- `ParallelRenderer.ct` gives each of twelve managed workers one horizontal rectangle to fill in scanline order, publishes completed pixel indices with release/acquire atomics, and keeps Raylib access on the primary thread.
 - `Pixels.ct` defines the exact four-byte RGBA pixel and deterministic buffer checksum.
 - `Raylib.ct` contains the minimal natural-layout Raylib ABI, `[NativeImport("raylib")]` declarations, CPU-image ownership, dirty-region uploads, and window lifecycle.
 - `Scene.ct` constructs the randomized small spheres, ground, and three large feature spheres, then builds the BVH once.

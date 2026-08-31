@@ -10,6 +10,21 @@ public static class Program
     private static Mutex Gate = new Mutex();
     private static volatile int WorkerValue;
 
+    private static bool ValidateDraft040Random()
+    {
+        Random zero = new Random();
+        bool zeroSequence = zero.NextUInt() == 0u && zero.NextUInt() == 1613493245u
+            && zero.NextUInt() == 3894649422u && zero.NextUInt() == 2055130073u && zero.NextUInt()
+            == 2315086854u;
+        Random ordinary = new Random(1UL);
+        bool ordinarySequence = ordinary.NextUInt() == 0u && ordinary.NextUInt()
+            == 3114030964u && ordinary.NextUInt() == 3308539156u;
+        Random maximum = new Random(18446744073709551615UL);
+        bool maximumSequence = maximum.NextUInt() == 4293918721u && maximum.NextUInt()
+            == 3933164268u;
+        return zeroSequence && ordinarySequence && maximumSequence;
+    }
+
     private static void Worker()
     {
         lock (Gate)
@@ -44,11 +59,14 @@ public static class Program
         Thread worker = new Thread(Worker);
         worker.Start();
         worker.Join();
+        if (!ValidateDraft040Random())
+            throw new Exception("Draft 0.40 deterministic Random validation failed.");
         try
         {
             WriteReport();
             Console.Write("Worker value: ");
             Console.WriteLine(WorkerValue);
+            Console.WriteLine("draft40 random: ok");
         }
         catch (IOException error)
         {

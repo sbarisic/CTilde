@@ -17,21 +17,32 @@ internal enum StandardVectorTypes
     All = Vec2 | Vec3 | Vec4 | Simd | Geometry | PacketGeometry,
 }
 
+[Flags]
+internal enum StandardFoundationTypes
+{
+    None = 0,
+    TimeSpan = 1,
+    Random = 2,
+    Stopwatch = 4,
+    All = TimeSpan | Random | Stopwatch,
+}
+
 internal static class StandardLibrary
 {
-    private static readonly ConcurrentDictionary<(CompilationTarget Target, bool NativeIntegers, bool NativeUtf8, bool HostedIo, StandardVectorTypes Vectors), ImmutableArray<SyntaxTree>> SyntaxTreeCache = new();
+    private static readonly ConcurrentDictionary<(CompilationTarget Target, bool NativeIntegers, bool NativeUtf8, bool HostedIo, StandardVectorTypes Vectors, StandardFoundationTypes Foundations), ImmutableArray<SyntaxTree>> SyntaxTreeCache = new();
 
     public static ImmutableArray<SyntaxTree> GetSyntaxTrees(
         CompilationTarget target,
         bool includeNativeIntegers = false,
         bool includeNativeUtf8 = false,
         bool includeHostedIo = false,
-        StandardVectorTypes vectors = StandardVectorTypes.None)
+        StandardVectorTypes vectors = StandardVectorTypes.None,
+        StandardFoundationTypes foundations = StandardFoundationTypes.None)
     {
         includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
-        return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors), key =>
+        return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors, foundations), key =>
         {
-            var files = FilesFor(key.Target, key.HostedIo, key.Vectors);
+            var files = FilesFor(key.Target, key.HostedIo, key.Vectors, key.Foundations);
             return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo, key.Target == CompilationTarget.Freestanding, null, null, applyTransforms: true);
         });
     }
@@ -47,11 +58,11 @@ internal static class StandardLibrary
         bool applyTransforms = true)
     {
         includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
-        return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors), includeNativeIntegers, includeNativeUtf8,
+        return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors, StandardFoundationTypes.All), includeNativeIntegers, includeNativeUtf8,
             includeHostedIo, target == CompilationTarget.Freestanding, Path.GetFullPath(sourceRoot), overrides, applyTransforms);
     }
 
-    private static IReadOnlyList<string> FilesFor(CompilationTarget target, bool includeHostedIo, StandardVectorTypes vectors)
+    private static IReadOnlyList<string> FilesFor(CompilationTarget target, bool includeHostedIo, StandardVectorTypes vectors, StandardFoundationTypes foundations)
     {
         if ((vectors & StandardVectorTypes.Geometry) != 0)
             vectors |= StandardVectorTypes.Vec2 | StandardVectorTypes.Vec3 | StandardVectorTypes.Vec4;
@@ -60,6 +71,12 @@ internal static class StandardLibrary
         var files = target == CompilationTarget.Freestanding
             ? new List<string> { "Object.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
             : new List<string> { "Object.ct", "Exception.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+        if ((foundations & (StandardFoundationTypes.TimeSpan | StandardFoundationTypes.Stopwatch)) != 0)
+            files.Add("TimeSpan.ct");
+        if ((foundations & StandardFoundationTypes.Random) != 0)
+            files.Add("Random.ct");
+        if (target != CompilationTarget.Freestanding && (foundations & StandardFoundationTypes.Stopwatch) != 0)
+            files.Add("Diagnostics.ct");
         if (target == CompilationTarget.Freestanding && (vectors & (StandardVectorTypes.Vec2 | StandardVectorTypes.Vec3 | StandardVectorTypes.Vec4 | StandardVectorTypes.Simd | StandardVectorTypes.Geometry)) != 0)
             files.Add("Math.ct");
         files.Add("Generics.ct");
@@ -109,6 +126,22 @@ internal static class StandardLibrary
                 "Vec3x4" => StandardVectorTypes.PacketGeometry,
                 "Matrix3x2" or "Matrix4x4" or "Quaternion" => StandardVectorTypes.Geometry,
                 _ => StandardVectorTypes.None,
+            };
+        }
+        return result;
+    }
+
+    public static StandardFoundationTypes RequiredFoundations(IEnumerable<SyntaxTree> trees)
+    {
+        var result = StandardFoundationTypes.None;
+        foreach (var token in trees.SelectMany(tree => tree.Tokens).Where(token => token.Kind == SyntaxKind.IdentifierToken))
+        {
+            result |= token.Text switch
+            {
+                "TimeSpan" => StandardFoundationTypes.TimeSpan,
+                "Random" => StandardFoundationTypes.Random,
+                "Stopwatch" => StandardFoundationTypes.Stopwatch | StandardFoundationTypes.TimeSpan,
+                _ => StandardFoundationTypes.None,
             };
         }
         return result;

@@ -46,6 +46,16 @@ internal sealed partial class CEmitter
             if (_usesHostedIo)
                 writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#include <wchar.h>\n#endif");
         }
+        if (_usesMonotonicClock)
+        {
+            writer.WriteLine("#if defined(_WIN32)");
+            writer.WriteLine("#include <windows.h>");
+            writer.WriteLine("#elif defined(ESP_PLATFORM)");
+            writer.WriteLine("#include <esp_timer.h>");
+            writer.WriteLine("#else");
+            writer.WriteLine("#include <time.h>");
+            writer.WriteLine("#endif");
+        }
         writer.WriteLine("#include <limits.h>");
         writer.WriteLine("#include <float.h>");
         if (!IsFreestanding)
@@ -227,7 +237,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic reference counts must preserve managed-header alignment\");");
         writer.WriteLine("typedef void (*ct_drop_value_fn)(void*);");
         writer.WriteLine("typedef struct ct_cleanup_record { struct ct_cleanup_record* Previous; void* Value; ct_drop_value_fn Drop; bool Active; } ct_cleanup_record;");
-        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
+        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
         writer.WriteLine("CT_NORETURN static void ct_raise_runtime_fault(ct_runtime_fault_kind kind, const char* code, const char* file, int line);");
         if (_usesExceptions)
         {

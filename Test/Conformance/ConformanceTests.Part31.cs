@@ -286,6 +286,61 @@ internal static partial class ConformanceTests
             Assert(repeated.ExitCode == 0 && Normalize(packet.StandardOutput) == Normalize(repeated.StandardOutput),
                 "The optimized packet renderer was not deterministic across repeated seeded renders.");
 
+            const string parallelHarness = """
+                using System;
+                namespace HostedIoExample;
+
+                public static class ParallelPacketTestProgram
+                {
+                    [EntryPoint] public static void Main()
+                    {
+                        HittableList objects = new HittableList();
+                        objects.Add(new Sphere(new Vec3(0.0f, 0.0f, -1.0f), 0.5f,
+                            new Lambertian(new Vec3(0.7f, 0.3f, 0.2f))));
+                        objects.Add(new Sphere(new Vec3(0.0f, -100.5f, -1.0f), 100.0f,
+                            new Lambertian(new Vec3(0.8f, 0.8f, 0.0f))));
+                        Hittable world = objects.BuildBvh();
+                        Camera camera = new Camera();
+                        camera.AspectRatio = 1.7f;
+                        camera.ImageWidth = 17;
+                        camera.SamplesPerPixel = 3;
+                        camera.MaxDepth = 5;
+                        camera.DefocusAngle = 0.25f;
+                        camera.FocusDistance = 1.0f;
+                        camera.ProgressRows = 0;
+                        camera.InitializeForRender();
+                        ParallelRenderSession render = new ParallelRenderSession(camera,
+                            world, RandomGenerator.DefaultRenderSeed);
+                        render.Start();
+                        render.Join();
+                        Console.WriteLine(render.IsComplete);
+                        Console.WriteLine(render.PixelChecksum());
+
+                        RenderWorkState workState = new RenderWorkState(camera.ImageWidth,
+                            camera.ImageHeight);
+                        Rgba32[] bandPixels = new Rgba32[camera.ImageWidth
+                            * camera.ImageHeight];
+                        RenderWorker band = new RenderWorker(workState, camera, world,
+                            bandPixels, RandomGenerator.DefaultRenderSeed, 2, 4);
+                        band.Run();
+                        bool linear = band.PublishedCount == camera.ImageWidth * 2;
+                        int completed = 0;
+                        while (completed < band.PublishedCount)
+                        {
+                            if (band.CompletedPixelAt(completed)
+                                != camera.ImageWidth * 2 + completed)
+                                linear = false;
+                            completed++;
+                        }
+                        Console.WriteLine(linear);
+                    }
+                }
+                """;
+            var parallel = CompileAndRun(HostedIoSources(parallelHarness), threads: true);
+            Assert(parallel.ExitCode == 0, parallel.StandardError);
+            Assert(Normalize(parallel.StandardOutput).Trim() == "True\n1657345586\nTrue",
+                $"The twelve-worker linear-band renderer diverged: {parallel.StandardOutput}{parallel.StandardError}");
+
             const string traversalHarness = """
                 using System;
                 using System.Simd;

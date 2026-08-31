@@ -14,6 +14,7 @@
   <member id="P:System.Exception.Message"><summary>Gets the exception message.</summary></member>
   <member id="M:System.Exception.ToString()"><summary>Returns the exception type and message.</summary><returns>An owned managed string.</returns></member>
   <member id="T:System.ArgumentException"><summary>Represents an invalid runtime argument, including an invalid dynamic atomic memory order.</summary></member>
+  <member id="T:System.ArgumentOutOfRangeException"><summary>Represents an argument outside the range accepted by an operation.</summary></member>
   <member id="T:System.ThreadStateException"><summary>Represents an invalid managed-thread lifecycle or native scheduler configuration.</summary></member>
   <member id="T:System.SynchronizationLockException"><summary>Represents an attempt to release a mutex that the current thread does not own.</summary></member>
 
@@ -47,7 +48,11 @@
 
   <member id="T:System.Math"><summary>Provides single- and double-precision mathematical functions.</summary><remarks>Functions follow the target C math library for NaN, infinity, signed-zero, and domain behavior. They do not expose errno or floating-point exception state.</remarks></member>
   <member id="F:System.Math.Pi"><summary>Represents the nearest single-precision value to pi.</summary></member>
+  <member id="F:System.Math.E"><summary>Represents the nearest single-precision value to Euler's number.</summary></member>
+  <member id="F:System.Math.Tau"><summary>Represents the nearest single-precision value to one full turn in radians.</summary></member>
   <member id="F:System.Math.Pi64"><summary>Represents the nearest double-precision value to pi.</summary></member>
+  <member id="F:System.Math.E64"><summary>Represents the nearest double-precision value to Euler's number.</summary></member>
+  <member id="F:System.Math.Tau64"><summary>Represents the nearest double-precision value to one full turn in radians.</summary></member>
   <member id="M:System.Math.Sqrt(float)"><summary>Returns the square root of a value.</summary><param name="value">The input value.</param><returns>The native C square-root result.</returns></member>
   <member id="M:System.Math.Abs(float)"><summary>Returns the absolute magnitude of a value.</summary><param name="value">The input value.</param><returns>The native C absolute-value result.</returns></member>
   <member id="M:System.Math.Tan(float)"><summary>Returns the tangent of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C tangent result.</returns></member>
@@ -55,8 +60,19 @@
   <member id="M:System.Math.Max(float,float)"><summary>Returns the larger of two values using native C maximum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C maximum result.</returns></member>
   <member id="M:System.Math.Sin(float)"><summary>Returns the sine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C sine result.</returns></member>
   <member id="M:System.Math.Cos(float)"><summary>Returns the cosine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C cosine result.</returns></member>
+  <member id="M:System.Math.Acos(float)"><summary>Returns the arc cosine of a value.</summary><param name="value">The input value.</param><returns>The native C arc-cosine result in radians.</returns></member>
   <member id="M:System.Math.Floor(float)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a float.</returns></member>
   <member id="M:System.Math.Ceiling(float)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a float.</returns></member>
+  <member id="M:System.Math.Asin(float)"><summary>Returns the arc sine of a value.</summary><param name="value">The input value.</param><returns>The native C arc-sine result in radians.</returns></member>
+  <member id="M:System.Math.Atan(float)"><summary>Returns the arc tangent of a value.</summary><param name="value">The input value.</param><returns>The native C arc-tangent result in radians.</returns></member>
+  <member id="M:System.Math.Atan2(float,float)"><summary>Returns the angle of a Cartesian coordinate.</summary><param name="y">The vertical coordinate.</param><param name="x">The horizontal coordinate.</param><returns>The native C two-argument arc-tangent result in radians.</returns></member>
+  <member id="M:System.Math.Exp(float)"><summary>Returns e raised to a power.</summary><param name="value">The exponent.</param><returns>The native C exponential result.</returns></member>
+  <member id="M:System.Math.Log(float)"><summary>Returns the natural logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C logarithm result.</returns></member>
+  <member id="M:System.Math.Log2(float)"><summary>Returns the base-two logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C base-two logarithm result.</returns></member>
+  <member id="M:System.Math.Log10(float)"><summary>Returns the base-ten logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C base-ten logarithm result.</returns></member>
+  <member id="M:System.Math.Pow(float,float)"><summary>Returns a value raised to a power.</summary><param name="value">The base value.</param><param name="power">The exponent.</param><returns>The native C power result.</returns></member>
+  <member id="M:System.Math.Round(float)"><summary>Rounds to the nearest integer, with halfway cases away from zero.</summary><param name="value">The input value.</param><returns>The native C round result as a float.</returns></member>
+  <member id="M:System.Math.Truncate(float)"><summary>Rounds toward zero to an integral value.</summary><param name="value">The input value.</param><returns>The native C truncation result as a float.</returns></member>
   <member id="M:System.Math.Sqrt(double)"><summary>Returns the square root of a value.</summary><param name="value">The input value.</param><returns>The native C square-root result.</returns></member>
   <member id="M:System.Math.Abs(double)"><summary>Returns the absolute magnitude of a value.</summary><param name="value">The input value.</param><returns>The native C absolute-value result.</returns></member>
   <member id="M:System.Math.Tan(double)"><summary>Returns the tangent of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C tangent result.</returns></member>
@@ -64,8 +80,45 @@
   <member id="M:System.Math.Max(double,double)"><summary>Returns the larger of two values using native C maximum semantics.</summary><param name="left">The first value.</param><param name="right">The second value.</param><returns>The native C maximum result.</returns></member>
   <member id="M:System.Math.Sin(double)"><summary>Returns the sine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C sine result.</returns></member>
   <member id="M:System.Math.Cos(double)"><summary>Returns the cosine of an angle in radians.</summary><param name="value">The angle in radians.</param><returns>The native C cosine result.</returns></member>
+  <member id="M:System.Math.Acos(double)"><summary>Returns the arc cosine of a value.</summary><param name="value">The input value.</param><returns>The native C arc-cosine result in radians.</returns></member>
   <member id="M:System.Math.Floor(double)"><summary>Returns the greatest integral value not greater than the input.</summary><param name="value">The input value.</param><returns>The native C floor result as a double.</returns></member>
   <member id="M:System.Math.Ceiling(double)"><summary>Returns the smallest integral value not less than the input.</summary><param name="value">The input value.</param><returns>The native C ceiling result as a double.</returns></member>
+  <member id="M:System.Math.Asin(double)"><summary>Returns the arc sine of a value.</summary><param name="value">The input value.</param><returns>The native C arc-sine result in radians.</returns></member>
+  <member id="M:System.Math.Atan(double)"><summary>Returns the arc tangent of a value.</summary><param name="value">The input value.</param><returns>The native C arc-tangent result in radians.</returns></member>
+  <member id="M:System.Math.Atan2(double,double)"><summary>Returns the angle of a Cartesian coordinate.</summary><param name="y">The vertical coordinate.</param><param name="x">The horizontal coordinate.</param><returns>The native C two-argument arc-tangent result in radians.</returns></member>
+  <member id="M:System.Math.Exp(double)"><summary>Returns e raised to a power.</summary><param name="value">The exponent.</param><returns>The native C exponential result.</returns></member>
+  <member id="M:System.Math.Log(double)"><summary>Returns the natural logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C logarithm result.</returns></member>
+  <member id="M:System.Math.Log2(double)"><summary>Returns the base-two logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C base-two logarithm result.</returns></member>
+  <member id="M:System.Math.Log10(double)"><summary>Returns the base-ten logarithm of a value.</summary><param name="value">The input value.</param><returns>The native C base-ten logarithm result.</returns></member>
+  <member id="M:System.Math.Pow(double,double)"><summary>Returns a value raised to a power.</summary><param name="value">The base value.</param><param name="power">The exponent.</param><returns>The native C power result.</returns></member>
+  <member id="M:System.Math.Round(double)"><summary>Rounds to the nearest integer, with halfway cases away from zero.</summary><param name="value">The input value.</param><returns>The native C round result as a double.</returns></member>
+  <member id="M:System.Math.Truncate(double)"><summary>Rounds toward zero to an integral value.</summary><param name="value">The input value.</param><returns>The native C truncation result as a double.</returns></member>
+
+  <member id="T:System.TimeSpan"><summary>Represents a signed duration with exact nanosecond storage.</summary></member>
+  <member id="F:System.TimeSpan.NanosecondsPerMicrosecond"><summary>Specifies the number of nanoseconds in one microsecond.</summary></member>
+  <member id="F:System.TimeSpan.NanosecondsPerMillisecond"><summary>Specifies the number of nanoseconds in one millisecond.</summary></member>
+  <member id="F:System.TimeSpan.NanosecondsPerSecond"><summary>Specifies the number of nanoseconds in one second.</summary></member>
+  <member id="M:System.TimeSpan.#ctor(long)"><summary>Creates a duration from nanoseconds.</summary><param name="nanoseconds">The signed nanosecond count.</param></member>
+  <member id="P:System.TimeSpan.Zero"><summary>Gets a zero-length duration.</summary></member>
+  <member id="P:System.TimeSpan.Nanoseconds"><summary>Gets the exact signed nanosecond count.</summary></member>
+  <member id="P:System.TimeSpan.WholeMicroseconds"><summary>Gets complete microseconds, truncated toward zero.</summary></member>
+  <member id="P:System.TimeSpan.WholeMilliseconds"><summary>Gets complete milliseconds, truncated toward zero.</summary></member>
+  <member id="P:System.TimeSpan.WholeSeconds"><summary>Gets complete seconds, truncated toward zero.</summary></member>
+  <member id="P:System.TimeSpan.TotalMilliseconds"><summary>Gets the duration as fractional milliseconds.</summary></member>
+  <member id="P:System.TimeSpan.TotalSeconds"><summary>Gets the duration as fractional seconds.</summary></member>
+  <member id="M:System.TimeSpan.FromNanoseconds(long)"><summary>Creates a duration from nanoseconds.</summary><param name="value">The signed unit count.</param><returns>The resulting duration.</returns></member>
+  <member id="M:System.TimeSpan.FromMicroseconds(long)"><summary>Creates a duration from microseconds.</summary><param name="value">The signed unit count.</param><returns>The resulting duration.</returns></member>
+  <member id="M:System.TimeSpan.FromMilliseconds(long)"><summary>Creates a duration from milliseconds.</summary><param name="value">The signed unit count.</param><returns>The resulting duration.</returns></member>
+  <member id="M:System.TimeSpan.FromSeconds(long)"><summary>Creates a duration from seconds.</summary><param name="value">The signed unit count.</param><returns>The resulting duration.</returns></member>
+
+  <member id="T:System.Random"><summary>Provides deterministic allocation-free pseudorandom values.</summary><remarks>Seeded PCG-XSH-RR 64/32 sequences are stable across C~ targets.</remarks></member>
+  <member id="M:System.Random.#ctor()"><summary>Creates a generator with deterministic seed zero.</summary></member>
+  <member id="M:System.Random.#ctor(ulong)"><summary>Creates a generator with a selected seed.</summary><param name="seed">The initial sequence state.</param></member>
+  <member id="M:System.Random.Reseed(ulong)"><summary>Restarts the generator from a selected seed.</summary><param name="seed">The new sequence state.</param></member>
+  <member id="M:System.Random.NextUInt()"><summary>Returns the next 32-bit unsigned value.</summary><returns>The next deterministic sequence value.</returns></member>
+  <member id="M:System.Random.NextUInt(uint)"><summary>Returns an unbiased unsigned value below an exclusive upper bound.</summary><param name="maxExclusive">The positive exclusive upper bound.</param><returns>A value less than the bound.</returns><exception cref="System.ArgumentOutOfRangeException">The bound is zero.</exception></member>
+  <member id="M:System.Random.NextInt(int,int)"><summary>Returns an unbiased integer in a half-open range.</summary><param name="minInclusive">The inclusive lower bound.</param><param name="maxExclusive">The exclusive upper bound.</param><returns>A value in the selected range.</returns><exception cref="System.ArgumentOutOfRangeException">The range is empty or reversed.</exception></member>
+  <member id="M:System.Random.NextFloat()"><summary>Returns a uniformly distributed single-precision value in the half-open range from zero to one.</summary><returns>A value greater than or equal to zero and less than one.</returns></member>
 
   <member id="T:System.Vec2"><summary>Represents a mutable two-component single-precision vector.</summary></member>
   <member id="F:System.Vec2.X"><summary>Gets or sets the X component.</summary></member>
@@ -173,6 +226,31 @@
   <member id="M:System.Threading.Mutex.Enter()"><summary>Acquires the mutex recursively.</summary></member>
   <member id="M:System.Threading.Mutex.TryEnter()"><summary>Attempts to acquire the mutex without waiting.</summary><returns>True when the mutex was acquired.</returns></member>
   <member id="M:System.Threading.Mutex.Exit()"><summary>Releases one recursive acquisition.</summary></member>
+  <member id="T:System.Threading.SpinWait"><summary>Provides allocation-free escalating spin and yield behavior.</summary></member>
+  <member id="M:System.Threading.SpinWait.#ctor()"><summary>Creates a spin waiter with a zero operation count.</summary></member>
+  <member id="P:System.Threading.SpinWait.Count"><summary>Gets the saturating number of completed spin operations.</summary></member>
+  <member id="P:System.Threading.SpinWait.NextSpinWillYield"><summary>Gets whether the next operation will yield to the scheduler.</summary></member>
+  <member id="M:System.Threading.SpinWait.SpinOnce()"><summary>Performs one escalating pause or scheduler yield.</summary></member>
+  <member id="M:System.Threading.SpinWait.Reset()"><summary>Resets the operation count.</summary></member>
+  <member id="T:System.Threading.SpinLock"><summary>Provides an allocation-free non-recursive spin lock without ownership tracking.</summary><remarks>The type contains atomic storage and cannot be copied.</remarks></member>
+  <member id="M:System.Threading.SpinLock.#ctor()"><summary>Creates an unlocked spin lock.</summary></member>
+  <member id="P:System.Threading.SpinLock.IsHeld"><summary>Gets whether some caller currently holds the lock.</summary></member>
+  <member id="M:System.Threading.SpinLock.TryEnter()"><summary>Attempts to acquire the lock without waiting.</summary><returns>True when the lock was acquired.</returns></member>
+  <member id="M:System.Threading.SpinLock.Enter()"><summary>Spins until the lock is acquired.</summary></member>
+  <member id="M:System.Threading.SpinLock.Exit()"><summary>Releases the lock with release ordering.</summary></member>
+
+  <member id="T:System.Diagnostics.Stopwatch"><summary>Measures elapsed time using an allocation-free monotonic clock.</summary><remarks>Mutable copies have independent state. Instances are not thread-safe.</remarks></member>
+  <member id="M:System.Diagnostics.Stopwatch.#ctor()"><summary>Creates a stopped stopwatch with zero elapsed time.</summary></member>
+  <member id="M:System.Diagnostics.Stopwatch.StartNew()"><summary>Creates and starts a stopwatch.</summary><returns>A running stopwatch.</returns></member>
+  <member id="M:System.Diagnostics.Stopwatch.GetTimestampNanoseconds()"><summary>Reads the target monotonic clock in nanoseconds.</summary><returns>A non-wall-clock timestamp suitable for elapsed-time measurement.</returns></member>
+  <member id="P:System.Diagnostics.Stopwatch.IsRunning"><summary>Gets whether the stopwatch is currently running.</summary></member>
+  <member id="P:System.Diagnostics.Stopwatch.Elapsed"><summary>Gets the current elapsed duration.</summary></member>
+  <member id="P:System.Diagnostics.Stopwatch.ElapsedNanoseconds"><summary>Gets the current elapsed nanoseconds.</summary></member>
+  <member id="P:System.Diagnostics.Stopwatch.ElapsedMilliseconds"><summary>Gets complete elapsed milliseconds, truncated toward zero.</summary></member>
+  <member id="M:System.Diagnostics.Stopwatch.Start()"><summary>Starts or resumes measurement. Calling this on a running stopwatch has no effect.</summary></member>
+  <member id="M:System.Diagnostics.Stopwatch.Stop()"><summary>Stops measurement. Calling this on a stopped stopwatch has no effect.</summary></member>
+  <member id="M:System.Diagnostics.Stopwatch.Reset()"><summary>Stops measurement and clears elapsed time.</summary></member>
+  <member id="M:System.Diagnostics.Stopwatch.Restart()"><summary>Clears elapsed time and starts measurement.</summary></member>
 
   <member id="T:System.be16"><summary>Stores an unsigned 16-bit value in big-endian byte order.</summary></member>
   <member id="T:System.be32"><summary>Stores an unsigned 32-bit value in big-endian byte order.</summary></member>

@@ -78,4 +78,12 @@ internal sealed partial class TypedIrBodyLowerer
 
     private static bool HasUserDefinedOperatorOperand(params IrExpressionValue[] operands) =>
         operands.Any(operand => operand.Type.Symbol?.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct);
+
+    private bool HasUserDefinedOperatorCandidate(SyntaxKind operatorKind, params IrExpressionValue[] operands) =>
+        operands
+            .Select(operand => operand.Type.Symbol)
+            .Where(type => type?.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Struct)
+            .SelectMany(type => Hierarchy(type!))
+            .SelectMany(type => type.Methods)
+            .Any(method => method.IsOperator && method.OperatorKind == operatorKind && method.Parameters.Length == operands.Length);
 }

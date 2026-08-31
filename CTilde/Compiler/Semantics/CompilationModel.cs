@@ -1474,8 +1474,6 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1242", "Opaque handles cannot be stored in fields.", field.Source, field.Span);
                     if (symbol.Type.IsNativeUtf8String)
                         Diagnostics.Add("CT1265", "NativeUtf8String cannot be stored in fields or static storage.", field.Source, field.Span);
-                    if (type.Kind == DeclaredTypeKind.Struct && symbol.Type.ContainsAtomic)
-                        Diagnostics.Add("CT1278", "A structure cannot contain Atomic<T> because structure copies would duplicate atomic storage.", field.Source, field.Span);
                     if (symbol.IsConst && field.Initializer is null)
                         Diagnostics.Add("CT1202", "A const field requires an initializer.", field.Source, field.Span);
                     if (symbol.IsConst && symbol.IsReadonly)

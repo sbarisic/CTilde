@@ -1,0 +1,89 @@
+namespace System;
+
+internal static class RandomRuntime
+{
+    [Extern("ct_random_argument_out_of_range")]
+    [NoAlloc]
+    [NoBlock]
+    internal static void ThrowArgumentOutOfRange();
+}
+
+public struct Random
+{
+    private ulong state;
+
+    public Random()
+    {
+        state = 0UL;
+    }
+
+    public Random(ulong seed)
+    {
+        state = seed;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public void Reseed(ulong seed)
+    {
+        state = seed;
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public uint NextUInt()
+    {
+        ulong previous = state;
+        state = previous * 6364136223846793005UL + 1442695040888963407UL;
+        uint shifted = (uint)(((previous >> 18) ^ previous) >> 27);
+        uint rotation = (uint)(previous >> 59);
+        return(shifted >> (int)rotation) | (shifted << (int)((0u - rotation) & 31u));
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public uint NextUInt(uint maxExclusive)
+    {
+        if (maxExclusive == 0u)
+        {
+            RandomRuntime.ThrowArgumentOutOfRange();
+            return 0u;
+        }
+        uint threshold = (0u - maxExclusive) % maxExclusive;
+        while (true)
+        {
+            uint value = NextUInt();
+            if (value >= threshold)
+            {
+                return value % maxExclusive;
+            }
+        }
+        return 0u;
+    }
+
+    [NoAlloc]
+    [NoBlock]
+    public int NextInt(int minInclusive, int maxExclusive)
+    {
+        if (maxExclusive <= minInclusive)
+        {
+            RandomRuntime.ThrowArgumentOutOfRange();
+            return 0;
+        }
+        uint range = (uint)maxExclusive - (uint)minInclusive;
+        return(int)((uint)minInclusive + NextUInt(range));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    [NoRuntime]
+    public float NextFloat()
+    {
+        return(float)(NextUInt() >> 8) * (1.0f / 16777216.0f);
+    }
+}

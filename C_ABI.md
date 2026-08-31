@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.37 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
+This document defines the generated C contract for C~ draft 0.40 and runtime ABI 16. Drafts 0.26 through 0.34 add source-owner identities, binary64 and rune scalars, internal fixed-width SIMD storage, embedded data, generated lambda/closure symbols, and exact repository source owners while retaining the Draft 0.25 native facilities.
 
-Draft 0.39 retains runtime ABI 16 and debug metadata version 3. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]` uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.40 retains runtime ABI 16 and debug metadata version 3. It adds only private, reachability-pruned monotonic-clock support and ordinary standard-library source. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]`, introduced in Draft 0.39, uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -427,7 +427,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.37.
+This section records constraints that remain after draft 0.40.
 
 Fixed-width SIMD values are internal C~ value types. They are rejected in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use x86/Arm intrinsics or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI.
 
@@ -478,6 +478,7 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 | `CTM0002` | Reference-count overflow or invalid retain |
 | `CTM0003` | Invalid release, underflow, or cleanup corruption |
 | `CTD0001` | `DivideByZeroException` |
+| `CTR0001` | `ArgumentOutOfRangeException` |
 | `CTS0002` | Native scalar formatting failure |
 | `CTS0003` | `ArgumentException` at a native UTF-8 boundary |
 | `CTO0001`, `CTO0003` | `InvalidCastException` |
@@ -485,10 +486,11 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 | `CTE0003` | C~ exception escaped a native export or callback barrier |
 | `CTT0001` | Native entry or ARC operation occurred on an unattached thread or task |
 | `CTT0002` | Attachment, detachment, task exit, or runtime shutdown violated the thread lifecycle |
+| `CTK0001` | Fatal monotonic-clock query or conversion failure |
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 
-Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the integer divide-by-zero runtime fault is `CTD0001`.
+Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the integer divide-by-zero runtime fault is `CTD0001`. Draft 0.40 adds catchable random-range origin `CTR0001` and fatal monotonic-clock code `CTK0001`.
 
 `CTM0002`, `CTM0003`, `CTE0003`, `CTT0001`, `CTT0002`, ABI mismatch, and cleanup corruption remain panics. Allocation failure before thread attachment is also a panic. `CTILDE_CONFORMANCE` enables allocation-failure injection for tests only; production builds expose no injection API. `Environment.Exit`, native `abort`, reset, and power loss bypass managed cleanup.
 

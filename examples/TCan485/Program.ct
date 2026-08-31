@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Runtime;
 using System.Threading;
 using Esp.Idf;
@@ -121,6 +122,25 @@ public struct ArcHolder
 
 public static class Program
 {
+    private static bool ValidateDraft040Foundations()
+    {
+        Random zero = new Random();
+        bool zeroSequence = zero.NextUInt() == 0u && zero.NextUInt() == 1613493245u
+            && zero.NextUInt() == 3894649422u && zero.NextUInt() == 2055130073u && zero.NextUInt()
+            == 2315086854u;
+        Random ordinary = new Random(1UL);
+        bool ordinarySequence = ordinary.NextUInt() == 0u && ordinary.NextUInt()
+            == 3114030964u && ordinary.NextUInt() == 3308539156u;
+        Random maximum = new Random(18446744073709551615UL);
+        bool maximumSequence = maximum.NextUInt() == 4293918721u && maximum.NextUInt()
+            == 3933164268u;
+        Stopwatch watch = Stopwatch.StartNew();
+        FreeRtos.DelayMilliseconds(1u);
+        watch.Stop();
+        return zeroSequence && ordinarySequence && maximumSequence && watch.Elapsed
+            > TimeSpan.Zero;
+    }
+
     private const int Ws2812Pin = 4;
     private static Atomic<int> ManagedCounter = new Atomic<int>(0);
     private static Mutex ManagedMutex;
@@ -349,6 +369,10 @@ public static class Program
             { nop }
             Console.WriteLine("inline assembly: ok");
             RunManagedSelfTests();
+            if (ValidateDraft040Foundations())
+                Console.WriteLine("draft40 foundations: ok");
+            else
+                Console.WriteLine("DRAFT40_FOUNDATIONS_FAILED");
             Console.Write("free heap: ");
             Console.WriteLine(EspSystem.GetFreeHeapSize());
             Console.Write("tick: ");

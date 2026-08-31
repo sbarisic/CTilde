@@ -652,7 +652,11 @@ internal static class TypeFacts
 
 internal static class OperatorFacts
 {
-    public static bool IsSupported(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken;
+    public static bool IsSupported(SyntaxKind kind) => kind is SyntaxKind.PlusToken or SyntaxKind.MinusToken or SyntaxKind.StarToken or SyntaxKind.SlashToken or
+        SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken or SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken;
+
+    public static bool IsComparison(SyntaxKind kind) => kind is SyntaxKind.EqualsEqualsToken or SyntaxKind.BangEqualsToken or
+        SyntaxKind.LessToken or SyntaxKind.LessEqualsToken or SyntaxKind.GreaterToken or SyntaxKind.GreaterEqualsToken;
 
     public static string Text(SyntaxKind kind) => kind switch
     {
@@ -660,6 +664,12 @@ internal static class OperatorFacts
         SyntaxKind.MinusToken => "-",
         SyntaxKind.StarToken => "*",
         SyntaxKind.SlashToken => "/",
+        SyntaxKind.EqualsEqualsToken => "==",
+        SyntaxKind.BangEqualsToken => "!=",
+        SyntaxKind.LessToken => "<",
+        SyntaxKind.LessEqualsToken => "<=",
+        SyntaxKind.GreaterToken => ">",
+        SyntaxKind.GreaterEqualsToken => ">=",
         _ => "?",
     };
 
@@ -671,6 +681,12 @@ internal static class OperatorFacts
         (SyntaxKind.MinusToken, 2) => "Subtraction",
         (SyntaxKind.StarToken, 2) => "Multiplication",
         (SyntaxKind.SlashToken, 2) => "Division",
+        (SyntaxKind.EqualsEqualsToken, 2) => "Equality",
+        (SyntaxKind.BangEqualsToken, 2) => "Inequality",
+        (SyntaxKind.LessToken, 2) => "LessThan",
+        (SyntaxKind.LessEqualsToken, 2) => "LessThanOrEqual",
+        (SyntaxKind.GreaterToken, 2) => "GreaterThan",
+        (SyntaxKind.GreaterEqualsToken, 2) => "GreaterThanOrEqual",
         _ => "Invalid",
     };
 

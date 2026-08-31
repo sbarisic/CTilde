@@ -44,7 +44,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'ELF carrier inspection failed.' }
     $inspectionText = $inspection -join "`n"
 
-    $expected = @('C~ is running as a Cosmopolitan APE.', 'Worker value: 42')
+    $expected = @('C~ is running as a Cosmopolitan APE.', 'Worker value: 42', 'draft40 random: ok')
     foreach ($line in $expected) {
         if ($windowsOutput -notcontains $line -or $linuxOutput -notcontains $line) {
             throw "The Windows or WSL transcript omitted '$line'."
@@ -55,7 +55,7 @@ try {
         throw 'The retained carrier does not contain the expected x86-64 header and C~ runtime symbols.'
     }
 
-    Write-Output 'Cosmopolitan Draft 0.24 acceptance passed on Windows and WSL.'
+    Write-Output 'Cosmopolitan Draft 0.40 acceptance passed on Windows and WSL.'
 }
 finally {
     $env:CTILDE_COSMOCC = $previousCompiler

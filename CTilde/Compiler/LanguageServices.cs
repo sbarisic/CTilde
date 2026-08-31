@@ -499,7 +499,10 @@ public sealed partial class LanguageServiceSnapshot
         }
 
         if (receiver.Type is null || receiver.Type.IsError)
+        {
+            AddNamespaceCompletions(results, member, replacement);
             return;
+        }
         if (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array)
             Add("Length", LanguageCompletionKind.Property, "int Length", "0");
         if (receiver.Type.IsNativeBuffer)
@@ -527,6 +530,33 @@ public sealed partial class LanguageServiceSnapshot
 
         void Add(string label, LanguageCompletionKind kind, string detail, string order, object? symbol = null, string? documentationId = null) =>
             results.Add(new LanguageCompletion(label, kind, detail, label, replacement, order + label, documentationId ?? (symbol is null ? null : _model.Documentation.GetId(symbol))));
+    }
+
+    private void AddNamespaceCompletions(List<LanguageCompletion> results, MemberAccessExpressionSyntax member,
+        TextSpan replacement)
+    {
+        var namespaceName = QualifiedName(member.Receiver);
+        if (string.IsNullOrEmpty(namespaceName))
+            return;
+        var prefix = namespaceName + ".";
+        var namespaces = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var type in _model.Types.Values)
+        {
+            if (type.Namespace == namespaceName)
+            {
+                results.Add(new LanguageCompletion(type.Name, CompletionKind(type), FormatType(type), type.Name,
+                    replacement, "1" + type.Name, _model.Documentation.GetId(type)));
+                continue;
+            }
+            if (!type.Namespace.StartsWith(prefix, StringComparison.Ordinal))
+                continue;
+            var remainder = type.Namespace[prefix.Length..];
+            var separator = remainder.IndexOf('.');
+            namespaces.Add(separator < 0 ? remainder : remainder[..separator]);
+        }
+        foreach (var child in namespaces)
+            results.Add(new LanguageCompletion(child, LanguageCompletionKind.Namespace,
+                $"namespace {namespaceName}.{child}", child, replacement, "0" + child));
     }
 
     private IEnumerable<object> ResolveToken(DocumentContext context, SyntaxToken token)

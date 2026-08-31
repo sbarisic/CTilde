@@ -169,6 +169,40 @@ internal static partial class ConformanceTests
             Assert(chainedCompletions.Count(item => item.Label == "WriteLine" && item.Kind == LanguageCompletionKind.Method) == 1,
                 "Whitespace and a chained receiver prevented recovered member completion.");
 
+            const string namespaceSource = "public static class Program { [EntryPoint] public static void Main() { System.Threa } }";
+            var namespaceService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(namespaceSource, "namespace-completion.ct")]);
+            var namespacePosition = namespaceSource.IndexOf("System.Threa", StringComparison.Ordinal) + "System.Threa".Length;
+            var namespaceCompletions = namespaceService.GetCompletions("namespace-completion.ct", namespacePosition);
+            var threading = namespaceCompletions.Single(item => item.Label == "Threading" && item.Kind == LanguageCompletionKind.Namespace);
+            Assert(threading.Detail == "namespace System.Threading" &&
+                namespaceSource.Substring(threading.ReplacementSpan.Start, threading.ReplacementSpan.Length) == "Threa",
+                "Root namespace completion did not preserve its qualified detail or replacement span.");
+
+            const string usingNamespaceSource = "using System.Threa\npublic static class Program { }";
+            var usingNamespaceService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(usingNamespaceSource, "using-namespace-completion.ct")]);
+            var usingNamespacePosition = usingNamespaceSource.IndexOf("System.Threa", StringComparison.Ordinal) + "System.Threa".Length;
+            Assert(usingNamespaceService.GetCompletions("using-namespace-completion.ct", usingNamespacePosition)
+                .Any(item => item.Label == "Threading" && item.Kind == LanguageCompletionKind.Namespace),
+                "Namespace completion was unavailable inside a using directive.");
+
+            const string nestedNamespaceSource = "public static class Program { [EntryPoint] public static void Main() { System.Threading. } }";
+            var nestedNamespaceService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(nestedNamespaceSource, "nested-namespace-completion.ct")]);
+            var nestedNamespacePosition = nestedNamespaceSource.IndexOf("System.Threading.", StringComparison.Ordinal) + "System.Threading.".Length;
+            var nestedNamespaceCompletions = nestedNamespaceService.GetCompletions("nested-namespace-completion.ct", nestedNamespacePosition);
+            Assert(nestedNamespaceCompletions.Any(item => item.Label == "Thread" && item.Kind == LanguageCompletionKind.Class) &&
+                nestedNamespaceCompletions.Any(item => item.Label == "SpinWait" && item.Kind == LanguageCompletionKind.Struct) &&
+                nestedNamespaceCompletions.Any(item => item.Label == "SpinLock" && item.Kind == LanguageCompletionKind.Struct),
+                "Nested namespace completion did not include its directly declared types.");
+
+            var customNamespace = SyntaxTree.ParseText("namespace Company.Product.Tools; public class Widget { }", "custom-library.ct");
+            const string customNamespaceSource = "public static class Program { public static void M() { Company.Product. } }";
+            var customNamespaceService = LanguageServiceSnapshot.Create([customNamespace,
+                SyntaxTree.ParseText(customNamespaceSource, "custom-namespace-completion.ct")]);
+            var customNamespacePosition = customNamespaceSource.IndexOf("Company.Product.", StringComparison.Ordinal) + "Company.Product.".Length;
+            var customNamespaceCompletions = customNamespaceService.GetCompletions("custom-namespace-completion.ct", customNamespacePosition);
+            Assert(customNamespaceCompletions.Any(item => item.Label == "Tools" && item.Kind == LanguageCompletionKind.Namespace),
+                "Project namespace completion did not include an immediate child namespace.");
+
             const string signatureSource = "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(1); } }";
             var signatureService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(signatureSource, "signature.ct")]);
             var signaturePosition = signatureSource.IndexOf("WriteLine(", StringComparison.Ordinal) + "WriteLine(".Length;

@@ -22,6 +22,11 @@ public static class CommandContracts
             _ => string.Empty,
         });
         result.RemoveAll(string.IsNullOrEmpty);
+        if (command != CTildeCommandKind.Clean)
+        {
+            result.Add("--verbosity");
+            result.Add("normal");
+        }
         return result;
     }
 
@@ -59,19 +64,33 @@ public sealed record ParsedDiagnostic(string File, int Line, int Column, string 
 
 public static class DiagnosticParser
 {
-    private static readonly Regex Pattern = new(
+    private static readonly Regex CanonicalPattern = new(
         @"^(?<file>.+)\((?<line>\d+),(?<column>\d+)\):\s*(?<severity>error|warning|info)\s+(?<code>[A-Za-z]+\d+):\s*(?<message>.*)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex MsvcPattern = new(
+        @"^(?<file>.+)\((?<line>\d+)(?:,(?<column>\d+))?\):\s*(?<severity>fatal error|error|warning)\s+(?<code>[A-Za-z]+\d+):\s*(?<message>.*)$",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
+    private static readonly Regex GnuPattern = new(
+        @"^(?<file>(?:[A-Za-z]:)?[^:]+):(?<line>\d+):(?<column>\d+):\s*(?<severity>fatal error|error|warning|note):\s*(?<message>.*)$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant | RegexOptions.IgnoreCase);
 
     public static bool TryParse(string line, out ParsedDiagnostic? diagnostic)
     {
-        var match = Pattern.Match(line);
+        var match = CanonicalPattern.Match(line);
+        if (!match.Success)
+            match = MsvcPattern.Match(line);
+        if (!match.Success)
+            match = GnuPattern.Match(line);
         if (!match.Success || !int.TryParse(match.Groups["line"].Value, out var row) || !int.TryParse(match.Groups["column"].Value, out var column))
         {
             diagnostic = null;
             return false;
         }
-        diagnostic = new ParsedDiagnostic(match.Groups["file"].Value, row, column, match.Groups["severity"].Value.ToLowerInvariant(), match.Groups["code"].Value, match.Groups["message"].Value);
+        var severity = match.Groups["severity"].Value.ToLowerInvariant();
+        if (severity == "fatal error") severity = "error";
+        if (severity == "note") severity = "info";
+        var code = match.Groups["code"].Success ? match.Groups["code"].Value : "CTNATIVE";
+        diagnostic = new ParsedDiagnostic(match.Groups["file"].Value, row, column, severity, code, match.Groups["message"].Value);
         return true;
     }
 }

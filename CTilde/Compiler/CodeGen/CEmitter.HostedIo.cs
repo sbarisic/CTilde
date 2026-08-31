@@ -57,7 +57,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("    int length = snprintf(buffer, sizeof(buffer), \"%s failed with host error %d.\", operation, error_code);");
         writer.WriteLine("    ct_string* message = ct_string_from_format(buffer, length, sizeof(buffer), \"<host-io>\", 0);");
         writer.WriteLine($"    {exceptionType}* exception = {ioConstructor.CName}(message, (int32_t)error_code);");
-        writer.WriteLine("    ct_release((ct_object*)(void*)message);");
+        writer.WriteLine("    ct_release_fast((ct_object*)(void*)message);");
         writer.WriteLine("    ct_object* owned_exception = (ct_object*)(void*)exception;");
         writer.WriteLine("    ct_cleanup_record cleanup;");
         writer.WriteLine("    ct_cleanup_push(&cleanup, &owned_exception, ct_drop_ref_value);");

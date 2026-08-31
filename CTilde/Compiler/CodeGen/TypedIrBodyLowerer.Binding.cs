@@ -175,7 +175,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (target.LValue.Property is { Getter: not null } property)
         {
             var getter = _emitter.GetAccessorMethod(property, getter: true);
-            _emitter.Effects.RecordCall(_method, getter, syntax.Operand, property.IsVirtual && !target.LValue.IsBaseReceiver);
+            _emitter.Effects.RecordCall(_method, getter, syntax.Operand, target.LValue.UsesVirtualDispatch);
         }
         var prelude = new List<string>(target.Prelude);
         var old = NewTemp();
@@ -515,7 +515,7 @@ internal sealed partial class TypedIrBodyLowerer
             if (target.LValue.Property is { Getter: not null } overloadedProperty)
             {
                 var getter = _emitter.GetAccessorMethod(overloadedProperty, getter: true);
-                _emitter.Effects.RecordCall(_method, getter, syntax.Left, overloadedProperty.IsVirtual && !target.LValue.IsBaseReceiver);
+                _emitter.Effects.RecordCall(_method, getter, syntax.Left, target.LValue.UsesVirtualDispatch);
             }
             var oldOperand = OwnResult(target.Type, target.Code, prelude, borrowed: target.Type.ContainsManagedReferences);
             var operatorResult = LowerOperatorCall(operation, [oldOperand, rawRight], [syntax.Left, syntax.Right], syntax);
@@ -546,7 +546,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (target.LValue.Property is { Getter: not null } property)
         {
             var getter = _emitter.GetAccessorMethod(property, getter: true);
-            _emitter.Effects.RecordCall(_method, getter, syntax.Left, property.IsVirtual && !target.LValue.IsBaseReceiver);
+            _emitter.Effects.RecordCall(_method, getter, syntax.Left, target.LValue.UsesVirtualDispatch);
         }
         var operationType = TypeFacts.PromoteNumeric(target.Type, rawRight.Type);
         if (operationType.IsError)
@@ -999,7 +999,7 @@ internal sealed partial class TypedIrBodyLowerer
             var thunk = _emitter.RegisterDelegateThunk(delegateType, method, false);
             var delegateValue = NewTemp();
             prelude.Add($"{_emitter.CTypeName(target)} {delegateValue} = {CEmitter.DelegateFactoryName(delegateType)}((ct_object*)(void*){environment}, &{thunk}, {_emitter.SourceArgument(lambda)});");
-            prelude.Add($"ct_release((ct_object*)(void*){environment});");
+            prelude.Add($"ct_release_fast((ct_object*)(void*){environment});");
             _emitter.Effects.RecordAllocation(_method, lambda, $"creation of ARC closure '{target.DisplayName}'");
             result = OwnResult(target, delegateValue, prelude, symbol: method);
         }
@@ -1081,7 +1081,7 @@ internal sealed partial class TypedIrBodyLowerer
             prelude = new List<string>(receiver.Prelude);
             targetCode = $"(ct_object*)(void*){receiver.Code}";
         }
-        var virtualDispatch = !selected.IsStatic && selected.IsVirtual && !group.IsBaseReceiver;
+        var virtualDispatch = !selected.IsStatic && RequiresVirtualDispatch(selected, receiver, group.IsBaseReceiver);
         var thunk = _emitter.RegisterDelegateThunk(target.Symbol!, selected, virtualDispatch);
         _emitter.Effects.RecordAllocation(_method, syntax, $"creation of delegate '{target.DisplayName}'");
         var creation = $"{CEmitter.DelegateFactoryName(target.Symbol!)}({targetCode}, &{thunk}, {_emitter.SourceArgument(syntax)})";

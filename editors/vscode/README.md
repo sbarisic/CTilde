@@ -43,7 +43,7 @@ code --install-extension .\ctilde-language-0.15.0.vsix --force
 - C#-style `///` XML documentation in lazily resolved completion details, hover, and signature help, including active-parameter descriptions.
 - Static/instance, inheritance, accessibility, lexical-scope, overload, and hosted/ESP-IDF filtering.
 - Live compiler diagnostics with related locations.
-- Hover, signature help, go-to-definition, document symbols, and workspace symbols.
+- Hover, signature help, go-to-definition, exact cross-project references, document symbols, and workspace symbols.
 - Read-only navigation into embedded `System` and `Esp.Idf` sources.
 - JSON validation for `ctilde.json` projects and ESP-IDF binding manifests.
 - Check, native Build, rebuild-and-Run, Debug, and Attach commands for workspace projects.
@@ -52,7 +52,7 @@ code --install-extension .\ctilde-language-0.15.0.vsix --force
 
 Supported documentation elements are `summary`, `param`, `returns`, `remarks`, `exception`, `see`, `paramref`, and sole-element `inheritdoc`. Documentation warnings remain non-blocking. Links, documentation-tag completion, XML output files, raw Markdown/HTML, and block documentation comments are not implemented.
 
-Rename, references, editor formatting, code actions, auto-import edits, and incremental semantic-token deltas are not implemented. Use `ctilde format <path>` or `ctilde format --check <path>` from the command line.
+Rename, editor formatting, code actions, auto-import edits, and incremental semantic-token deltas are not implemented. Use `ctilde format <path>` or `ctilde format --check <path>` from the command line.
 
 Type-body completion includes the `operator` declaration keyword. Operator hover, go-to-definition, document/workspace symbols, semantic classification, and filtering from ordinary member completion share the same regression coverage.
 

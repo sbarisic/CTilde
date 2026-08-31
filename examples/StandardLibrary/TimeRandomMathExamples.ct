@@ -1,0 +1,28 @@
+using System;
+using System.Diagnostics;
+using System.Threading;
+
+namespace StandardLibraryExample;
+
+public static class TimeRandomMathExamples
+{
+    public static void Run()
+    {
+        Console.WriteLine("-- time, random, and math --");
+        TimeSpan duration = TimeSpan.FromMilliseconds(1500L);
+        Console.WriteLine(String.Format("duration={0:F1}s; whole-ms={1}", duration.TotalSeconds,
+            duration.WholeMilliseconds));
+        Random random = new Random(42UL);
+        int integer = random.NextInt(10, 20);
+        float unit = random.NextFloat();
+        Console.WriteLine(String.Format("seeded-int={0}; seeded-unit={1:F4}", integer,
+            unit));
+        Console.WriteLine(String.Format("pow={0:F1}; log2={1:F1}; tau={2:F4}", Math.Pow(2.0f,
+            5.0f), Math.Log2(8.0f), Math.Tau));
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        Thread.Sleep(2u);
+        stopwatch.Stop();
+        Console.WriteLine(String.Format("stopwatch-running={0}; elapsed-positive={1}",
+            stopwatch.IsRunning, stopwatch.Elapsed > TimeSpan.Zero));
+    }
+}

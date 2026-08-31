@@ -639,6 +639,9 @@ test("Visual Studio diagnostics wait for project contexts and discard obsolete g
     const current = await client.waitForNotification("textDocument/publishDiagnostics",
       value => value.uri === uri && value.version === 2);
     assert.deepEqual(current.diagnostics, []);
+    const published = await client.waitForNotification("ctilde/diagnosticsPublished",
+      value => value.uri === uri && value.version === 2);
+    assert.equal(published.uri, uri);
     await client.assertNoNotification("textDocument/publishDiagnostics",
       value => value.uri === uri && value.version === 1, 300);
     client.clearNotifications("textDocument/publishDiagnostics",

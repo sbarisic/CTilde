@@ -99,15 +99,15 @@ Every class, string, array, and box starts with this header:
 ```c
 typedef struct ct_object {
     const ct_type_descriptor* Type;
-    uint32_t IdentityHash;
+    ct_atomic_u32 IdentityHash;
     ct_atomic_u32 RefCount;
     struct ct_object* ReleaseNext;
 } ct_object;
 ```
 
-`ct_atomic_u32` is a private four-byte atomic representation with the same alignment as `uint32_t`; the emitter verifies both properties. The descriptor stores a type name, base descriptor, primary vtable, immutable interface-table pointer and count, type ID, size, value-type flag, and generated `Drop` callback. Heap objects start with `RefCount == 1`; `UINT32_MAX` marks immortal static strings. `ReleaseNext` links zero-count objects into the final-releasing thread's allocation-free iterative LIFO worklist.
+`ct_atomic_u32` is a private four-byte atomic representation with the same alignment as `uint32_t`; the emitter verifies both properties, so the header size, alignment, and offsets remain unchanged. Heap objects start with `IdentityHash == 0` and `RefCount == 1`. The default object hash assigns one stable nonzero identity on first use with an atomic compare/exchange; the numeric value is not an allocation-order contract. `UINT32_MAX` marks immortal static strings. The descriptor stores a type name, base descriptor, primary vtable, immutable interface-table pointer and count, type ID, size, value-type flag, and generated `Drop` callback. `ReleaseNext` links zero-count objects into the final-releasing thread's allocation-free iterative LIFO worklist.
 
-The vtable contains typed function pointers. A generated thunk converts `ct_object*` to the method's declaring type.
+The vtable contains typed function pointers. A generated thunk converts `ct_object*` to the method's declaring type. Calls through interface or unsealed static receiver types use the vtable; calls whose static class receiver or selected override is sealed use the resolved method, accessor, or delegate thunk directly.
 
 Descriptors and vtables are emitted as portable C `const` data. The empty string and every literal string use a distinct compatible `const` wrapper object. On ESP-IDF, retained `ct_d_*`, `ct_v_*`, and `ct_sl_*` symbols must resolve to flash-backed read-only ELF sections. Mutable static fields and the preinitialized runtime-fault objects remain writable. The public header continues to expose only opaque managed objects.
 
@@ -506,6 +506,6 @@ Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the i
 
 Class instances, arrays, dynamic strings, boxes, exception objects, and reference-bearing structure values use automatic reference counting. Strong-slot replacement retains the new value, moves out the old value, stores the new value, and releases the old value. Owned temporaries and locals register automatic cleanup records; transfer operations disarm the corresponding record. Parameters and `this` are borrowed, while managed and reference-bearing structure returns are owned.
 
-`ct_retain` uses an atomic compare/exchange loop. `ct_release` performs a release decrement and an acquire fence before the zero-count thread pushes the object through `ReleaseNext` onto its thread-local LIFO worklist. A drain already in progress pushes newly dead objects onto that same worklist, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing inline elements, and boxes and structures recursively drop nested references. String and array drops free only their single enclosing allocations. Matching generated retain helpers preserve nested structure ownership during by-value copies.
+Compiler-generated ownership operations use private inline retain/release fast paths. Retain performs the atomic compare/exchange directly. Release performs the release decrement directly and enters the attached thread's existing destruction worklist only when it removes the final reference. The public `ct_retain` and `ct_release` functions remain strict attachment-checked wrappers, including for null. Final release performs an acquire fence before pushing the object through `ReleaseNext`; a drain already in progress pushes newly dead objects onto that same worklist, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing inline elements, and boxes and structures recursively drop nested references. String and array drops free only their single enclosing allocations. Matching generated retain helpers preserve nested structure ownership during by-value copies.
 
 Exception frames, pending actions, defer captures, and ownership cleanup records use automatic storage and do not call `ct_alloc`. Static fields own their values until process termination; static and empty strings are immortal. Reference cycles leak. `CT_MEMORY_DIAGNOSTICS` enables conformance-only live-object and live-allocation counters without adding a production API or cost.

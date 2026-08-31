@@ -54,8 +54,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("static void ct_managed_thread_drop(ct_object* object);");
         if (layoutTypes.Any(type => type is { Namespace: "System.Threading", Name: "Mutex" }))
             writer.WriteLine("static void ct_managed_mutex_drop(ct_object* object);");
-        writer.WriteLine($"void ct_memory_retain({NameMangler.Type(objectType)}* value) {{ ct_retain((ct_object*)(void*)value); }}");
-        writer.WriteLine($"void ct_memory_release({NameMangler.Type(objectType)}* value) {{ ct_release((ct_object*)(void*)value); }}");
+        writer.WriteLine($"void ct_memory_retain({NameMangler.Type(objectType)}* value) {{ ct_retain_fast((ct_object*)(void*)value); }}");
+        writer.WriteLine($"void ct_memory_release({NameMangler.Type(objectType)}* value) {{ ct_release_fast((ct_object*)(void*)value); }}");
         if (IsEspIdf && Model.Types.ContainsKey("Esp.Idf.EspError"))
             writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name((esp_err_t)code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
 
@@ -124,7 +124,7 @@ internal sealed partial class CEmitter
             writer.WriteLine($"    {NameMangler.Type(type)}* value = ({NameMangler.Type(type)}*)(void*)object;");
             writer.WriteLine("    ct_object* target = value->ct_target;");
             writer.WriteLine("    value->ct_target = NULL;");
-            writer.WriteLine("    ct_release(target);");
+            writer.WriteLine("    ct_release_fast(target);");
             writer.WriteLine("}");
         }
 
@@ -205,7 +205,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static uint32_t ct_hash_float(float value) { if (isnan(value)) return UINT32_C(0x7FC00000); if (value == 0.0f) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
         writer.WriteLine("static uint32_t ct_hash_double(double value) { if (isnan(value)) return UINT32_C(0x7FF80000); if (value == 0.0) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
         EmitDefaultVTable(writer, "ct_default_vtable", virtualMethods, virtualProperties);
-        writer.WriteLine("static ct_string* ct_string_v_to_string(ct_object* value) { ct_retain(value); return (ct_string*)(void*)value; }");
+        writer.WriteLine("static ct_string* ct_string_v_to_string(ct_object* value) { ct_retain_fast(value); return (ct_string*)(void*)value; }");
         writer.WriteLine("static bool ct_string_v_equals(ct_object* left, ct_object* right) { return right != NULL && right->Type == &ct_desc_string && ct_string_equal((ct_string*)(void*)left, (ct_string*)(void*)right); }");
         writer.WriteLine("static int32_t ct_string_v_hash(ct_object* value) { ct_string* text = (ct_string*)(void*)value; return ct_i32_bits(ct_hash_bytes(text->Data, (size_t)text->Length)); }");
         var stringType = Model.Types["System.String"];
@@ -241,7 +241,7 @@ internal sealed partial class CEmitter
         }
         writer.WriteLine("static ct_string* ct_object_default_to_string(ct_object* value) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", \"<runtime>\", 0); return ct_string_from_bytes((const uint8_t*)value->Type->Name, (int32_t)strlen(value->Type->Name), \"<runtime>\", 0); }");
         writer.WriteLine("static bool ct_object_default_equals(ct_object* left, ct_object* right) { return left == right; }");
-        writer.WriteLine("static int32_t ct_object_default_hash(ct_object* value) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", \"<runtime>\", 0); return ct_i32_bits(value->IdentityHash); }");
+        writer.WriteLine("static int32_t ct_object_default_hash(ct_object* value) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", \"<runtime>\", 0); return ct_object_identity_hash(value); }");
         writer.WriteLine("static bool ct_object_value_equals(ct_object* left, ct_object* right) { if (left == right) return true; if (left == NULL || right == NULL) return false; return left->Type->VTable->Equals(left, right); }");
         writer.WriteLine("static uint32_t ct_object_value_hash(ct_object* value) { return value == NULL ? 0u : (uint32_t)value->Type->VTable->GetHashCode(value); }");
         var objectType = Model.Types.GetValueOrDefault("System.Object");
@@ -384,7 +384,7 @@ internal sealed partial class CEmitter
             writer.WriteLine($"    ct_init_object(value, &{DescriptorName(type)});");
             writer.WriteLine("    value->ct_target = target;");
             writer.WriteLine("    value->ct_invoke = invoke;");
-            writer.WriteLine("    ct_retain(target);");
+            writer.WriteLine("    ct_retain_fast(target);");
             writer.WriteLine("    return value;");
             writer.WriteLine("}");
         }
@@ -434,7 +434,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("        ct_object* ct_callback_exception = ct_current_exception;");
             writer.WriteLine("        ct_current_exception = NULL;");
             writer.WriteLine("        ct_exception_top = ct_callback_frame.Previous;");
-            writer.WriteLine("        ct_release(ct_callback_exception);");
+            writer.WriteLine("        ct_release_fast(ct_callback_exception);");
             writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-callback>\", 0);");
             writer.WriteLine("    }");
             var arguments = delegateType.DelegateParameters

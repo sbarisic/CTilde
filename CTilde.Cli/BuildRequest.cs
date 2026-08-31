@@ -52,7 +52,8 @@ internal sealed record BuildRequest(
     NativeCpuTarget? CpuTarget = null,
     NativeFloatingPointMode? FloatingPoint = null,
     NativePgoMode PgoMode = NativePgoMode.Off,
-    string? PgoDirectory = null)
+    string? PgoDirectory = null,
+    BuildVerbosity Verbosity = BuildVerbosity.Minimal)
 {
     public string EspIdfBuildDirectory => Environment == TargetEnvironment.Qemu
         ? Path.Combine(EspIdfProjectDirectory!, "build", EspIdfChip == CTilde.EspIdfChip.Esp32 ? "esp32_qemu" : "esp32c3_qemu")
@@ -160,7 +161,7 @@ internal static class BuildRequestResolver
             options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
             project.Configuration.SimdOptimizations,
             project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted,
-            optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory);
+            optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory, options.Verbosity);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -237,7 +238,7 @@ internal static class BuildRequestResolver
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
             null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures,
             false, null, null, options.Environment, options.EspIdfChip, null, options.Optimization, options.CpuTarget,
-            options.FloatingPoint, options.PgoMode ?? NativePgoMode.Off, pgoDirectory);
+            options.FloatingPoint, options.PgoMode ?? NativePgoMode.Off, pgoDirectory, options.Verbosity);
     }
 
     private static void ValidateCommon(CommandLineOptions options)

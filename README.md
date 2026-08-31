@@ -111,7 +111,7 @@ public static class Program
 
 SIMD lane values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` for explicit supported-target intrinsic lowering, or set top-level `simdOptimizations: true` to optimize scalar geometry in hosted x64 applications and implicitly select SIMD128. `Vec3x4` stores three `F32x4` components in exactly 48 bytes.
 
-The [feature example](examples/Features/Program.ct) covers more syntax. The [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
+The [feature example](examples/Features/Program.ct) covers more syntax, the [standard-library tour](examples/StandardLibrary/README.md) exercises the Draft 0.40/0.41 APIs, and the [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
 
 ## Build the compiler
 
@@ -207,6 +207,10 @@ ctilde --project .\ctilde.json --run
 
 `--run` rebuilds first and starts the configured command only after a successful build. The runner uses argument arrays without shell evaluation. It supports host and WSL executors plus `${projectRoot}` and `${buildOutput}` placeholders.
 
+Project Build and Run commands use concise `normal` output by default: manifest, source count, target, architecture, configuration, toolchain, C layout, optimization profile, phases, artifact, elapsed time, and diagnostic totals. Select `--verbosity quiet|minimal|normal|detailed`; detailed mode also prints source files, generated-output decisions, native commands, and native tool output. `--trace` remains an independent compiler-internal diagnostic mode. Project Check and direct compilation default to `minimal` unless verbosity is selected explicitly.
+
+Builds that share an output directory wait for its owner for up to 30 seconds. The lock records the owner process, operation, manifest, and start time; a timeout is reported as `CT6002`. Each project Check, Build, or Run atomically refreshes `.ctilde/build-diagnostics.json`. Successful compilation clears its diagnostics, failed compilation replaces them, and cancellation preserves the previous valid receipt.
+
 Release builds can select `speed` or `aggressive` optimization, `baseline` or x64-only `avx2`, and `precise` or `fast` floating-point behavior. The matching CLI overrides are `--optimization`, `--cpu-target`, and `--floating-point`. Hosted project builds can run explicit `--pgo generate` training and `--pgo use` phases; PGO also requires Release and LTO. Omit these settings to preserve the target's historical toolchain behavior.
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
@@ -254,7 +258,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 - `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
 - `Editors.sln` contains the three Visual Studio extension projects.
-- `Examples.sln` contains the 12 example projects, with the three T-CAN variants grouped together.
+- `Examples.sln` contains the 13 example projects, including a Draft 0.40/0.41 standard-library tour and the three grouped T-CAN variants.
 - `CTilde.StandardLibrary.sln` contains the physical standard-library project.
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.

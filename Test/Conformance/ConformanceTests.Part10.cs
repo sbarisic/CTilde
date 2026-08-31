@@ -111,7 +111,7 @@ internal static partial class ConformanceTests
             var first = Emit(arithmetic);
             var second = Emit(arithmetic);
             Assert(first == second, "Runtime-helper pruning changed deterministic unity emission.");
-            Assert(first.Contains("static int32_t ct_i32_add(", StringComparison.Ordinal) && first.Contains("static int32_t ct_i32_bits(", StringComparison.Ordinal), "Arithmetic helper dependencies were pruned while reachable.");
+            Assert(first.Contains("static CT_INLINE int32_t ct_i32_add(", StringComparison.Ordinal) && first.Contains("static CT_INLINE int32_t ct_i32_bits(", StringComparison.Ordinal), "Inline arithmetic helper dependencies were pruned while reachable.");
             Assert(!first.Contains("ct_i64_add(", StringComparison.Ordinal) && !first.Contains("ct_string_concat(", StringComparison.Ordinal) && !first.Contains("ct_bounds(", StringComparison.Ordinal), "A minimal arithmetic program retained unrelated runtime helpers.");
             Assert(!first.Contains("#pragma warning(disable: 4505)", StringComparison.Ordinal) &&
                 !first.Contains("static CT_UNUSED int32_t ct_i32_add(", StringComparison.Ordinal), "Runtime helpers still relied on blanket unused suppression.");
@@ -122,9 +122,9 @@ internal static partial class ConformanceTests
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             var header = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
-            Assert(runtime.Contains("int32_t ct_i32_add(", StringComparison.Ordinal) && !runtime.Contains("ct_i64_add(", StringComparison.Ordinal), "Modular runtime pruning diverged from unity output.");
-            Assert(System.Text.RegularExpressions.Regex.Matches(runtime, @"(?m)^int32_t ct_i32_add\(").Count == 1, "A retained modular helper was not emitted exactly once.");
-            Assert(header.Contains("extern int32_t ct_i32_add(", StringComparison.Ordinal) && !header.Contains("ct_i32_add(int32_t a, int32_t b) {", StringComparison.Ordinal), "The modular internal header still embedded runtime helper bodies.");
+            Assert(runtime.Contains("static CT_INLINE int32_t ct_i32_add(", StringComparison.Ordinal) && !runtime.Contains("ct_i64_add(", StringComparison.Ordinal), "Modular runtime pruning diverged from unity output.");
+            Assert(System.Text.RegularExpressions.Regex.Matches(runtime, @"(?m)^static CT_INLINE int32_t ct_i32_add\(").Count == 1, "A retained modular inline helper was not emitted exactly once in the runtime unit.");
+            Assert(header.Contains("static CT_INLINE int32_t ct_i32_add(", StringComparison.Ordinal) && !header.Contains("extern int32_t ct_i32_add(", StringComparison.Ordinal), "The modular internal header omitted the translation-unit-local arithmetic helper body.");
             Assert(!header.Contains("free(value);", StringComparison.Ordinal), "A multiline runtime helper body leaked into the modular internal header.");
 
             const string strings = "using System; public static class Program { [EntryPoint] public static void Main() { int value = 42; string scalar = value.ToString(); string text = \"value=\" + value.ToString() + \".\"; Console.WriteLine(scalar); Console.WriteLine(text); } }";

@@ -1,0 +1,51 @@
+using System;
+using System.Text;
+
+namespace StandardLibraryExample;
+
+public readonly struct Temperature : IFormattable
+{
+    private readonly float degrees;
+
+    public Temperature(float degrees)
+    {
+        this.degrees = degrees;
+    }
+
+    public string ToString(string format)
+    {
+        if (format == "short")
+            return String.Format("{0:F1} C", degrees);
+        return String.Format("Temperature({0:G})", degrees);
+    }
+}
+
+public static class StringExamples
+{
+    public static void Run()
+    {
+        Console.WriteLine("-- strings and formatting --");
+        string source = "  alpha,,beta,gamma  ";
+        string clean = source.Trim(' ');
+        string[] words = clean.Split(',', StringSplitOptions.RemoveEmptyEntries);
+        Console.WriteLine(String.Format("words={0:D2}; joined={1}", words.Length,
+            String.Join(" | ", words)));
+        Console.WriteLine(String.Format("beta-at={0}; path={1}", clean.IndexOf("beta"),
+            clean.Replace(",", "/")));
+        StringBuilder segments = new StringBuilder();
+        foreach (StringSegment segment in clean.EnumerateSplit(',', 10, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (segments.Length != 0)
+                segments.Append(" -> ");
+            segments.Append(segment.ToString());
+        }
+        Console.WriteLine(segments.ToString());
+        Temperature temperature = new Temperature(21.5f);
+        StringBuilder report = new StringBuilder(32);
+        report.AppendFormat("hex={0:X4}; fixed={1:F2}; custom={2:short}", 42, 3.5f,
+            temperature);
+        Console.WriteLine(report.ToString());
+        Console.WriteLine(String.Format("UTF-8 byte length of café: {0}", "café".Length));
+        Console.WriteLine(Ascii.EqualsIgnoreCase("CTILDE", "ctilde"));
+    }
+}

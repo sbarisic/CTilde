@@ -259,7 +259,7 @@ internal static partial class ConformanceTests
             Assert(!diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), string.Join(Environment.NewLine, diagnostics));
             var generated = Emit(source);
             Assert(generated.Contains("creation of ARC closure", StringComparison.Ordinal) == false, "Compiler-internal effect text leaked into generated C.");
-            Assert(generated.Contains("ct_release((ct_object*)(void*)", StringComparison.Ordinal), "Closure environment ownership transfer was not emitted.");
+            Assert(generated.Contains("ct_release_fast((ct_object*)(void*)", StringComparison.Ordinal), "Closure environment ownership transfer did not use the managed ARC fast path.");
             var run = CompileAndRun(source, memoryDiagnostics: true);
             Assert(run.ExitCode == 0 && run.StandardOutput.Replace("\r", string.Empty, StringComparison.Ordinal).Trim() == "12\nTrue", $"ARC closure behavior changed: {run.StandardOutput}{run.StandardError}");
 

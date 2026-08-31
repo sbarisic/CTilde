@@ -73,6 +73,8 @@ Reference CodeLens is enabled by default under **Tools > Options > C~ > Language
 
 The common imports and item schemas are required by CPS for the project hierarchy and property catalogs; they do not make `.ctproj` a supported command-line build format. `CTildeManifest` is project-relative and defaults to `ctilde.json`. Command-line and CI builds continue to use `dotnet ctilde.dll --project ctilde.json` or the corresponding installed `ctilde` command.
 
+Visual Studio project Check and Build explicitly request normal compiler verbosity. Canonical C~ diagnostics populate the Error List directly, without a generic `MSB3073` duplicate. The compiler writes `.ctilde/build-diagnostics.json` atomically after project compilation. The extension uses matching saved-source hashes for temporary source squiggles, asks the language server for a fresh project analysis, and uses LSP results as the source authority. Manifest diagnostics are owned by the extension and underline the exact invalid JSON value. Unmapped native compiler and linker failures remain in the Error List rather than being attached to an unrelated C~ span.
+
 The repository solution contains 13 ready-to-load C~ projects under **C~**: the physical standard library and 12 example/target entries. Select the intended project before running a command. This is required for the three T-CAN wrappers because they share one directory but reference different manifests. The entries deliberately omit `Build.0`, so **Build Solution** continues to build only the .NET solution projects.
 
 ## Running and debugging

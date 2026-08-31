@@ -37,7 +37,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("        ct_object* ct_export_exception = ct_current_exception;");
             writer.WriteLine("        ct_current_exception = NULL;");
             writer.WriteLine("        ct_exception_top = ct_export_frame.Previous;");
-            writer.WriteLine("        ct_release(ct_export_exception);");
+            writer.WriteLine("        ct_release_fast(ct_export_exception);");
             writer.WriteLine("        ct_fail(\"CTE0003\", \"<native-export>\", 0);");
             writer.WriteLine("    }");
             writer.WriteLine("    ct_exception_top = &ct_export_frame;");
@@ -113,7 +113,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("        ct_object* ct_task_exception = ct_current_exception;");
         writer.WriteLine("        ct_current_exception = NULL;");
         writer.WriteLine("        ct_exception_top = ct_task_frame.Previous;");
-        writer.WriteLine("        ct_release(ct_task_exception);");
+        writer.WriteLine("        ct_release_fast(ct_task_exception);");
         writer.WriteLine("        ct_fail(\"CTE0003\", \"<task-entry>\", 0);");
         writer.WriteLine("    }");
         writer.WriteLine("    ct_exception_top = &ct_task_frame;");

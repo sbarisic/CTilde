@@ -1702,7 +1702,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
             if (!isTruthyGdbValue(await this.evaluateNative(`${allocation} != 0`)))
                 break;
             const object = `((ct_object*)(void*)((${allocation}) + 1))`;
-            const identity = await this.evaluateNative(`${object}->IdentityHash`);
+            const identity = await this.evaluateNative(`(uint32_t)${object}->IdentityHash`);
             const type = await this.evaluateCString(`${object}->Type->Name`);
             const presentationType = this.debugMap?.boxes?.some(box => box.valueType === type) ? 'System.Object' : type || 'System.Object';
             result.push(await this.makeVariable(`#${identity}`, object, presentationType, frameId));
@@ -1715,7 +1715,7 @@ export class CTildeDebugSession extends LoggingDebugSession {
         const object = `((ct_object*)(void*)(${expression}))`;
         const allocation = `(((ct_debug_allocation*)(void*)(${expression})) - 1)`;
         const result: DebugProtocol.Variable[] = [
-            { name: 'IdentityHash', value: await this.evaluateNative(`${object}->IdentityHash`), type: 'uint', variablesReference: 0 },
+            { name: 'IdentityHash', value: await this.evaluateNative(`(uint32_t)${object}->IdentityHash`), type: 'uint', variablesReference: 0 },
             { name: 'RefCount', value: await this.evaluateNative(`${object}->RefCount`), type: 'uint', variablesReference: 0, evaluateName: `${object}->RefCount`, memoryReference: await this.addressOf(`${object}->RefCount`) },
         ];
         if (this.debugMap?.memoryDiagnostics !== 'off') {

@@ -42,6 +42,7 @@ internal sealed class IrValueStorage
     public ParameterSymbol? Parameter { get; init; }
     public bool IsBaseReceiver { get; init; }
     public bool IsConstInitStorage { get; init; }
+    public bool UsesVirtualDispatch { get; init; }
 }
 
 internal sealed partial class TypedIrBodyLowerer
@@ -103,6 +104,30 @@ internal sealed partial class TypedIrBodyLowerer
     private bool EmitDebugInstrumentation => _emitter.EmitDebugInstrumentation && !_method.IsInterruptCode;
 
     private CType ResolveType(TypeSyntax syntax) => _model.ResolveType(syntax, TreeFor(syntax), _method.TypeSubstitutions);
+
+    private bool RequiresVirtualDispatch(MethodSymbol method, IrExpressionValue? receiver, bool isBaseReceiver = false)
+    {
+        if (!method.IsVirtual || isBaseReceiver || method.IsSealedOverride)
+            return false;
+        var receiverType = receiver?.Type.Symbol ?? (!_method.IsStatic ? _method.ContainingType : null);
+        return receiverType?.Kind != DeclaredTypeKind.Class || !receiverType.IsSealed;
+    }
+
+    private bool RequiresVirtualDispatch(PropertySymbol property, IrExpressionValue? receiver, bool isBaseReceiver = false)
+    {
+        if (!property.IsVirtual || isBaseReceiver || property.IsSealedOverride)
+            return false;
+        var receiverType = receiver?.Type.Symbol ?? (!_method.IsStatic ? _method.ContainingType : null);
+        return receiverType?.Kind != DeclaredTypeKind.Class || !receiverType.IsSealed;
+    }
+
+    private static bool RequiresVirtualDispatch(MethodSymbol method, CType receiverType) =>
+        method.IsVirtual && !method.IsSealedOverride &&
+        (receiverType.Kind != CTypeKind.Class || receiverType.Symbol?.IsSealed != true);
+
+    private static bool RequiresVirtualDispatch(PropertySymbol property, CType receiverType) =>
+        property.IsVirtual && !property.IsSealedOverride &&
+        (receiverType.Kind != CTypeKind.Class || receiverType.Symbol?.IsSealed != true);
 
     public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null, IrOptimizationFacts? optimizationFacts = null)
     {

@@ -23,6 +23,9 @@ internal static class CTildeCommand
         }
 
         using var cancellation = new CancellationTokenSource();
+        using var reporter = new BuildReporter(options!.Verbosity, options.Trace);
+        var operation = options.Run ? "Run" : options.CheckOnly ? "Check" : "Build";
+        BuildRequest? activeRequest = null;
         ConsoleCancelEventHandler cancelHandler = (_, eventArgs) =>
         {
             eventArgs.Cancel = true;
@@ -31,7 +34,7 @@ internal static class CTildeCommand
         Console.CancelKeyPress += cancelHandler;
         try
         {
-            if (options!.InputDirectory is not null)
+            if (options.InputDirectory is not null)
                 return CompileDirectory(options);
 
             if (options.ProjectManifest is not null)
@@ -40,11 +43,13 @@ internal static class CTildeCommand
                 try { project = CTildeProjectFile.Load(options.ProjectManifest); }
                 catch (CTildeProjectException exception)
                 {
-                    Console.Error.WriteLine($"ctilde: {exception.Message}");
+                    var diagnostic = reporter.ProjectDiagnostic(exception, options.ProjectManifest);
+                    BuildDiagnosticReceipt.Write(options.ProjectManifest, operation, "failed", [diagnostic]);
+                    reporter.Complete(1);
                     return 1;
                 }
                 if (project.Configuration.Kind == CTildeProjectKind.StandardLibrary)
-                    return ValidateStandardLibrary(options, project);
+                    return await ValidateStandardLibraryAsync(options, project, reporter, operation, cancellation.Token);
             }
 
             BuildRequest request;
@@ -54,38 +59,70 @@ internal static class CTildeCommand
             }
             catch (Exception exception) when (exception is CommandLineException or CTildeProjectException)
             {
-                Console.Error.WriteLine($"ctilde: {exception.Message}");
+                if (exception is CTildeProjectException projectException)
+                {
+                    var diagnostic = reporter.ProjectDiagnostic(projectException, options.ProjectManifest);
+                    if (options.ProjectManifest is not null)
+                        BuildDiagnosticReceipt.Write(options.ProjectManifest, operation, "failed", [diagnostic]);
+                }
+                else
+                {
+                    Console.Error.WriteLine($"ctilde: {exception.Message}");
+                }
+                reporter.Complete(1);
                 return exception is CommandLineException ? 2 : 1;
             }
+            activeRequest = request;
+            reporter.Begin(request, operation);
 
             if (request.PrepareDebug == "attach")
                 return DebugPreparation.ValidateAttach(request);
 
             await using (var buildLock = request.BuildNative || request.BindingManifests is { Count: > 0 }
-                ? BuildLock.Acquire(request.LockDirectory)
+                ? await BuildLock.AcquireAsync(request.LockDirectory, operation, request.ManifestPath, cancellation.Token)
                 : null)
             {
                 if (request.BindingManifests is { Count: > 0 })
                 {
                     if (!await EspIdfBindingGenerator.RefreshAsync(request, request.VerifyBindings, cancellation.Token))
+                    {
+                        var diagnostic = reporter.InfrastructureDiagnostic(request.ManifestPath!, "CT6003", "ESP-IDF binding refresh failed. See the preceding diagnostics.");
+                        WriteReceipt(request, operation, "failed", [diagnostic]);
+                        reporter.Complete(1);
                         return 1;
+                    }
                     if (request.GenerateBindingsOnly || request.VerifyBindings)
+                    {
+                        WriteReceipt(request, operation, "succeeded", []);
+                        reporter.Complete(0);
                         return 0;
+                    }
                     var refreshedProject = CTildeProjectFile.Load(request.ManifestPath!);
                     request = request with { Inputs = refreshedProject.SourceFiles, SourceOwners = refreshedProject.SourceOwners };
                 }
                 var compileElapsed = Stopwatch.StartNew();
-                var result = Compile(request);
+                var result = Compile(request, reporter);
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: C~ compile phase {compileElapsed.ElapsedMilliseconds} ms");
                 if (result.ExitCode != 0 || !request.BuildNative)
+                {
+                    WriteReceipt(request, operation, result.ExitCode == 0 ? "succeeded" : "failed", result.Diagnostics);
+                    reporter.Complete(result.ExitCode, result.ExitCode == 0 ? request.GeneratedCPath ?? request.GeneratedDirectory : null);
                     return result.ExitCode;
+                }
+                reporter.Phase("Compiling and linking native output...");
                 var nativeElapsed = Stopwatch.StartNew();
                 var nativeResult = await NativeBuildDriver.BuildAsync(request, result.UsesInlineAssembly, cancellation.Token);
+                reporter.Phase($"Native toolchain: {nativeResult.Backend}" + (nativeResult.CompilerCommand is null ? string.Empty : $" ({nativeResult.CompilerCommand})"));
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: native build phase {nativeElapsed.ElapsedMilliseconds} ms");
                 if (nativeResult.ExitCode != 0)
+                {
+                    var diagnostic = reporter.InfrastructureDiagnostic(request.ManifestPath!, "CT6003", "The native compiler or linker failed. See the preceding native diagnostic output.");
+                    WriteReceipt(request, operation, "failed", [diagnostic]);
+                    reporter.Complete(nativeResult.ExitCode);
                     return nativeResult.ExitCode;
+                }
                 if (request.PrepareDebug == "launch")
                 {
                     if (request.Target == CompilationTarget.EspIdf)
@@ -93,18 +130,44 @@ internal static class CTildeCommand
                     DebugPreparation.WriteDescriptor(request, nativeResult);
                 }
             }
-            return request.RunAfterBuild
-                ? await ProjectRunDriver.RunAsync(request, cancellation.Token)
-                : 0;
+            WriteReceipt(request, operation, "succeeded", []);
+            reporter.Complete(0, request.ExecutablePath);
+            return request.RunAfterBuild ? await ProjectRunDriver.RunAsync(request, cancellation.Token) : 0;
         }
         catch (BuildLockException exception)
         {
-            Console.Error.WriteLine($"ctilde: {exception.Message}");
+            var manifest = activeRequest?.ManifestPath ?? options.ProjectManifest;
+            if (manifest is not null)
+            {
+                var diagnostic = reporter.InfrastructureDiagnostic(manifest, "CT6002", exception.Message);
+                BuildDiagnosticReceipt.Write(manifest, operation, "failed", [diagnostic], activeRequest?.Inputs);
+            }
+            else
+                Console.Error.WriteLine($"ctilde: {exception.Message}");
+            reporter.Complete(1);
             return 1;
         }
         catch (NativeBuildException exception)
         {
-            Console.Error.WriteLine($"ctilde: {exception.Message}");
+            var manifest = activeRequest?.ManifestPath ?? options.ProjectManifest;
+            if (manifest is not null)
+            {
+                var diagnostic = reporter.InfrastructureDiagnostic(manifest, "CT6003", exception.Message);
+                BuildDiagnosticReceipt.Write(manifest, operation, "failed", [diagnostic], activeRequest?.Inputs);
+            }
+            else
+                Console.Error.WriteLine($"ctilde: {exception.Message}");
+            reporter.Complete(1);
+            return 1;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
+        {
+            var manifest = activeRequest?.ManifestPath ?? options.ProjectManifest;
+            if (manifest is not null)
+                reporter.InfrastructureDiagnostic(manifest, "CT6003", exception.Message);
+            else
+                Console.Error.WriteLine($"ctilde: {exception.Message}");
+            reporter.Complete(1);
             return 1;
         }
         catch (OperationCanceledException)
@@ -118,7 +181,8 @@ internal static class CTildeCommand
         }
     }
 
-    private static int ValidateStandardLibrary(CommandLineOptions options, CTildeProject project)
+    private static async Task<int> ValidateStandardLibraryAsync(CommandLineOptions options, CTildeProject project,
+        BuildReporter reporter, string operation, CancellationToken cancellationToken)
     {
         if (options.Run || options.PrepareDebug is not null || options.GenerateBindings || options.VerifyBindings)
             return UsageError("Standard-library projects support only --check or --build.");
@@ -134,27 +198,40 @@ internal static class CTildeCommand
 
         try
         {
+            reporter.BeginStandardLibrary(project, operation);
+            await using var buildLock = await BuildLock.AcquireAsync(Path.Combine(project.RootDirectory, "build"), operation,
+                project.ManifestPath, cancellationToken);
             var failed = false;
+            var diagnostics = new List<Diagnostic>();
             foreach (var result in StandardLibraryProjectService.Validate(project))
             {
                 Console.Out.WriteLine($"C~ standard library: validating {result.Variant}");
                 foreach (var diagnostic in result.Diagnostics)
-                    Console.Error.WriteLine(diagnostic);
+                {
+                    diagnostics.Add(diagnostic);
+                    reporter.Diagnostic(diagnostic);
+                }
                 if (result.Diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error))
                     failed = true;
                 else
                     Console.Out.WriteLine($"C~ standard library: {result.Variant} passed");
             }
+            BuildDiagnosticReceipt.Write(project.ManifestPath, operation, failed ? "failed" : "succeeded", diagnostics, project.SourceFiles);
+            reporter.Complete(failed ? 1 : 0);
             return failed ? 1 : 0;
         }
         catch (Exception exception) when (exception is CTildeProjectException or IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
         {
-            Console.Error.WriteLine($"ctilde: {exception.Message}");
+            var diagnostic = exception is CTildeProjectException projectException
+                ? reporter.ProjectDiagnostic(projectException, project.ManifestPath)
+                : reporter.InfrastructureDiagnostic(project.ManifestPath, "CT6003", exception.Message);
+            BuildDiagnosticReceipt.Write(project.ManifestPath, operation, "failed", [diagnostic], project.SourceFiles);
+            reporter.Complete(1);
             return 1;
         }
     }
 
-    private static CompilationOutcome Compile(BuildRequest request)
+    private static CompilationOutcome Compile(BuildRequest request, BuildReporter? reporter = null)
     {
         try
         {
@@ -195,23 +272,24 @@ internal static class CTildeCommand
                 : request.CLayout == GeneratedCLayout.Unity
                     ? compilation.EmitC(generated).Diagnostics
                     : (bundle = compilation.EmitCBundle()).Diagnostics;
+            reporter?.Phase(request.CheckOnly ? "Semantic analysis complete." : "Semantic analysis and C lowering complete.");
             if (!request.CheckOnly && request.GeneratedHeaderPath is not null && !HasErrors(diagnostics))
                 diagnostics = compilation.EmitCHeader(generatedHeader).Diagnostics;
             foreach (var diagnostic in diagnostics)
-                Console.Error.WriteLine(diagnostic);
+                (reporter ?? BuildReporter.Current)?.Diagnostic(diagnostic);
             if (HasErrors(diagnostics))
             {
                 if (request.BuildNative)
                     RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
                         request.DebugMapPath, request.DebugTargetPath);
-                return new CompilationOutcome(1, compilation.UsesInlineAssembly);
+                return new CompilationOutcome(1, compilation.UsesInlineAssembly, diagnostics);
             }
 
             if (request.CheckOnly)
             {
                 if (request.Trace)
                     Console.Error.WriteLine("trace: semantic analysis complete");
-                return new CompilationOutcome(0, compilation.UsesInlineAssembly);
+                return new CompilationOutcome(0, compilation.UsesInlineAssembly, diagnostics);
             }
 
             var changedOutputs = 0;
@@ -248,15 +326,28 @@ internal static class CTildeCommand
                 if (request.GeneratedHeaderPath is not null)
                     Console.Error.WriteLine($"trace: emitted {request.GeneratedHeaderPath}");
             }
-            return new CompilationOutcome(0, compilation.UsesInlineAssembly);
+            reporter?.Detail($"Generated artifacts changed: {changedOutputs}");
+            reporter?.Phase($"Generated C: {request.GeneratedCPath ?? request.GeneratedDirectory}");
+            if (reporter?.Verbosity >= BuildVerbosity.Detailed)
+            {
+                foreach (var path in request.GeneratedSourcePaths)
+                    reporter.Detail(path);
+                if (request.GeneratedHeaderPath is not null)
+                    reporter.Detail(request.GeneratedHeaderPath);
+            }
+            return new CompilationOutcome(0, compilation.UsesInlineAssembly, diagnostics);
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or DecoderFallbackException)
         {
             if (request.BuildNative)
                 RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
                     request.DebugMapPath, request.DebugTargetPath);
-            Console.Error.WriteLine($"ctilde: {exception.Message}");
-            return new CompilationOutcome(1, false);
+            var diagnostics = request.ManifestPath is null
+                ? []
+                : new[] { (reporter ?? BuildReporter.Current)!.InfrastructureDiagnostic(request.ManifestPath, "CT6003", exception.Message) };
+            if (request.ManifestPath is null)
+                Console.Error.WriteLine($"ctilde: {exception.Message}");
+            return new CompilationOutcome(1, false, diagnostics);
         }
     }
 
@@ -327,7 +418,13 @@ internal static class CTildeCommand
     private static bool HasErrors(IEnumerable<Diagnostic> diagnostics) =>
         diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
 
-    private readonly record struct CompilationOutcome(int ExitCode, bool UsesInlineAssembly);
+    private readonly record struct CompilationOutcome(int ExitCode, bool UsesInlineAssembly, IReadOnlyList<Diagnostic> Diagnostics);
+
+    private static void WriteReceipt(BuildRequest request, string operation, string state, IEnumerable<Diagnostic> diagnostics)
+    {
+        if (request.ManifestPath is not null)
+            BuildDiagnosticReceipt.Write(request.ManifestPath, operation, state, diagnostics, request.Inputs);
+    }
 
     private static int WriteBundle(string outputDirectory, IEnumerable<GeneratedCArtifact> artifacts, string? additionalOutput)
     {
@@ -422,7 +519,7 @@ internal static class CTildeCommand
     {
         Console.Error.WriteLine("Usage: ctilde <input.ct>... -o <program.c> [--c-layout unity|modules] [--output-directory <directory>] [--symbol-map <path>] [--debug-info] [--debug-map <path>] [--header <exports.h>] [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [--architecture auto|x86|x64|arm32|arm64|xtensa|riscv32|riscv64] [--cpu-feature simd128] [--panic-policy abort|restart|halt] [--no-recursion] [--source-root <directory>] [--check] [--trace]");
         Console.Error.WriteLine("       ctilde <input.ct>... --build [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [native build options] [--trace]");
-        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] --build|--run [native build options] [--trace]");
+        Console.Error.WriteLine("       ctilde --project <ctilde.json> [--source-root <directory>] --build|--run [native build options] [--verbosity quiet|minimal|normal|detailed] [--trace]");
         Console.Error.WriteLine("       ctilde --project <ctilde.json> --generate-bindings|--verify-bindings [--idf-path <directory>] [--esp-clang <path>]");
         Console.Error.WriteLine("       ctilde --compile-directory <directory> [--target hosted|esp-idf|esp32_qemu|esp32c3_qemu|freestanding|cosmopolitan] [--source-root <directory>] [--trace]");
         Console.Error.WriteLine("       ctilde restore|update|vendor --project <ctilde.json>");

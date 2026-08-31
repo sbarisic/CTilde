@@ -397,11 +397,14 @@ internal static partial class ConformanceTests
                     ? RunProcess("wsl", ["--exec", WslPath(executable)])
                     : RunProcess(executable, []);
                 Assert(builtProgram.ExitCode == 0 && Normalize(builtProgram.StandardOutput) == "3\n", $"Project native math executable failed: {builtProgram.StandardOutput}{builtProgram.StandardError}");
-                using (var buildLock = new FileStream(Path.Combine(directory, "out", ".ctilde-build.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None))
-                {
-                    var overlapping = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
-                    Assert(overlapping.ExitCode == 1 && overlapping.StandardError.Contains("Another C~ project build", StringComparison.Ordinal), "An overlapping project native build was not rejected.");
-                }
+                var buildLock = new FileStream(Path.Combine(directory, "out", ".ctilde-build.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+                var owner = System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new { ProcessId = Environment.ProcessId, Operation = "test", Manifest = project.ManifestPath, StartedAtUtc = DateTimeOffset.UtcNow });
+                buildLock.Write(owner);
+                buildLock.Flush();
+                var releaseLock = Task.Run(async () => { await Task.Delay(350); buildLock.Dispose(); });
+                var overlapping = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--build"]);
+                releaseLock.GetAwaiter().GetResult();
+                Assert(overlapping.ExitCode == 0 && overlapping.StandardOutput.Contains("Waiting for another C~ operation", StringComparison.Ordinal), "An overlapping project native build did not wait and resume.");
                 var conflict = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--target", "hosted", "--check"]);
                 Assert(conflict.ExitCode == 2, "Project and target were not rejected as conflicting CLI inputs.");
                 var incompatible = RunProcess("dotnet", [cliDll, "--project", project.ManifestPath, "--check", "--build"]);

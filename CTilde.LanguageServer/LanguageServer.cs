@@ -14,6 +14,7 @@ internal sealed class LanguageServer
     private CancellationTokenSource? _diagnosticDelay;
     private long _diagnosticGeneration;
     private bool _waitingForProjectContexts;
+    private bool _isVisualStudio;
     private int _testPostAnalysisDelayMilliseconds;
     private readonly object _referenceGate = new();
     private readonly Dictionary<string, (ProjectSnapshot Project, LanguageReference Reference)[]> _workspaceReferenceCache = new(StringComparer.Ordinal);
@@ -29,7 +30,8 @@ internal sealed class LanguageServer
     public InitializeResult Initialize(InitializeParams parameters)
     {
         _workspace.Initialize(parameters.RootUri, parameters.WorkspaceFolders);
-        _waitingForProjectContexts = IsVisualStudio(parameters.InitializationOptions);
+        _isVisualStudio = IsVisualStudio(parameters.InitializationOptions);
+        _waitingForProjectContexts = _isVisualStudio;
         _testPostAnalysisDelayMilliseconds = TestPostAnalysisDelay(parameters.InitializationOptions);
         _semanticRefreshSupported = SupportsSemanticTokenRefresh(parameters.Capabilities);
         return new InitializeResult(
@@ -331,6 +333,8 @@ internal sealed class LanguageServer
             if (!_workspace.IsCurrent(document, project))
                 continue;
             await rpc.NotifyWithParameterObjectAsync("textDocument/publishDiagnostics", new PublishDiagnosticsParams(document.Uri, diagnostics, document.Version)).ConfigureAwait(false);
+            if (_isVisualStudio)
+                await rpc.NotifyWithParameterObjectAsync("ctilde/diagnosticsPublished", new { uri = document.Uri, version = document.Version }).ConfigureAwait(false);
         }
     }
 

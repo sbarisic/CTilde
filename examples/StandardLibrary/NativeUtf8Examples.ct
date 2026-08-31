@@ -1,0 +1,30 @@
+using System;
+using System.Runtime;
+using System.Text;
+
+namespace StandardLibraryExample;
+
+public static class NativeUtf8Examples
+{
+    public static unsafe void Run()
+    {
+        Console.WriteLine("-- explicit native UTF-8 conversion --");
+        string source = "C~ café";
+        NativeBuffer<byte> destination = stackalloc byte[32];
+        nuint written;
+        bool copied = Utf8.TryCopyTo(source, destination, true, out written);
+        string roundTrip = Utf8.GetString(destination.Pointer, written);
+        Console.WriteLine(String.Format("copied={0}; bytes-with-NUL={1}; text={2}",
+            copied, written, roundTrip));
+        NativeBuffer<byte> exactStorage = stackalloc byte[3];
+        exactStorage[0] = (byte)'a';
+        exactStorage[1] = (byte)0;
+        exactStorage[2] = (byte)'b';
+        ReadOnlyNativeBuffer<byte> exact = exactStorage;
+        string embeddedNull = Utf8.GetString(exact);
+        Console.WriteLine(String.Format("exact-buffer={0}; embedded-NUL={1}", embeddedNull.Length,
+            embeddedNull[1] == '\0'));
+        NativeUtf8String borrowed = NativeUtf8String.Borrow(source);
+        Console.WriteLine(String.Format("borrowed-bytes={0}", borrowed.ByteLength));
+    }
+}

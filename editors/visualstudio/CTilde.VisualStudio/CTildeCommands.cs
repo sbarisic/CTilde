@@ -22,6 +22,8 @@ internal sealed class CTildeCommands : IDisposable
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private readonly CTildePackage _package;
     private readonly ErrorListProvider _errors;
+    private readonly HashSet<string> _seenDiagnostics = new(StringComparer.OrdinalIgnoreCase);
+    private readonly object _diagnosticGate = new();
     private CancellationTokenSource? _operationCancellation;
 
     private CTildeCommands(CTildePackage package)
@@ -129,6 +131,8 @@ internal sealed class CTildeCommands : IDisposable
             return 1;
         _operationCancellation = new CancellationTokenSource();
         _errors.Tasks.Clear();
+        lock (_diagnosticGate)
+            _seenDiagnostics.Clear();
         CTildeOutput.WriteLine($"{kind} {contract.ManifestPath}");
         if (kind is CTildeCommandKind.Build or CTildeCommandKind.Check)
             CTildeOutput.WriteLine($"Manifest configuration: {ReadManifestConfiguration(contract.ManifestPath)} (the Visual Studio solution configuration does not override it).");
@@ -198,17 +202,22 @@ internal sealed class CTildeCommands : IDisposable
         CTildeOutput.WriteLine(line);
         if (!DiagnosticParser.TryParse(line, out var diagnostic))
             return;
+        var parsed = diagnostic!;
+        var identity = $"{parsed.File}|{parsed.Line}|{parsed.Column}|{parsed.Severity}|{parsed.Code}|{parsed.Message}";
+        lock (_diagnosticGate)
+            if (!_seenDiagnostics.Add(identity))
+                return;
         ThreadHelper.JoinableTaskFactory.Run(async () =>
         {
             await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
             var task = new ErrorTask
             {
                 Category = TaskCategory.BuildCompile,
-                ErrorCategory = diagnostic!.Severity == "error" ? TaskErrorCategory.Error : diagnostic.Severity == "warning" ? TaskErrorCategory.Warning : TaskErrorCategory.Message,
-                Text = $"{diagnostic.Code}: {diagnostic.Message}",
-                Document = diagnostic.File,
-                Line = Math.Max(0, diagnostic.Line - 1),
-                Column = Math.Max(0, diagnostic.Column - 1),
+                ErrorCategory = parsed.Severity == "error" ? TaskErrorCategory.Error : parsed.Severity == "warning" ? TaskErrorCategory.Warning : TaskErrorCategory.Message,
+                Text = $"{parsed.Code}: {parsed.Message}",
+                Document = parsed.File,
+                Line = Math.Max(0, parsed.Line - 1),
+                Column = Math.Max(0, parsed.Column - 1),
             };
             task.Navigate += (_, _) => _errors.Navigate(task, new Guid(EnvDTE.Constants.vsViewKindCode));
             _errors.Tasks.Add(task);

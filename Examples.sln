@@ -14,6 +14,8 @@ Project("{97222C8D-C7C1-4F63-8C70-0798E354F6F0}") = "Inline Assembly (WSL GCC)",
 EndProject
 Project("{97222C8D-C7C1-4F63-8C70-0798E354F6F0}") = "Object Model", "examples\ObjectModel\ObjectModel.ctproj", "{A163CA1D-81B8-44C6-BB9F-6A1CF87B2976}"
 EndProject
+Project("{97222C8D-C7C1-4F63-8C70-0798E354F6F0}") = "Standard Library", "examples\StandardLibrary\StandardLibrary.ctproj", "{28E96180-6312-4A2B-B59E-EF872AE24375}"
+EndProject
 Project("{97222C8D-C7C1-4F63-8C70-0798E354F6F0}") = "Cosmopolitan", "examples\Cosmopolitan\Cosmopolitan.ctproj", "{6D4ED961-D495-4980-9C9A-5F03DF587BC5}"
 EndProject
 Project("{97222C8D-C7C1-4F63-8C70-0798E354F6F0}") = "Freestanding", "examples\Freestanding\Freestanding.ctproj", "{BB065F34-9D17-43D8-9808-710B9ED1DF13}"
@@ -68,6 +70,12 @@ Global
 		{A163CA1D-81B8-44C6-BB9F-6A1CF87B2976}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{A163CA1D-81B8-44C6-BB9F-6A1CF87B2976}.Release|x64.ActiveCfg = Release|Any CPU
 		{A163CA1D-81B8-44C6-BB9F-6A1CF87B2976}.Release|x86.ActiveCfg = Release|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Release|x64.ActiveCfg = Release|Any CPU
+		{28E96180-6312-4A2B-B59E-EF872AE24375}.Release|x86.ActiveCfg = Release|Any CPU
 		{6D4ED961-D495-4980-9C9A-5F03DF587BC5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6D4ED961-D495-4980-9C9A-5F03DF587BC5}.Debug|x64.ActiveCfg = Debug|Any CPU
 		{6D4ED961-D495-4980-9C9A-5F03DF587BC5}.Debug|x86.ActiveCfg = Debug|Any CPU

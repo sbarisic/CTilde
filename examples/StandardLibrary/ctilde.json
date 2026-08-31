@@ -1,0 +1,13 @@
+{
+  "target": "hosted",
+  "architecture": "x64",
+  "sources": ["*.ct"],
+  "build": {
+    "configuration": "release",
+    "cLayout": "unity",
+    "generatedDirectory": "build/generated",
+    "generatedHeader": "build/generated/ctilde_exports.h",
+    "symbolMap": "build/generated/ctilde_symbols.json",
+    "executable": "build/StandardLibraryExample.exe"
+  }
+}

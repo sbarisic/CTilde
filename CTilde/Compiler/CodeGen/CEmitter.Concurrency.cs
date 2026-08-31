@@ -84,7 +84,7 @@ internal sealed partial class CEmitter
         writer.WriteLine($"static void ct_managed_thread_complete({typeName}* thread)");
         writer.WriteLine("{");
         writer.WriteLine($"    ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), UINT64_C(2), 2);");
-        writer.WriteLine("    ct_release((ct_object*)(void*)thread);");
+        writer.WriteLine("    ct_release_fast((ct_object*)(void*)thread);");
         writer.WriteLine("    ct_thread_detach();");
         writer.WriteLine("}");
         writer.WriteLine("#if defined(_MSC_VER)");
@@ -147,7 +147,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_managed_thread_payload* payload = (ct_managed_thread_payload*)calloc(1u, sizeof(*payload));");
         writer.WriteLine($"    if (payload == NULL) {{ ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", \"<thread-start>\", 0); }}");
         writer.WriteLine("    ct_atomic_store_relaxed(&payload->Ready, 0u); ct_atomic_store_relaxed(&payload->Abort, 0u);");
-        writer.WriteLine($"    thread->{handle} = (uintptr_t)(void*)payload; thread->{id} = ct_atomic_fetch_add_relaxed(&ct_managed_thread_next_id, 1u); ct_retain((ct_object*)(void*)thread);");
+        writer.WriteLine($"    thread->{handle} = (uintptr_t)(void*)payload; thread->{id} = ct_atomic_fetch_add_relaxed(&ct_managed_thread_next_id, 1u); ct_retain_fast((ct_object*)(void*)thread);");
         writer.WriteLine("    bool created = false; bool priority_ok = true;");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine($"    uintptr_t native = _beginthreadex(NULL, (unsigned)thread->{stack}, ct_managed_thread_worker, thread, CREATE_SUSPENDED, &payload->NativeId);");
@@ -172,7 +172,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("#else");
         writer.WriteLine("        if (created) (void)pthread_join(payload->Handle, NULL);");
         writer.WriteLine("#endif");
-        writer.WriteLine($"        if (!created) {{ thread->{handle} = 0u; free(payload); ct_release((ct_object*)(void*)thread); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); }}");
+        writer.WriteLine($"        if (!created) {{ thread->{handle} = 0u; free(payload); ct_release_fast((ct_object*)(void*)thread); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); }}");
         writer.WriteLine("        ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0103\", \"<thread-start>\", 0);");
         writer.WriteLine("    }");
         writer.WriteLine("}");

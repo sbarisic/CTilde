@@ -147,6 +147,22 @@ internal sealed partial class CEmitter
         writer.WriteLine("#define CT_UNUSED");
         writer.WriteLine("#endif");
         writer.WriteLine("#if defined(_MSC_VER)");
+        writer.WriteLine("#define CT_INLINE __forceinline");
+        writer.WriteLine("#define CT_NOINLINE __declspec(noinline)");
+        writer.WriteLine("#define CT_COLD CT_NOINLINE");
+        writer.WriteLine("#define CT_UNLIKELY(value) (value)");
+        writer.WriteLine("#elif defined(__GNUC__) || defined(__clang__)");
+        writer.WriteLine("#define CT_INLINE inline __attribute__((always_inline, unused))");
+        writer.WriteLine("#define CT_NOINLINE __attribute__((noinline))");
+        writer.WriteLine("#define CT_COLD __attribute__((cold, noinline))");
+        writer.WriteLine("#define CT_UNLIKELY(value) __builtin_expect(!!(value), 0)");
+        writer.WriteLine("#else");
+        writer.WriteLine("#define CT_INLINE inline");
+        writer.WriteLine("#define CT_NOINLINE");
+        writer.WriteLine("#define CT_COLD");
+        writer.WriteLine("#define CT_UNLIKELY(value) (value)");
+        writer.WriteLine("#endif");
+        writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("#define CT_FLEXIBLE_ARRAY 1");
         writer.WriteLine("#else");
         writer.WriteLine("#define CT_FLEXIBLE_ARRAY");
@@ -181,7 +197,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void ct_module_init(void);");
         writer.WriteLine("static void ct_module_fini(void);");
         writer.WriteLine("static ct_module_descriptor ct_program_module;");
-        writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;");
+        writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; ct_atomic_u32 IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;");
         if (EmitDebugInformation)
         {
             writer.WriteLine("#if defined(_MSC_VER)");
@@ -233,8 +249,8 @@ internal sealed partial class CEmitter
                 writer.WriteLine("static void ct_debug_report_leaks(void);");
             }
         }
-        writer.WriteLine("static_assert(sizeof(ct_atomic_u32) == sizeof(uint32_t), \"C~ atomic reference counts must remain 32-bit\");");
-        writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic reference counts must preserve managed-header alignment\");");
+        writer.WriteLine("static_assert(sizeof(ct_atomic_u32) == sizeof(uint32_t), \"C~ atomic header fields must remain 32-bit\");");
+        writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic header fields must preserve managed-header alignment\");");
         writer.WriteLine("typedef void (*ct_drop_value_fn)(void*);");
         writer.WriteLine("typedef struct ct_cleanup_record { struct ct_cleanup_record* Previous; void* Value; ct_drop_value_fn Drop; bool Active; } ct_cleanup_record;");
         writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_NULL, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_FORMAT, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
@@ -300,7 +316,8 @@ internal sealed partial class CEmitter
             writer.WriteLine(PanicTerminationStatement());
         }
         writer.WriteLine("}");
-        writer.WriteLine("static void* ct_require_nonnull(void* value, const char* file, int line) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", file, line); return value; }");
+        writer.WriteLine("static CT_COLD CT_NORETURN void ct_null_fail(const char* file, int line) { ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", file, line); }");
+        writer.WriteLine("static CT_INLINE void* ct_require_nonnull(void* value, const char* file, int line) { if (CT_UNLIKELY(value == NULL)) ct_null_fail(file, line); return value; }");
         EmitPlatformAllocation(writer);
         if (HasNativeImports)
         {
@@ -316,34 +333,20 @@ internal sealed partial class CEmitter
             writer.WriteLine("#define ct_exception_top (ct_thread_require_attached()->ExceptionTop)");
             writer.WriteLine("#define ct_current_exception (ct_thread_require_attached()->CurrentException)");
         }
-        writer.WriteLine("void ct_retain(ct_object* object)");
+        writer.WriteLine("static void ct_release_last(ct_object* object, ct_thread_state* state);");
+        writer.WriteLine("static CT_INLINE void ct_retain_core(ct_object* object) {" +
+            (EmitDebugObjects ? " ct_debug_arc_touch(object);" : string.Empty) +
+            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount); for (;;) { if (count == UINT32_MAX) return; if (CT_UNLIKELY(count == 0u || count == UINT32_MAX - 1u)) ct_fail(\"CTM0002\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_relaxed(&object->RefCount, &count, count + 1u)) return; } }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_release_decrement(ct_object* object) {" +
+            (EmitDebugObjects ? " ct_debug_arc_touch(object);" : string.Empty) +
+            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount); for (;;) { if (count == UINT32_MAX) return UINT32_MAX; if (CT_UNLIKELY(count == 0u)) ct_fail(\"CTM0003\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_release(&object->RefCount, &count, count - 1u)) return count; } }");
+        writer.WriteLine("static CT_INLINE void ct_retain_fast(ct_object* object) { if (object != NULL) ct_retain_core(object); }");
+        writer.WriteLine("static CT_INLINE void ct_release_fast(ct_object* object) { if (object == NULL) return; uint32_t count = ct_release_decrement(object); if (CT_UNLIKELY(count == 1u)) ct_release_last(object, NULL); }");
+        writer.WriteLine("void ct_retain(ct_object* object) { (void)ct_thread_require_attached(); ct_retain_fast(object); }");
+        writer.WriteLine("void ct_release(ct_object* object) { ct_thread_state* state = ct_thread_require_attached(); if (object == NULL) return; uint32_t count = ct_release_decrement(object); if (count == 1u) ct_release_last(object, state); }");
+        writer.WriteLine("static void ct_release_last(ct_object* object, ct_thread_state* state)");
         writer.WriteLine("{");
-        writer.WriteLine("    (void)ct_thread_require_attached();");
-        writer.WriteLine("    if (object == NULL) return;");
-        if (EmitDebugObjects)
-            writer.WriteLine("    ct_debug_arc_touch(object);");
-        writer.WriteLine("    uint32_t count = ct_atomic_load_relaxed(&object->RefCount);");
-        writer.WriteLine("    for (;;)");
-        writer.WriteLine("    {");
-        writer.WriteLine("        if (count == UINT32_MAX) return;");
-        writer.WriteLine("        if (count == 0u || count == UINT32_MAX - 1u) ct_fail(\"CTM0002\", \"<runtime>\", 0);");
-        writer.WriteLine("        if (ct_atomic_compare_exchange_relaxed(&object->RefCount, &count, count + 1u)) return;");
-        writer.WriteLine("    }");
-        writer.WriteLine("}");
-        writer.WriteLine("void ct_release(ct_object* object)");
-        writer.WriteLine("{");
-        writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
-        writer.WriteLine("    if (object == NULL) return;");
-        if (EmitDebugObjects)
-            writer.WriteLine("    ct_debug_arc_touch(object);");
-        writer.WriteLine("    uint32_t count = ct_atomic_load_relaxed(&object->RefCount);");
-        writer.WriteLine("    for (;;)");
-        writer.WriteLine("    {");
-        writer.WriteLine("        if (count == UINT32_MAX) return;");
-        writer.WriteLine("        if (count == 0u) ct_fail(\"CTM0003\", \"<runtime>\", 0);");
-        writer.WriteLine("        if (ct_atomic_compare_exchange_release(&object->RefCount, &count, count - 1u)) break;");
-        writer.WriteLine("    }");
-        writer.WriteLine("    if (count != 1u) return;");
+        writer.WriteLine("    if (state == NULL) state = ct_thread_require_attached();");
         writer.WriteLine("    ct_atomic_acquire_fence();");
         if (EmitDebugObjects)
             writer.WriteLine("    ct_debug_runtime_event(CT_DEBUG_REASON_RELEASE, CT_DEBUG_EVENT_RELEASE, object, 0u, NULL, NULL, 0);");
@@ -364,13 +367,13 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    state->ReleaseDraining = false;");
         writer.WriteLine("}");
-        writer.WriteLine("static void ct_retain_ref_value(void* value) { ct_retain(*(ct_object**)value); }");
-        writer.WriteLine("static void ct_drop_ref_value(void* value) { ct_object* object = *(ct_object**)value; *(ct_object**)value = NULL; ct_release(object); }");
+        writer.WriteLine("static void ct_retain_ref_value(void* value) { ct_retain_fast(*(ct_object**)value); }");
+        writer.WriteLine("static void ct_drop_ref_value(void* value) { ct_object* object = *(ct_object**)value; *(ct_object**)value = NULL; ct_release_fast(object); }");
         if (_usesNativeUtf8)
         {
-            writer.WriteLine("static void ct_retain_value_nu8(void* storage) { ct_native_utf8_string* value = (ct_native_utf8_string*)storage; ct_retain((ct_object*)(void*)value->Owner); }");
-            writer.WriteLine("static void ct_drop_value_nu8(void* storage) { ct_native_utf8_string* value = (ct_native_utf8_string*)storage; ct_string* owner = value->Owner; value->Owner = NULL; value->Data = NULL; value->ByteLength = 0u; ct_release((ct_object*)(void*)owner); }");
-            writer.WriteLine("ct_native_utf8_string ct_native_utf8_borrow(ct_string* value) { (void)ct_require_nonnull(value, \"<native-utf8>\", 0); if (memchr(value->Data, 0, (size_t)value->Length) != NULL) ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTS0003\", \"<native-utf8>\", 0); ct_retain((ct_object*)(void*)value); return (ct_native_utf8_string){ value, value->Data, (size_t)value->Length }; }");
+            writer.WriteLine("static void ct_retain_value_nu8(void* storage) { ct_native_utf8_string* value = (ct_native_utf8_string*)storage; ct_retain_fast((ct_object*)(void*)value->Owner); }");
+            writer.WriteLine("static void ct_drop_value_nu8(void* storage) { ct_native_utf8_string* value = (ct_native_utf8_string*)storage; ct_string* owner = value->Owner; value->Owner = NULL; value->Data = NULL; value->ByteLength = 0u; ct_release_fast((ct_object*)(void*)owner); }");
+            writer.WriteLine("ct_native_utf8_string ct_native_utf8_borrow(ct_string* value) { (void)ct_require_nonnull(value, \"<native-utf8>\", 0); if (memchr(value->Data, 0, (size_t)value->Length) != NULL) ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTS0003\", \"<native-utf8>\", 0); ct_retain_fast((ct_object*)(void*)value); return (ct_native_utf8_string){ value, value->Data, (size_t)value->Length }; }");
             writer.WriteLine("ct_native_utf8_string ct_native_utf8_null(void) { return (ct_native_utf8_string){ NULL, NULL, 0u }; }");
         }
         writer.WriteLine("static void ct_cleanup_push(ct_cleanup_record* record, void* value, ct_drop_value_fn drop) { record->Previous = ct_cleanup_top; record->Value = value; record->Drop = drop; record->Active = true; ct_cleanup_top = record; }");
@@ -384,9 +387,9 @@ internal sealed partial class CEmitter
             writer.WriteLine("    state->ExceptionCode = code; state->ExceptionFile = file; state->ExceptionLine = (int32_t)line;");
             if (EmitDebugInformation)
                 writer.WriteLine("    ct_debug_throw_hook(exception, code, file, line, ct_exception_top == NULL ? 1u : 0u);");
-            writer.WriteLine("    if (ct_exception_top == NULL) { ct_retain(exception); ct_cleanup_unwind_to(NULL); ct_unhandled_exception(exception); }");
-            writer.WriteLine("    ct_retain(exception);");
-            writer.WriteLine("    ct_release(ct_current_exception);");
+            writer.WriteLine("    if (ct_exception_top == NULL) { ct_retain_fast(exception); ct_cleanup_unwind_to(NULL); ct_unhandled_exception(exception); }");
+            writer.WriteLine("    ct_retain_fast(exception);");
+            writer.WriteLine("    ct_release_fast(ct_current_exception);");
             writer.WriteLine("    ct_current_exception = exception;");
             writer.WriteLine("    ct_exception_frame* target = ct_exception_top;");
             writer.WriteLine("    ct_cleanup_unwind_to(target->CleanupBoundary);");
@@ -395,13 +398,10 @@ internal sealed partial class CEmitter
             writer.WriteLine("CT_NORETURN static void ct_throw(ct_object* exception, const char* file, int line) { if (exception == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTE0002\", file, line); ct_throw_core(exception, \"CTE0001\", file, line); }");
             writer.WriteLine("CT_NORETURN static void ct_rethrow(ct_object* exception) { ct_thread_state* state = ct_thread_require_attached(); ct_throw_core(exception, state->ExceptionCode, state->ExceptionFile, state->ExceptionLine); }");
         }
-        writer.WriteLine("static ct_atomic_u32 ct_next_identity = CT_ATOMIC_U32_INIT(1u);");
         writer.WriteLine("static void ct_init_object(void* value, const ct_type_descriptor* type)");
         writer.WriteLine("{");
         writer.WriteLine("    ct_object* object = (ct_object*)value;");
-        writer.WriteLine("    uint32_t identity;");
-        writer.WriteLine("    do { identity = ct_atomic_fetch_add_relaxed(&ct_next_identity, 1u); } while (identity == 0u);");
-        writer.WriteLine("    object->Type = type; object->IdentityHash = identity; ct_atomic_store_relaxed(&object->RefCount, 1u); object->ReleaseNext = NULL;");
+        writer.WriteLine("    object->Type = type; ct_atomic_store_relaxed(&object->IdentityHash, 0u); ct_atomic_store_relaxed(&object->RefCount, 1u); object->ReleaseNext = NULL;");
         if (EmitDebugObjects)
             writer.WriteLine("    ct_debug_object_initialized(object);");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
@@ -415,47 +415,52 @@ internal sealed partial class CEmitter
         writer.WriteLine("    size_t size = data_offset + count * element_size;");
         writer.WriteLine("    return size < minimum_size ? minimum_size : size;");
         writer.WriteLine("}");
-        writer.WriteLine("static void ct_bounds(int32_t index, int32_t length, const char* file, int line) { if (index < 0 || index >= length) ct_raise_runtime_fault(CT_FAULT_BOUNDS, \"CTA0003\", file, line); }");
+        writer.WriteLine("static CT_COLD CT_NORETURN void ct_bounds_fail(const char* file, int line) { ct_raise_runtime_fault(CT_FAULT_BOUNDS, \"CTA0003\", file, line); }");
+        writer.WriteLine("static CT_INLINE void ct_bounds(int32_t index, int32_t length, const char* file, int line) { if (CT_UNLIKELY(index < 0 || index >= length)) ct_bounds_fail(file, line); }");
         if (_nativeBufferTypes.Count != 0)
         {
-            writer.WriteLine("static void ct_native_bounds(size_t index, size_t length, const char* file, int line) { if (index >= length) ct_raise_runtime_fault(CT_FAULT_BOUNDS, \"CTB0001\", file, line); }");
-            writer.WriteLine("static size_t ct_stack_bytes(size_t count, size_t element_size, const char* file, int line) { if (element_size != 0u && count > SIZE_MAX / element_size) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0003\", file, line); return count * element_size; }");
+            writer.WriteLine("static CT_COLD CT_NORETURN void ct_native_bounds_fail(const char* file, int line) { ct_raise_runtime_fault(CT_FAULT_BOUNDS, \"CTB0001\", file, line); }");
+            writer.WriteLine("static CT_COLD CT_NORETURN void ct_stack_bytes_fail(const char* file, int line) { ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTB0003\", file, line); }");
+            writer.WriteLine("static CT_INLINE void ct_native_bounds(size_t index, size_t length, const char* file, int line) { if (CT_UNLIKELY(index >= length)) ct_native_bounds_fail(file, line); }");
+            writer.WriteLine("static CT_INLINE size_t ct_stack_bytes(size_t count, size_t element_size, const char* file, int line) { if (CT_UNLIKELY(element_size != 0u && count > SIZE_MAX / element_size)) ct_stack_bytes_fail(file, line); return count * element_size; }");
         }
-        writer.WriteLine("static int32_t ct_i32_bits(uint32_t value) { int32_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
-        writer.WriteLine("static int32_t ct_i32_add(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a + (uint32_t)b); }");
-        writer.WriteLine("static int32_t ct_i32_sub(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a - (uint32_t)b); }");
-        writer.WriteLine("static int32_t ct_i32_mul(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a * (uint32_t)b); }");
-        writer.WriteLine("static int32_t ct_i32_neg(int32_t value) { return ct_i32_bits(0u - (uint32_t)value); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_bits(uint32_t value) { int32_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
+        writer.WriteLine("static ct_atomic_u32 ct_next_identity = CT_ATOMIC_U32_INIT(1u);");
+        writer.WriteLine("static int32_t ct_object_identity_hash(ct_object* object) { uint32_t identity = ct_atomic_load_relaxed(&object->IdentityHash); if (identity == 0u) { uint32_t candidate; do { candidate = ct_atomic_fetch_add_relaxed(&ct_next_identity, 1u); } while (candidate == 0u); uint32_t expected = 0u; if (!ct_atomic_compare_exchange_relaxed(&object->IdentityHash, &expected, candidate)) candidate = expected; identity = candidate; } return ct_i32_bits(identity); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_add(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a + (uint32_t)b); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_sub(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a - (uint32_t)b); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_mul(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a * (uint32_t)b); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_neg(int32_t value) { return ct_i32_bits(0u - (uint32_t)value); }");
         writer.WriteLine("static int32_t ct_i32_div(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT32_MIN && b == -1) return INT32_MIN; return a / b; }");
         writer.WriteLine("static int32_t ct_i32_mod(int32_t a, int32_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT32_MIN && b == -1) return 0; return a % b; }");
         writer.WriteLine("static uint32_t ct_u32_div(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
         writer.WriteLine("static uint32_t ct_u32_mod(uint32_t a, uint32_t b, const char* file, int line) { if (b == 0u) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
-        writer.WriteLine("static int32_t ct_i32_shl(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a << ((uint32_t)b & 31u)); }");
-        writer.WriteLine("static int32_t ct_i32_shr(int32_t a, int32_t b) { uint32_t n = (uint32_t)b & 31u; if (n == 0u) return a; return a >= 0 ? (int32_t)((uint32_t)a >> n) : ct_i32_bits(((uint32_t)a >> n) | (~UINT32_C(0) << (32u - n))); }");
-        writer.WriteLine("static int64_t ct_i64_bits(uint64_t value) { int64_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
-        writer.WriteLine("static int64_t ct_i64_add(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a + (uint64_t)b); }");
-        writer.WriteLine("static int64_t ct_i64_sub(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a - (uint64_t)b); }");
-        writer.WriteLine("static int64_t ct_i64_mul(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a * (uint64_t)b); }");
-        writer.WriteLine("static int64_t ct_i64_neg(int64_t value) { return ct_i64_bits(UINT64_C(0) - (uint64_t)value); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_shl(int32_t a, int32_t b) { return ct_i32_bits((uint32_t)a << ((uint32_t)b & 31u)); }");
+        writer.WriteLine("static CT_INLINE int32_t ct_i32_shr(int32_t a, int32_t b) { uint32_t n = (uint32_t)b & 31u; if (n == 0u) return a; return a >= 0 ? (int32_t)((uint32_t)a >> n) : ct_i32_bits(((uint32_t)a >> n) | (~UINT32_C(0) << (32u - n))); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_bits(uint64_t value) { int64_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_add(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a + (uint64_t)b); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_sub(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a - (uint64_t)b); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_mul(int64_t a, int64_t b) { return ct_i64_bits((uint64_t)a * (uint64_t)b); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_neg(int64_t value) { return ct_i64_bits(UINT64_C(0) - (uint64_t)value); }");
         writer.WriteLine("static int64_t ct_i64_div(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT64_MIN && b == -1) return INT64_MIN; return a / b; }");
         writer.WriteLine("static int64_t ct_i64_mod(int64_t a, int64_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INT64_MIN && b == -1) return 0; return a % b; }");
         writer.WriteLine("static uint64_t ct_u64_div(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
         writer.WriteLine("static uint64_t ct_u64_mod(uint64_t a, uint64_t b, const char* file, int line) { if (b == UINT64_C(0)) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
-        writer.WriteLine("static int64_t ct_i64_shl(int64_t a, int32_t b) { return ct_i64_bits((uint64_t)a << ((uint32_t)b & 63u)); }");
-        writer.WriteLine("static int64_t ct_i64_shr(int64_t a, int32_t b) { uint32_t n = (uint32_t)b & 63u; if (n == 0u) return a; return a >= 0 ? (int64_t)((uint64_t)a >> n) : ct_i64_bits(((uint64_t)a >> n) | (~UINT64_C(0) << (64u - n))); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_shl(int64_t a, int32_t b) { return ct_i64_bits((uint64_t)a << ((uint32_t)b & 63u)); }");
+        writer.WriteLine("static CT_INLINE int64_t ct_i64_shr(int64_t a, int32_t b) { uint32_t n = (uint32_t)b & 63u; if (n == 0u) return a; return a >= 0 ? (int64_t)((uint64_t)a >> n) : ct_i64_bits(((uint64_t)a >> n) | (~UINT64_C(0) << (64u - n))); }");
         if (_usesNativeIntegers)
         {
-            writer.WriteLine("static intptr_t ct_ni_bits(uintptr_t value) { intptr_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
-            writer.WriteLine("static intptr_t ct_ni_add(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a + (uintptr_t)b); }");
-            writer.WriteLine("static intptr_t ct_ni_sub(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a - (uintptr_t)b); }");
-            writer.WriteLine("static intptr_t ct_ni_mul(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a * (uintptr_t)b); }");
-            writer.WriteLine("static intptr_t ct_ni_neg(intptr_t value) { return ct_ni_bits((uintptr_t)0 - (uintptr_t)value); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_bits(uintptr_t value) { intptr_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_add(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a + (uintptr_t)b); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_sub(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a - (uintptr_t)b); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_mul(intptr_t a, intptr_t b) { return ct_ni_bits((uintptr_t)a * (uintptr_t)b); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_neg(intptr_t value) { return ct_ni_bits((uintptr_t)0 - (uintptr_t)value); }");
             writer.WriteLine("static intptr_t ct_ni_div(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INTPTR_MIN && b == -1) return INTPTR_MIN; return a / b; }");
             writer.WriteLine("static intptr_t ct_ni_mod(intptr_t a, intptr_t b, const char* file, int line) { if (b == 0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); if (a == INTPTR_MIN && b == -1) return 0; return a % b; }");
             writer.WriteLine("static uintptr_t ct_nu_div(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a / b; }");
             writer.WriteLine("static uintptr_t ct_nu_mod(uintptr_t a, uintptr_t b, const char* file, int line) { if (b == (uintptr_t)0) ct_raise_runtime_fault(CT_FAULT_DIVIDE, \"CTD0001\", file, line); return a % b; }");
-            writer.WriteLine("static intptr_t ct_ni_shl(intptr_t a, int32_t b) { const uint32_t mask = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u); return ct_ni_bits((uintptr_t)a << ((uint32_t)b & mask)); }");
-            writer.WriteLine("static intptr_t ct_ni_shr(intptr_t a, int32_t b) { const uint32_t width = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT); uint32_t n = (uint32_t)b & (width - 1u); if (n == 0u) return a; return a >= 0 ? (intptr_t)((uintptr_t)a >> n) : ct_ni_bits(((uintptr_t)a >> n) | (~(uintptr_t)0 << (width - n))); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_shl(intptr_t a, int32_t b) { const uint32_t mask = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT - 1u); return ct_ni_bits((uintptr_t)a << ((uint32_t)b & mask)); }");
+            writer.WriteLine("static CT_INLINE intptr_t ct_ni_shr(intptr_t a, int32_t b) { const uint32_t width = (uint32_t)(sizeof(uintptr_t) * CHAR_BIT); uint32_t n = (uint32_t)b & (width - 1u); if (n == 0u) return a; return a >= 0 ? (intptr_t)((uintptr_t)a >> n) : ct_ni_bits(((uintptr_t)a >> n) | (~(uintptr_t)0 << (width - n))); }");
         }
         writer.WriteLine("static bool ct_string_equal(const ct_string* a, const ct_string* b) { if (a == b) return true; if (a == NULL || b == NULL || a->Length != b->Length) return false; return a->Length == 0 || memcmp(a->Data, b->Data, (size_t)a->Length) == 0; }");
         writer.WriteLine("static ct_string* ct_string_concat(const ct_string* a, const ct_string* b, const char* file, int line)");
@@ -958,27 +963,27 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("typedef volatile long ct_atomic_u32;");
         writer.WriteLine("#define CT_ATOMIC_U32_INIT(value) ((ct_atomic_u32)(value))");
-        writer.WriteLine("static uint32_t ct_atomic_load_relaxed(const ct_atomic_u32* value) { return (uint32_t)*value; }");
-        writer.WriteLine("static uint32_t ct_atomic_load_acquire(const ct_atomic_u32* value) { uint32_t result = (uint32_t)*value; _ReadWriteBarrier(); return result; }");
-        writer.WriteLine("static void ct_atomic_store_relaxed(ct_atomic_u32* value, uint32_t desired) { (void)_InterlockedExchange(value, (long)desired); }");
-        writer.WriteLine("static void ct_atomic_store_release(ct_atomic_u32* value, uint32_t desired) { (void)_InterlockedExchange(value, (long)desired); }");
-        writer.WriteLine("static bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { long observed = _InterlockedCompareExchange(value, (long)desired, (long)*expected); if ((uint32_t)observed == *expected) return true; *expected = (uint32_t)observed; return false; }");
-        writer.WriteLine("static bool ct_atomic_compare_exchange_release(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return ct_atomic_compare_exchange_relaxed(value, expected, desired); }");
-        writer.WriteLine("static uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, (long)amount); }");
-        writer.WriteLine("static uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, -(long)amount); }");
-        writer.WriteLine("static void ct_atomic_acquire_fence(void) { _ReadWriteBarrier(); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_relaxed(const ct_atomic_u32* value) { return (uint32_t)*value; }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_acquire(const ct_atomic_u32* value) { uint32_t result = (uint32_t)*value; _ReadWriteBarrier(); return result; }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_relaxed(ct_atomic_u32* value, uint32_t desired) { (void)_InterlockedExchange(value, (long)desired); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_release(ct_atomic_u32* value, uint32_t desired) { (void)_InterlockedExchange(value, (long)desired); }");
+        writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { long observed = _InterlockedCompareExchange(value, (long)desired, (long)*expected); if ((uint32_t)observed == *expected) return true; *expected = (uint32_t)observed; return false; }");
+        writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_release(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return ct_atomic_compare_exchange_relaxed(value, expected, desired); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, (long)amount); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, -(long)amount); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_acquire_fence(void) { _ReadWriteBarrier(); }");
         writer.WriteLine("#else");
         writer.WriteLine("typedef uint32_t ct_atomic_u32;");
         writer.WriteLine("#define CT_ATOMIC_U32_INIT(value) ((ct_atomic_u32)(value))");
-        writer.WriteLine("static uint32_t ct_atomic_load_relaxed(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_RELAXED); }");
-        writer.WriteLine("static uint32_t ct_atomic_load_acquire(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_ACQUIRE); }");
-        writer.WriteLine("static void ct_atomic_store_relaxed(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELAXED); }");
-        writer.WriteLine("static void ct_atomic_store_release(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELEASE); }");
-        writer.WriteLine("static bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return __atomic_compare_exchange_n(value, expected, desired, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }");
-        writer.WriteLine("static bool ct_atomic_compare_exchange_release(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return __atomic_compare_exchange_n(value, expected, desired, true, __ATOMIC_RELEASE, __ATOMIC_RELAXED); }");
-        writer.WriteLine("static uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { return __atomic_fetch_add(value, amount, __ATOMIC_RELAXED); }");
-        writer.WriteLine("static uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { return __atomic_fetch_sub(value, amount, __ATOMIC_RELEASE); }");
-        writer.WriteLine("static void ct_atomic_acquire_fence(void) { __atomic_thread_fence(__ATOMIC_ACQUIRE); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_relaxed(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_acquire(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_ACQUIRE); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_relaxed(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_release(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELEASE); }");
+        writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return __atomic_compare_exchange_n(value, expected, desired, true, __ATOMIC_RELAXED, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_release(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return __atomic_compare_exchange_n(value, expected, desired, true, __ATOMIC_RELEASE, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { return __atomic_fetch_add(value, amount, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { return __atomic_fetch_sub(value, amount, __ATOMIC_RELEASE); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_acquire_fence(void) { __atomic_thread_fence(__ATOMIC_ACQUIRE); }");
         writer.WriteLine("#endif");
     }
 

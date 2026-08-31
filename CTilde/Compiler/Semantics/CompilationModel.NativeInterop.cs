@@ -32,7 +32,7 @@ internal sealed partial class CompilationModel
     {
         var runtimeSymbols = new HashSet<string>(StringComparer.Ordinal)
         {
-            "main", "ct_fail", "ct_require_nonnull", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_memory_retain", "ct_memory_release", "ct_alloc_array", "ct_bounds", "ct_i32_bits",
+            "main", "ct_fail", "ct_require_nonnull", "ct_null_fail", "ct_alloc", "ct_dealloc", "ct_retain", "ct_release", "ct_retain_core", "ct_release_decrement", "ct_retain_fast", "ct_release_fast", "ct_release_last", "ct_memory_retain", "ct_memory_release", "ct_alloc_array", "ct_bounds", "ct_bounds_fail", "ct_i32_bits",
             "ct_i32_add", "ct_i32_sub", "ct_i32_mul", "ct_i32_neg", "ct_i32_div", "ct_i32_mod",
             "ct_u32_div", "ct_u32_mod", "ct_i32_shl", "ct_i32_shr", "ct_string_equal", "ct_string_concat",
             "ct_i64_bits", "ct_i64_add", "ct_i64_sub", "ct_i64_mul", "ct_i64_neg", "ct_i64_div", "ct_i64_mod",
@@ -54,9 +54,9 @@ internal sealed partial class CompilationModel
             "ct_monotonic_nanoseconds", "ct_random_argument_out_of_range", "ct_spin_pause",
             "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close",
             "ct_host_io_throw", "ct_host_utf8_valid", "ct_host_file", "ct_host_file_require", "ct_host_write_all",
-            "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_stack_bytes",
+            "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_native_bounds_fail", "ct_stack_bytes", "ct_stack_bytes_fail",
             "ct_module_init", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",
-            "ct_init_object", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
+            "ct_init_object", "ct_next_identity", "ct_object_identity_hash", "ct_object_default_to_string", "ct_object_default_equals", "ct_object_default_hash",
             "ct_object_to_string", "ct_object_base_to_string", "ct_object_hash", "ct_object_reference_equals", "ct_type_is_assignable",
             "ct_checked_cast", "ct_safe_cast", "ct_hash_bytes", "ct_hash_float", "ct_hash_double", "ct_object_value_equals",
             "ct_object_value_hash", "ct_default_vtable", "ct_string_vtable", "ct_desc_string",

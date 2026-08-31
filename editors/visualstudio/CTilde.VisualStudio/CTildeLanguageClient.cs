@@ -129,6 +129,27 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
 
     internal static event Action<long>? ReferenceCodeLensesChanged;
 
+    internal void QueueProjectReanalysis(string manifestPath)
+    {
+        var rpc = _rpc;
+        if (rpc is null)
+            return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await rpc.NotifyWithParameterObjectAsync("workspace/didChangeWatchedFiles", new
+                {
+                    changes = new[] { new { uri = new Uri(Path.GetFullPath(manifestPath)).AbsoluteUri, type = 2 } },
+                }).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
+            {
+                CTildeOutput.WriteLine($"C~ post-build analysis refresh failed: {exception.Message}");
+            }
+        });
+    }
+
     internal async Task<ReferenceCodeLensItem[]> GetReferenceCodeLensesAsync(string uri, CancellationToken cancellationToken)
     {
         var rpc = _rpc;
@@ -161,6 +182,15 @@ public sealed class CTildeLanguageClient : ILanguageClient, ILanguageClientCusto
     {
         [JsonRpcMethod("ctilde/referenceCodeLens/refresh", UseSingleObjectParameterDeserialization = true)]
         public void Refresh(ReferenceCodeLensRefresh refresh) => ReferenceCodeLensesChanged?.Invoke(refresh.Revision);
+
+        [JsonRpcMethod("ctilde/diagnosticsPublished", UseSingleObjectParameterDeserialization = true)]
+        public void DiagnosticsPublished(DiagnosticsPublished notification) => BuildDiagnosticTagger.ClearForUri(notification.Uri);
+    }
+
+    private sealed class DiagnosticsPublished
+    {
+        public string Uri { get; set; } = string.Empty;
+        public int? Version { get; set; }
     }
 
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Usage", "VSTHRD100:Avoid async void methods", Justification = "EnvDTE solution events require void callbacks.")]

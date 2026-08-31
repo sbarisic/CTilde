@@ -56,8 +56,8 @@ Run("filesystem hierarchy exclusions", () =>
 Run("CLI arguments and Windows quoting", () =>
 {
     var arguments = CommandContracts.Arguments(CTildeCommandKind.Build, @"C:\Program Files\C~\ctilde.dll", @"C:\Source Folder\ctilde.json");
-    Equal("--build", arguments[^1]);
-    Equal("\"C:\\Program Files\\C~\\ctilde.dll\" --project \"C:\\Source Folder\\ctilde.json\" --build", CommandContracts.JoinWindowsArguments(arguments));
+    Equal("normal", arguments[^1]);
+    Equal("\"C:\\Program Files\\C~\\ctilde.dll\" --project \"C:\\Source Folder\\ctilde.json\" --build --verbosity normal", CommandContracts.JoinWindowsArguments(arguments));
     Equal("\"a\\\\\\\"b\"", CommandContracts.QuoteWindowsArgument("a\\\"b"));
 });
 Run("diagnostic parsing and non-diagnostics", () =>
@@ -66,7 +66,55 @@ Run("diagnostic parsing and non-diagnostics", () =>
     Equal(@"C:\work\Program.ct", diagnostic!.File);
     Equal(12, diagnostic.Line);
     Equal("CT1234", diagnostic.Code);
+    True(DiagnosticParser.TryParse(@"C:\work\native.c(8,3): error C2065: missing", out var msvc));
+    Equal("C2065", msvc!.Code);
+    True(DiagnosticParser.TryParse("/work/native.c:9:4: warning: suspicious", out var gnu));
+    Equal("CTNATIVE", gnu!.Code);
     True(!DiagnosticParser.TryParse("native compiler output", out _));
+});
+Run("build diagnostic receipt parsing and source hashing", () =>
+{
+    WithProject(root =>
+    {
+        var manifest = Path.Combine(root, "ctilde.json");
+        var source = Path.Combine(root, "Program.ct");
+        File.WriteAllText(manifest, "{}");
+        File.WriteAllText(source, "broken");
+        var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("broken"))).ToLowerInvariant();
+        var receiptPath = BuildDiagnosticReceipts.PathForManifest(manifest);
+        Directory.CreateDirectory(Path.GetDirectoryName(receiptPath)!);
+        File.WriteAllText(receiptPath, System.Text.Json.JsonSerializer.Serialize(new
+        {
+            schemaVersion = 1,
+            manifest,
+            operation = "Build",
+            completionState = "failed",
+            completedAtUtc = DateTimeOffset.UtcNow,
+            sourceHashes = new Dictionary<string, string> { [source] = hash },
+            diagnostics = new[] { new { file = source, startLine = 1, startColumn = 1, endLine = 1, endColumn = 7, severity = "error", code = "CT1234", message = "broken", kind = "source" } },
+        }));
+        True(BuildDiagnosticReceipts.TryRead(receiptPath, out var receipt));
+        True(BuildDiagnosticReceipts.SourceTextHashMatches(receipt!, source, "broken"));
+        True(!BuildDiagnosticReceipts.SourceTextHashMatches(receipt!, source, "changed"));
+        Equal(1, BuildDiagnosticReceipts.CurrentDiagnostics(receipt!, source, "broken").Count);
+        Equal(0, BuildDiagnosticReceipts.CurrentDiagnostics(receipt!, source, "changed").Count);
+        Equal(0, BuildDiagnosticReceipts.CurrentDiagnostics(receipt! with { CompletionState = "succeeded" }, source, "broken").Count);
+        Equal("CT1234", receipt!.Diagnostics.Single().Code);
+    });
+});
+Run("Visual Studio build diagnostics integration", () =>
+{
+    var root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", ".."));
+    var targets = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "ProjectSystem", "CTilde.targets"));
+    True(targets.Contains("--build --verbosity normal", StringComparison.Ordinal));
+    True(targets.Contains("ConsoleToMSBuild=\"true\" IgnoreExitCode=\"true\"", StringComparison.Ordinal));
+    True(targets.Contains("error CT6003", StringComparison.Ordinal));
+    True(!targets.Contains("MSB3073", StringComparison.Ordinal));
+    var tagger = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio", "BuildDiagnosticTagger.cs"));
+    var contracts = File.ReadAllText(Path.Combine(root, "editors", "visualstudio", "CTilde.VisualStudio.Core", "BuildDiagnosticContracts.cs"));
+    True(contracts.Contains("SourceTextHashMatches", StringComparison.Ordinal));
+    True(contracts.Contains("item.Kind == \"manifest\"", StringComparison.Ordinal));
+    True(tagger.Contains("QueueProjectReanalysis", StringComparison.Ordinal));
 });
 Run("command enablement", () =>
 {
@@ -159,6 +207,7 @@ Run("repository C~ project contracts", () =>
         "examples/Features/Features.ctproj",
         "examples/InlineAssemblyWindows/InlineAssemblyWindows.ctproj",
         "examples/ObjectModel/ObjectModel.ctproj",
+        "examples/StandardLibrary/StandardLibrary.ctproj",
         "examples/Cosmopolitan/Cosmopolitan.ctproj",
         "examples/Freestanding/Freestanding.ctproj",
         "examples/HostedIo/HostedIo.ctproj",
@@ -168,8 +217,8 @@ Run("repository C~ project contracts", () =>
         "examples/TCan485/TCan485.QemuEsp32C3.ctproj",
     };
     var contracts = relativeProjects.Select(path => CTildeProjectContract.Load(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)))).ToArray();
-    Equal(13, contracts.Length);
-    Equal(13, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
+    Equal(14, contracts.Length);
+    Equal(14, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
     True(contracts.All(contract => File.Exists(contract.ManifestPath)));
     foreach (var contract in contracts)
     {

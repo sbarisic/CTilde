@@ -923,10 +923,14 @@ internal sealed partial class TypedIrBodyLowerer
         RecordForeachDependency("move-next", moveNext, moveNext.ReturnType);
         RecordForeachDependency("dispose", dispose, dispose.ReturnType);
         RecordForeachDependency("current", _emitter.GetAccessorMethod(current, getter: true), current.Type);
-        _emitter.Effects.RecordCall(_method, getEnumerator, syntax, getEnumerator.IsVirtual);
-        _emitter.Effects.RecordCall(_method, moveNext, syntax, moveNext.IsVirtual);
-        _emitter.Effects.RecordCall(_method, dispose, syntax, dispose.IsVirtual);
-        _emitter.Effects.RecordCall(_method, _emitter.GetAccessorMethod(current, getter: true), syntax, current.IsVirtual);
+        var getEnumeratorVirtual = RequiresVirtualDispatch(getEnumerator, collection.Type);
+        var moveNextVirtual = RequiresVirtualDispatch(moveNext, enumeratorType);
+        var disposeVirtual = RequiresVirtualDispatch(dispose, enumeratorType);
+        var currentVirtual = RequiresVirtualDispatch(current, enumeratorType);
+        _emitter.Effects.RecordCall(_method, getEnumerator, syntax, getEnumeratorVirtual);
+        _emitter.Effects.RecordCall(_method, moveNext, syntax, moveNextVirtual);
+        _emitter.Effects.RecordCall(_method, dispose, syntax, disposeVirtual);
+        _emitter.Effects.RecordCall(_method, _emitter.GetAccessorMethod(current, getter: true), syntax, currentVirtual);
         var collectionReceiver = MaterializeReceiver(collection, syntax.Collection);
         EmitPrelude(writer, collectionReceiver.Prelude);
         var collectionArgument = collection.Type.Kind == CTypeKind.Interface
@@ -935,7 +939,7 @@ internal sealed partial class TypedIrBodyLowerer
         var enumeratorName = NewTemp();
         RegisterDurableSlot(enumeratorName, enumeratorType);
         var enumeratorStorage = $"ct_state.{enumeratorName}";
-        var getCall = getEnumerator.IsVirtual
+        var getCall = getEnumeratorVirtual
             ? $"{collectionArgument}->Type->VTable->{CEmitter.VirtualSlotName(getEnumerator)}({collectionArgument})"
             : $"{getEnumerator.CName}({collectionArgument})";
         writer.WriteLine($"{enumeratorStorage} = {_emitter.DefaultValue(enumeratorType)};");
@@ -951,7 +955,7 @@ internal sealed partial class TypedIrBodyLowerer
             : enumeratorType.Kind == CTypeKind.Struct
             ? $"({NameMangler.Type(enumeratorSymbol)}*)(void*)&{enumeratorStorage}"
             : $"({NameMangler.Type(enumeratorSymbol)}*)(void*){enumeratorStorage}";
-        var disposeCall = dispose.IsVirtual
+        var disposeCall = disposeVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(dispose)}({enumeratorArgument})"
             : $"{dispose.CName}({enumeratorArgument})";
         var disposeId = _deferId++;
@@ -982,7 +986,7 @@ internal sealed partial class TypedIrBodyLowerer
         var @break = NewLabel("foreach_pattern_break");
         var before = SnapshotAssignments();
         writer.WriteLine($"{start}:;");
-        var moveNextCall = moveNext.IsVirtual
+        var moveNextCall = moveNextVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(moveNext)}({enumeratorArgument})"
             : $"{moveNext.CName}({enumeratorArgument})";
         writer.WriteLine($"if (!{moveNextCall}) goto {@break};");
@@ -990,7 +994,7 @@ internal sealed partial class TypedIrBodyLowerer
             RegisterDurableSlot(local.StorageName, declaredType);
         else
             writer.WriteLine($"{_emitter.CDeclaration(declaredType, local.CName)} = {_emitter.DefaultValue(declaredType)};");
-        var currentCode = current.IsVirtual
+        var currentCode = currentVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualGetterSlotName(current)}({enumeratorArgument})"
             : $"{NameMangler.Getter(current)}({enumeratorArgument})";
         if (declaredType.ContainsManagedReferences)

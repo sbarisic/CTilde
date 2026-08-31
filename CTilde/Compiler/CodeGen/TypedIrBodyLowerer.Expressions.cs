@@ -633,13 +633,14 @@ internal sealed partial class TypedIrBodyLowerer
         var selectedAccessor = forWrite
             ? property.Setter is null ? null : _emitter.GetAccessorMethod(property, getter: false)
             : property.Getter is null ? null : _emitter.GetAccessorMethod(property, getter: true);
+        var virtualDispatch = RequiresVirtualDispatch(property, receiver, baseReceiver);
         if (selectedAccessor is not null)
-            _emitter.Effects.RecordCall(_method, selectedAccessor, syntax, property.IsVirtual && !baseReceiver);
+            _emitter.Effects.RecordCall(_method, selectedAccessor, syntax, virtualDispatch);
         var typedReceiver = property.IsStatic ? string.Empty : $"({NameMangler.Type(property.ContainingType)}*)(void*){receiverArgument}";
         var objectReceiver = property.IsStatic ? string.Empty : $"((ct_object*)(void*){receiverArgument})";
         var getterCode = property.Getter is null
             ? _emitter.DefaultValue(property.Type)
-            : property.IsVirtual && !baseReceiver
+            : virtualDispatch
                 ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(property)}({objectReceiver})"
                 : $"{NameMangler.Getter(property)}({typedReceiver})";
         var result = new IrExpressionValue
@@ -650,13 +651,14 @@ internal sealed partial class TypedIrBodyLowerer
             Symbol = property,
             LValue = property.Setter is null ? null : new IrValueStorage
             {
-                Store = value => property.IsVirtual && !baseReceiver
+                Store = value => virtualDispatch
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(property)}({objectReceiver}, {value})"
                     : $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : typedReceiver + ", ")}{value})",
                 Field = property.BackingField,
                 Property = property,
                 IsBaseReceiver = baseReceiver,
                 IsConstInitStorage = receiver?.IsConstInitStorage == true,
+                UsesVirtualDispatch = virtualDispatch,
             },
             IsConstInitStorage = receiver?.IsConstInitStorage == true,
         };
@@ -692,15 +694,16 @@ internal sealed partial class TypedIrBodyLowerer
             var accessor = forWrite
                 ? indexer.Setter is null ? null : _emitter.GetAccessorMethod(indexer, getter: false)
                 : indexer.Getter is null ? null : _emitter.GetAccessorMethod(indexer, getter: true);
+            var virtualDispatch = RequiresVirtualDispatch(indexer, receiver, receiver.IsBaseReceiver);
             if (accessor is not null)
-                _emitter.Effects.RecordCall(_method, accessor, syntax, indexer.IsVirtual && !receiver.IsBaseReceiver);
+                _emitter.Effects.RecordCall(_method, accessor, syntax, virtualDispatch);
             var loweredReceiverValue = MaterializeReceiver(receiver, syntax.Receiver);
             prelude = [.. loweredReceiverValue.Prelude, .. index.Prelude];
             var typedReceiver = $"({NameMangler.Type(indexer.ContainingType)}*)(void*){loweredReceiverValue.Code}";
             var objectReceiver = $"((ct_object*)(void*){loweredReceiverValue.Code})";
             var getterCode = indexer.Getter is null
                 ? _emitter.DefaultValue(indexer.Type)
-                : indexer.IsVirtual && !receiver.IsBaseReceiver
+                : virtualDispatch
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(indexer)}({objectReceiver}, {index.Code})"
                     : $"{NameMangler.Getter(indexer)}({typedReceiver}, {index.Code})";
             var result = new IrExpressionValue
@@ -711,10 +714,11 @@ internal sealed partial class TypedIrBodyLowerer
                 Symbol = indexer,
                 LValue = indexer.Setter is null ? null : new IrValueStorage
                 {
-                    Store = value => indexer.IsVirtual && !receiver.IsBaseReceiver
+                    Store = value => virtualDispatch
                         ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(indexer)}({objectReceiver}, {index.Code}, {value})"
                         : $"{NameMangler.Setter(indexer)}({typedReceiver}, {index.Code}, {value})",
                     Property = indexer,
+                    UsesVirtualDispatch = virtualDispatch,
                 },
             };
             return !forWrite && indexer.Type.ContainsManagedReferences
@@ -1082,7 +1086,8 @@ internal sealed partial class TypedIrBodyLowerer
         CheckAccess(selected, syntax);
         _emitter.RegisterExternUse(selected, syntax);
         var nativeImportSlot = selected.IsNativeImport ? _emitter.RegisterNativeImportUse(selected, syntax) : null;
-        _emitter.Effects.RecordCall(_method, selected, syntax, selected.IsVirtual && receiver?.IsBaseReceiver != true);
+        var virtualDispatch = RequiresVirtualDispatch(selected, receiver, receiver?.IsBaseReceiver == true);
+        _emitter.Effects.RecordCall(_method, selected, syntax, virtualDispatch);
         if (selected.ExternName == "ct_native_utf8_borrow" &&
             syntax.Arguments is [{ Expression: LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string utf8Literal } }] &&
             utf8Literal.Contains('\0'))
@@ -1144,7 +1149,7 @@ internal sealed partial class TypedIrBodyLowerer
             callArguments.Add(receiverCode);
         callArguments.AddRange(loweredArguments.Codes);
         string call;
-        if (selected.IsVirtual && receiverCode is not null && receiver?.IsBaseReceiver != true)
+        if (virtualDispatch && receiverCode is not null)
         {
             var objectReceiver = $"((ct_object*)(void*){receiverCode})";
             callArguments[0] = objectReceiver;

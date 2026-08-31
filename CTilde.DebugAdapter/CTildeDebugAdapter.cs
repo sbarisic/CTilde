@@ -1302,7 +1302,7 @@ internal sealed class CTildeDebugAdapter : DebugAdapterBase, IDisposable
         var expression = container.Expression!;
         return
         [
-            EvaluateVariable("IdentityHash", $"((ct_object*)(void*)({expression}))->IdentityHash", "uint", container.FrameId, level),
+            EvaluateVariable("IdentityHash", $"(uint32_t)((ct_object*)(void*)({expression}))->IdentityHash", "uint", container.FrameId, level),
             EvaluateVariable("RefCount", $"((ct_object*)(void*)({expression}))->RefCount", "uint", container.FrameId, level),
         ];
     }

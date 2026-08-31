@@ -2,6 +2,14 @@ using CTilde;
 
 namespace CTilde.Cli;
 
+internal enum BuildVerbosity
+{
+    Quiet,
+    Minimal,
+    Normal,
+    Detailed,
+}
+
 internal sealed record CommandLineOptions(
     IReadOnlyList<string> Inputs,
     string? Output,
@@ -55,7 +63,8 @@ internal sealed record CommandLineOptions(
     NativeCpuTarget? CpuTarget,
     NativeFloatingPointMode? FloatingPoint,
     NativePgoMode? PgoMode,
-    string? PgoDirectory)
+    string? PgoDirectory,
+    BuildVerbosity Verbosity)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -119,6 +128,7 @@ internal sealed record CommandLineOptions(
         NativeFloatingPointMode? floatingPoint = null;
         NativePgoMode? pgoMode = null;
         string? pgoDirectory = null;
+        BuildVerbosity? verbosity = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -281,6 +291,20 @@ internal sealed record CommandLineOptions(
                     break;
                 case "--check": check = true; break;
                 case "--trace": trace = true; break;
+                case "--verbosity":
+                    var verbosityValue = RequireValue();
+                    verbosity = verbosityValue switch
+                    {
+                        "quiet" => BuildVerbosity.Quiet,
+                        "minimal" => BuildVerbosity.Minimal,
+                        "normal" => BuildVerbosity.Normal,
+                        "detailed" => BuildVerbosity.Detailed,
+                        null => null,
+                        _ => (BuildVerbosity)(-1),
+                    };
+                    if (verbosity is not null && !Enum.IsDefined(verbosity.Value))
+                        parseError = $"Unknown verbosity '{verbosityValue}'; expected quiet, minimal, normal, or detailed.";
+                    break;
                 case "--build": build = true; break;
                 case "--run": run = true; break;
                 case "--generate-bindings": generateBindings = true; break;
@@ -371,7 +395,8 @@ internal sealed record CommandLineOptions(
             targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
             panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures,
-            environment, espIdfChip, optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory);
+            environment, espIdfChip, optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory,
+            verbosity ?? (project is not null && (build || run) ? BuildVerbosity.Normal : BuildVerbosity.Minimal));
         return true;
     }
 }

@@ -300,5 +300,218 @@ internal static partial class ConformanceTests
                 freestandingOutput.Contains("ct_runtime_allocate_bridge", StringComparison.Ordinal),
                 "Freestanding string allocation or formatting support was not emitted through runtime roles.");
         });
+
+        suite.Run("draft 0.41 inline runtime hot paths", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ctilde-inline-hot-paths", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                File.WriteAllText(Path.Combine(root, "Program.ct"), """
+                    using System;
+                    public static class Program
+                    {
+                        private static long Read(int[] values, int index, long seed)
+                        {
+                            int value = values[index];
+                            return ((seed + value) * 3L) - (seed << 1);
+                        }
+                        [EntryPoint] public static void Main()
+                        {
+                            int[] values = new int[1]; values[0] = 41;
+                            Console.WriteLine(Read(values, 0, 1L));
+                        }
+                    }
+                    """);
+                var compiler = Environment.GetEnvironmentVariable("CTILDE_CC") ?? "auto";
+                File.WriteAllText(Path.Combine(root, "ctilde.json"), $$"""
+                    {
+                      "target": "hosted",
+                      "architecture": "x64",
+                      "sources": ["*.ct"],
+                      "build": {
+                        "cLayout": "modules",
+                        "generatedDirectory": "build/generated",
+                        "generatedHeader": "build/generated/ctilde_exports.h",
+                        "configuration": "release",
+                        "lto": false,
+                        "optimization": "speed",
+                        "compiler": "{{compiler}}",
+                        "executable": "build/hot-paths.exe"
+                      }
+                    }
+                    """);
+                var run = RunNativeProfileCli(root, Path.Combine(root, "ctilde.json"), "--run");
+                Assert(run.ExitCode == 0 && Normalize(run.StandardOutput).Contains("124\n", StringComparison.Ordinal), run.StandardOutput + run.StandardError);
+                var header = File.ReadAllText(Path.Combine(root, "build", "generated", "ctilde_internal.h"));
+                var runtime = File.ReadAllText(Path.Combine(root, "build", "generated", "ctilde_runtime.c"));
+                Assert(header.Contains("static CT_INLINE int64_t ct_i64_add(", StringComparison.Ordinal) &&
+                    header.Contains("static CT_INLINE int64_t ct_i64_mul(", StringComparison.Ordinal) &&
+                    header.Contains("static CT_INLINE void* ct_require_nonnull(", StringComparison.Ordinal) &&
+                    header.Contains("static CT_INLINE void ct_bounds(", StringComparison.Ordinal),
+                    "The modular internal header omitted a reachable inline hot-path helper.");
+                Assert(!header.Contains("extern int64_t ct_i64_add(", StringComparison.Ordinal) &&
+                    !header.Contains("extern void ct_bounds(", StringComparison.Ordinal) &&
+                    runtime.Contains("static CT_INLINE int64_t ct_i64_add(", StringComparison.Ordinal) &&
+                    !System.Text.RegularExpressions.Regex.IsMatch(runtime, @"(?m)^int64_t ct_i64_add\("),
+                    "A modular inline helper retained an external call or definition.");
+
+                const string collision = "public static class Native { [Extern(\"ct_retain_fast\")] public static void Call(); } public static class Program { [EntryPoint] public static void Main() { } }";
+                Assert(Compile(collision).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT4101"),
+                    "A native declaration was allowed to collide with an internal ARC fast path.");
+            }
+            finally { Directory.Delete(root, recursive: true); }
+        });
+
+        suite.Run("draft 0.41 ARC fast paths and lazy identity hash", () =>
+        {
+            const string source = """
+                using System;
+                using System.Threading;
+                public sealed class Item { }
+                public static class Program
+                {
+                    private static Item shared;
+                    private static int firstHash;
+                    private static int secondHash;
+                    private static void First() { firstHash = shared.GetHashCode(); }
+                    private static void Second() { secondHash = shared.GetHashCode(); }
+                    [EntryPoint] public static void Main()
+                    {
+                        Item first = new Item();
+                        Item other = new Item();
+                        shared = first;
+                        Thread one = new Thread(First); Thread two = new Thread(Second);
+                        one.Start(); two.Start(); one.Join(); two.Join();
+                        Console.WriteLine(firstHash != 0 && firstHash == secondHash && first.GetHashCode() == firstHash);
+                        int otherHash = other.GetHashCode();
+                        Console.WriteLine(otherHash != 0 && otherHash != firstHash);
+                    }
+                }
+                """;
+            var generated = Emit(source);
+            Assert(generated.Contains("ct_atomic_u32 IdentityHash", StringComparison.Ordinal) &&
+                generated.Contains("ct_atomic_store_relaxed(&object->IdentityHash, 0u)", StringComparison.Ordinal) &&
+                generated.Contains("ct_object_identity_hash(value)", StringComparison.Ordinal) &&
+                !generated.Contains("do { identity = ct_atomic_fetch_add_relaxed(&ct_next_identity", StringComparison.Ordinal),
+                "Managed allocation still assigned an eager identity hash or lost atomic lazy storage.");
+            Assert(generated.Contains("static CT_INLINE void ct_retain_fast(", StringComparison.Ordinal) &&
+                generated.Contains("static CT_INLINE void ct_release_fast(", StringComparison.Ordinal) &&
+                generated.Contains("void ct_retain(ct_object* object) { (void)ct_thread_require_attached();", StringComparison.Ordinal) &&
+                generated.Contains("void ct_release(ct_object* object) { ct_thread_state* state = ct_thread_require_attached();", StringComparison.Ordinal),
+                "Generated ARC fast paths or strict public wrappers were not emitted.");
+            var result = CompileAndRun(source, memoryDiagnostics: true, threads: true);
+            Assert(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+            AssertOutputLines(result.StandardOutput, "True", "True");
+        });
+
+        suite.Run("draft 0.41 public ARC attachment contract", () =>
+        {
+            const string source = """
+                public static class Native { [Extern("ct_test_arc_unattached")] public static void Invoke(); }
+                public static class Program { [EntryPoint] public static void Main() { Native.Invoke(); } }
+                """;
+            foreach (var operation in new[] { "ct_retain(NULL);", "ct_release(NULL);" })
+            {
+                var native = $$"""
+
+                    #if defined(_WIN32)
+                    #include <windows.h>
+                    static DWORD WINAPI ct_test_arc_worker(LPVOID raw) { (void)raw; {{operation}} return 0; }
+                    void ct_test_arc_unattached(void) { HANDLE thread = CreateThread(NULL, 0, ct_test_arc_worker, NULL, 0, NULL); if (thread == NULL) abort(); (void)WaitForSingleObject(thread, INFINITE); (void)CloseHandle(thread); }
+                    #else
+                    #include <pthread.h>
+                    static void* ct_test_arc_worker(void* raw) { (void)raw; {{operation}} return NULL; }
+                    void ct_test_arc_unattached(void) { pthread_t thread; if (pthread_create(&thread, NULL, ct_test_arc_worker, NULL) != 0) abort(); if (pthread_join(thread, NULL) != 0) abort(); }
+                    #endif
+                    """;
+                var result = CompileAndRun(source, nativeSuffix: native, threads: true);
+                Assert(result.ExitCode != 0 && result.StandardError.Contains("CTT0001", StringComparison.Ordinal),
+                    operation + Environment.NewLine + result.StandardOutput + result.StandardError);
+            }
+        });
+
+        suite.Run("draft 0.41 sealed receiver devirtualization", () =>
+        {
+            const string source = """
+                using System;
+                public delegate int Reader();
+                public class Base
+                {
+                    public virtual int Read() { return 1; }
+                    public virtual int Value { get { return 2; } }
+                    public virtual int this[int index] { get { return index; } }
+                }
+                public sealed class Closed : Base
+                {
+                    public override int Read() { return 10; }
+                    public override int Value { get { return 20; } }
+                    public override int this[int index] { get { return 30 + index; } }
+                }
+                public class Locked : Base { public sealed override int Read() { return 40; } }
+                public class Open : Base { public override int Read() { return 50; } }
+                public static class Program
+                {
+                    [EntryPoint] public static void Main()
+                    {
+                        Closed closed = new Closed(); Locked locked = new Locked(); Base open = new Open();
+                        Reader closedReader = closed.Read; Reader openReader = open.Read;
+                        Console.WriteLine(closed.Read() + closed.Value + closed[1] + closedReader());
+                        Console.WriteLine(locked.Read());
+                        Console.WriteLine(open.Read() + openReader());
+                    }
+                }
+                """;
+            var compilation = Compile(source);
+            var generatedWriter = new StringWriter();
+            Assert(compilation.EmitC(generatedWriter).Success, "Sealed-dispatch C emission failed.");
+            var mapWriter = new StringWriter();
+            Assert(compilation.EmitSymbolMap(mapWriter).Success, "Sealed-dispatch symbol-map emission failed.");
+            var generated = generatedWriter.ToString();
+            var mainName = Draft41SymbolName(mapWriter.ToString(), "method:Program::Main(", "method");
+            var closedRead = Draft41SymbolName(mapWriter.ToString(), "method:Closed::Read(", "method");
+            var lockedRead = Draft41SymbolName(mapWriter.ToString(), "method:Locked::Read(", "method");
+            var closedValue = Draft41SymbolName(mapWriter.ToString(), "getter:Closed::Value", "getter");
+            var closedIndexer = Draft41SymbolName(mapWriter.ToString(), "getter:Closed::Item", "getter");
+            var mainBody = Draft41FunctionBody(generated, "void " + mainName + "(");
+            Assert(mainBody.Contains(closedRead + "(", StringComparison.Ordinal) &&
+                mainBody.Contains(lockedRead + "(", StringComparison.Ordinal) &&
+                mainBody.Contains(closedValue + "(", StringComparison.Ordinal) &&
+                mainBody.Contains(closedIndexer + "(", StringComparison.Ordinal) &&
+                mainBody.Contains("->Type->VTable->", StringComparison.Ordinal),
+                "Sealed direct calls or the required open-receiver virtual call were emitted incorrectly.\n" + mainBody);
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(generated,
+                    @"return " + System.Text.RegularExpressions.Regex.Escape(closedRead) + @"\([^\n]*ct_target"),
+                "A delegate bound to a sealed receiver retained virtual dispatch.");
+            Assert(generated.Contains("target->Type->VTable->", StringComparison.Ordinal),
+                "A delegate bound through an open base receiver lost virtual dispatch.");
+            var result = CompileAndRun(source, memoryDiagnostics: true);
+            Assert(result.ExitCode == 0, result.StandardOutput + result.StandardError);
+            AssertOutputLines(result.StandardOutput, "71", "40", "100");
+        });
+    }
+
+    private static string Draft41SymbolName(string map, string identityFragment, string kind)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(map);
+        foreach (var symbol in document.RootElement.GetProperty("symbols").EnumerateArray())
+        {
+            if (symbol.GetProperty("kind").GetString() == kind &&
+                symbol.GetProperty("identity").GetString()!.Contains(identityFragment, StringComparison.Ordinal))
+                return symbol.GetProperty("name").GetString()!;
+        }
+        throw new InvalidOperationException($"Symbol map omitted {kind} '{identityFragment}'.");
+    }
+
+    private static string Draft41FunctionBody(string generated, string signature)
+    {
+        var declaration = generated.IndexOf(signature, StringComparison.Ordinal);
+        var definition = generated.IndexOf(signature, declaration + signature.Length, StringComparison.Ordinal);
+        if (definition < 0)
+            throw new InvalidOperationException($"Generated C omitted definition '{signature}'.");
+        var end = generated.IndexOf("\n}\n", definition, StringComparison.Ordinal);
+        if (end < 0)
+            throw new InvalidOperationException($"Generated C did not terminate definition '{signature}'.");
+        return generated[definition..(end + 3)];
     }
 }

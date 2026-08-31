@@ -550,6 +550,11 @@ internal sealed partial class CEmitter : ILoweringServices
                 writer.Append(line).Append('\n');
                 continue;
             }
+            if (line.StartsWith("static CT_INLINE ", StringComparison.Ordinal))
+            {
+                writer.Append(line).Append('\n');
+                continue;
+            }
 
             var declaration = RemoveInternalLinkage(line);
             if (declaration is null && line.Length != 0 && !char.IsWhiteSpace(line[0]) && line[0] != '#')
@@ -755,6 +760,11 @@ internal sealed partial class CEmitter : ILoweringServices
             if (runtimeUnit && line.Contains("ct_module_descriptor ct_program_module;", StringComparison.Ordinal))
             {
                 writer.Append("extern ct_module_descriptor ct_program_module;\n");
+                continue;
+            }
+            if (line.StartsWith("static CT_INLINE ", StringComparison.Ordinal))
+            {
+                writer.Append(line).Append('\n');
                 continue;
             }
             line = line.Replace("CT_NORETURN static CT_UNUSED ", "CT_NORETURN ", StringComparison.Ordinal)

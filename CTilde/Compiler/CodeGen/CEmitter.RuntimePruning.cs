@@ -6,7 +6,7 @@ namespace CTilde;
 internal sealed partial class CEmitter
 {
     private static readonly Regex PrivateRuntimeFunctionPattern = new(
-        @"\bstatic(?:\s+CT_UNUSED)?\s+[^;={}]*?\b(?<name>ct_[A-Za-z0-9_]+)\s*\(",
+        @"\bstatic(?:\s+CT_[A-Z0-9_]+)*\s+[^;={}]*?\b(?<name>ct_[A-Za-z0-9_]+)\s*\(",
         RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
     private static readonly Regex PrivateRuntimeDataPattern = new(

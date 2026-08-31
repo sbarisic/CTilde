@@ -29,7 +29,7 @@ Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte
 
 ## Compiler optimization
 
-The first typed-IR size tranche now removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
+The first typed-IR size tranche removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. The following low-risk generated-C tranche moves reachable atomic, wrapping-arithmetic, ARC, null, bounds, and stack-size common paths into the modular internal header, assigns default object hashes lazily, and devirtualizes sealed receivers and sealed overrides. Public ABI 16 layouts and native ownership entry points remain unchanged. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
 
 - [ ] Split the broad generated internal header into narrow dependency headers without duplicating declarations or changing public ABI output.
 - [ ] Add an optional readable-C mode with source-oriented names and annotations while preserving compact deterministic Release output by default.
@@ -42,7 +42,7 @@ The first typed-IR size tranche now removes cleanup boundaries with no live reco
 
 ## Editor tooling
 
-- [ ] Add references, rename, formatting, code actions, and auto-import completion edits.
+- [ ] Add rename, editor formatting, code actions, and auto-import completion edits. Exact cross-project references are implemented.
 - [ ] Add semantic-token range requests, delta results, and result-ID caching if project sizes demonstrate a need.
 - [ ] Publish self-contained language-server packages when distribution must support machines without an installed .NET 10 runtime.
 - [ ] Add documentation-tag completion, navigable documentation links, and other XML-documentation authoring features when prioritized.
@@ -75,6 +75,5 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 ## Deferred research
 
 - [ ] Design dynamic C~-module descriptor registration, dependency ordering, and module-lifetime tracking as a future runtime ABI revision. Draft 0.39 native imports load ordinary C ABI libraries only.
-- [ ] Add parallel path-tracer workers only if the existing per-sample deterministic output gate remains byte-identical across schedules.
 - [ ] Record a comparable pre-optimization renderer timing only if a representative historical build can be reconstructed; current elapsed-time measurements remain non-gating.
 - [ ] Add architecture-specific inline-assembly validation only if C~ gains a native backend. The GNU C backend intentionally delegates instruction validation to the assembler.

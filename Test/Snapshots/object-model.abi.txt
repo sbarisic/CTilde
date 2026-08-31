@@ -1,4 +1,4 @@
-typedef struct ct_object { const ct_type_descriptor* Type; uint32_t IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;
+typedef struct ct_object { const ct_type_descriptor* Type; ct_atomic_u32 IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;
 typedef struct ct_string { ct_object Object; int32_t Length; uint8_t Data[CT_FLEXIBLE_ARRAY]; } ct_string;
 typedef struct ct_string_literal_0_type { ct_object Object; int32_t Length; uint8_t Data[3]; } ct_string_literal_0_type;
 extern const ct_type_descriptor ct_d_d282cb203926a764ad6376ae;

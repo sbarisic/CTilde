@@ -215,6 +215,7 @@ orleans.codegen.cs
 /examples/InlineAssemblyWindows/build/
 /examples/ObjectModel/build/
 /examples/HostedIo/build/
+/examples/StandardLibrary/build/
 /examples/HostedIo/program.c
 /examples/HostedIo/program
 /examples/HostedIo/program.exe

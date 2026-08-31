@@ -1,0 +1,36 @@
+using System;
+using System.Threading;
+
+namespace StandardLibraryExample;
+
+public static class ThreadingExamples
+{
+    private static SpinLock gate = new SpinLock();
+    private static int counter;
+
+    private static void Increment()
+    {
+        for (int index = 0; index < 250; index++)
+        {
+            gate.Enter();
+            counter++;
+            gate.Exit();
+        }
+    }
+
+    public static void Run()
+    {
+        Console.WriteLine("-- threads and spin primitives --");
+        Thread first = new Thread(Increment);
+        Thread second = new Thread(Increment);
+        first.Start();
+        second.Start();
+        first.Join();
+        second.Join();
+        SpinWait wait = new SpinWait();
+        for (int index = 0; index < 10; index++)
+            wait.SpinOnce();
+        Console.WriteLine(String.Format("counter={0}; next-spin-yields={1}", counter,
+            wait.NextSpinWillYield));
+    }
+}

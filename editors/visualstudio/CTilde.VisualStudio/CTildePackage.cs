@@ -114,11 +114,19 @@ public sealed class CTildePackage : AsyncPackage, IVsSolutionEvents
         return VSConstants.S_OK;
     }
 
-    int IVsSolutionEvents.OnBeforeCloseProject(IVsHierarchy hierarchy, int removed) => VSConstants.S_OK;
+    int IVsSolutionEvents.OnBeforeCloseProject(IVsHierarchy hierarchy, int removed)
+    {
+        BuildDiagnosticTagger.ClearAll();
+        return VSConstants.S_OK;
+    }
 
     int IVsSolutionEvents.OnBeforeCloseSolution(object reserved) => VSConstants.S_OK;
 
-    int IVsSolutionEvents.OnBeforeUnloadProject(IVsHierarchy realHierarchy, IVsHierarchy stubHierarchy) => VSConstants.S_OK;
+    int IVsSolutionEvents.OnBeforeUnloadProject(IVsHierarchy realHierarchy, IVsHierarchy stubHierarchy)
+    {
+        BuildDiagnosticTagger.ClearAll();
+        return VSConstants.S_OK;
+    }
 
     int IVsSolutionEvents.OnAfterCloseSolution(object reserved)
     {

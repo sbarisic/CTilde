@@ -282,15 +282,15 @@ internal sealed partial class TypedIrBodyLowerer
                     RecordRuntimeFault(argumentSyntax, "synchronous callback null check");
                     prelude.Add($"(void)ct_require_nonnull({temp}, {_emitter.SourceArgument(argumentSyntax)});");
                 }
-                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
+                prelude.Add($"ct_retain_fast((ct_object*)(void*){temp});");
                 var adapter = _emitter.SynchronousCallbackAdapterName(parameter.Type.Symbol!);
                 codes.Add(parameter.IsNullable ? $"{temp} == NULL ? NULL : &{adapter}" : $"&{adapter}");
                 codes.Add($"(void*){temp}");
-                postlude.Add($"ct_release((ct_object*)(void*){temp});");
+                postlude.Add($"ct_release_fast((ct_object*)(void*){temp});");
                 continue;
             }
             if (parameter.IsRetained)
-                prelude.Add($"ct_retain((ct_object*)(void*){temp});");
+                prelude.Add($"ct_retain_fast((ct_object*)(void*){temp});");
             if (converted.Type.IsNativeBuffer)
             {
                 codes.Add($"{temp}.Data");
@@ -346,7 +346,7 @@ internal sealed partial class TypedIrBodyLowerer
             var slot = $"ct_df_{_deferId}_arg_{index}";
             AddCapturedSlot(prelude, converted.Type, slot, converted.Code);
             codes.Add(parameters[index].IsRetained
-                ? $"(ct_retain((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
+                ? $"(ct_retain_fast((ct_object*)(void*){Durable(slot)}), {Durable(slot)})"
                 : converted.Type.IsNativeUtf8String
                     ? $"(const char*)(const void*){Durable(slot)}.Data"
                     : Durable(slot));

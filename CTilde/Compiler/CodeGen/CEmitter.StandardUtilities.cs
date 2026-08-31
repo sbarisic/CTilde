@@ -148,7 +148,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("{");
             writer.WriteLine("    if (value == NULL) return ct_empty_string;");
             writer.WriteLine("    ct_object* object = (ct_object*)(void*)value;");
-            writer.WriteLine("    if (object->Type == &ct_desc_string) { if (format != NULL && format->Length != 0) ct_string_format_invalid(); ct_retain(object); return (ct_string*)(void*)object; }");
+            writer.WriteLine("    if (object->Type == &ct_desc_string) { if (format != NULL && format->Length != 0) ct_string_format_invalid(); ct_retain_fast(object); return (ct_string*)(void*)object; }");
             foreach (var type in BoxedTypes)
             {
                 var descriptor = BoxDescriptorName(type);

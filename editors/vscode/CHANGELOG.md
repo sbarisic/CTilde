@@ -38,7 +38,7 @@ First Visual Studio Marketplace preview.
 
 ## Known limitations
 
-- References, rename, formatting, code actions, and auto-import edits are not implemented.
+- Rename, formatting, code actions, and auto-import edits are not implemented.
 - The bundled compiler and language server require the .NET 10 runtime.
 - MSVC debugging requires Microsoft's C/C++ extension and uses `cppvsdbg`.
 - OpenOCD, JTAG, reverse execution, panic-only postmortem debugging, and ISR entry are outside the current debugger profile.

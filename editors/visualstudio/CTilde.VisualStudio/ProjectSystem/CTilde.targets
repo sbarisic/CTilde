@@ -17,12 +17,24 @@
   </Target>
   <Target Name="Check" DependsOnTargets="CTildeValidateBuildEnvironment">
     <Message Importance="High" Text="C~ Check: $(CTildeManifestFullPath)" />
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --check" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --check --verbosity normal"
+          ConsoleToMSBuild="true" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" ItemName="_CTildeCheckOutput" />
+      <Output TaskParameter="ExitCode" PropertyName="_CTildeCheckExitCode" />
+    </Exec>
+    <Error Condition="'$(_CTildeCheckExitCode)' != '0' and !$([System.String]::Copy('@(_CTildeCheckOutput)').Contains(': error '))"
+           Text="$(CTildeManifestFullPath)(1,1): error CT6003: C~ check failed without a structured diagnostic (exit code $(_CTildeCheckExitCode))." />
   </Target>
   <Target Name="Build" DependsOnTargets="CTildeValidateBuildEnvironment">
     <Message Importance="High" Text="C~ Build: $(CTildeManifestFullPath)" />
     <Message Importance="High" Text="C~ uses build.configuration from ctilde.json; Visual Studio's $(Configuration)|$(Platform) selection does not override the manifest." />
-    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --build" />
+    <Exec WorkingDirectory="$(MSBuildProjectDirectory)" Command="&quot;$(CTildeDotNetPath)&quot; &quot;$(CTildeCompilerPath)&quot; --project &quot;$(CTildeManifestFullPath)&quot; --build --verbosity normal"
+          ConsoleToMSBuild="true" IgnoreExitCode="true">
+      <Output TaskParameter="ConsoleOutput" ItemName="_CTildeBuildOutput" />
+      <Output TaskParameter="ExitCode" PropertyName="_CTildeBuildExitCode" />
+    </Exec>
+    <Error Condition="'$(_CTildeBuildExitCode)' != '0' and !$([System.String]::Copy('@(_CTildeBuildOutput)').Contains(': error '))"
+           Text="$(CTildeManifestFullPath)(1,1): error CT6003: C~ build failed without a structured diagnostic (exit code $(_CTildeBuildExitCode))." />
   </Target>
   <Target Name="Clean" DependsOnTargets="CTildeValidateBuildEnvironment">
     <Message Importance="High" Text="C~ Clean: $(CTildeManifestFullPath)" />

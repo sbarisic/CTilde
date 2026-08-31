@@ -152,9 +152,25 @@ public enum RepositoryModuleUpdatePolicy
 
 public sealed class CTildeProjectException : Exception
 {
-    public CTildeProjectException(string message) : base(message) { }
+    public CTildeProjectException(string message, string code = "CT6001", SourceLocation? location = null, SourceLocation? relatedLocation = null)
+        : base(message)
+    {
+        Code = code;
+        Location = location;
+        RelatedLocation = relatedLocation;
+    }
 
-    public CTildeProjectException(string message, Exception innerException) : base(message, innerException) { }
+    public CTildeProjectException(string message, Exception innerException, string code = "CT6001", SourceLocation? location = null, SourceLocation? relatedLocation = null)
+        : base(message, innerException)
+    {
+        Code = code;
+        Location = location;
+        RelatedLocation = relatedLocation;
+    }
+
+    public string Code { get; }
+    public SourceLocation? Location { get; }
+    public SourceLocation? RelatedLocation { get; }
 }
 
 public static class CTildeProjectFile
@@ -165,6 +181,40 @@ public static class CTildeProjectFile
     ];
 
     public static CTildeProject Load(string manifestPath)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
+        var fullManifestPath = Path.GetFullPath(manifestPath);
+        SourceText? source = null;
+        ManifestLocationMap? locations = null;
+        try
+        {
+            if (File.Exists(fullManifestPath))
+            {
+                source = SourceText.FromFile(fullManifestPath);
+                locations = ManifestLocationMap.Create(source);
+            }
+            return LoadCore(fullManifestPath);
+        }
+        catch (CTildeProjectException exception) when (exception.Location is null)
+        {
+            var location = source is null
+                ? new SourceLocation(fullManifestPath, new TextSpan(0, 0), 1, 1)
+                : exception.InnerException is JsonException json
+                    ? JsonFailureLocation(source, json)
+                    : locations?.Find(InferPropertyPath(exception.Message)) ?? source.GetLocation(new TextSpan(0, 0));
+            var code = exception.InnerException is JsonException or IOException or UnauthorizedAccessException || !File.Exists(fullManifestPath)
+                ? "CT6000"
+                : exception.Code;
+            throw new CTildeProjectException(exception.Message, exception, code, location, exception.RelatedLocation);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
+        {
+            var location = new SourceLocation(fullManifestPath, new TextSpan(0, 0), 1, 1);
+            throw new CTildeProjectException($"Could not read project manifest '{fullManifestPath}': {exception.Message}", exception, "CT6000", location);
+        }
+    }
+
+    private static CTildeProject LoadCore(string manifestPath)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestPath);
         var fullManifestPath = Path.GetFullPath(manifestPath);
@@ -295,6 +345,121 @@ public static class CTildeProjectFile
             : null;
         return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(kind, target, architecture, environment, espIdfChip, sources, excludes, build, bindingManifests, cpuFeatures, simdOptimizations, modules, run,
             document.NoRecursion ?? false, panicPolicy, hosted, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
+    }
+
+    private static SourceLocation JsonFailureLocation(SourceText source, JsonException exception)
+    {
+        var line = (int)Math.Clamp(exception.LineNumber ?? 0, 0, source.LineCount - 1);
+        var lineStart = source.GetPosition(line, 0);
+        var lineEnd = line + 1 < source.LineCount ? source.GetPosition(line + 1, 0) : source.Length;
+        var lineText = source.Text.AsSpan(lineStart, Math.Max(0, lineEnd - lineStart));
+        var bytes = System.Text.Encoding.UTF8.GetBytes(lineText.ToString());
+        var byteColumn = (int)Math.Clamp(exception.BytePositionInLine ?? 0, 0, bytes.Length);
+        var column = System.Text.Encoding.UTF8.GetCharCount(bytes, 0, byteColumn);
+        return source.GetLocation(new TextSpan(Math.Min(source.Length, lineStart + column), 1));
+    }
+
+    private static string? InferPropertyPath(string message)
+    {
+        var property = Regex.Match(message, @"Property '([^']+)'");
+        if (property.Success)
+            return property.Groups[1].Value;
+        if (message.Contains("build configuration", StringComparison.OrdinalIgnoreCase)) return "build.configuration";
+        if (message.Contains("build optimization", StringComparison.OrdinalIgnoreCase)) return "build.optimization";
+        if (message.Contains("CPU target", StringComparison.OrdinalIgnoreCase)) return "build.cpuTarget";
+        if (message.Contains("floating-point mode", StringComparison.OrdinalIgnoreCase)) return "build.floatingPoint";
+        if (message.Contains("PGO mode", StringComparison.OrdinalIgnoreCase)) return "build.pgo.mode";
+        if (message.Contains("C layout", StringComparison.OrdinalIgnoreCase)) return "build.cLayout";
+        if (message.Contains("architecture", StringComparison.OrdinalIgnoreCase)) return "architecture";
+        if (message.Contains("target", StringComparison.OrdinalIgnoreCase)) return "target";
+        if (message.Contains("project kind", StringComparison.OrdinalIgnoreCase)) return "kind";
+        if (message.Contains("runtime file", StringComparison.OrdinalIgnoreCase)) return "hosted.runtimeFiles";
+        if (message.Contains("sources", StringComparison.OrdinalIgnoreCase)) return "sources";
+        return null;
+    }
+
+    private sealed class ManifestLocationMap
+    {
+        private readonly SourceText source;
+        private readonly Dictionary<string, SourceLocation> values;
+
+        private ManifestLocationMap(SourceText source, Dictionary<string, SourceLocation> values)
+        {
+            this.source = source;
+            this.values = values;
+        }
+
+        public static ManifestLocationMap? Create(SourceText source)
+        {
+            try
+            {
+                var utf8 = System.Text.Encoding.UTF8.GetBytes(source.Text);
+                var reader = new Utf8JsonReader(utf8, new JsonReaderOptions { AllowTrailingCommas = true, CommentHandling = JsonCommentHandling.Skip });
+                var paths = new Stack<string>();
+                paths.Push(string.Empty);
+                string? pending = null;
+                var result = new Dictionary<string, SourceLocation>(StringComparer.OrdinalIgnoreCase);
+                while (reader.Read())
+                {
+                    if (reader.TokenType == JsonTokenType.PropertyName)
+                    {
+                        var name = reader.GetString() ?? string.Empty;
+                        pending = string.IsNullOrEmpty(paths.Peek()) ? name : paths.Peek() + "." + name;
+                        result.TryAdd(pending, Location(source, utf8, reader.TokenStartIndex, reader.BytesConsumed));
+                    }
+                    else if (reader.TokenType is JsonTokenType.StartObject or JsonTokenType.StartArray)
+                    {
+                        if (pending is not null)
+                        {
+                            paths.Push(pending);
+                            pending = null;
+                        }
+                        else if (reader.CurrentDepth > 0)
+                        {
+                            paths.Push(paths.Peek());
+                        }
+                    }
+                    else if (reader.TokenType is JsonTokenType.EndObject or JsonTokenType.EndArray)
+                    {
+                        if (paths.Count > 1)
+                            paths.Pop();
+                        pending = null;
+                    }
+                    else if (pending is not null)
+                    {
+                        result[pending] = Location(source, utf8, reader.TokenStartIndex, reader.BytesConsumed);
+                        pending = null;
+                    }
+                }
+                return new ManifestLocationMap(source, result);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        public SourceLocation Find(string? path)
+        {
+            if (path is not null && values.TryGetValue(path, out var location))
+                return location;
+            if (path is not null)
+            {
+                var match = values.FirstOrDefault(entry => entry.Key.EndsWith("." + path, StringComparison.OrdinalIgnoreCase));
+                if (!string.IsNullOrEmpty(match.Key))
+                    return match.Value;
+            }
+            return source.GetLocation(new TextSpan(0, 0));
+        }
+
+        private static SourceLocation Location(SourceText source, byte[] utf8, long byteStart, long byteEnd)
+        {
+            var startBytes = (int)Math.Clamp(byteStart, 0, utf8.Length);
+            var endBytes = (int)Math.Clamp(byteEnd, startBytes, utf8.Length);
+            var start = System.Text.Encoding.UTF8.GetCharCount(utf8, 0, startBytes);
+            var end = start + System.Text.Encoding.UTF8.GetCharCount(utf8, startBytes, endBytes - startBytes);
+            return source.GetLocation(TextSpan.FromBounds(start, end));
+        }
     }
 
     private static void ValidateStandardLibraryDocument(ProjectDocument document, string manifestPath)

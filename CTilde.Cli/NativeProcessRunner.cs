@@ -17,6 +17,7 @@ internal static class NativeProcessRunner
 {
     public static async Task<NativeProcessResult> RunAsync(NativeProcessRequest request, CancellationToken cancellationToken)
     {
+        BuildReporter.Current?.NativeCommand(request);
         var startInfo = new ProcessStartInfo(request.FileName)
         {
             UseShellExecute = false,
@@ -46,8 +47,11 @@ internal static class NativeProcessRunner
 
         var standardOutput = new StringBuilder();
         var standardError = new StringBuilder();
-        var outputTask = PumpAsync(process.StandardOutput, standardOutput, request.ForwardOutput ? Console.Out : null, cancellationToken);
-        var errorTask = PumpAsync(process.StandardError, standardError, request.ForwardOutput ? Console.Error : null, cancellationToken);
+        var reporter = BuildReporter.Current;
+        var outputTask = PumpAsync(process.StandardOutput, standardOutput,
+            reporter is null && request.ForwardOutput ? Console.Out : null, reporter, false, request.ForwardOutput, cancellationToken);
+        var errorTask = PumpAsync(process.StandardError, standardError,
+            reporter is null && request.ForwardOutput ? Console.Error : null, reporter, true, request.ForwardOutput, cancellationToken);
         try
         {
             await process.WaitForExitAsync(cancellationToken);
@@ -68,13 +72,15 @@ internal static class NativeProcessRunner
         return new NativeProcessResult(process.ExitCode, standardOutput.ToString(), standardError.ToString());
     }
 
-    private static async Task PumpAsync(StreamReader reader, StringBuilder capture, TextWriter? forward, CancellationToken cancellationToken)
+    private static async Task PumpAsync(StreamReader reader, StringBuilder capture, TextWriter? forward,
+        BuildReporter? reporter, bool isErrorStream, bool forwardRequested, CancellationToken cancellationToken)
     {
         while (await reader.ReadLineAsync(cancellationToken) is { } line)
         {
             capture.AppendLine(line);
             if (forward is not null)
                 await forward.WriteLineAsync(line);
+            reporter?.NativeLine(line, isErrorStream, !forwardRequested);
         }
     }
 }

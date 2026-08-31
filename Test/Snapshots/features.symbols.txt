@@ -13,7 +13,6 @@ method ct_m_b5aeaf95652a3e62a68409db method:Examples.Point::Sum()->int -> int
 method ct_m_c6a0a677cdfaef93d1ef8fc5 method:Examples.Counter::Increment()->void -> void
 method ct_m_c7ae14bd949d06dbca728549 method:Examples.Program::ShowDeferredCleanup()->void -> void
 method ct_m_d570ebcf544a7dd5c4ef686f method:Examples.Counter::Add(:int)->int -> int
-method ct_m_ebebd95add60453f721bff21 method:Examples.Program::Twice(:uint)->uint -> uint
 setter ct_s_215f270e70cd8133b84de410 setter:Examples.Counter::Value:int -> void
 type ct_t_01679443df45d0d3a977d592 type:Examples.Counter -> Examples.Counter
 type ct_t_0ffa27a15bb455db28f4783d type:Examples.Program -> Examples.Program

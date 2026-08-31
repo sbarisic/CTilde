@@ -214,6 +214,38 @@
           "default": "debug",
           "description": "Hosted or Cosmopolitan native build configuration."
         },
+        "optimization": {
+          "type": "string",
+          "enum": ["speed", "aggressive"],
+          "description": "Controlled Release optimization: /O2 (plus /Ob3 for aggressive) or -O2/-O3. Omit to preserve the target's legacy behavior."
+        },
+        "cpuTarget": {
+          "type": "string",
+          "enum": ["baseline", "avx2"],
+          "description": "Controlled native CPU target. AVX2 requires resolved x64 and does not add runtime dispatch."
+        },
+        "floatingPoint": {
+          "type": "string",
+          "enum": ["precise", "fast"],
+          "description": "Explicit floating-point policy. Fast permits reassociation and contraction and need not match precise output hashes."
+        },
+        "pgo": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Hosted-only profile-guided optimization phase and project-contained profile root.",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "enum": ["off", "generate", "use"],
+              "default": "off"
+            },
+            "directory": {
+              "type": "string",
+              "minLength": 1,
+              "default": "build/pgo"
+            }
+          }
+        },
         "compiler": {
           "type": "string",
           "minLength": 1,

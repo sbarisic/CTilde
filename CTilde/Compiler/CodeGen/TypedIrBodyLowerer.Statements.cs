@@ -922,7 +922,7 @@ internal sealed partial class TypedIrBodyLowerer
         RecordForeachDependency("get-enumerator", getEnumerator, getEnumerator.ReturnType);
         RecordForeachDependency("move-next", moveNext, moveNext.ReturnType);
         RecordForeachDependency("dispose", dispose, dispose.ReturnType);
-        RecordForeachDependency("current", current, current.Type);
+        RecordForeachDependency("current", _emitter.GetAccessorMethod(current, getter: true), current.Type);
         _emitter.Effects.RecordCall(_method, getEnumerator, syntax, getEnumerator.IsVirtual);
         _emitter.Effects.RecordCall(_method, moveNext, syntax, moveNext.IsVirtual);
         _emitter.Effects.RecordCall(_method, dispose, syntax, dispose.IsVirtual);

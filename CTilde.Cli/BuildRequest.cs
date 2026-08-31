@@ -47,7 +47,12 @@ internal sealed record BuildRequest(
     CTildeProjectRunConfiguration? RunConfiguration = null,
     TargetEnvironment Environment = TargetEnvironment.Native,
     EspIdfChip? EspIdfChip = null,
-    HostedProjectConfiguration? Hosted = null)
+    HostedProjectConfiguration? Hosted = null,
+    NativeOptimization? Optimization = null,
+    NativeCpuTarget? CpuTarget = null,
+    NativeFloatingPointMode? FloatingPoint = null,
+    NativePgoMode PgoMode = NativePgoMode.Off,
+    string? PgoDirectory = null)
 {
     public string EspIdfBuildDirectory => Environment == TargetEnvironment.Qemu
         ? Path.Combine(EspIdfProjectDirectory!, "build", EspIdfChip == CTilde.EspIdfChip.Esp32 ? "esp32_qemu" : "esp32c3_qemu")
@@ -134,6 +139,15 @@ internal static class BuildRequestResolver
         var freestanding = project.Configuration.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, project.Configuration.Freestanding, project.RootDirectory, buildNative, executable)
             : null;
+        var optimization = options.Optimization ?? build.Optimization;
+        var cpuTarget = options.CpuTarget ?? build.CpuTarget;
+        var floatingPoint = options.FloatingPoint ?? build.FloatingPoint;
+        var pgoMode = options.PgoMode ?? build.Pgo?.Mode ?? NativePgoMode.Off;
+        var pgoDirectory = ResolvePgoDirectory(options.PgoDirectory,
+            build.Pgo?.DirectoryPath ?? (pgoMode != NativePgoMode.Off ? Path.Combine(project.RootDirectory, "build", "pgo") : null), project.RootDirectory);
+        ValidateNativeSettings(project.Configuration.Target, architecture, configuration, lto, optimization, cpuTarget,
+            floatingPoint, pgoMode, pgoDirectory, hasManifest: true, layout, freestanding,
+            options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default);
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, architecture, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             options.Run, configuration, options.Compiler ?? build.Compiler, executable,
@@ -145,7 +159,8 @@ internal static class BuildRequestResolver
             options.CosmopolitanModeSpecified ? options.CosmopolitanMode : project.Configuration.Cosmopolitan?.Mode ?? CosmopolitanRuntimeMode.Default,
             options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
             project.Configuration.SimdOptimizations,
-            project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted);
+            project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted,
+            optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)
@@ -211,6 +226,9 @@ internal static class BuildRequestResolver
         var freestanding = options.Target == CompilationTarget.Freestanding
             ? ResolveFreestanding(options, null, root, buildNative, executable)
             : null;
+        var pgoDirectory = ResolvePgoDirectory(options.PgoDirectory, null, root);
+        ValidateNativeSettings(options.Target, architecture, configuration, options.Lto, options.Optimization, options.CpuTarget,
+            options.FloatingPoint, options.PgoMode ?? NativePgoMode.Off, pgoDirectory, hasManifest: false, layout, freestanding, options.CosmopolitanMode);
         return new BuildRequest(options.Inputs.Select(Path.GetFullPath).ToArray(), options.Target, architecture, null, root,
             ResolveSourceRoot(options),
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach, false,
@@ -218,12 +236,14 @@ internal static class BuildRequestResolver
             executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
             null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures,
-            false, null, null, options.Environment, options.EspIdfChip);
+            false, null, null, options.Environment, options.EspIdfChip, null, options.Optimization, options.CpuTarget,
+            options.FloatingPoint, options.PgoMode ?? NativePgoMode.Off, pgoDirectory);
     }
 
     private static void ValidateCommon(CommandLineOptions options)
     {
         var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.CosmopolitanModeSpecified || options.Lto ||
+            options.Optimization is not null || options.CpuTarget is not null || options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
             options.NativeOutput is not null || options.EspIdfProject is not null ||
             options.LinkerScript is not null || options.EntrySymbol is not null || options.NativeSources.Count != 0 ||
             options.ObjectFiles.Count != 0 || options.Libraries.Count != 0 || options.CompileOptions.Count != 0 || options.LinkOptions.Count != 0 ||
@@ -341,6 +361,83 @@ internal static class BuildRequestResolver
             throw new CommandLineException("Freestanding linker and native-input options require --target freestanding.");
         if (target == CompilationTarget.Freestanding && options.PrepareDebug is not null)
             throw new CommandLineException("Debug preparation is unavailable for freestanding builds.");
+    }
+
+    private static string? ResolvePgoDirectory(string? cliValue, string? manifestValue, string root)
+    {
+        var value = cliValue ?? manifestValue;
+        if (value is null)
+            return null;
+        var full = Path.GetFullPath(value, root);
+        var relative = Path.GetRelativePath(root, full);
+        if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathRooted(relative))
+            throw new CommandLineException($"PGO directory '{value}' must stay within the project root '{root}'.");
+        return full;
+    }
+
+    private static void ValidateNativeSettings(
+        CompilationTarget target,
+        CompilationArchitecture architecture,
+        CTildeNativeBuildConfiguration configuration,
+        bool lto,
+        NativeOptimization? optimization,
+        NativeCpuTarget? cpuTarget,
+        NativeFloatingPointMode? floatingPoint,
+        NativePgoMode pgoMode,
+        string? pgoDirectory,
+        bool hasManifest,
+        GeneratedCLayout layout,
+        FreestandingProjectConfiguration? freestanding,
+        CosmopolitanRuntimeMode cosmopolitanMode)
+    {
+        if (cpuTarget == NativeCpuTarget.Avx2 && architecture != CompilationArchitecture.X64)
+            throw new CommandLineException("CPU target 'avx2' requires resolved architecture 'x64'.");
+        if (optimization is not null && target != CompilationTarget.EspIdf && configuration != CTildeNativeBuildConfiguration.Release)
+            throw new CommandLineException("Controlled native optimization requires a Release configuration.");
+        if (target == CompilationTarget.Cosmopolitan && cosmopolitanMode == CosmopolitanRuntimeMode.Tiny && optimization is not null)
+            throw new CommandLineException("Cosmopolitan mode 'tiny' owns -Os and cannot be combined with an explicit speed or aggressive optimization.");
+        if (target == CompilationTarget.EspIdf && layout != GeneratedCLayout.Modules &&
+            (optimization is not null || cpuTarget is not null || floatingPoint is not null))
+            throw new CommandLineException("Controlled ESP-IDF native settings require modular C output so flags can be scoped to generated sources.");
+        if (pgoDirectory is not null && !hasManifest)
+            throw new CommandLineException("--pgo-directory requires --project <ctilde.json>.");
+        if (pgoMode != NativePgoMode.Off)
+        {
+            if (!hasManifest)
+                throw new CommandLineException("PGO requires --project <ctilde.json> so training data has a stable project identity.");
+            if (target != CompilationTarget.Hosted)
+                throw new CommandLineException("PGO is supported only for hosted applications; freestanding, ESP-IDF, and Cosmopolitan require separate profile transport designs.");
+            if (configuration != CTildeNativeBuildConfiguration.Release)
+                throw new CommandLineException("PGO requires a Release configuration.");
+            if (!lto)
+                throw new CommandLineException("PGO requires link-time optimization.");
+            if (pgoDirectory is null)
+                throw new CommandLineException("PGO requires a profile directory.");
+        }
+        if (freestanding is not null)
+            ValidateControlledFreestandingOptions(freestanding, optimization, cpuTarget, floatingPoint);
+    }
+
+    private static void ValidateControlledFreestandingOptions(
+        FreestandingProjectConfiguration settings,
+        NativeOptimization? optimization,
+        NativeCpuTarget? cpuTarget,
+        NativeFloatingPointMode? floatingPoint)
+    {
+        foreach (var option in settings.CompileOptions.Concat(settings.LinkOptions))
+        {
+            var optimizationConflict = optimization is not null && option.StartsWith("-O", StringComparison.Ordinal);
+            var cpuConflict = cpuTarget is not null && (option.StartsWith("-march", StringComparison.Ordinal) ||
+                option.StartsWith("-mtune", StringComparison.Ordinal) || option.StartsWith("-mcpu", StringComparison.Ordinal) ||
+                option.StartsWith("-mavx", StringComparison.Ordinal) || option.StartsWith("-mno-avx", StringComparison.Ordinal) ||
+                option.StartsWith("-msse", StringComparison.Ordinal) || option.StartsWith("-mfma", StringComparison.Ordinal));
+            var floatingPointConflict = floatingPoint is not null && (option.Contains("fast-math", StringComparison.Ordinal) ||
+                option.StartsWith("-ffp-contract", StringComparison.Ordinal) || option.StartsWith("-funsafe-math", StringComparison.Ordinal) ||
+                option.StartsWith("-fexcess-precision", StringComparison.Ordinal) || option.StartsWith("-frounding-math", StringComparison.Ordinal) ||
+                option.StartsWith("-mfpmath", StringComparison.Ordinal));
+            if (optimizationConflict || cpuConflict || floatingPointConflict)
+                throw new CommandLineException($"Freestanding option '{option}' conflicts with an explicitly controlled optimization, CPU, or floating-point setting.");
+        }
     }
 
     private static FreestandingProjectConfiguration ResolveFreestanding(

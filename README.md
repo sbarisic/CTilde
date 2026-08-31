@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.40 includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, link-time and dynamically loaded native interop, freestanding images, ESP-IDF, and Cosmopolitan APEs. Its C~-native standard library includes nanosecond durations, monotonic timing, deterministic random generation, spin primitives, generic collections, UTF-8 rune helpers, expanded scalar math, explicit SIMD128 values, scalar-layout geometry, and `System.Simd.Vec3x4` packet geometry.
+Draft 0.41 includes controlled native optimization, CPU, and floating-point profiles, hosted PGO for MSVC, GCC, and Clang, and compiler-backed UTF-8 strings with ordinal operations, splitting, `StringBuilder`, invariant formatting, and explicit checked native conversion. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -184,7 +184,11 @@ A `ctilde.json` file defines a source set, target, build outputs, and run comman
   "build": {
     "cLayout": "modules",
     "configuration": "release",
-    "lto": true
+    "lto": true,
+    "optimization": "speed",
+    "cpuTarget": "baseline",
+    "floatingPoint": "precise",
+    "pgo": { "mode": "off", "directory": "build/pgo" }
   },
   "run": {
     "executor": "host",
@@ -202,6 +206,8 @@ ctilde --project .\ctilde.json --run
 ```
 
 `--run` rebuilds first and starts the configured command only after a successful build. The runner uses argument arrays without shell evaluation. It supports host and WSL executors plus `${projectRoot}` and `${buildOutput}` placeholders.
+
+Release builds can select `speed` or `aggressive` optimization, `baseline` or x64-only `avx2`, and `precise` or `fast` floating-point behavior. The matching CLI overrides are `--optimization`, `--cpu-target`, and `--floating-point`. Hosted project builds can run explicit `--pgo generate` training and `--pgo use` phases; PGO also requires Release and LTO. Omit these settings to preserve the target's historical toolchain behavior.
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
@@ -272,7 +278,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.40 language rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.41 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

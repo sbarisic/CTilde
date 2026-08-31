@@ -14,9 +14,47 @@
   <member id="P:System.Exception.Message"><summary>Gets the exception message.</summary></member>
   <member id="M:System.Exception.ToString()"><summary>Returns the exception type and message.</summary><returns>An owned managed string.</returns></member>
   <member id="T:System.ArgumentException"><summary>Represents an invalid runtime argument, including an invalid dynamic atomic memory order.</summary></member>
+  <member id="T:System.ArgumentNullException"><summary>Represents a required managed argument that was null.</summary></member>
   <member id="T:System.ArgumentOutOfRangeException"><summary>Represents an argument outside the range accepted by an operation.</summary></member>
+  <member id="T:System.FormatException"><summary>Represents malformed composite or scalar formatting input.</summary></member>
   <member id="T:System.ThreadStateException"><summary>Represents an invalid managed-thread lifecycle or native scheduler configuration.</summary></member>
   <member id="T:System.SynchronizationLockException"><summary>Represents an attempt to release a mutex that the current thread does not own.</summary></member>
+
+  <member id="T:System.IFormattable"><summary>Formats a value with an invariant format specification.</summary></member>
+  <member id="M:System.IFormattable.ToString(string)"><summary>Formats this value using an invariant specification.</summary><param name="format">The type-specific format specification.</param><returns>The formatted managed string.</returns></member>
+  <member id="T:System.String"><summary>Provides the compiler-backed immutable UTF-8 string surface.</summary><remarks>Lengths, indexes, ranges, and ordinal operations use UTF-8 byte offsets.</remarks></member>
+  <member id="P:System.String.Empty"><summary>Gets the immortal empty string.</summary></member>
+  <member id="M:System.String.IsNullOrEmpty(string)"><summary>Tests whether a string is null or has zero bytes.</summary></member>
+  <member id="M:System.String.Contains(char)"><summary>Performs an ordinal byte search for a character.</summary></member>
+  <member id="M:System.String.Contains(string)"><summary>Performs an ordinal byte search for a string.</summary></member>
+  <member id="M:System.String.StartsWith(string)"><summary>Tests an ordinal prefix.</summary></member>
+  <member id="M:System.String.EndsWith(string)"><summary>Tests an ordinal suffix.</summary></member>
+  <member id="M:System.String.IndexOf(char)"><summary>Returns the first ordinal byte index, or -1.</summary></member>
+  <member id="M:System.String.IndexOf(string)"><summary>Returns the first ordinal substring byte index, or -1.</summary></member>
+  <member id="M:System.String.LastIndexOf(char)"><summary>Returns the last ordinal byte index, or -1.</summary></member>
+  <member id="M:System.String.LastIndexOf(string)"><summary>Returns the last ordinal substring byte index, or -1.</summary></member>
+  <member id="M:System.String.Substring(int)"><summary>Copies the suffix beginning at a byte offset.</summary></member>
+  <member id="M:System.String.Substring(int,int)"><summary>Copies a validated byte range, or returns the source for the full range.</summary></member>
+  <member id="M:System.String.Insert(int,string)"><summary>Inserts a string at a byte offset.</summary></member>
+  <member id="M:System.String.Remove(int,int)"><summary>Removes a byte range.</summary></member>
+  <member id="M:System.String.Replace(string,string)"><summary>Replaces non-overlapping ordinal matches.</summary></member>
+  <member id="M:System.String.Trim(char)"><summary>Removes the specified byte from both ends.</summary></member>
+  <member id="M:System.String.ToCharArray()"><summary>Copies every UTF-8 byte to a character array.</summary></member>
+  <member id="M:System.String.CopyTo(int,char[],int,int)"><summary>Copies a validated byte range to a character array.</summary></member>
+  <member id="M:System.String.Split(char)"><summary>Splits on an ordinal character separator and materializes the results.</summary></member>
+  <member id="M:System.String.Split(string)"><summary>Splits on a nonempty ordinal string separator and materializes the results.</summary></member>
+  <member id="M:System.String.EnumerateSplit(char)"><summary>Enumerates source-retaining split segments without materializing strings.</summary></member>
+  <member id="M:System.String.EnumerateSplit(string)"><summary>Enumerates source-retaining split segments for a nonempty string separator.</summary></member>
+  <member id="M:System.String.CompareOrdinal(string,string)"><summary>Compares nullable strings by ordinal UTF-8 bytes.</summary></member>
+  <member id="M:System.String.Concat(string[])"><summary>Concatenates an array in one builder.</summary></member>
+  <member id="M:System.String.Join(string,string[])"><summary>Joins an array with an ordinal separator.</summary></member>
+  <member id="M:System.String.Format(string,object[])"><summary>Applies invariant composite formatting with indexes, alignment, escaped braces, and format specifications.</summary></member>
+  <member id="T:System.StringSplitOptions"><summary>Controls whether split operations preserve empty entries.</summary></member>
+  <member id="T:System.StringSegment"><summary>Retains a source string and exposes a byte range without copying.</summary></member>
+  <member id="P:System.StringSegment.Source"><summary>Gets the retained source string.</summary></member>
+  <member id="P:System.StringSegment.Start"><summary>Gets the source byte offset.</summary></member>
+  <member id="P:System.StringSegment.Length"><summary>Gets the segment byte length.</summary></member>
+  <member id="P:System.StringSegment.IsEmpty"><summary>Gets whether the segment has zero bytes.</summary></member>
 
   <member id="T:System.Console"><summary>Writes formatted values to the target console.</summary><remarks>Hosted output uses the process streams. ESP-IDF output uses the configured UART console.</remarks></member>
   <member id="M:System.Console.WriteLine()"><summary>Writes a line terminator.</summary></member>

@@ -43,6 +43,7 @@ internal sealed partial class CompilationModel
         ValidateUsings();
         ResolveBaseTypes();
         DeclareMembers();
+        ValidateStringSurface();
         ValidateInheritanceMembers();
         Documentation = DocumentationIndex.Build(this, target);
         ValidateRecursivePointerExposure();
@@ -1015,7 +1016,7 @@ internal sealed partial class CompilationModel
                 }
                 foreach (var member in declaration.Members)
                     DeclareMember(type, member, tree);
-                if (!type.IsStatic && type.Kind != DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
+                if (!type.IsStatic && !type.IsStringSurface && type.Kind != DeclaredTypeKind.Interface && type.FullName != "Esp.Idf.EspError" && type.Constructors.Count == 0)
                 {
                     type.Constructors.Add(new MethodSymbol
                     {
@@ -1840,6 +1841,10 @@ internal sealed partial class CompilationModel
                             Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", method.ReturnType.Source, method.ReturnType.Span);
                         foreach (var parameter in methodParameters.Where(parameter => ForbiddenNativeBoundaryType(parameter.Type)))
                             Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", parameter.Syntax!.Source, parameter.Syntax.Span);
+                        if (UserSyntaxTrees.Contains(tree) && returnType.Kind == CTypeKind.String)
+                            Diagnostics.Add("CT1279", "Managed strings cannot cross a native boundary; use NativeUtf8String, byte pointers, or native buffers explicitly.", method.ReturnType.Source, method.ReturnType.Span);
+                        foreach (var parameter in methodParameters.Where(parameter => UserSyntaxTrees.Contains(tree) && parameter.Type.Kind == CTypeKind.String))
+                            Diagnostics.Add("CT1279", "Managed strings cannot cross a native boundary; use NativeUtf8String, byte pointers, or native buffers explicitly.", parameter.Syntax!.Source, parameter.Syntax.Span);
                     }
                     if (returnsBorrowed is not null &&
                         (returnsBorrowed.Arguments.Length != 0 || external is null && nativeImport is null || !(returnType.IsReference || returnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)))
@@ -1941,6 +1946,17 @@ internal sealed partial class CompilationModel
             type.Symbol?.IsOpenConstructed == true)
             return true;
         return type.ElementType is not null && ForbiddenNativeBoundaryType(type.ElementType);
+    }
+
+    private void ValidateStringSurface()
+    {
+        if (!Types.TryGetValue("System.String", out var type) || type.Syntax is null)
+            return;
+        var invalid = type.Kind != DeclaredTypeKind.Class || !type.IsSealed || type.Fields.Count != 0 ||
+                      type.Constructors.Count != 0 || type.BaseType?.FullName != "System.Object" ||
+                      type.Interfaces.Any(contract => contract.FullName != "System.IFormattable");
+        if (invalid)
+            Diagnostics.Add("CT1320", "System.String is a compiler-backed sealed surface and cannot declare storage, constructors, or change its inheritance contract.", type.Syntax.Source, type.Syntax.Span);
     }
 
     private static bool IsSimdType(CType type) =>

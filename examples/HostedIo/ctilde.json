@@ -25,6 +25,13 @@
     "generatedHeader": "build/generated/ctilde_exports.h",
     "symbolMap": "build/generated/ctilde_symbols.json",
     "configuration": "release",
-    "lto": true
+    "lto": true,
+    "optimization": "speed",
+    "cpuTarget": "baseline",
+    "floatingPoint": "precise",
+    "pgo": {
+      "mode": "off",
+      "directory": "build/pgo"
+    }
   }
 }

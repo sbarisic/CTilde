@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Simd;
 using System.Threading;
 
@@ -59,6 +60,29 @@ public sealed class ParallelRenderSession
         {
             return presentedPixelCount;
         }
+    }
+
+    [NoAlloc]
+    public int RenderWorkerCount
+    {
+        get
+        {
+            return WorkerCount;
+        }
+    }
+
+    public long WorkerElapsedNanoseconds(int workerIndex)
+    {
+        if (workerIndex < 0 || workerIndex >= WorkerCount)
+            throw new ArgumentOutOfRangeException();
+        return workers[workerIndex].ElapsedNanoseconds;
+    }
+
+    public int WorkerPixelCount(int workerIndex)
+    {
+        if (workerIndex < 0 || workerIndex >= WorkerCount)
+            throw new ArgumentOutOfRangeException();
+        return workers[workerIndex].PixelCount;
     }
 
     [NoAlloc]
@@ -233,6 +257,22 @@ internal sealed class RenderWorker
     }
 
     [NoAlloc]
+    public int PixelCount
+    {
+        get
+        {
+            return pixelCount;
+        }
+    }
+
+    [NoAlloc]
+    public long ElapsedNanoseconds
+    {
+        get;
+        private set;
+    }
+
+    [NoAlloc]
     public bool IsComplete
     {
         get
@@ -249,6 +289,7 @@ internal sealed class RenderWorker
 
     public void Run()
     {
+        Stopwatch stopwatch = Stopwatch.StartNew();
         int rendered = 0;
         while (rendered < pixelCount && !workState.IsCancellationRequested)
         {
@@ -268,6 +309,8 @@ internal sealed class RenderWorker
             RenderPacket(pixel0, pixel1, pixel2, pixel3, laneCount);
             rendered += laneCount;
         }
+        stopwatch.Stop();
+        ElapsedNanoseconds = stopwatch.ElapsedNanoseconds;
         complete.Store(true, MemoryOrder.Release);
     }
 

@@ -1,0 +1,25 @@
+using System;
+
+public static class Program
+{
+    [EntryPoint]
+    public static void Main()
+    {
+        string value = "--a::beta::a--";
+        string[] all = "::a::::b::".Split("::");
+        int segments = 0;
+        foreach (StringSegment segment in "x--y--z".EnumerateSplit("--"))
+        {
+            if (segments == 1)
+                Console.WriteLine(segment.Source == "x--y--z" && segment.Start == 3
+                && segment.Length == 1 && segment[0] == 'y');
+            segments++;
+        }
+        string[] joined = new string[3];
+        joined[0] = "a";
+        joined[1] = "b";
+        joined[2] = "c";
+        Console.WriteLine(value.Length == 14 && all.Length == 5 && segments == 3
+            && String.Join("/", joined) == "a/b/c");
+    }
+}

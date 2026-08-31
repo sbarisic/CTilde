@@ -165,8 +165,12 @@ internal sealed class TypeSymbol
             return TypeParameters.IsDefaultOrEmpty ? baseName : $"{baseName}<{string.Join(", ", TypeParameters.Select(parameter => parameter.Name))}>";
         }
     }
+    public bool IsStringSurface => FullName == "System.String";
+
     public CType Type => IsConstantParameter
         ? new CType(CTypeKind.Constant, Symbol: this, ElementType: ConstantParameterType)
+        : IsStringSurface
+            ? CType.String
         : new(FullName == "Esp.Idf.EspError"
             ? CTypeKind.EspError
             : Kind switch
@@ -567,6 +571,8 @@ internal static class TypeFacts
         if (to.Kind == CTypeKind.Class && to.Symbol?.IsObject == true && from.Kind is not CTypeKind.Void and not CTypeKind.Null and not CTypeKind.Error and not CTypeKind.FunctionPointer and not CTypeKind.NativeBuffer and not CTypeKind.ReadOnlyNativeBuffer and not CTypeKind.Opaque and not CTypeKind.NativeUtf8String)
             return true;
         if (from.Kind == CTypeKind.Class && to.Kind == CTypeKind.Class && from.Symbol is not null && to.Symbol is not null && from.Symbol.DerivesFrom(to.Symbol))
+            return true;
+        if (from.Kind == CTypeKind.String && to.Kind == CTypeKind.Interface && to.Symbol?.FullName == "System.IFormattable")
             return true;
         if (to.Kind == CTypeKind.Interface && to.Symbol is not null && from.Symbol is not null && from.Symbol.Implements(to.Symbol))
             return true;

@@ -1,12 +1,15 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.40 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.41 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Draft 0.40 adds nanosecond durations, monotonic timing, deterministic random generation, spin primitives, common scalar math, and user-defined equality and ordering operators. Draft 0.39 remains the historical hosted-native-import and four-worker HostedIo revision. Remaining follow-ups are:
+Draft 0.41 adds controlled native optimization profiles, x64 AVX2 targeting, precise/fast floating point, hosted PGO, schema-2 parallel HostedIo benchmarking, and the compiler-backed string, splitting, builder, invariant-formatting, ASCII, and checked native UTF-8 foundations. Remaining follow-ups are:
+
+- [ ] Add a flattened, cache-oriented SAH BVH and compare it as a new benchmark accelerator against `object-midpoint-bvh`.
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
+- [ ] Add parsing and general conversion APIs, culture-aware formatting, Unicode casing, normalization, collation and grapheme segmentation, and regular expressions only after their portability and allocation contracts are specified.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
 - [ ] Extend closure source-debug metadata beyond the current generated-method mapping and add dedicated lambda editor-service fixtures.
 - [ ] Permit iterator suspension across cleanup regions after defining state-machine ownership for `try`, `catch`, `finally`, `lock`, and `defer`.

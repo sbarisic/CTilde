@@ -47,8 +47,33 @@
   <member id="M:System.Collections.ArrayAlgorithms.Reversed``1(T[])"><summary>Allocates a reversed shallow copy.</summary><param name="source">The source array.</param><returns>A new array.</returns></member>
   <member id="M:System.Collections.ArrayAlgorithms.Sorted``1(T[],System.Ordering&lt;T&gt;)"><summary>Allocates a stable sorted shallow copy.</summary><param name="source">The source array.</param><param name="ordering">The negative-zero-positive ordering callback.</param><returns>A new stably ordered array.</returns></member>
 
-  <member id="T:System.Text.Utf8"><summary>Provides allocation-free UTF-8 scalar encoding and decoding on every target.</summary></member>
+  <member id="T:System.Text.StringBuilder"><summary>Builds managed UTF-8 strings over a reusable growable byte array.</summary></member>
+  <member id="M:System.Text.StringBuilder.#ctor()"><summary>Creates a builder with default capacity.</summary></member>
+  <member id="M:System.Text.StringBuilder.#ctor(int)"><summary>Creates a builder with the requested initial capacity.</summary></member>
+  <member id="P:System.Text.StringBuilder.Length"><summary>Gets the number of appended UTF-8 bytes.</summary></member>
+  <member id="P:System.Text.StringBuilder.Capacity"><summary>Gets the current byte capacity.</summary></member>
+  <member id="M:System.Text.StringBuilder.EnsureCapacity(int)"><summary>Grows capacity geometrically when required.</summary></member>
+  <member id="M:System.Text.StringBuilder.Clear()"><summary>Clears content while retaining capacity.</summary></member>
+  <member id="M:System.Text.StringBuilder.Append(string)"><summary>Appends a managed string.</summary></member>
+  <member id="M:System.Text.StringBuilder.Append(object)"><summary>Appends an object's invariant textual representation.</summary></member>
+  <member id="M:System.Text.StringBuilder.AppendLine()"><summary>Appends a line-feed byte.</summary></member>
+  <member id="M:System.Text.StringBuilder.AppendFormat(string,object[])"><summary>Appends invariant composite formatting output.</summary></member>
+  <member id="M:System.Text.StringBuilder.ToString()"><summary>Creates one exact immutable string from the current bytes.</summary></member>
+
+  <member id="T:System.Text.Utf8"><summary>Provides checked managed and native UTF-8 conversion plus scalar encoding and decoding on every target.</summary></member>
+  <member id="M:System.Text.Utf8.GetString(byte*,nuint)"><summary>Copies a bounded zero-terminated native UTF-8 string.</summary><remarks>A null pointer produces a null managed string.</remarks></member>
+  <member id="M:System.Text.Utf8.TryGetString(byte*,nuint,out string)"><summary>Attempts to copy a bounded zero-terminated native UTF-8 string.</summary></member>
+  <member id="M:System.Text.Utf8.GetString(System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;)"><summary>Validates and copies the exact native byte range, preserving embedded NUL bytes.</summary></member>
+  <member id="M:System.Text.Utf8.TryGetString(System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;,out string)"><summary>Attempts to validate and copy the exact native byte range.</summary></member>
+  <member id="M:System.Text.Utf8.GetByteCount(string)"><summary>Gets the exact UTF-8 byte length of a managed string.</summary></member>
+  <member id="M:System.Text.Utf8.TryCopyTo(string,System.Runtime.NativeBuffer&lt;byte&gt;,bool,out nuint)"><summary>Copies exact UTF-8 bytes with an optional trailing NUL.</summary></member>
   <member id="M:System.Text.Utf8.TryDecode(string,int,out rune,out int)"><summary>Decodes one scalar at a byte offset.</summary><param name="source">The managed UTF-8 string.</param><param name="offset">The byte offset.</param><param name="value">Receives NUL on failure.</param><param name="bytesRead">Receives zero on failure.</param><returns>True for a valid complete scalar.</returns><remarks>This method is NoAlloc, but not NoRuntime.</remarks></member>
   <member id="M:System.Text.Utf8.TryDecode(System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;,out rune,out nuint)"><summary>Validates and decodes the first external UTF-8 scalar.</summary><param name="source">The native bytes.</param><param name="value">Receives NUL on failure.</param><param name="bytesRead">Receives zero on failure.</param><returns>True for a valid complete scalar.</returns></member>
   <member id="M:System.Text.Utf8.TryEncode(rune,System.Runtime.NativeBuffer&lt;byte&gt;,out nuint)"><summary>Encodes one scalar without allocation.</summary><param name="value">The scalar.</param><param name="destination">The native destination.</param><param name="bytesWritten">Receives zero on failure.</param><returns>True when the destination is large enough.</returns><remarks>Failure leaves the destination unchanged.</remarks></member>
+  <member id="T:System.Text.Ascii"><summary>Provides explicit ASCII-only classification, casing, and comparison.</summary></member>
+  <member id="M:System.Text.Ascii.IsWhiteSpace(char)"><summary>Tests the six ASCII whitespace bytes.</summary></member>
+  <member id="M:System.Text.Ascii.ToLower(char)"><summary>Maps an ASCII uppercase letter to lowercase.</summary></member>
+  <member id="M:System.Text.Ascii.ToUpper(char)"><summary>Maps an ASCII lowercase letter to uppercase.</summary></member>
+  <member id="M:System.Text.Ascii.CompareIgnoreCase(string,string)"><summary>Compares nullable strings with ASCII-only case folding.</summary></member>
+  <member id="M:System.Text.Ascii.EqualsIgnoreCase(string,string)"><summary>Tests equality with ASCII-only case folding.</summary></member>
 </doc>

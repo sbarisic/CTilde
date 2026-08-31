@@ -85,6 +85,33 @@ public enum CTildeNativeBuildConfiguration
     Release,
 }
 
+public enum NativeOptimization
+{
+    Speed,
+    Aggressive,
+}
+
+public enum NativeCpuTarget
+{
+    Baseline,
+    Avx2,
+}
+
+public enum NativeFloatingPointMode
+{
+    Precise,
+    Fast,
+}
+
+public enum NativePgoMode
+{
+    Off,
+    Generate,
+    Use,
+}
+
+public sealed record NativePgoConfiguration(NativePgoMode Mode, string DirectoryPath);
+
 public sealed record CTildeProjectBuildConfiguration(
     string GeneratedCPath,
     string GeneratedHeaderPath,
@@ -95,7 +122,11 @@ public sealed record CTildeProjectBuildConfiguration(
     CTildeNativeBuildConfiguration Configuration,
     string Compiler,
     string? ExecutablePath,
-    string? EspIdfProjectDirectory);
+    string? EspIdfProjectDirectory,
+    NativeOptimization? Optimization,
+    NativeCpuTarget? CpuTarget,
+    NativeFloatingPointMode? FloatingPoint,
+    NativePgoConfiguration? Pgo);
 
 public sealed record CTildeProject(
     string ManifestPath,
@@ -473,6 +504,41 @@ public static class CTildeProjectFile
             (compiler.Contains(Path.DirectorySeparatorChar) || compiler.Contains(Path.AltDirectorySeparatorChar)))
             compiler = ResolveProjectPath(compiler, "build.compiler", root, manifestPath, isDirectory: false);
 
+        NativeOptimization? optimization = document?.Optimization switch
+        {
+            null => null,
+            "speed" => NativeOptimization.Speed,
+            "aggressive" => NativeOptimization.Aggressive,
+            _ => throw new CTildeProjectException($"Unknown build optimization '{document.Optimization}' in '{manifestPath}'; expected speed or aggressive."),
+        };
+        NativeCpuTarget? cpuTarget = document?.CpuTarget switch
+        {
+            null => null,
+            "baseline" => NativeCpuTarget.Baseline,
+            "avx2" => NativeCpuTarget.Avx2,
+            _ => throw new CTildeProjectException($"Unknown build CPU target '{document.CpuTarget}' in '{manifestPath}'; expected baseline or avx2."),
+        };
+        NativeFloatingPointMode? floatingPoint = document?.FloatingPoint switch
+        {
+            null => null,
+            "precise" => NativeFloatingPointMode.Precise,
+            "fast" => NativeFloatingPointMode.Fast,
+            _ => throw new CTildeProjectException($"Unknown floating-point mode '{document.FloatingPoint}' in '{manifestPath}'; expected precise or fast."),
+        };
+        NativePgoConfiguration? pgo = null;
+        if (document?.Pgo is not null)
+        {
+            var pgoMode = document.Pgo.Mode switch
+            {
+                null or "off" => NativePgoMode.Off,
+                "generate" => NativePgoMode.Generate,
+                "use" => NativePgoMode.Use,
+                _ => throw new CTildeProjectException($"Unknown PGO mode '{document.Pgo.Mode}' in '{manifestPath}'; expected off, generate, or use."),
+            };
+            var pgoDirectory = ResolveProjectPath(document.Pgo.Directory ?? "build/pgo", "build.pgo.directory", root, manifestPath, isDirectory: true);
+            pgo = new NativePgoConfiguration(pgoMode, pgoDirectory);
+        }
+
         string? executable = null;
         string? espIdfProjectDirectory = null;
         if (target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan)
@@ -498,7 +564,7 @@ public static class CTildeProjectFile
         }
 
         return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, lto,
-            configuration, compiler, executable, espIdfProjectDirectory);
+            configuration, compiler, executable, espIdfProjectDirectory, optimization, cpuTarget, floatingPoint, pgo);
     }
 
     private static CTildeProjectRunConfiguration? CreateRunConfiguration(
@@ -832,9 +898,17 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("lto")] bool? Lto,
         [property: JsonPropertyName("configuration")] string? Configuration,
         [property: JsonPropertyName("compiler")] string? Compiler,
+        [property: JsonPropertyName("optimization")] string? Optimization,
+        [property: JsonPropertyName("cpuTarget")] string? CpuTarget,
+        [property: JsonPropertyName("floatingPoint")] string? FloatingPoint,
+        [property: JsonPropertyName("pgo")] PgoDocument? Pgo,
         [property: JsonPropertyName("executable")] string? Executable,
         [property: JsonPropertyName("image")] string? Image,
         [property: JsonPropertyName("espIdfProjectDirectory")] string? EspIdfProjectDirectory);
+
+    private sealed record PgoDocument(
+        [property: JsonPropertyName("mode")] string? Mode,
+        [property: JsonPropertyName("directory")] string? Directory);
 
     private sealed record RunDocument(
         [property: JsonPropertyName("executor")] string? Executor,

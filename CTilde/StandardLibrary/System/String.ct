@@ -1,0 +1,779 @@
+using System.Text;
+
+namespace System;
+
+public interface IFormattable
+{
+    string ToString(string format);
+}
+
+public enum StringSplitOptions
+{
+    None=0, RemoveEmptyEntries=1,
+}
+
+public sealed class String : IFormattable
+{
+    public static string Empty
+    {
+        get
+        {
+            return "";
+        }
+    }
+
+    [NoAlloc]
+    public static bool IsNullOrEmpty(string value)
+    {
+        return value == null || value.Length == 0;
+    }
+
+    public bool Contains(char value)
+    {
+        return IndexOf(value) >= 0;
+    }
+
+    public bool Contains(string value)
+    {
+        return IndexOf(value) >= 0;
+    }
+
+    public bool StartsWith(string value)
+    {
+        RequireValue(value);
+        if (value.Length > this.Length)
+            return false;
+        return StringRuntime.RegionEquals(this, 0, value, 0, value.Length);
+    }
+
+    public bool EndsWith(string value)
+    {
+        RequireValue(value);
+        if (value.Length > this.Length)
+            return false;
+        return StringRuntime.RegionEquals(this, this.Length - value.Length, value,
+            0, value.Length);
+    }
+
+    public int IndexOf(char value)
+    {
+        return IndexOf(value, 0, this.Length);
+    }
+
+    public int IndexOf(char value, int startIndex)
+    {
+        return IndexOf(value, startIndex, this.Length - startIndex);
+    }
+
+    public int IndexOf(char value, int startIndex, int count)
+    {
+        ValidateRange(startIndex, count);
+        return StringRuntime.IndexOfChar(this, value, startIndex, count);
+    }
+
+    public int IndexOf(string value)
+    {
+        return IndexOf(value, 0, this.Length);
+    }
+
+    public int IndexOf(string value, int startIndex)
+    {
+        return IndexOf(value, startIndex, this.Length - startIndex);
+    }
+
+    public int IndexOf(string value, int startIndex, int count)
+    {
+        RequireValue(value);
+        ValidateRange(startIndex, count);
+        return StringRuntime.IndexOf(this, value, startIndex, count);
+    }
+
+    public int LastIndexOf(char value)
+    {
+        return LastIndexOf(value, 0, this.Length);
+    }
+
+    public int LastIndexOf(char value, int startIndex)
+    {
+        return LastIndexOf(value, startIndex, this.Length - startIndex);
+    }
+
+    public int LastIndexOf(char value, int startIndex, int count)
+    {
+        ValidateRange(startIndex, count);
+        return StringRuntime.LastIndexOfChar(this, value, startIndex, count);
+    }
+
+    public int LastIndexOf(string value)
+    {
+        return LastIndexOf(value, 0, this.Length);
+    }
+
+    public int LastIndexOf(string value, int startIndex)
+    {
+        return LastIndexOf(value, startIndex, this.Length - startIndex);
+    }
+
+    public int LastIndexOf(string value, int startIndex, int count)
+    {
+        RequireValue(value);
+        ValidateRange(startIndex, count);
+        return StringRuntime.LastIndexOf(this, value, startIndex, count);
+    }
+
+    public string Substring(int startIndex)
+    {
+        return Substring(startIndex, this.Length - startIndex);
+    }
+
+    public string Substring(int startIndex, int length)
+    {
+        ValidateRange(startIndex, length);
+        if (startIndex == 0 && length == this.Length)
+            return this;
+        return StringRuntime.Substring(this, startIndex, length);
+    }
+
+    public string Insert(int startIndex, string value)
+    {
+        RequireValue(value);
+        if (startIndex < 0 || startIndex > this.Length)
+            StringRuntime.ArgumentOutOfRange();
+        if (value.Length == 0)
+            return this;
+        if (value.Length > 2147483647 - this.Length)
+            StringRuntime.Overflow();
+        StringBuilder builder = new StringBuilder(this.Length + value.Length);
+        builder.Append(this, 0, startIndex);
+        builder.Append(value);
+        builder.Append(this, startIndex, this.Length - startIndex);
+        return builder.ToString();
+    }
+
+    public string Remove(int startIndex)
+    {
+        return Remove(startIndex, this.Length - startIndex);
+    }
+
+    public string Remove(int startIndex, int count)
+    {
+        ValidateRange(startIndex, count);
+        if (count == 0)
+            return this;
+        StringBuilder builder = new StringBuilder(this.Length - count);
+        builder.Append(this, 0, startIndex);
+        builder.Append(this, startIndex + count, this.Length - startIndex - count);
+        return builder.ToString();
+    }
+
+    public string Replace(string oldValue, string newValue)
+    {
+        RequireValue(oldValue);
+        RequireValue(newValue);
+        if (oldValue.Length == 0)
+            StringRuntime.Argument();
+        int first = IndexOf(oldValue);
+        if (first < 0)
+            return this;
+        StringBuilder builder = new StringBuilder(this.Length);
+        int position = 0;
+        while (first >= 0)
+        {
+            builder.Append(this, position, first - position);
+            builder.Append(newValue);
+            position = first + oldValue.Length;
+            first = IndexOf(oldValue, position, this.Length - position);
+        }
+        builder.Append(this, position, this.Length - position);
+        return builder.ToString();
+    }
+
+    public string Trim(char value)
+    {
+        int start = 0;
+        while (start < this.Length && this[start] == value)
+            start++;
+        int end = this.Length;
+        while (end > start && this[end - 1] == value)
+            end--;
+        return Substring(start, end - start);
+    }
+
+    public string TrimStart(char value)
+    {
+        int start = 0;
+        while (start < this.Length && this[start] == value)
+            start++;
+        return Substring(start, this.Length - start);
+    }
+
+    public string TrimEnd(char value)
+    {
+        int end = this.Length;
+        while (end > 0 && this[end - 1] == value)
+            end--;
+        return Substring(0, end);
+    }
+
+    public char[] ToCharArray()
+    {
+        char[] result = new char[this.Length];
+        CopyTo(0, result, 0, this.Length);
+        return result;
+    }
+
+    public void CopyTo(int sourceIndex, char[] destination, int destinationIndex,
+        int count)
+    {
+        if (destination == null)
+            StringRuntime.ArgumentNull();
+        ValidateRange(sourceIndex, count);
+        if (destinationIndex < 0 || count < 0 || destinationIndex > destination.Length
+            - count)
+            StringRuntime.ArgumentOutOfRange();
+        for (int index = 0; index < count; index++)
+            destination[destinationIndex + index] = this[sourceIndex + index];
+    }
+
+    public string[] Split(char separator)
+    {
+        return Split(separator, 2147483647, StringSplitOptions.None);
+    }
+
+    public string[] Split(char separator, StringSplitOptions options)
+    {
+        return Split(separator, 2147483647, options);
+    }
+
+    public string[] Split(char separator, int count, StringSplitOptions options)
+    {
+        return SplitCore(new StringSegment("", 0, 0), true, separator, count, options);
+    }
+
+    public string[] Split(string separator)
+    {
+        return Split(separator, 2147483647, StringSplitOptions.None);
+    }
+
+    public string[] Split(string separator, StringSplitOptions options)
+    {
+        return Split(separator, 2147483647, options);
+    }
+
+    public string[] Split(string separator, int count, StringSplitOptions options)
+    {
+        RequireValue(separator);
+        if (separator.Length == 0)
+            StringRuntime.Argument();
+        return SplitCore(new StringSegment(separator, 0, separator.Length), false,
+            '\0', count, options);
+    }
+
+    public StringSplitEnumerable EnumerateSplit(char separator)
+    {
+        return new StringSplitEnumerable(this, null, separator, 2147483647, StringSplitOptions.None);
+    }
+
+    public StringSplitEnumerable EnumerateSplit(char separator, int count, StringSplitOptions options)
+    {
+        return new StringSplitEnumerable(this, null, separator, count, options);
+    }
+
+    public StringSplitEnumerable EnumerateSplit(string separator)
+    {
+        return EnumerateSplit(separator, 2147483647, StringSplitOptions.None);
+    }
+
+    public StringSplitEnumerable EnumerateSplit(string separator, int count, StringSplitOptions options)
+    {
+        RequireValue(separator);
+        if (separator.Length == 0)
+            StringRuntime.Argument();
+        return new StringSplitEnumerable(this, separator, '\0', count, options);
+    }
+
+    public static int CompareOrdinal(string left, string right)
+    {
+        return StringRuntime.CompareOrdinal(left, right);
+    }
+
+    public static string Concat(string[] values)
+    {
+        if (values == null)
+            StringRuntime.ArgumentNull();
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < values.Length; index++)
+            builder.Append(values[index]);
+        return builder.ToString();
+    }
+
+    public static string Join(string separator, string[] values)
+    {
+        RequireValue(separator);
+        if (values == null)
+            StringRuntime.ArgumentNull();
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < values.Length; index++)
+        {
+            if (index != 0)
+                builder.Append(separator);
+            builder.Append(values[index]);
+        }
+        return builder.ToString();
+    }
+
+    public static string Format(string format, object arg0)
+    {
+        object[] arguments = new object[1];
+        arguments[0] = arg0;
+        return Format(format, arguments);
+    }
+
+    public static string Format(string format, object arg0, object arg1)
+    {
+        object[] arguments = new object[2];
+        arguments[0] = arg0;
+        arguments[1] = arg1;
+        return Format(format, arguments);
+    }
+
+    public static string Format(string format, object arg0, object arg1, object arg2)
+    {
+        object[] arguments = new object[3];
+        arguments[0] = arg0;
+        arguments[1] = arg1;
+        arguments[2] = arg2;
+        return Format(format, arguments);
+    }
+
+    public static string Format(string format, object arg0, object arg1, object arg2,
+        object arg3)
+    {
+        object[] arguments = new object[4];
+        arguments[0] = arg0;
+        arguments[1] = arg1;
+        arguments[2] = arg2;
+        arguments[3] = arg3;
+        return Format(format, arguments);
+    }
+
+    public static string Format(string format, object[] arguments)
+    {
+        RequireValue(format);
+        if (arguments == null)
+            StringRuntime.ArgumentNull();
+        int initialCapacity = format.Length;
+        if (initialCapacity <= 2147483631)
+            initialCapacity += 16;
+        StringBuilder result = new StringBuilder(initialCapacity);
+        int position = 0;
+        while (position < format.Length)
+        {
+            char current = format[position];
+            if (current == '{' && position + 1 < format.Length && format[position
+                + 1] == '{')
+            {
+                result.Append('{');
+                position += 2;
+            }
+            else if (current == '}' && position + 1 < format.Length && format[position
+                + 1] == '}')
+            {
+                result.Append('}');
+                position += 2;
+            }
+            else if (current == '{')
+            {
+                position++;
+                int argumentIndex = ParseUnsigned(format, ref position);
+                if (argumentIndex < 0 || argumentIndex >= arguments.Length)
+                    StringRuntime.Format();
+                SkipSpaces(format, ref position);
+                int alignment = 0;
+                if (position < format.Length && format[position] == ',')
+                {
+                    position++;
+                    SkipSpaces(format, ref position);
+                    bool negative = false;
+                    if (position < format.Length && format[position] == '-')
+                    {
+                        negative = true;
+                        position++;
+                    }
+                    alignment = ParseUnsigned(format, ref position);
+                    if (alignment < 0)
+                        StringRuntime.Format();
+                    if (negative)
+                        alignment = -alignment;
+                    SkipSpaces(format, ref position);
+                }
+                string specification = "";
+                if (position < format.Length && format[position] == ':')
+                {
+                    int specificationStart = ++position;
+                    while (position < format.Length && format[position] != '}')
+                    {
+                        if (format[position] == '{')
+                            StringRuntime.Format();
+                        position++;
+                    }
+                    specification = format.Substring(specificationStart, position
+                        - specificationStart);
+                }
+                if (position >= format.Length || format[position] != '}')
+                    StringRuntime.Format();
+                position++;
+                string rendered = FormatValue(arguments[argumentIndex], specification);
+                int padding = alignment - rendered.Length;
+                if (alignment < 0)
+                    padding = -alignment - rendered.Length;
+                if (alignment > 0)
+                    AppendSpaces(result, padding);
+                result.Append(rendered);
+                if (alignment < 0)
+                    AppendSpaces(result, padding);
+            }
+            else if (current == '}')
+                StringRuntime.Format();
+            else
+            {
+                result.Append(current);
+                position++;
+            }
+        }
+        return result.ToString();
+    }
+
+    public string ToString(string format)
+    {
+        return this;
+    }
+
+    private string[] SplitCore(StringSegment separator, bool characterSeparator,
+        char character, int count, StringSplitOptions options)
+    {
+        if (count < 0)
+            StringRuntime.ArgumentOutOfRange();
+        if (options != StringSplitOptions.None && options != StringSplitOptions.RemoveEmptyEntries)
+            StringRuntime.ArgumentOutOfRange();
+        if (count == 0)
+            return new string[0];
+        int entries = 0;
+        string textSeparator = separator.ToString();
+        if (characterSeparator)
+            textSeparator = null;
+        StringSplitEnumerator counter = new StringSplitEnumerator(this, textSeparator,
+            character, count, options);
+        while (counter.MoveNext())
+            entries++;
+        string[] result = new string[entries];
+        StringSplitEnumerator enumerator = new StringSplitEnumerator(this, textSeparator,
+            character, count, options);
+        int index = 0;
+        while (enumerator.MoveNext())
+        {
+            result[index] = enumerator.GetCurrent().ToString();
+            index++;
+        }
+        return result;
+    }
+
+    private static string FormatValue(object value, string specification)
+    {
+        if (value == null)
+            return "";
+        string builtIn = StringRuntime.FormatBuiltIn(value, specification);
+        if (builtIn != null)
+            return builtIn;
+        IFormattable custom = value as IFormattable;
+        if (custom != null)
+            return custom.ToString(specification);
+        if (specification.Length != 0)
+            StringRuntime.Format();
+        return value.ToString();
+    }
+
+    private static int ParseUnsigned(string format, ref int position)
+    {
+        int value = 0;
+        int start = position;
+        while (position < format.Length && format[position] >= '0' && format[position]
+            <= '9')
+        {
+            if (value > 214748364)
+                StringRuntime.Format();
+            value = value * 10 + (int)(format[position] - '0');
+            position++;
+        }
+        if (position == start)
+            return -1;
+        return value;
+    }
+
+    private static void SkipSpaces(string format, ref int position)
+    {
+        while (position < format.Length && format[position] == ' ')
+            position++;
+    }
+
+    private static void AppendSpaces(StringBuilder builder, int count)
+    {
+        for (int index = 0; index < count; index++)
+            builder.Append(' ');
+    }
+
+    private static void RequireValue(string value)
+    {
+        if (value == null)
+            StringRuntime.ArgumentNull();
+    }
+
+    private void ValidateRange(int startIndex, int count)
+    {
+        if (startIndex < 0 || count < 0 || startIndex > this.Length - count)
+            StringRuntime.ArgumentOutOfRange();
+    }
+}
+
+public readonly struct StringSegment
+{
+    private readonly string source;
+    private readonly int start;
+    private readonly int length;
+
+    public StringSegment(string source, int start, int length)
+    {
+        if (source == null)
+            StringRuntime.ArgumentNull();
+        if (start < 0 || length < 0 || start > source.Length - length)
+            StringRuntime.ArgumentOutOfRange();
+        this.source = source;
+        this.start = start;
+        this.length = length;
+    }
+
+    public string Source
+    {
+        get
+        {
+            return source;
+        }
+    }
+
+    public int Start
+    {
+        get
+        {
+            return start;
+        }
+    }
+
+    public int Length
+    {
+        get
+        {
+            return length;
+        }
+    }
+
+    public bool IsEmpty
+    {
+        get
+        {
+            return length == 0;
+        }
+    }
+
+    public char this[int index]
+    {
+        get
+        {
+            if (index < 0 || index >= length)
+                StringRuntime.Bounds();
+            return source[start + index];
+        }
+    }
+
+    public override string ToString()
+    {
+        return source.Substring(start, length);
+    }
+}
+
+public readonly struct StringSplitEnumerable
+{
+    private readonly string source;
+    private readonly string separator;
+    private readonly char character;
+    private readonly int count;
+    private readonly StringSplitOptions options;
+
+    internal StringSplitEnumerable(string source, string separator, char character,
+        int count, StringSplitOptions options)
+    {
+        if (source == null)
+            StringRuntime.ArgumentNull();
+        if (count < 0)
+            StringRuntime.ArgumentOutOfRange();
+        this.source = source;
+        this.separator = separator;
+        this.character = character;
+        this.count = count;
+        this.options = options;
+    }
+
+    public StringSplitEnumerator GetEnumerator()
+    {
+        return new StringSplitEnumerator(source, separator, character, count, options);
+    }
+}
+
+public struct StringSplitEnumerator
+{
+    private string source;
+    private string separator;
+    private char character;
+    private int count;
+    private StringSplitOptions options;
+    private int position;
+    private int emitted;
+    private bool finished;
+    private StringSegment current;
+
+    internal StringSplitEnumerator(string source, string separator, char character,
+        int count, StringSplitOptions options)
+    {
+        if (source == null)
+            StringRuntime.ArgumentNull();
+        if (count < 0)
+            StringRuntime.ArgumentOutOfRange();
+        if (options != StringSplitOptions.None && options != StringSplitOptions.RemoveEmptyEntries)
+            StringRuntime.ArgumentOutOfRange();
+        this.source = source;
+        this.separator = separator;
+        this.character = character;
+        this.count = count;
+        this.options = options;
+        position = 0;
+        emitted = 0;
+        finished = count == 0;
+        current = new StringSegment(source, 0, 0);
+    }
+
+    public StringSegment Current
+    {
+        get
+        {
+            return current;
+        }
+    }
+
+    internal StringSegment GetCurrent()
+    {
+        return current;
+    }
+
+    public bool MoveNext()
+    {
+        while (!finished)
+        {
+            int start = position;
+            int found = -1;
+            int separatorLength = 1;
+            if (emitted + 1 < count)
+            {
+                if (separator == null)
+                    found = source.IndexOf(character, position, source.Length - position);
+                else
+                {
+                    found = source.IndexOf(separator, position, source.Length - position);
+                    separatorLength = separator.Length;
+                }
+            }
+            if (found < 0)
+            {
+                found = source.Length;
+                finished = true;
+            }
+            else
+                position = found + separatorLength;
+            int length = found - start;
+            if (options == StringSplitOptions.RemoveEmptyEntries && length == 0)
+                continue;
+            current = new StringSegment(source, start, length);
+            emitted++;
+            return true;
+        }
+        return false;
+    }
+
+    public void Dispose()
+    {
+        finished = true;
+    }
+}
+
+internal static class StringRuntime
+{
+    [Extern("ct_string_region_equal")]
+    [NoAlloc]
+    internal static bool RegionEquals(string left, int leftStart, string right, int rightStart,
+        int count);
+
+    [Extern("ct_string_index_char")]
+    [NoAlloc]
+    internal static int IndexOfChar(string value, char search, int start, int count);
+
+    [Extern("ct_string_last_index_char")]
+    [NoAlloc]
+    internal static int LastIndexOfChar(string value, char search, int start, int count);
+
+    [Extern("ct_string_index_string")]
+    [NoAlloc]
+    internal static int IndexOf(string value, string search, int start, int count);
+
+    [Extern("ct_string_last_index_string")]
+    [NoAlloc]
+    internal static int LastIndexOf(string value, string search, int start, int count);
+
+    [Extern("ct_string_substring")]
+    internal static string Substring(string value, int start, int count);
+
+    [Extern("ct_string_compare_ordinal")]
+    [NoAlloc]
+    internal static int CompareOrdinal(string left, string right);
+
+    [Extern("ct_string_from_array")]
+    internal static string FromBytes(byte[] value, int start, int count);
+
+    [Extern("ct_string_format_builtin")]
+    internal static string FormatBuiltIn(object value, string format);
+
+    [Extern("ct_string_argument_null")]
+    [NoAlloc]
+    internal static void ArgumentNull();
+
+    [Extern("ct_string_argument")]
+    [NoAlloc]
+    internal static void Argument();
+
+    [Extern("ct_string_argument_out_of_range")]
+    [NoAlloc]
+    internal static void ArgumentOutOfRange();
+
+    [Extern("ct_string_overflow")]
+    [NoAlloc]
+    internal static void Overflow();
+
+    [Extern("ct_string_out_of_memory")]
+    [NoAlloc]
+    internal static void OutOfMemory();
+
+    [Extern("ct_string_bounds")]
+    [NoAlloc]
+    internal static void Bounds();
+
+    [Extern("ct_string_format_invalid")]
+    [NoAlloc]
+    internal static void Format();
+}

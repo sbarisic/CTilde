@@ -16,5 +16,6 @@
     <Compile Include="Compiler/**/*.cs" />
     <EmbeddedResource Include="StandardLibrary/**/*.ct" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
     <EmbeddedResource Include="StandardLibrary/**/*.xml" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../third_party/ryu/4c0618b0/ryu/*" LogicalName="CTilde.Ryu.%(Filename)%(Extension)" />
   </ItemGroup>
 </Project>

@@ -82,6 +82,7 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
             .GroupBy(function => (PropertySymbol)function.Property!)
             .ToDictionary(group => group.Key, group => group.ToImmutableArray());
         var reachable = new HashSet<MethodSymbol>();
+        var surfacedTypes = new HashSet<TypeSymbol>();
         var pending = new Queue<MethodSymbol>();
 
         void Add(MethodSymbol? method)
@@ -90,14 +91,28 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
                 pending.Enqueue(method);
         }
 
+        void AddTypeSurface(TypeSymbol? type)
+        {
+            if (type is null || !surfacedTypes.Add(type))
+                return;
+            AddTypeSurface(type.BaseType);
+            foreach (var function in ir.Functions.Where(function => function.Method.ContainingType == type &&
+                (function.Method.IsVirtual || function.Method.IsOverride || function.Method.ImplementedInterfaceMethods.Count != 0 ||
+                    (function.Property?.ImplementedInterfaceProperties.Count ?? 0) != 0)))
+                Add(function.Method);
+        }
+
         Add(program.Model.EntryPoint);
         foreach (var implementation in program.Model.RuntimeImplementations.Values)
             Add(implementation);
-        foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null || function.Method.IsVirtual || function.Method.IsOverride))
+        foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null ||
+            (function.Method.IsVirtual || function.Method.IsOverride) &&
+            function.Method.ContainingType.FullName is not ("System.StringSegment" or "System.Text.StringBuilder")))
             Add(function.Method);
         foreach (var function in ir.Functions.Where(function => function.Method.IsUsed && !function.Method.IsGenericDefinition))
             Add(function.Method);
-        foreach (var function in ir.Functions.Where(function => function.Method.ImplementedInterfaceMethods.Count != 0 || (function.Property?.ImplementedInterfaceProperties.Count ?? 0) != 0))
+        foreach (var function in ir.Functions.Where(function => function.Method.ImplementedInterfaceMethods.Count != 0 ||
+            (function.Property?.ImplementedInterfaceProperties.Count ?? 0) != 0))
             Add(function.Method);
         foreach (var function in ir.Functions.Where(function => function.Method.IsOperator))
             Add(function.Method);
@@ -110,12 +125,6 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
         {
             foreach (var constructor in ioExceptionType.Constructors)
                 Add(constructor);
-        }
-        if (program.Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.Type.Kind == CTypeKind.FunctionPointer) ||
-            program.Model.UserSyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.AmpersandToken))
-        {
-            foreach (var function in ir.Functions.Where(function => function.Method.IsStatic))
-                Add(function.Method);
         }
         foreach (var initializer in program.Bodies.Where(body => body.Method.Name == "<module_init>"))
             AddDependencies(initializer);
@@ -149,8 +158,12 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
                 Add(deferred);
             foreach (var semantic in body.Semantics.Values)
             {
+                AddTypeSurface(semantic.Type.Symbol);
                 switch (semantic.Symbol)
                 {
+                    case TypeSymbol type:
+                        AddTypeSurface(type);
+                        break;
                     case MethodSymbol method:
                         Add(method);
                         break;

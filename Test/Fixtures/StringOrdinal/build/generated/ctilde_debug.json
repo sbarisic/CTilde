@@ -1,0 +1,4773 @@
+{
+  "generator": "C~ draft 0.41",
+  "version": 3,
+  "runtimeAbi": 16,
+  "instrumented": false,
+  "memoryDiagnostics": "off",
+  "files": [
+    "Program.ct",
+    "stdlib/System/Console.ct",
+    "stdlib/System/Exception.ct",
+    "stdlib/System/Math.ct",
+    "stdlib/System/Object.ct",
+    "stdlib/System/String.ct",
+    "stdlib/System/StringBuilder.ct"
+  ],
+  "functions": [
+    {
+      "name": "ct_c_06834d114c6fa18407be2a8c",
+      "displayName": "System.Object.Object",
+      "returnType": "System.Object",
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 5,
+        "column": 12,
+        "spanStart": 52,
+        "spanLength": 20
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Object.ct",
+            "line": 6,
+            "column": 5,
+            "spanStart": 65,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_10a5c283ffec843f9ff35b60",
+      "displayName": "System.ArgumentNullException.ArgumentNullException",
+      "returnType": "System.ArgumentNullException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 80,
+        "column": 12,
+        "spanStart": 1550,
+        "spanLength": 74
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 81,
+            "column": 5,
+            "spanStart": 1617,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_30d76fe0bc73f827d36e8c37",
+      "displayName": "System.StringSplitEnumerator.StringSplitEnumerator",
+      "returnType": "System.StringSplitEnumerator",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 601,
+        "column": 14,
+        "spanStart": 18774,
+        "spanLength": 712
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "character",
+          "storage": "u_9_character",
+          "type": "char",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 603,
+          "column": 9,
+          "spanStart": 18898,
+          "spanLength": 66
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 604,
+          "column": 13,
+          "spanStart": 18930,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 605,
+          "column": 9,
+          "spanStart": 18973,
+          "spanLength": 67
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 606,
+          "column": 13,
+          "spanStart": 19000,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 607,
+          "column": 9,
+          "spanStart": 19049,
+          "spanLength": 144
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 608,
+          "column": 13,
+          "spanStart": 19153,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 609,
+          "column": 9,
+          "spanStart": 19202,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 610,
+          "column": 9,
+          "spanStart": 19232,
+          "spanLength": 27
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 611,
+          "column": 9,
+          "spanStart": 19268,
+          "spanLength": 27
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 612,
+          "column": 9,
+          "spanStart": 19304,
+          "spanLength": 19
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 613,
+          "column": 9,
+          "spanStart": 19332,
+          "spanLength": 23
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 614,
+          "column": 9,
+          "spanStart": 19364,
+          "spanLength": 13
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 615,
+          "column": 9,
+          "spanStart": 19386,
+          "spanLength": 12
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 616,
+          "column": 9,
+          "spanStart": 19407,
+          "spanLength": 22
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 617,
+          "column": 9,
+          "spanStart": 19438,
+          "spanLength": 42
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 602,
+            "column": 5,
+            "spanStart": 18888,
+            "spanLength": 598
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_3a5f72b4cdfc40a34785cc47",
+      "displayName": "System.Text.StringBuilder.StringBuilder",
+      "returnType": "System.Text.StringBuilder",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 8,
+        "column": 12,
+        "spanStart": 123,
+        "spanLength": 38
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 9,
+            "column": 5,
+            "spanStart": 154,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_474d4a2144bdab489476d8c3",
+      "displayName": "System.IndexOutOfRangeException.IndexOutOfRangeException",
+      "returnType": "System.IndexOutOfRangeException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 45,
+        "column": 12,
+        "spanStart": 820,
+        "spanLength": 82
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 46,
+            "column": 5,
+            "spanStart": 895,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_4ef68a0e92a534d1506e56ff",
+      "displayName": "System.ArgumentOutOfRangeException.ArgumentOutOfRangeException",
+      "returnType": "System.ArgumentOutOfRangeException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 94,
+        "column": 12,
+        "spanStart": 1845,
+        "spanLength": 91
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 95,
+            "column": 5,
+            "spanStart": 1929,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_50775c258c20cc0e47086631",
+      "displayName": "System.ArgumentException.ArgumentException",
+      "returnType": "System.ArgumentException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 73,
+        "column": 12,
+        "spanStart": 1414,
+        "spanLength": 65
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 74,
+            "column": 5,
+            "spanStart": 1472,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_6cdcd840e7a18f6fe6d2602d",
+      "displayName": "System.OverflowException.OverflowException",
+      "returnType": "System.OverflowException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 66,
+        "column": 12,
+        "spanStart": 1269,
+        "spanLength": 78
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 67,
+            "column": 5,
+            "spanStart": 1340,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_85981876d224106a559f6a51",
+      "displayName": "System.Exception.Exception",
+      "returnType": "System.Exception",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 11,
+        "column": 12,
+        "spanStart": 131,
+        "spanLength": 155
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "message",
+          "storage": "u_7_message",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 13,
+          "column": 9,
+          "spanStart": 180,
+          "spanLength": 100
+        },
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 14,
+          "column": 13,
+          "spanStart": 213,
+          "spanLength": 18
+        },
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 16,
+          "column": 13,
+          "spanStart": 257,
+          "spanLength": 23
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 12,
+            "column": 5,
+            "spanStart": 170,
+            "spanLength": 116
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_9cc720d0d788c2d473842478",
+      "displayName": "System.StringSegment.StringSegment",
+      "returnType": "System.StringSegment",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 530,
+        "column": 12,
+        "spanStart": 16742,
+        "spanLength": 350
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "start",
+          "storage": "u_5_start",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "length",
+          "storage": "u_6_length",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 532,
+          "column": 9,
+          "spanStart": 16808,
+          "spanLength": 66
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 533,
+          "column": 13,
+          "spanStart": 16840,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 534,
+          "column": 9,
+          "spanStart": 16883,
+          "spanLength": 115
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 535,
+          "column": 13,
+          "spanStart": 16958,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 536,
+          "column": 9,
+          "spanStart": 17007,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 537,
+          "column": 9,
+          "spanStart": 17037,
+          "spanLength": 19
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 538,
+          "column": 9,
+          "spanStart": 17065,
+          "spanLength": 21
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 531,
+            "column": 5,
+            "spanStart": 16798,
+            "spanLength": 294
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_9e19594d33169f25bdc8389e",
+      "displayName": "System.Text.StringBuilder.StringBuilder",
+      "returnType": "System.Text.StringBuilder",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 12,
+        "column": 12,
+        "spanStart": 174,
+        "spanLength": 182
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "capacity",
+          "storage": "u_8_capacity",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 14,
+          "column": 9,
+          "spanStart": 216,
+          "spanLength": 77
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 15,
+          "column": 13,
+          "spanStart": 246,
+          "spanLength": 47
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 16,
+          "column": 9,
+          "spanStart": 302,
+          "spanLength": 28
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 17,
+          "column": 9,
+          "spanStart": 339,
+          "spanLength": 11
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 13,
+            "column": 5,
+            "spanStart": 206,
+            "spanLength": 150
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_a20530623093015e27fc57fc",
+      "displayName": "System.StringSplitEnumerable.StringSplitEnumerable",
+      "returnType": "System.StringSplitEnumerable",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 570,
+        "column": 14,
+        "spanStart": 17873,
+        "spanLength": 434
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "character",
+          "storage": "u_9_character",
+          "type": "char",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 572,
+          "column": 9,
+          "spanStart": 17997,
+          "spanLength": 66
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 573,
+          "column": 13,
+          "spanStart": 18029,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 574,
+          "column": 9,
+          "spanStart": 18072,
+          "spanLength": 67
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 575,
+          "column": 13,
+          "spanStart": 18099,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 576,
+          "column": 9,
+          "spanStart": 18148,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 577,
+          "column": 9,
+          "spanStart": 18178,
+          "spanLength": 27
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 578,
+          "column": 9,
+          "spanStart": 18214,
+          "spanLength": 27
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 579,
+          "column": 9,
+          "spanStart": 18250,
+          "spanLength": 19
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 580,
+          "column": 9,
+          "spanStart": 18278,
+          "spanLength": 23
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 571,
+            "column": 5,
+            "spanStart": 17987,
+            "spanLength": 320
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_c_c766f54c6fa9e0dcd731e08e",
+      "displayName": "System.OutOfMemoryException.OutOfMemoryException",
+      "returnType": "System.OutOfMemoryException",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 115,
+        "column": 12,
+        "spanStart": 2327,
+        "spanLength": 71
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 116,
+            "column": 5,
+            "spanStart": 2391,
+            "spanLength": 7
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_g_7d2772457c4c8f316c155ba9",
+      "displayName": "System.Exception.Message.get",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 21,
+        "column": 9,
+        "spanStart": 328,
+        "spanLength": 51
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Exception",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 22,
+            "column": 9,
+            "spanStart": 340,
+            "spanLength": 39
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_g_b3680276ee1f89a225f58872",
+      "displayName": "System.StringSegment.Length.get",
+      "returnType": "int",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 543,
+        "column": 25,
+        "spanStart": 17217,
+        "spanLength": 22
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSegment",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 543,
+            "column": 29,
+            "spanStart": 17221,
+            "spanLength": 18
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_g_b5beef296f34ea283b98a411",
+      "displayName": "System.StringSegment.Item.get",
+      "returnType": "char",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 548,
+        "column": 9,
+        "spanStart": 17345,
+        "spanLength": 165
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSegment",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "index",
+          "storage": "u_5_index",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 549,
+            "column": 9,
+            "spanStart": 17357,
+            "spanLength": 153
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_g_c4e0380be22bad481d52355f",
+      "displayName": "System.StringSplitEnumerator.Current.get",
+      "returnType": "System.StringSegment",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 620,
+        "column": 36,
+        "spanStart": 19523,
+        "spanLength": 23
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSplitEnumerator",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 620,
+            "column": 40,
+            "spanStart": 19527,
+            "spanLength": 19
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_g_c877c66c5a3d1cfb9ab137b2",
+      "displayName": "System.StringSegment.Start.get",
+      "returnType": "int",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 542,
+        "column": 24,
+        "spanStart": 17169,
+        "spanLength": 21
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSegment",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 542,
+            "column": 28,
+            "spanStart": 17173,
+            "spanLength": 17
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_0d7409c0bbdb4067d8ac44a6",
+      "displayName": "System.String.IndexOf",
+      "returnType": "int",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 81,
+        "column": 12,
+        "spanStart": 1741,
+        "spanLength": 205
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "startIndex",
+          "storage": "u_10_startIndex",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 83,
+          "column": 9,
+          "spanStart": 1808,
+          "spanLength": 20
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 84,
+          "column": 9,
+          "spanStart": 1837,
+          "spanLength": 33
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 85,
+          "column": 9,
+          "spanStart": 1879,
+          "spanLength": 61
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 82,
+            "column": 5,
+            "spanStart": 1798,
+            "spanLength": 148
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_0e1fc17445e193dc01abf5e5",
+      "displayName": "System.String.ValidateRange",
+      "returnType": "void",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 517,
+        "column": 13,
+        "spanStart": 16399,
+        "spanLength": 187
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "startIndex",
+          "storage": "u_10_startIndex",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 519,
+          "column": 9,
+          "spanStart": 16459,
+          "spanLength": 121
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 520,
+          "column": 13,
+          "spanStart": 16540,
+          "spanLength": 40
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 518,
+            "column": 5,
+            "spanStart": 16449,
+            "spanLength": 137
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_0e5afa0ae4dc03e1ea358f38",
+      "displayName": "System.String.ToString",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 437,
+        "column": 12,
+        "spanStart": 13725,
+        "spanLength": 63
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "format",
+          "storage": "u_6_format",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 439,
+          "column": 9,
+          "spanStart": 13770,
+          "spanLength": 12
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 438,
+            "column": 5,
+            "spanStart": 13760,
+            "spanLength": 28
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_12ea57df29059c69b47f402e",
+      "displayName": "System.StringSplitEnumerator.MoveNext",
+      "returnType": "bool",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 627,
+        "column": 12,
+        "spanStart": 19638,
+        "spanLength": 1048
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSplitEnumerator",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [
+        {
+          "name": "start",
+          "storage": "ct_l_0",
+          "type": "int",
+          "durable": false,
+          "scopeId": 1,
+          "liveStart": 19729,
+          "liveEnd": 20658,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 631,
+            "column": 13,
+            "spanStart": 19708,
+            "spanLength": 21
+          }
+        },
+        {
+          "name": "found",
+          "storage": "ct_l_1",
+          "type": "int",
+          "durable": false,
+          "scopeId": 1,
+          "liveStart": 19757,
+          "liveEnd": 20658,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 632,
+            "column": 13,
+            "spanStart": 19742,
+            "spanLength": 15
+          }
+        },
+        {
+          "name": "separatorLength",
+          "storage": "ct_l_2",
+          "type": "int",
+          "durable": false,
+          "scopeId": 1,
+          "liveStart": 19794,
+          "liveEnd": 20658,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 633,
+            "column": 13,
+            "spanStart": 19770,
+            "spanLength": 24
+          }
+        },
+        {
+          "name": "length",
+          "storage": "ct_l_3",
+          "type": "int",
+          "durable": false,
+          "scopeId": 1,
+          "liveStart": 20429,
+          "liveEnd": 20658,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 651,
+            "column": 13,
+            "spanStart": 20402,
+            "spanLength": 27
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 629,
+          "column": 9,
+          "spanStart": 19668,
+          "spanLength": 990
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 631,
+          "column": 13,
+          "spanStart": 19708,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 632,
+          "column": 13,
+          "spanStart": 19742,
+          "spanLength": 15
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 633,
+          "column": 13,
+          "spanStart": 19770,
+          "spanLength": 24
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 634,
+          "column": 13,
+          "spanStart": 19807,
+          "spanLength": 386
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 636,
+          "column": 17,
+          "spanStart": 19862,
+          "spanLength": 317
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 637,
+          "column": 21,
+          "spanStart": 19905,
+          "spanLength": 70
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 640,
+          "column": 21,
+          "spanStart": 20035,
+          "spanLength": 70
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 641,
+          "column": 21,
+          "spanStart": 20126,
+          "spanLength": 35
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 644,
+          "column": 13,
+          "spanStart": 20206,
+          "spanLength": 183
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 646,
+          "column": 17,
+          "spanStart": 20251,
+          "spanLength": 22
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 647,
+          "column": 17,
+          "spanStart": 20290,
+          "spanLength": 16
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 650,
+          "column": 17,
+          "spanStart": 20354,
+          "spanLength": 35
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 651,
+          "column": 13,
+          "spanStart": 20402,
+          "spanLength": 27
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 652,
+          "column": 13,
+          "spanStart": 20442,
+          "spanLength": 94
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 653,
+          "column": 17,
+          "spanStart": 20527,
+          "spanLength": 9
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 654,
+          "column": 13,
+          "spanStart": 20549,
+          "spanLength": 51
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 655,
+          "column": 13,
+          "spanStart": 20613,
+          "spanLength": 10
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 656,
+          "column": 13,
+          "spanStart": 20636,
+          "spanLength": 12
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 658,
+          "column": 9,
+          "spanStart": 20667,
+          "spanLength": 13
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 628,
+            "column": 5,
+            "spanStart": 19658,
+            "spanLength": 1028
+          }
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 630,
+            "column": 9,
+            "spanStart": 19694,
+            "spanLength": 964
+          }
+        },
+        {
+          "id": 2,
+          "parent": 1,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 635,
+            "column": 13,
+            "spanStart": 19844,
+            "spanLength": 349
+          }
+        },
+        {
+          "id": 3,
+          "parent": 2,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 639,
+            "column": 17,
+            "spanStart": 20013,
+            "spanLength": 166
+          }
+        },
+        {
+          "id": 4,
+          "parent": 1,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 645,
+            "column": 13,
+            "spanStart": 20233,
+            "spanLength": 87
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_13a39a9a061db32552420131",
+      "displayName": "System.String.EnumerateSplit",
+      "returnType": "System.StringSplitEnumerable",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 281,
+        "column": 12,
+        "spanStart": 8057,
+        "spanLength": 297
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 283,
+          "column": 9,
+          "spanStart": 8165,
+          "spanLength": 24
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 284,
+          "column": 9,
+          "spanStart": 8198,
+          "spanLength": 69
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 285,
+          "column": 13,
+          "spanStart": 8237,
+          "spanLength": 30
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 286,
+          "column": 9,
+          "spanStart": 8276,
+          "spanLength": 72
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 282,
+            "column": 5,
+            "spanStart": 8155,
+            "spanLength": 199
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_1621bdb71760d630c9e71fdb",
+      "displayName": "Program.Main",
+      "returnType": "void",
+      "source": {
+        "file": "Program.ct",
+        "line": 5,
+        "column": 5,
+        "spanStart": 49,
+        "spanLength": 663
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [
+        {
+          "name": "value",
+          "storage": "ct_l_0",
+          "type": "string",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 138,
+          "liveEnd": 712,
+          "source": {
+            "file": "Program.ct",
+            "line": 8,
+            "column": 9,
+            "spanStart": 106,
+            "spanLength": 32
+          }
+        },
+        {
+          "name": "all",
+          "storage": "ct_l_1",
+          "type": "string[]",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 187,
+          "liveEnd": 712,
+          "source": {
+            "file": "Program.ct",
+            "line": 9,
+            "column": 9,
+            "spanStart": 147,
+            "spanLength": 40
+          }
+        },
+        {
+          "name": "segments",
+          "storage": "ct_l_2",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 213,
+          "liveEnd": 712,
+          "source": {
+            "file": "Program.ct",
+            "line": 10,
+            "column": 9,
+            "spanStart": 196,
+            "spanLength": 17
+          }
+        },
+        {
+          "name": "segment",
+          "storage": "ct_l_3",
+          "type": "System.StringSegment",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 296,
+          "liveEnd": 492,
+          "source": {
+            "file": "Program.ct",
+            "line": 11,
+            "column": 9,
+            "spanStart": 222,
+            "spanLength": 270
+          }
+        },
+        {
+          "name": "joined",
+          "storage": "ct_l_4",
+          "type": "string[]",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 533,
+          "liveEnd": 712,
+          "source": {
+            "file": "Program.ct",
+            "line": 17,
+            "column": 9,
+            "spanStart": 501,
+            "spanLength": 32
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "Program.ct",
+          "line": 8,
+          "column": 9,
+          "spanStart": 106,
+          "spanLength": 32
+        },
+        {
+          "file": "Program.ct",
+          "line": 9,
+          "column": 9,
+          "spanStart": 147,
+          "spanLength": 40
+        },
+        {
+          "file": "Program.ct",
+          "line": 10,
+          "column": 9,
+          "spanStart": 196,
+          "spanLength": 17
+        },
+        {
+          "file": "Program.ct",
+          "line": 11,
+          "column": 9,
+          "spanStart": 222,
+          "spanLength": 270
+        },
+        {
+          "file": "Program.ct",
+          "line": 13,
+          "column": 13,
+          "spanStart": 310,
+          "spanLength": 148
+        },
+        {
+          "file": "Program.ct",
+          "line": 14,
+          "column": 17,
+          "spanStart": 345,
+          "spanLength": 113
+        },
+        {
+          "file": "Program.ct",
+          "line": 15,
+          "column": 13,
+          "spanStart": 471,
+          "spanLength": 11
+        },
+        {
+          "file": "Program.ct",
+          "line": 17,
+          "column": 9,
+          "spanStart": 501,
+          "spanLength": 32
+        },
+        {
+          "file": "Program.ct",
+          "line": 17,
+          "column": 42,
+          "spanStart": 534,
+          "spanLength": 16
+        },
+        {
+          "file": "Program.ct",
+          "line": 17,
+          "column": 59,
+          "spanStart": 551,
+          "spanLength": 16
+        },
+        {
+          "file": "Program.ct",
+          "line": 17,
+          "column": 76,
+          "spanStart": 568,
+          "spanLength": 16
+        },
+        {
+          "file": "Program.ct",
+          "line": 18,
+          "column": 9,
+          "spanStart": 593,
+          "spanLength": 113
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "Program.ct",
+            "line": 7,
+            "column": 5,
+            "spanStart": 96,
+            "spanLength": 616
+          }
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "source": {
+            "file": "Program.ct",
+            "line": 12,
+            "column": 9,
+            "spanStart": 296,
+            "spanLength": 196
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_16474c1cb7ae606d264724a8",
+      "displayName": "System.StringSegment.ToString",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 556,
+        "column": 21,
+        "spanStart": 17538,
+        "spanLength": 77
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSegment",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 558,
+          "column": 9,
+          "spanStart": 17570,
+          "spanLength": 39
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 557,
+            "column": 5,
+            "spanStart": 17560,
+            "spanLength": 55
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_30d0f08d7f3431323f0dba9b",
+      "displayName": "System.Object.ToString",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 9,
+        "column": 20,
+        "spanStart": 93,
+        "spanLength": 74
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Object",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/Object.ct",
+          "line": 11,
+          "column": 9,
+          "spanStart": 125,
+          "spanLength": 36
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Object.ct",
+            "line": 10,
+            "column": 5,
+            "spanStart": 115,
+            "spanLength": 52
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_30e612f791fd4425a1a073aa",
+      "displayName": "System.Text.StringBuilder.EnsureCapacity",
+      "returnType": "System.Text.StringBuilder",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 23,
+        "column": 12,
+        "spanStart": 477,
+        "spanLength": 654
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Text.StringBuilder",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "capacity",
+          "storage": "u_8_capacity",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [
+        {
+          "name": "next",
+          "storage": "ct_l_0",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 709,
+          "liveEnd": 1131,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 29,
+            "column": 9,
+            "spanStart": 684,
+            "spanLength": 25
+          }
+        },
+        {
+          "name": "replacement",
+          "storage": "ct_l_1",
+          "type": "byte[]",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 973,
+          "liveEnd": 1131,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 38,
+            "column": 9,
+            "spanStart": 937,
+            "spanLength": 36
+          }
+        },
+        {
+          "name": "index",
+          "storage": "ct_l_2",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 1000,
+          "liveEnd": 1074,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 39,
+            "column": 14,
+            "spanStart": 987,
+            "spanLength": 13
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 25,
+          "column": 9,
+          "spanStart": 534,
+          "spanLength": 77
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 26,
+          "column": 13,
+          "spanStart": 564,
+          "spanLength": 47
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 27,
+          "column": 9,
+          "spanStart": 620,
+          "spanLength": 55
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 28,
+          "column": 13,
+          "spanStart": 663,
+          "spanLength": 12
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 29,
+          "column": 9,
+          "spanStart": 684,
+          "spanLength": 25
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 30,
+          "column": 9,
+          "spanStart": 718,
+          "spanLength": 37
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 31,
+          "column": 13,
+          "spanStart": 745,
+          "spanLength": 10
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 32,
+          "column": 9,
+          "spanStart": 764,
+          "spanLength": 164
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 34,
+          "column": 13,
+          "spanStart": 810,
+          "spanLength": 79
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 35,
+          "column": 17,
+          "spanStart": 849,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 36,
+          "column": 13,
+          "spanStart": 902,
+          "spanLength": 16
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 38,
+          "column": 9,
+          "spanStart": 937,
+          "spanLength": 36
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 39,
+          "column": 9,
+          "spanStart": 982,
+          "spanLength": 92
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 39,
+          "column": 14,
+          "spanStart": 987,
+          "spanLength": 13
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 40,
+          "column": 13,
+          "spanStart": 1039,
+          "spanLength": 35
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 41,
+          "column": 9,
+          "spanStart": 1083,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 42,
+          "column": 9,
+          "spanStart": 1113,
+          "spanLength": 12
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 24,
+            "column": 5,
+            "spanStart": 524,
+            "spanLength": 607
+          }
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 33,
+            "column": 9,
+            "spanStart": 796,
+            "spanLength": 132
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_3d69aae48606bea80ce4f3d3",
+      "displayName": "System.String.Split",
+      "returnType": "string[]",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 248,
+        "column": 12,
+        "spanStart": 6944,
+        "spanLength": 114
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 250,
+          "column": 9,
+          "spanStart": 6991,
+          "spanLength": 61
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 249,
+            "column": 5,
+            "spanStart": 6981,
+            "spanLength": 77
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_3d7778df8eec973fa84f85a3",
+      "displayName": "System.String.EnumerateSplit",
+      "returnType": "System.StringSplitEnumerable",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 276,
+        "column": 12,
+        "spanStart": 7899,
+        "spanLength": 145
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 278,
+          "column": 9,
+          "spanStart": 7968,
+          "spanLength": 70
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 277,
+            "column": 5,
+            "spanStart": 7958,
+            "spanLength": 86
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_4ce83710710dc475bada84ed",
+      "displayName": "System.String.IndexOf",
+      "returnType": "int",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 65,
+        "column": 12,
+        "spanStart": 1318,
+        "spanLength": 178
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "char",
+          "passing": "value"
+        },
+        {
+          "name": "startIndex",
+          "storage": "u_10_startIndex",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 67,
+          "column": 9,
+          "spanStart": 1383,
+          "spanLength": 33
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 68,
+          "column": 9,
+          "spanStart": 1425,
+          "spanLength": 65
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 66,
+            "column": 5,
+            "spanStart": 1373,
+            "spanLength": 123
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_558407ab9002ca9cae189ad7",
+      "displayName": "System.Object.GetHashCode",
+      "returnType": "int",
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 19,
+        "column": 20,
+        "spanStart": 305,
+        "spanLength": 77
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Object",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/Object.ct",
+          "line": 21,
+          "column": 9,
+          "spanStart": 337,
+          "spanLength": 39
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Object.ct",
+            "line": 20,
+            "column": 5,
+            "spanStart": 327,
+            "spanLength": 55
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_5efde5c14305aa508f3f9500",
+      "displayName": "System.Console.WriteLine",
+      "returnType": "void",
+      "source": {
+        "file": "stdlib/System/Console.ct",
+        "line": 85,
+        "column": 19,
+        "spanStart": 1655,
+        "spanLength": 81
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "bool",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/Console.ct",
+          "line": 87,
+          "column": 9,
+          "spanStart": 1696,
+          "spanLength": 13
+        },
+        {
+          "file": "stdlib/System/Console.ct",
+          "line": 88,
+          "column": 9,
+          "spanStart": 1718,
+          "spanLength": 12
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Console.ct",
+            "line": 86,
+            "column": 5,
+            "spanStart": 1686,
+            "spanLength": 50
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_71f9f3e6200ba19fe092d079",
+      "displayName": "System.StringSplitEnumerator.GetCurrent",
+      "returnType": "System.StringSegment",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 622,
+        "column": 14,
+        "spanStart": 19563,
+        "spanLength": 62
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSplitEnumerator",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 624,
+          "column": 9,
+          "spanStart": 19604,
+          "spanLength": 15
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 623,
+            "column": 5,
+            "spanStart": 19594,
+            "spanLength": 31
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_794564b5e418a5cf691b9e20",
+      "displayName": "System.Text.StringBuilder.Append",
+      "returnType": "System.Text.StringBuilder",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 68,
+        "column": 12,
+        "spanStart": 1643,
+        "spanLength": 591
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Text.StringBuilder",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "startIndex",
+          "storage": "u_10_startIndex",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [
+        {
+          "name": "index",
+          "storage": "ct_l_0",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 2087,
+          "liveEnd": 2182,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 77,
+            "column": 14,
+            "spanStart": 2074,
+            "spanLength": 13
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 70,
+          "column": 9,
+          "spanStart": 1719,
+          "spanLength": 72
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 71,
+          "column": 13,
+          "spanStart": 1750,
+          "spanLength": 41
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 72,
+          "column": 9,
+          "spanStart": 1800,
+          "spanLength": 129
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 73,
+          "column": 13,
+          "spanStart": 1882,
+          "spanLength": 47
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 74,
+          "column": 9,
+          "spanStart": 1938,
+          "spanLength": 82
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 75,
+          "column": 13,
+          "spanStart": 1983,
+          "spanLength": 37
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 76,
+          "column": 9,
+          "spanStart": 2029,
+          "spanLength": 31
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 77,
+          "column": 9,
+          "spanStart": 2069,
+          "spanLength": 113
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 77,
+          "column": 14,
+          "spanStart": 2074,
+          "spanLength": 13
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 78,
+          "column": 13,
+          "spanStart": 2125,
+          "spanLength": 57
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 79,
+          "column": 9,
+          "spanStart": 2191,
+          "spanLength": 16
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 80,
+          "column": 9,
+          "spanStart": 2216,
+          "spanLength": 12
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 69,
+            "column": 5,
+            "spanStart": 1709,
+            "spanLength": 525
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_93b905dcd7adecfb8e0062ea",
+      "displayName": "System.String.RequireValue",
+      "returnType": "void",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 511,
+        "column": 20,
+        "spanStart": 16268,
+        "spanLength": 117
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 513,
+          "column": 9,
+          "spanStart": 16314,
+          "spanLength": 65
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 514,
+          "column": 13,
+          "spanStart": 16345,
+          "spanLength": 34
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 512,
+            "column": 5,
+            "spanStart": 16304,
+            "spanLength": 81
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_a8070d2c9af8f5b2c3ff5abd",
+      "displayName": "System.StringSplitEnumerator.Dispose",
+      "returnType": "void",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 661,
+        "column": 12,
+        "spanStart": 20699,
+        "spanLength": 51
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSplitEnumerator",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 663,
+          "column": 9,
+          "spanStart": 20728,
+          "spanLength": 16
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 662,
+            "column": 5,
+            "spanStart": 20718,
+            "spanLength": 32
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_c0f36c2a0a3614ef3cb808da",
+      "displayName": "System.Text.StringBuilder.Append",
+      "returnType": "System.Text.StringBuilder",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 61,
+        "column": 12,
+        "spanStart": 1485,
+        "spanLength": 145
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Text.StringBuilder",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "string",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 63,
+          "column": 9,
+          "spanStart": 1534,
+          "spanLength": 43
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 64,
+          "column": 13,
+          "spanStart": 1565,
+          "spanLength": 12
+        },
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 65,
+          "column": 9,
+          "spanStart": 1586,
+          "spanLength": 38
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 62,
+            "column": 5,
+            "spanStart": 1524,
+            "spanLength": 106
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_d9424caeba94737a9eb768f9",
+      "displayName": "System.StringSplitEnumerable.GetEnumerator",
+      "returnType": "System.StringSplitEnumerator",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 583,
+        "column": 12,
+        "spanStart": 18320,
+        "spanLength": 137
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.StringSplitEnumerable",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 585,
+          "column": 9,
+          "spanStart": 18372,
+          "spanLength": 79
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 584,
+            "column": 5,
+            "spanStart": 18362,
+            "spanLength": 95
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_e0d17396555b954c6e2b5743",
+      "displayName": "System.String.Join",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 304,
+        "column": 19,
+        "spanStart": 8837,
+        "spanLength": 448
+      },
+      "receiver": null,
+      "receiverType": null,
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "values",
+          "storage": "u_6_values",
+          "type": "string[]",
+          "passing": "value"
+        }
+      ],
+      "locals": [
+        {
+          "name": "builder",
+          "storage": "ct_l_0",
+          "type": "System.Text.StringBuilder",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 9050,
+          "liveEnd": 9285,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 309,
+            "column": 9,
+            "spanStart": 9006,
+            "spanLength": 44
+          }
+        },
+        {
+          "name": "index",
+          "storage": "ct_l_1",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 9077,
+          "liveEnd": 9244,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 310,
+            "column": 14,
+            "spanStart": 9064,
+            "spanLength": 13
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 306,
+          "column": 9,
+          "spanStart": 8898,
+          "spanLength": 24
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 307,
+          "column": 9,
+          "spanStart": 8931,
+          "spanLength": 66
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 308,
+          "column": 13,
+          "spanStart": 8963,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 309,
+          "column": 9,
+          "spanStart": 9006,
+          "spanLength": 44
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 310,
+          "column": 9,
+          "spanStart": 9059,
+          "spanLength": 185
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 310,
+          "column": 14,
+          "spanStart": 9064,
+          "spanLength": 13
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 312,
+          "column": 13,
+          "spanStart": 9133,
+          "spanLength": 58
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 313,
+          "column": 17,
+          "spanStart": 9165,
+          "spanLength": 26
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 314,
+          "column": 13,
+          "spanStart": 9204,
+          "spanLength": 30
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 316,
+          "column": 9,
+          "spanStart": 9253,
+          "spanLength": 26
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 305,
+            "column": 5,
+            "spanStart": 8888,
+            "spanLength": 397
+          }
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 311,
+            "column": 9,
+            "spanStart": 9119,
+            "spanLength": 125
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_e56b712a1da175b18c02e00e",
+      "displayName": "System.String.Substring",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 126,
+        "column": 12,
+        "spanStart": 2997,
+        "spanLength": 244
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "startIndex",
+          "storage": "u_10_startIndex",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "length",
+          "storage": "u_6_length",
+          "type": "int",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 128,
+          "column": 9,
+          "spanStart": 3056,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 129,
+          "column": 9,
+          "spanStart": 3099,
+          "spanLength": 70
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 130,
+          "column": 13,
+          "spanStart": 3157,
+          "spanLength": 12
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 131,
+          "column": 9,
+          "spanStart": 3178,
+          "spanLength": 57
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 127,
+            "column": 5,
+            "spanStart": 3046,
+            "spanLength": 195
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_ee857c56f72fd2a29fca1dca",
+      "displayName": "System.String.Split",
+      "returnType": "string[]",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 258,
+        "column": 12,
+        "spanStart": 7210,
+        "spanLength": 300
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 260,
+          "column": 9,
+          "spanStart": 7296,
+          "spanLength": 24
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 261,
+          "column": 9,
+          "spanStart": 7329,
+          "spanLength": 69
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 262,
+          "column": 13,
+          "spanStart": 7368,
+          "spanLength": 30
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 263,
+          "column": 9,
+          "spanStart": 7407,
+          "spanLength": 97
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 259,
+            "column": 5,
+            "spanStart": 7286,
+            "spanLength": 224
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_ee9d37ca73e9ac88c39d7575",
+      "displayName": "System.Exception.ToString",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 27,
+        "column": 21,
+        "spanStart": 407,
+        "spanLength": 195
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Exception",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [
+        {
+          "name": "typeName",
+          "storage": "ct_l_0",
+          "type": "string",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 473,
+          "liveEnd": 602,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 29,
+            "column": 9,
+            "spanStart": 439,
+            "spanLength": 34
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 29,
+          "column": 9,
+          "spanStart": 439,
+          "spanLength": 34
+        },
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 30,
+          "column": 9,
+          "spanStart": 482,
+          "spanLength": 72
+        },
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 31,
+          "column": 13,
+          "spanStart": 538,
+          "spanLength": 16
+        },
+        {
+          "file": "stdlib/System/Exception.ct",
+          "line": 32,
+          "column": 9,
+          "spanStart": 563,
+          "spanLength": 33
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Exception.ct",
+            "line": 28,
+            "column": 5,
+            "spanStart": 429,
+            "spanLength": 173
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_f2db0bb0529313ae8cb55994",
+      "displayName": "System.String.SplitCore",
+      "returnType": "string[]",
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 442,
+        "column": 13,
+        "spanStart": 13802,
+        "spanLength": 1093
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.String",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "System.StringSegment",
+          "passing": "value"
+        },
+        {
+          "name": "characterSeparator",
+          "storage": "u_18_characterSeparator",
+          "type": "bool",
+          "passing": "value"
+        },
+        {
+          "name": "character",
+          "storage": "u_9_character",
+          "type": "char",
+          "passing": "value"
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "passing": "value"
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "passing": "value"
+        }
+      ],
+      "locals": [
+        {
+          "name": "entries",
+          "storage": "ct_l_0",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14243,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 450,
+            "column": 9,
+            "spanStart": 14227,
+            "spanLength": 16
+          }
+        },
+        {
+          "name": "textSeparator",
+          "storage": "ct_l_1",
+          "type": "string",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14296,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 451,
+            "column": 9,
+            "spanStart": 14252,
+            "spanLength": 44
+          }
+        },
+        {
+          "name": "counter",
+          "storage": "ct_l_2",
+          "type": "System.StringSplitEnumerator",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14477,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 454,
+            "column": 9,
+            "spanStart": 14371,
+            "spanLength": 106
+          }
+        },
+        {
+          "name": "result",
+          "storage": "ct_l_3",
+          "type": "string[]",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14582,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 457,
+            "column": 9,
+            "spanStart": 14544,
+            "spanLength": 38
+          }
+        },
+        {
+          "name": "enumerator",
+          "storage": "ct_l_4",
+          "type": "System.StringSplitEnumerator",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14700,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 458,
+            "column": 9,
+            "spanStart": 14591,
+            "spanLength": 109
+          }
+        },
+        {
+          "name": "index",
+          "storage": "ct_l_5",
+          "type": "int",
+          "durable": false,
+          "scopeId": 0,
+          "liveStart": 14723,
+          "liveEnd": 14895,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 459,
+            "column": 9,
+            "spanStart": 14709,
+            "spanLength": 14
+          }
+        }
+      ],
+      "executable": [
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 444,
+          "column": 9,
+          "spanStart": 13940,
+          "spanLength": 67
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 445,
+          "column": 13,
+          "spanStart": 13967,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 446,
+          "column": 9,
+          "spanStart": 14016,
+          "spanLength": 144
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 447,
+          "column": 13,
+          "spanStart": 14120,
+          "spanLength": 40
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 448,
+          "column": 9,
+          "spanStart": 14169,
+          "spanLength": 49
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 449,
+          "column": 13,
+          "spanStart": 14197,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 450,
+          "column": 9,
+          "spanStart": 14227,
+          "spanLength": 16
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 451,
+          "column": 9,
+          "spanStart": 14252,
+          "spanLength": 44
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 452,
+          "column": 9,
+          "spanStart": 14305,
+          "spanLength": 57
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 453,
+          "column": 13,
+          "spanStart": 14341,
+          "spanLength": 21
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 454,
+          "column": 9,
+          "spanStart": 14371,
+          "spanLength": 106
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 455,
+          "column": 9,
+          "spanStart": 14486,
+          "spanLength": 49
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 456,
+          "column": 13,
+          "spanStart": 14525,
+          "spanLength": 10
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 457,
+          "column": 9,
+          "spanStart": 14544,
+          "spanLength": 38
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 458,
+          "column": 9,
+          "spanStart": 14591,
+          "spanLength": 109
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 459,
+          "column": 9,
+          "spanStart": 14709,
+          "spanLength": 14
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 460,
+          "column": 9,
+          "spanStart": 14732,
+          "spanLength": 134
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 462,
+          "column": 13,
+          "spanStart": 14784,
+          "spanLength": 51
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 463,
+          "column": 13,
+          "spanStart": 14848,
+          "spanLength": 8
+        },
+        {
+          "file": "stdlib/System/String.ct",
+          "line": 465,
+          "column": 9,
+          "spanStart": 14875,
+          "spanLength": 14
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 443,
+            "column": 5,
+            "spanStart": 13930,
+            "spanLength": 965
+          }
+        },
+        {
+          "id": 1,
+          "parent": 0,
+          "source": {
+            "file": "stdlib/System/String.ct",
+            "line": 461,
+            "column": 9,
+            "spanStart": 14770,
+            "spanLength": 96
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_f5e8e4d55eb7d6dc7bc2e2bc",
+      "displayName": "System.Text.StringBuilder.ToString",
+      "returnType": "string",
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 141,
+        "column": 21,
+        "spanStart": 4555,
+        "spanLength": 95
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Text.StringBuilder",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/StringBuilder.ct",
+          "line": 143,
+          "column": 9,
+          "spanStart": 4587,
+          "spanLength": 57
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/StringBuilder.ct",
+            "line": 142,
+            "column": 5,
+            "spanStart": 4577,
+            "spanLength": 73
+          }
+        }
+      ]
+    },
+    {
+      "name": "ct_m_f86f60014f73dc589fd5112f",
+      "displayName": "System.Object.Equals",
+      "returnType": "bool",
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 14,
+        "column": 20,
+        "spanStart": 188,
+        "spanLength": 96
+      },
+      "receiver": "ct_self",
+      "receiverType": "System.Object",
+      "used": false,
+      "linkerRetained": false,
+      "genericDefinition": null,
+      "typeArguments": [],
+      "parameters": [
+        {
+          "name": "value",
+          "storage": "u_5_value",
+          "type": "System.Object",
+          "passing": "value"
+        }
+      ],
+      "locals": [],
+      "executable": [
+        {
+          "file": "stdlib/System/Object.ct",
+          "line": 16,
+          "column": 9,
+          "spanStart": 228,
+          "spanLength": 50
+        }
+      ],
+      "sites": [],
+      "scopes": [
+        {
+          "id": 0,
+          "parent": null,
+          "source": {
+            "file": "stdlib/System/Object.ct",
+            "line": 15,
+            "column": 5,
+            "spanStart": 218,
+            "spanLength": 66
+          }
+        }
+      ]
+    }
+  ],
+  "types": [
+    {
+      "name": "Program",
+      "storage": "ct_t_b0ecdae5361908302e4a7337",
+      "kind": "staticclass",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "Program.ct",
+        "line": 3,
+        "column": 15,
+        "spanStart": 29,
+        "spanLength": 685
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.ArgumentException",
+      "storage": "ct_t_1bb2a862c5cd6454794fe0a4",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 71,
+        "column": 15,
+        "spanStart": 1365,
+        "spanLength": 116
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.ArgumentNullException",
+      "storage": "ct_t_a78ecc6f5bdfd6b012d715e6",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 78,
+        "column": 15,
+        "spanStart": 1497,
+        "spanLength": 129
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.ArgumentOutOfRangeException",
+      "storage": "ct_t_c97cd04de744fc66692080e7",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 92,
+        "column": 15,
+        "spanStart": 1786,
+        "spanLength": 152
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.Console",
+      "storage": "ct_t_0bc967de150cfc84feabb9d3",
+      "kind": "staticclass",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Console.ct",
+        "line": 3,
+        "column": 15,
+        "spanStart": 33,
+        "spanLength": 2289
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.DivideByZeroException",
+      "storage": "ct_t_3ca6063c0b91e629603fd3cc",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 50,
+        "column": 15,
+        "spanStart": 920,
+        "spanLength": 126
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.Exception",
+      "storage": "ct_t_8e21a5e2fb9f095e7f0daf1a",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Object",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 3,
+        "column": 8,
+        "spanStart": 26,
+        "spanLength": 578
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "message",
+          "storage": "u_7_message",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.FormatException",
+      "storage": "ct_t_8b01cafc793da58d2040a6cd",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 85,
+        "column": 15,
+        "spanStart": 1642,
+        "spanLength": 128
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.IFormattable",
+      "storage": "ct_t_23b0058da2c5e34a73a10fdc",
+      "kind": "interface",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 5,
+        "column": 8,
+        "spanStart": 46,
+        "spanLength": 62
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.IndexOutOfRangeException",
+      "storage": "ct_t_fb1324f2d929f92a1452d6b0",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 43,
+        "column": 15,
+        "spanStart": 764,
+        "spanLength": 140
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.InvalidCastException",
+      "storage": "ct_t_1a7b6d1d671f587b43c0eb87",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 57,
+        "column": 15,
+        "spanStart": 1062,
+        "spanLength": 142
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.Math",
+      "storage": "ct_t_e90eb5ca09b099c54ac34749",
+      "kind": "staticclass",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Math.ct",
+        "line": 3,
+        "column": 15,
+        "spanStart": 33,
+        "spanLength": 4142
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "E",
+          "storage": "ct_f_ce7b6af2ae5bcde1df17e305",
+          "type": "float",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "E64",
+          "storage": "ct_f_6ac492fc3f5a329d32fe664f",
+          "type": "double",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "Pi",
+          "storage": "ct_f_6386beeddf7f0caddaef89d4",
+          "type": "float",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "Pi64",
+          "storage": "ct_f_b465cfeedc17961ef37fdc32",
+          "type": "double",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "Tau",
+          "storage": "ct_f_f9829a7ce82d223475016ad1",
+          "type": "float",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "Tau64",
+          "storage": "ct_f_be7a276739e6d679b19e98f1",
+          "type": "double",
+          "static": true,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.NullReferenceException",
+      "storage": "ct_t_bb505331b25fb5c1667198f6",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 36,
+        "column": 15,
+        "spanStart": 620,
+        "spanLength": 128
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.Object",
+      "storage": "ct_t_85f9bec51c25eec663cd1245",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 3,
+        "column": 8,
+        "spanStart": 26,
+        "spanLength": 661
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.ObjectRuntime",
+      "storage": "ct_t_a1e6390dfe453112d07731fe",
+      "kind": "staticclass",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Object.ct",
+        "line": 37,
+        "column": 17,
+        "spanStart": 705,
+        "spanLength": 339
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.OutOfMemoryException",
+      "storage": "ct_t_7097958c7fa205ef236ea3cf",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 113,
+        "column": 15,
+        "spanStart": 2275,
+        "spanLength": 125
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.OverflowException",
+      "storage": "ct_t_143c556968abb53e4e3c125f",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 64,
+        "column": 15,
+        "spanStart": 1220,
+        "spanLength": 129
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.String",
+      "storage": "ct_t_6e5f7f6f42e030de7a52723e",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Object",
+      "interfaces": [
+        "System.IFormattable"
+      ],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 16,
+        "column": 15,
+        "spanStart": 202,
+        "spanLength": 16386
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.StringRuntime",
+      "storage": "ct_t_e99c23b4a4ca341d5317c178",
+      "kind": "staticclass",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 667,
+        "column": 17,
+        "spanStart": 20770,
+        "spanLength": 1214
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.StringSegment",
+      "storage": "ct_t_700771cbaf96a5d5a760b05a",
+      "kind": "struct",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 524,
+        "column": 17,
+        "spanStart": 16606,
+        "spanLength": 1011
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "length",
+          "storage": "u_6_length",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "start",
+          "storage": "u_5_start",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.StringSplitEnumerable",
+      "storage": "ct_t_e861dec74f025143d2431456",
+      "kind": "struct",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 562,
+        "column": 17,
+        "spanStart": 17635,
+        "spanLength": 824
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "character",
+          "storage": "u_9_character",
+          "type": "char",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.StringSplitEnumerator",
+      "storage": "ct_t_10a1718f2fa9adcc0c4c1cf2",
+      "kind": "struct",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 589,
+        "column": 8,
+        "spanStart": 18468,
+        "spanLength": 2284
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "character",
+          "storage": "u_9_character",
+          "type": "char",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "count",
+          "storage": "u_5_count",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "current",
+          "storage": "u_7_current",
+          "type": "System.StringSegment",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "emitted",
+          "storage": "u_7_emitted",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "finished",
+          "storage": "u_8_finished",
+          "type": "bool",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "options",
+          "storage": "u_7_options",
+          "type": "System.StringSplitOptions",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "position",
+          "storage": "u_8_position",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "separator",
+          "storage": "u_9_separator",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "source",
+          "storage": "u_6_source",
+          "type": "string",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.StringSplitOptions",
+      "storage": "ct_t_00fb20968d290e8e2aa6d955",
+      "kind": "enum",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": null,
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/String.ct",
+        "line": 10,
+        "column": 8,
+        "spanStart": 117,
+        "spanLength": 69
+      },
+      "values": [
+        {
+          "name": "None",
+          "value": "0"
+        },
+        {
+          "name": "RemoveEmptyEntries",
+          "value": "1"
+        }
+      ],
+      "fields": []
+    },
+    {
+      "name": "System.SynchronizationLockException",
+      "storage": "ct_t_8adee54d3efbf9ece7651659",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 127,
+        "column": 15,
+        "spanStart": 2584,
+        "spanLength": 157
+      },
+      "values": [],
+      "fields": []
+    },
+    {
+      "name": "System.Text.StringBuilder",
+      "storage": "ct_t_d1f0c06b644ece1fcd5b7eca",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Object",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/StringBuilder.ct",
+        "line": 3,
+        "column": 15,
+        "spanStart": 38,
+        "spanLength": 4614
+      },
+      "values": [],
+      "fields": [
+        {
+          "name": "buffer",
+          "storage": "u_6_buffer",
+          "type": "byte[]",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        },
+        {
+          "name": "length",
+          "storage": "u_6_length",
+          "type": "int",
+          "static": false,
+          "volatile": false,
+          "atomic": false,
+          "nativeVolatile": false,
+          "extern": null,
+          "used": false,
+          "linkerRetained": false,
+          "linkerSymbol": null,
+          "registerAddress": null,
+          "bitFirst": null,
+          "bitLast": null,
+          "offset": null,
+          "alignment": null
+        }
+      ]
+    },
+    {
+      "name": "System.ThreadStateException",
+      "storage": "ct_t_b5e50b31da161bbdd1109f01",
+      "kind": "class",
+      "layout": "sequential",
+      "pack": null,
+      "alignment": null,
+      "underlyingType": null,
+      "bitFieldBackingType": null,
+      "base": "System.Exception",
+      "interfaces": [],
+      "genericDefinition": null,
+      "typeArguments": [],
+      "runtimeBacked": false,
+      "simd": null,
+      "source": {
+        "file": "stdlib/System/Exception.ct",
+        "line": 120,
+        "column": 15,
+        "spanStart": 2416,
+        "spanLength": 152
+      },
+      "values": [],
+      "fields": []
+    }
+  ],
+  "arrays": [
+    {
+      "type": "System.Object[]",
+      "storage": "ct_a_r5460954ce8f881aa3aa4a49f*",
+      "elementType": "System.Object"
+    },
+    {
+      "type": "bool[]",
+      "storage": "ct_a_b*",
+      "elementType": "bool"
+    },
+    {
+      "type": "byte[]",
+      "storage": "ct_a_u8*",
+      "elementType": "byte"
+    },
+    {
+      "type": "char[]",
+      "storage": "ct_a_c8*",
+      "elementType": "char"
+    },
+    {
+      "type": "int[]",
+      "storage": "ct_a_i32*",
+      "elementType": "int"
+    },
+    {
+      "type": "string[]",
+      "storage": "ct_a_str*",
+      "elementType": "string"
+    }
+  ],
+  "inlineArrays": [],
+  "boxes": [
+    {
+      "type": "System.StringSegment",
+      "storage": "ct_box_sb462753db1724388ed74e96c",
+      "valueType": "System.StringSegment"
+    }
+  ],
+  "entryPoint": "ct_m_1621bdb71760d630c9e71fdb",
+  "runtimeHooks": {
+    "throw": "ct_debug_throw_hook",
+    "fatal": "ct_debug_fatal_hook",
+    "control": null,
+    "trap": null,
+    "startup": null,
+    "ready": null
+  },
+  "runtimeControl": null,
+  "runtimeSummary": null
+}

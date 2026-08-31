@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.40 and runtime ABI 16. Hosted, Cosmopolitan, and ESP-IDF profiles load monotonic timing, deterministic random generation, spin primitives, generic collections, UTF-8 helpers, scalar geometry, matrices, quaternions, and explicit SIMD128 values. Freestanding retains its allocation-free core, including `TimeSpan`, `Random`, generic value containers, and scalar geometry; managed collections require the ordinary managed-allocation and exception runtime roles.
+This document is the canonical standard-library reference for C~ Draft 0.41 and runtime ABI 16. Draft 0.41 adds the compiler-backed `System.String` surface, `StringSegment`, `StringBuilder`, invariant formatting, ASCII helpers, and checked native UTF-8 conversion alongside the native build controls. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -426,6 +426,20 @@ Construction, pointer access, and `stackalloc` use require an unsafe context. El
 
 Views can be local values and synchronous value parameters. They cannot be stored in managed state, boxed, returned, or passed by `ref`, `in`, or `out`. Native ABI parameters flatten to a data pointer followed by `size_t` length; read-only views use a `const` data pointer.
 
+## Strings, segments, and formatting
+
+The built-in `string` type uses the compiler-recognized `System.String` declaration. Its `Length`, indexes, ranges, and segments count UTF-8 bytes. Instance operations include ordinal `Contains`, `StartsWith`, `EndsWith`, `IndexOf`, `LastIndexOf`, `Substring`, `Insert`, `Remove`, `Replace`, single-byte `Trim` variants, `ToCharArray`, `CopyTo`, `Split`, and `EnumerateSplit`. Static operations include `Empty`, `IsNullOrEmpty`, `CompareOrdinal`, `Concat`, `Join`, and `Format`.
+
+`Split` accepts a `char` or nonempty `string` separator, an optional result count, and `StringSplitOptions.None` or `RemoveEmptyEntries`. Empty entries are preserved by default. `StringSegment` retains the source string and exposes a byte `Start`, `Length`, read-only indexing, `IsEmpty`, and materializing `ToString()`.
+
+`System.Text.StringBuilder` owns a managed byte array. It supports capacity construction, `EnsureCapacity`, `Clear`, scalar, string, and object `Append`, `AppendLine`, `AppendFormat`, and exact `ToString()` materialization. Capacity grows geometrically and is independent from the final string size.
+
+Composite formatting is invariant and supports escaped braces, indexed arguments, alignment, integral `D`/`d` and `X`/`x`, and floating-point `F`/`f` and `G`/`g` with precision from 0 through 99. Null arguments produce empty text. Built-in scalars and `System.IFormattable` values consume the format specification; other objects use `ToString()`. Floating-point output uses the vendored Ryu implementation for deterministic nearest-even fixed and shortest-round-trip conversion. Invalid formats throw `FormatException` and report `CTS0006` when unhandled.
+
+`System.Text.Ascii` provides explicitly ASCII-only whitespace, letter, digit, upper/lower conversion, ordinal ignore-case comparison, and equality helpers. General string operations remain ordinal and case-sensitive; Unicode casing, normalization, collation, and grapheme segmentation are not implied.
+
+These APIs are present in hosted, Cosmopolitan, ESP-IDF, and freestanding profiles. Freestanding operations that allocate require the configured allocate and free roles. Their validation failures route through the panic role because the freestanding profile has no catchable exception regions; managed profiles raise the documented exception types.
+
 ## Scoped native UTF-8 strings
 
 ```csharp
@@ -439,6 +453,10 @@ public readonly struct NativeUtf8String
 ```
 
 `Borrow` retains the managed string for the view's lexical lifetime and does not allocate. It rejects null and embedded NUL bytes; dynamic embedded NUL reports `CTS0003`. Native boundaries receive `const char*`. The view is stack-only and cannot be stored, boxed, returned, or retained. `Null` requires `[Nullable]` at the receiving native parameter.
+
+`System.Text.Utf8.GetString` and `TryGetString` copy a bounded NUL-terminated `byte*` or an exact `ReadOnlyNativeBuffer<byte>` into an owned managed string. A null pointer maps successfully to a null string. Pointer input must find its terminator within `maxBytes`; buffer input preserves embedded NUL bytes. Both forms validate canonical UTF-8. Throwing conversion reports `CTS0004` for invalid UTF-8 or `CTS0005` for a missing terminator; `Try` conversion returns false and clears its result.
+
+`Utf8.GetByteCount` returns the exact managed byte length. `TryCopyTo` copies exact UTF-8 bytes to a `NativeBuffer<byte>`, optionally appends one NUL byte, and returns false with zero bytes written when the destination is too small. Native ownership and deallocation remain explicit, and native imports still reject direct managed-string parameters and results.
 
 ## ESP-IDF
 
@@ -551,7 +569,7 @@ The callback types are `Predicate<T>`, `Equality<T>`, `Ordering<T>`, `Mapper<TIn
 
 `System.Text.Utf8.TryDecode(string,int,out rune,out int)` reads one scalar at a byte offset. The native-buffer overload validates external bytes, and `TryEncode` writes one scalar to a writable native buffer. All are allocation-free. Failure writes NUL and a zero count; an encode failure does not modify the destination. Decoding rejects continuation starts, truncated and overlong sequences, surrogates, and scalars above `U+10FFFF`.
 
-These operations are compiler intrinsics rather than declarations in the bundled C~ sources.
+Array storage and indexing remain compiler intrinsics. The string, split, builder, formatting, ASCII, and UTF-8 surfaces are ordinary bundled C~ declarations backed only by reachability-pruned runtime helpers where raw string creation or deterministic numeric conversion requires them.
 
 ## Runtime behavior
 
@@ -569,6 +587,6 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 The initial Cosmopolitan x64 audit has passed one portable managed-runtime APE on Linux/WSL and Windows. Broader math, environment, exports/callbacks, Unicode-path, custom-section, and final-retention cases remain explicit acceptance work. Arm64 and fat-image claims remain later gates; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
-The checked library roadmap includes richer hosted I/O, SIMD buffer operations, mutable collections after the required language foundations, and safe long-lived native-resource storage. Later work can add `System.Convert`, parsing, richer strings, streams, directories, clocks, and date/time APIs. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
+The checked library roadmap includes richer hosted I/O, SIMD buffer operations, parsing and conversion, and safe long-lived native-resource storage. Later work can add streams, directories, wall-clock calendars, culture-aware formatting, Unicode casing and normalization, and regular expressions. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
 
 Project binding manifests can add generated source-compatible ESP-IDF APIs alongside this handwritten surface. Their tracked C~ declarations use ordinary extern and ownership contracts, while project-private adapters consume the installed public headers, native constants, validated initializer macros, nested configuration fields, bounded fixed UTF-8 arrays, and selected output structures. Generated APIs are project declarations, not additions to the embedded standard library. `[NoAlloc]` describes only C~-heap behavior; a generated ESP-IDF call may allocate native memory. Long-lived owned-resource fields and retained callback lifetime rules remain deferred. Generated bindings do not infer `[InterruptSafe]`.

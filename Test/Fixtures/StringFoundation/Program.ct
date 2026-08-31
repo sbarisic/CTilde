@@ -1,0 +1,55 @@
+using System;
+using System.Text;
+
+public struct CustomValue : IFormattable
+{
+    private int marker;
+
+    public string ToString(string format)
+    {
+        return "custom-" + format;
+    }
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static unsafe void Main()
+    {
+        string text = "--alpha::beta::--";
+        if (!text.Contains("alpha") || text.IndexOf("beta") != 9 || text.LastIndexOf(':')
+            != 14)
+            throw new InvalidOperationException();
+        if (text.Substring(2, 5) != "alpha" || text.Trim('-') != "alpha::beta::")
+            throw new InvalidOperationException();
+        if ("a-b-a".Replace("a", "xy") != "xy-b-xy")
+            throw new InvalidOperationException();
+        string[] parts = "a::b::".Split("::");
+        if (parts.Length != 3 || parts[0] != "a" || parts[1] != "b" || parts[2] != "")
+            throw new InvalidOperationException();
+        StringBuilder builder = new StringBuilder(1);
+        builder.Append("value=").Append(42).AppendLine();
+        if (builder.ToString() != "value=42\n")
+            throw new InvalidOperationException();
+        if (String.Format("{0:D4}:{1:x4}:{2,6:F2}", 42, 255u, 1.5f) != "0042:00ff:  1.50")
+            throw new InvalidOperationException();
+        if (String.Format("{0:tag}", new CustomValue()) != "custom-tag")
+            throw new InvalidOperationException();
+        NativeBuffer<byte> nativeStorage = stackalloc byte[5];
+        byte* native = nativeStorage.Pointer;
+        native[0] = (byte)'t';
+        native[1] = (byte)'e';
+        native[2] = (byte)'s';
+        native[3] = (byte)'t';
+        native[4] = (byte)0;
+        if (Utf8.GetString(native, 5) != "test")
+            throw new InvalidOperationException();
+        NativeBuffer<byte> destination = stackalloc byte[5];
+        byte* copied = destination.Pointer;
+        nuint written;
+        if (!Utf8.TryCopyTo("test", destination, true, out written) || written != 5
+            || copied[4] != (byte)0)
+            throw new InvalidOperationException();
+        Console.WriteLine("string-foundation-ok");
+    }
+}

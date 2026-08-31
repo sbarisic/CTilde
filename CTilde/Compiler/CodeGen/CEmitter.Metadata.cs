@@ -14,6 +14,8 @@ internal sealed partial class CEmitter
         "System.InvalidCastException",
         "System.OverflowException",
         "System.ArgumentException",
+        "System.ArgumentNullException",
+        "System.FormatException",
         "System.OutOfMemoryException",
         "System.ThreadStateException",
         "System.SynchronizationLockException",
@@ -27,14 +29,22 @@ internal sealed partial class CEmitter
         ("CT_FAULT_CAST", "System.InvalidCastException", "ct_fault_cast"),
         ("CT_FAULT_OVERFLOW", "System.OverflowException", "ct_fault_overflow"),
         ("CT_FAULT_ARGUMENT", "System.ArgumentException", "ct_fault_argument"),
+        ("CT_FAULT_ARGUMENT_NULL", "System.ArgumentNullException", "ct_fault_argument_null"),
         ("CT_FAULT_ARGUMENT_OUT_OF_RANGE", "System.ArgumentOutOfRangeException", "ct_fault_argument_out_of_range"),
+        ("CT_FAULT_FORMAT", "System.FormatException", "ct_fault_format"),
         ("CT_FAULT_OUT_OF_MEMORY", "System.OutOfMemoryException", "ct_fault_out_of_memory"),
         ("CT_FAULT_THREAD_STATE", "System.ThreadStateException", "ct_fault_thread_state"),
         ("CT_FAULT_SYNCHRONIZATION_LOCK", "System.SynchronizationLockException", "ct_fault_synchronization_lock"),
     ];
 
     private IEnumerable<(string Kind, string TypeName, string StorageName)> ActiveRuntimeFaultTypes =>
-        RuntimeFaultTypes.Where(entry => entry.TypeName != "System.ArgumentOutOfRangeException" || _usesRandomRangeFailure);
+        RuntimeFaultTypes.Where(entry => entry.TypeName switch
+        {
+            "System.ArgumentNullException" => _externUses.Any(use => use.Method.ExternName == "ct_string_argument_null"),
+            "System.ArgumentOutOfRangeException" => _usesRandomRangeFailure ||
+                _externUses.Any(use => use.Method.ExternName == "ct_string_argument_out_of_range"),
+            _ => true,
+        });
 
     private void EmitOwnershipHelpers(CWriter writer)
     {
@@ -198,12 +208,14 @@ internal sealed partial class CEmitter
         writer.WriteLine("static ct_string* ct_string_v_to_string(ct_object* value) { ct_retain(value); return (ct_string*)(void*)value; }");
         writer.WriteLine("static bool ct_string_v_equals(ct_object* left, ct_object* right) { return right != NULL && right->Type == &ct_desc_string && ct_string_equal((ct_string*)(void*)left, (ct_string*)(void*)right); }");
         writer.WriteLine("static int32_t ct_string_v_hash(ct_object* value) { ct_string* text = (ct_string*)(void*)value; return ct_i32_bits(ct_hash_bytes(text->Data, (size_t)text->Length)); }");
-        EmitSpecialVTable(writer, "ct_string_vtable", "ct_string_v_to_string", "ct_string_v_equals", "ct_string_v_hash", virtualMethods, virtualProperties);
-        writer.WriteLine("const ct_type_descriptor ct_desc_string = { \"string\", &" + DescriptorName(Model.Types["System.Object"]) + ", &ct_string_vtable, NULL, 0u, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string };");
+        var stringType = Model.Types["System.String"];
+        EmitStringVTable(writer, stringType, virtualMethods, virtualProperties);
+        var stringInterfaces = EmitInterfaceTable(writer, "ct_desc_string", "ct_string_vtable", ImplementedInterfaces(stringType));
+        writer.WriteLine($"const ct_type_descriptor ct_desc_string = {{ \"string\", &{DescriptorName(Model.Types["System.Object"])}, &ct_string_vtable, {stringInterfaces.Pointer}, {stringInterfaces.Count}u, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string }};");
         uint id = 2;
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Interface).OrderBy(type => type.FullName, StringComparer.Ordinal))
             writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", NULL, &ct_default_vtable, NULL, 0u, {id++}u, 0u, 1u, false, NULL }};");
-        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsStringSurface).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
             var interfaces = EmitInterfaceTable(writer, DescriptorName(type), VTableName(type), ImplementedInterfaces(type));
@@ -518,6 +530,32 @@ internal sealed partial class CEmitter
         writer.WriteLine("};");
     }
 
+    private void EmitStringVTable(CWriter writer, TypeSymbol type, MethodSymbol[] methods, PropertySymbol[] properties)
+    {
+        var methodEntries = methods.Select(root => (Root: root, Implementation: ResolveVirtualMethod(type, root)))
+            .Select(entry => (entry.Root, Name: entry.Implementation is null ? "NULL" : EmitMethodThunk(writer, entry.Implementation)))
+            .ToArray();
+        var propertyEntries = properties.Select(root =>
+        {
+            var implementation = ResolveVirtualProperty(type, root);
+            return (Root: root,
+                Getter: implementation?.Getter is null ? "NULL" : EmitPropertyThunk(writer, implementation, true),
+                Setter: implementation?.Setter is null ? "NULL" : EmitPropertyThunk(writer, implementation, false));
+        }).ToArray();
+        writer.WriteLine("static const ct_vtable ct_string_vtable = {");
+        writer.WriteLine("    .ToString = ct_string_v_to_string, .Equals = ct_string_v_equals, .GetHashCode = ct_string_v_hash,");
+        foreach (var entry in methodEntries)
+            writer.WriteLine($"    .{VirtualSlotName(entry.Root)} = {entry.Name},");
+        foreach (var entry in propertyEntries)
+        {
+            if (entry.Root.Getter is not null)
+                writer.WriteLine($"    .{VirtualGetterSlotName(entry.Root)} = {entry.Getter},");
+            if (entry.Root.Setter is not null)
+                writer.WriteLine($"    .{VirtualSetterSlotName(entry.Root)} = {entry.Setter},");
+        }
+        writer.WriteLine("};");
+    }
+
     private void EmitClassVTable(CWriter writer, TypeSymbol type, MethodSymbol[] methods, PropertySymbol[] properties)
     {
         var objectMethods = Model.Types["System.Object"].Methods;
@@ -624,7 +662,7 @@ internal sealed partial class CEmitter
             ? $"ct_object* a{index}"
             : CParameterDeclaration(parameter, $"a{index}")).ToArray();
         var signatureParameters = string.Join(", ", new[] { "ct_object* self" }.Concat(parameters));
-        var arguments = string.Join(", ", new[] { $"({NameMangler.Type(method.ContainingType)}*)(void*)self" }.Concat(method.Parameters.Select((parameter, index) => objectSlot == "Equals"
+        var arguments = string.Join(", ", new[] { $"({InstanceStorageType(method.ContainingType)}*)(void*)self" }.Concat(method.Parameters.Select((parameter, index) => objectSlot == "Equals"
             ? $"({CTypeName(parameter.Type)})(void*)a{index}"
             : $"a{index}")));
         writer.WriteLine($"static {CTypeName(method.ReturnType)} {name}({signatureParameters}) {{ {(method.ReturnType == CType.Void ? string.Empty : "return ")}{method.CName}({arguments}); }}");
@@ -636,7 +674,7 @@ internal sealed partial class CEmitter
         var name = VirtualPropertyThunkName(property, getter);
         if (!_emittedThunks.Add(name))
             return name;
-        var self = $"({NameMangler.Type(property.ContainingType)}*)(void*)self";
+        var self = $"({InstanceStorageType(property.ContainingType)}*)(void*)self";
         var indexDeclaration = property.IndexParameter is null ? string.Empty : $", {CTypeName(property.IndexParameter.Type)} key";
         var indexArgument = property.IndexParameter is null ? string.Empty : ", key";
         if (getter)

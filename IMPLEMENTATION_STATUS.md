@@ -4,13 +4,13 @@ Last reviewed: 2026-08-31
 
 ## Current state
 
-C~ draft 0.40 has one compiler path:
+C~ draft 0.41 has one compiler path:
 
 ```text
 .ct source -> full-fidelity syntax -> declarations -> immutable bound bodies and semantic maps -> flow/effect/target validation -> structured typed IR -> reachability/optimization -> unity or modular hosted/ESP-IDF/freestanding/Cosmopolitan GNU C23
 ```
 
-The compiler library, CLI, and conformance runner target .NET 10. Draft 0.40 adds exact nanosecond `TimeSpan`, allocation-free monotonic `Stopwatch`, cross-target PCG32 `Random`, `SpinWait`/`SpinLock`, user-defined equality and ordering operators, and common scalar `Math` functions. Clock support is reachability-pruned and maps to QPC, `clock_gettime(CLOCK_MONOTONIC)`, or `esp_timer_get_time`; the value-oriented utilities remain ordinary C~ source. Draft 0.39 remains the historical native-import revision on top of Draft 0.38 hosted x64 scalar-geometry SIMD optimization, `System.Simd.Vec3x4`, and four-ray HostedIo production batching. HostedIo now balances shuffled 128x128 tiles over four managed workers and displays progressive RGBA output through a minimal Raylib 6.0 native-import surface on Windows x64 and Linux x64. Workers publish completed pixels with release/acquire atomics while the primary thread alone performs Raylib uploads and event pumping at up to 60 Hz. Its manifest selects the checked-in official runtime payload through `hosted.runtimeFiles`. Ordinary project loading is network-free and uses replacement, verified-vendor, then exact-cache precedence.
+The compiler library, CLI, and conformance runner target .NET 10. Draft 0.41 adds controlled native optimization, x64 AVX2 targeting, precise or fast floating-point modes, stronger Release linking, hosted PGO for MSVC, GCC, and Clang. It also binds the built-in UTF-8 `string` representation to `System.String`, with ordinal manipulation, splitting and segments, `StringBuilder`, invariant Ryu-backed formatting, ASCII helpers, and checked native UTF-8 copying. Draft 0.40 remains the historical timing, random, spin, operator, and scalar-math revision. HostedIo divides the image into twelve horizontal rectangles and each worker fills its rectangle in linear scanline order. The headless schema-2 benchmark measures scalar, packet, parallel, AVX2, fast-math, and PGO profiles, including process CPU time, ray rates, untimed exact path-segment census, and per-worker completion telemetry. The current accelerator identity is `object-midpoint-bvh`; flattened/SAH construction remains future work.
 
 The compiler emits one C file by default or an immutable modular bundle containing shared headers, one runtime source, one source per reachable source identity, an entry/lifecycle source, a versioned symbol map, and an ESP-IDF CMake fragment. It can independently emit a deterministic public header for exports, public extern data, and public linker addresses with runtime ABI 16. Source-debug emission adds C~ mappings and stable hooks. Debug Launch emits deterministic logical probes and version-3 metadata, including aggregate, bitfield, native-symbol, and generated-storage paths. Hosted output is self-contained. Cosmopolitan output uses hosted runtime semantics and produces an x86-64 APE plus a retained ELF/DWARF carrier. ESP-IDF output includes the checked `ctilde_esp_shim.h` boundary and configurable fatal-panic policy. Freestanding output has no hosted startup, libc, TLS, threads, console, filesystem, process, libm, or exception dependency; it uses explicit runtime roles and lifecycle. The CLI can stop after emission, invoke an installed MSVC/GCC/Clang, Cosmopolitan, ESP-IDF, or GNU/ELF cross toolchain, or prepare verified hosted/ESP Launch/Attach descriptors. Hosted, Cosmopolitan, and freestanding modular objects use draft-versioned content-addressed caches.
 
@@ -112,7 +112,9 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 | Exact-width integers through `long`/`ulong` | Implemented | Suffix, boundary, promotion, wrapping, formatting, enum, boxing, and C ABI tests |
 | Native-sized `nint` and `nuint` | Implemented | Portable constants, promotions, wrapping, target-width shifts, overloads, formatting, boxing, and ABI tests |
 | Checked arrays and `foreach` | Implemented | Native iteration and failure tests |
-| Immutable UTF-8 strings | Implemented | Native concatenation, output, indexing, and length tests |
+| Immutable UTF-8 strings | Implemented | Compiler-backed `System.String`, native concatenation, ordinal search and editing, split segments, arrays, output, indexing, identity fast paths, and exact byte-length tests |
+| Invariant formatting and `StringBuilder` | Implemented | Composite syntax, alignment, integral D/X, floating F/G, nulls, `IFormattable`, deterministic Ryu output, precision failures, growth, clear, append, and reuse tests |
+| Checked native UTF-8 conversion | Implemented | Bounded pointer scans, exact buffers, canonical validation, embedded NUL preservation, nullable input, destination capacity, and no automatic native marshalling |
 | Expression precedence | Implemented | Pratt parser and deterministic emission test |
 | Calls as expressions | Implemented | Nested call and overload tests |
 | Ordered evaluation | Implemented | Native `Pack(Next(), Next()) == 12` test |
@@ -152,7 +154,7 @@ Ubuntu Clang 18.1.3 under WSL passed the previously reviewed complete suite with
 
 ## Conformance coverage
 
-The executable test project registers 164 checks. The release gate below records their current managed and native result. Coverage includes:
+The executable test project registers the current managed, native, editor, target, and toolchain checks. The release gate below records their measured result. Coverage includes:
 
 - Byte-identical repeated C emission.
 - Trivia, comments, missing tokens, skipped tokens, spans, and exact syntax round-tripping.
@@ -388,7 +390,7 @@ These features are outside draft 0.22:
 
 ## Release gate
 
-A draft 0.40 release requires:
+A draft 0.41 release requires:
 
 - A zero-warning .NET build.
 - All managed and native conformance checks.
@@ -403,4 +405,6 @@ On 2026-08-28, the Draft 0.24 solution build completed with zero warnings and er
 
 On 2026-08-28, the Draft 0.23 solution build completed with zero warnings and errors and all 160 conformance cases passed under MSVC, WSL GCC, and WSL Clang. The ESP-IDF runner passed its direct Xtensa and RISC-V compiler probes, ordinary ESP32 and ESP32-C3 builds, and the Draft 0.23 interrupt fixture for both architectures. Xtensa ELF inspection placed `ctilde_draft023_timer_isr` and `ct_draft023_ack` in `.iram0.text` and the C~-owned counter in `.dram0.data`. VS Code 0.8.0 tests, `dotnet format --verify-no-changes`, and `git diff --check` also passed. The connected automated T-CAN485 run exercised the GPTimer ISR, observed matching C~ and native acknowledgement counters, and emitted `CTILDE_DRAFT_023_OK`; the same run passed the earlier Draft 0.18 through 0.20 fixtures, panic-policy images, memory, console, debugger, detach, and startup-timeout gates before restoring the ordinary Release firmware. Its ignored report is `artifacts/esp32-hardware/20260828-000319.json`. After restoration, the operator confirmed that the ordinary firmware visibly alternated the onboard LED between blue and purple, closing the visual gate. Historical Draft 0.22 and earlier hosted, cross-build, and hardware evidence remains preserved above and in Git history.
 
-Draft 0.40 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Native-import acceptance is hosted Windows/Linux only; automatic scalar-geometry SIMD acceptance remains hosted x64 only. Historical Draft 0.39 native-import, Draft 0.38 SIMD, Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effect, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.
+On 2026-08-31, the Draft 0.41 string foundation passed the Fast validation tier in 1,056.73 seconds. The Release solution build had zero warnings and errors; all 232 registered cases passed under MSVC, and the selected 102 native cases passed under both WSL GCC and WSL Clang. Physical standard-library validation passed for hosted, Cosmopolitan, ESP-IDF, and freestanding profiles. The dedicated NativeImport matrix additionally passed Release unity and Release modular-LTO builds and executions under all three hosted toolchains. Debug-adapter, Visual Studio core, VS Code protocol, current and minimum-supported VS Code extension-host, formatting, and diff checks passed. The rebuilt editor packages are `ctilde-language-0.15.0.vsix` (7,481,616 bytes, SHA-256 `6374821710CCB083FC6B7A3DC7F7EE7910D336284E71172255BB198A2970E29C`) and `CTilde.VisualStudio-0.15.0.vsix` (7,667,631 bytes, SHA-256 `923E6A2AF9B9E3F9E125688BF23BC28651E6FCB5C9F2DA30307DC4DC197BB318`). Connected ESP hardware execution and the optional Cosmopolitan/QEMU end-to-end runners were not repeated for this library-only tranche.
+
+Draft 0.41 uses GCC or Clang in GNU C23 mode as the canonical freestanding release gate and the pinned Cosmopolitan 4.0.2 wrapper for x64 APE acceptance. MSVC latest-C mode remains an independent hosted compatibility check and rejects inline-assembly and assembly-function native builds. ESP-IDF interrupt output is checked by Xtensa and RISC-V GNU toolchains. Unity and modular layouts consume the same optimized typed-IR program and must agree under every supported target/toolchain combination. Native-import acceptance is hosted Windows/Linux only; automatic scalar-geometry SIMD acceptance remains hosted x64 only. Historical Draft 0.40 foundations, Draft 0.39 native imports, Draft 0.38 SIMD, Draft 0.24 Cosmopolitan, Draft 0.23 interrupt, Draft 0.22 effects, Draft 0.21 freestanding, and Draft 0.20 connected-board baselines remain recorded above.

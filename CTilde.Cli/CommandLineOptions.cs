@@ -50,7 +50,12 @@ internal sealed record CommandLineOptions(
     IReadOnlyList<string> LinkOptions,
     IReadOnlyList<CpuFeature> CpuFeatures,
     TargetEnvironment Environment,
-    EspIdfChip? EspIdfChip)
+    EspIdfChip? EspIdfChip,
+    NativeOptimization? Optimization,
+    NativeCpuTarget? CpuTarget,
+    NativeFloatingPointMode? FloatingPoint,
+    NativePgoMode? PgoMode,
+    string? PgoDirectory)
 {
     public static bool TryParse(string[] args, out CommandLineOptions? options, out string? error, out bool showHelp)
     {
@@ -109,6 +114,11 @@ internal sealed record CommandLineOptions(
         DebugMemoryMode? debugMemory = null;
         GeneratedCLayout? cLayout = null;
         CTildeNativeBuildConfiguration? configuration = null;
+        NativeOptimization? optimization = null;
+        NativeCpuTarget? cpuTarget = null;
+        NativeFloatingPointMode? floatingPoint = null;
+        NativePgoMode? pgoMode = null;
+        string? pgoDirectory = null;
 
         for (var index = 0; index < args.Length; index++)
         {
@@ -207,6 +217,56 @@ internal sealed record CommandLineOptions(
                         parseError = $"Invalid baud rate '{baudValue}'; expected a positive integer.";
                     break;
                 case "--lto": lto = true; break;
+                case "--optimization":
+                    var optimizationValue = RequireValue();
+                    optimization = optimizationValue switch
+                    {
+                        "speed" => NativeOptimization.Speed,
+                        "aggressive" => NativeOptimization.Aggressive,
+                        null => null,
+                        _ => (NativeOptimization)(-1),
+                    };
+                    if (optimization is not null && !Enum.IsDefined(optimization.Value))
+                        parseError = $"Unknown optimization '{optimizationValue}'; expected speed or aggressive.";
+                    break;
+                case "--cpu-target":
+                    var cpuTargetValue = RequireValue();
+                    cpuTarget = cpuTargetValue switch
+                    {
+                        "baseline" => NativeCpuTarget.Baseline,
+                        "avx2" => NativeCpuTarget.Avx2,
+                        null => null,
+                        _ => (NativeCpuTarget)(-1),
+                    };
+                    if (cpuTarget is not null && !Enum.IsDefined(cpuTarget.Value))
+                        parseError = $"Unknown CPU target '{cpuTargetValue}'; expected baseline or avx2.";
+                    break;
+                case "--floating-point":
+                    var floatingPointValue = RequireValue();
+                    floatingPoint = floatingPointValue switch
+                    {
+                        "precise" => NativeFloatingPointMode.Precise,
+                        "fast" => NativeFloatingPointMode.Fast,
+                        null => null,
+                        _ => (NativeFloatingPointMode)(-1),
+                    };
+                    if (floatingPoint is not null && !Enum.IsDefined(floatingPoint.Value))
+                        parseError = $"Unknown floating-point mode '{floatingPointValue}'; expected precise or fast.";
+                    break;
+                case "--pgo":
+                    var pgoValue = RequireValue();
+                    pgoMode = pgoValue switch
+                    {
+                        "off" => NativePgoMode.Off,
+                        "generate" => NativePgoMode.Generate,
+                        "use" => NativePgoMode.Use,
+                        null => null,
+                        _ => (NativePgoMode)(-1),
+                    };
+                    if (pgoMode is not null && !Enum.IsDefined(pgoMode.Value))
+                        parseError = $"Unknown PGO mode '{pgoValue}'; expected off, generate, or use.";
+                    break;
+                case "--pgo-directory": pgoDirectory = RequireValue(); break;
                 case "--c-layout":
                     var layoutValue = RequireValue();
                     cLayout = layoutValue switch
@@ -311,7 +371,7 @@ internal sealed record CommandLineOptions(
             targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
             panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures,
-            environment, espIdfChip);
+            environment, espIdfChip, optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory);
         return true;
     }
 }

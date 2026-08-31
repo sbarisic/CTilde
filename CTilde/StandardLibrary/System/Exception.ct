@@ -75,6 +75,20 @@ public sealed class ArgumentException : Exception
     }
 }
 
+public sealed class ArgumentNullException : Exception
+{
+    public ArgumentNullException() : base("A required argument is null.")
+    {
+    }
+}
+
+public sealed class FormatException : Exception
+{
+    public FormatException() : base("The input string has an invalid format.")
+    {
+    }
+}
+
 public sealed class ArgumentOutOfRangeException : Exception
 {
     public ArgumentOutOfRangeException() : base("An argument is outside the valid range.")

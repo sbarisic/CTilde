@@ -21,9 +21,15 @@ if (-not ([IO.Path]::GetFullPath($workRoot).StartsWith($tempPrefix, [StringCompa
 
 try {
     foreach ($compiler in $Compilers) {
-        foreach ($profile in @(
-            @{ Name = 'release-unity'; Configuration = 'release'; Layout = 'unity'; Lto = $false },
-            @{ Name = 'release-modules-lto'; Configuration = 'release'; Layout = 'modules'; Lto = $true })) {
+        $profiles = foreach ($optimization in @('speed', 'aggressive')) {
+            foreach ($cpu in @('baseline', 'avx2')) {
+                foreach ($floatingPoint in @('precise', 'fast')) {
+                    @{ Name = "$optimization-$cpu-$floatingPoint"; Configuration = 'release'; Layout = 'unity'; Lto = $true
+                        Optimization = $optimization; Cpu = $cpu; FloatingPoint = $floatingPoint }
+                }
+            }
+        }
+        foreach ($profile in $profiles) {
             $label = ($compiler -replace ':', '-') + '-' + $profile.Name
             $root = Join-Path $workRoot $label
             New-Item -ItemType Directory -Path $root | Out-Null
@@ -35,13 +41,17 @@ try {
                 sources = @('*.ct')
                 build = [ordered]@{
                     cLayout = $profile.Layout
-                    generatedDirectory = 'build/generated'
+                    generatedC = 'build/generated/ctilde_program.c'
                     generatedHeader = 'build/generated/ctilde_exports.h'
                     symbolMap = 'build/generated/ctilde_symbols.json'
                     configuration = $profile.Configuration
                     lto = $profile.Lto
                     compiler = $compiler
                     executable = "build/$label.exe"
+                    optimization = $profile.Optimization
+                    cpuTarget = $profile.Cpu
+                    floatingPoint = $profile.FloatingPoint
+                    pgo = [ordered]@{ mode = 'off'; directory = 'build/pgo' }
                 }
             }
             [IO.File]::WriteAllText((Join-Path $root 'ctilde.json'),

@@ -21,10 +21,17 @@ internal static class NativeBuildDriver
 
 internal static class HostedBuildDriver
 {
+    private static readonly Dictionary<string, string> WslDriveRoots = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly object WslDriveRootsLock = new();
+
     public static async Task<NativeBuildOutcome> BuildAsync(BuildRequest request, bool usesInlineAssembly, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(request.ExecutablePath!)!);
         var compiler = await ResolveCompilerAsync(request.Compiler, request.RootDirectory, cancellationToken);
+        var compilerIdentity = request.PgoMode == NativePgoMode.Off
+            ? string.Empty
+            : await ReadCompilerIdentityAsync(compiler, request.RootDirectory, cancellationToken);
+        var pgo = await PreparePgoAsync(compiler, compilerIdentity, request, cancellationToken);
         if (usesInlineAssembly && compiler.Kind == HostedCompilerKind.Msvc)
             throw new NativeBuildException("Inline assembly requires a GNU-compatible GCC or Clang compiler; MSVC is not supported for programs containing asm.");
         var operatingSystem = ResolveOperatingSystem(compiler);
@@ -37,8 +44,18 @@ internal static class HostedBuildDriver
         if (request.Trace)
             Console.Error.WriteLine($"trace: native compiler {compiler.Command}");
         var result = compiler.Kind == HostedCompilerKind.Msvc
-            ? await CompileMsvcAsync(compiler, request, cancellationToken)
-            : await CompileGnuAsync(compiler, request, runtimeFiles.Count != 0, cancellationToken);
+            ? await CompileMsvcAsync(compiler, request, pgo, cancellationToken)
+            : await CompileGnuAsync(compiler, request, runtimeFiles.Count != 0, pgo, cancellationToken);
+        if (result == 0 && compiler.Kind == HostedCompilerKind.Msvc && request.PgoMode == NativePgoMode.Generate)
+        {
+            var runtime = Path.Combine(Path.GetDirectoryName(compiler.Command)!, "pgort140.dll");
+            if (!File.Exists(runtime))
+                throw new NativeBuildException($"MSVC PGO runtime was not found beside cl.exe: {runtime}");
+            var destination = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, Path.GetFileName(runtime));
+            File.Copy(runtime, destination, overwrite: true);
+            if (request.Trace)
+                Console.Error.WriteLine($"trace: staged MSVC PGO runtime {destination}");
+        }
         if (result == 0)
             HostedRuntimeFileStager.Stage(request, runtimeFiles);
         if (result == 0 && request.Trace)
@@ -158,21 +175,24 @@ internal static class HostedBuildDriver
         return environment;
     }
 
-    private static async Task<int> CompileMsvcAsync(HostedCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
+    private static async Task<int> CompileMsvcAsync(HostedCompiler compiler, BuildRequest request, PgoContext pgo, CancellationToken cancellationToken)
     {
-        var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new[] { "/Od", "/Zi", "/Oy-" }
-            : ["/O2"];
         var common = new List<string> { "/nologo", "/std:clatest", "/W4", "/WX", "/wd4702" };
-        common.AddRange(configuration);
+        common.AddRange(NativeOptimizationSettings.MsvcCompile(request));
         if (request.Lto)
             common.Add("/GL");
+        common.AddRange(pgo.CompileFlags);
+        if (request.Trace)
+        {
+            Console.Error.WriteLine($"trace: native profile {NativeOptimizationSettings.Describe(request)}");
+            Console.Error.WriteLine($"trace: native compile flags {string.Join(' ', common)}");
+        }
         var objects = new List<string>();
         foreach (var source in request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []))
         {
-            var objectPath = CachedObjectPath(request, compiler, source, string.Join('\n', common), ".obj");
+            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, source, ".obj") : CachedObjectPath(request, compiler, source, string.Join('\n', common), ".obj");
             objects.Add(objectPath);
-            if (File.Exists(objectPath))
+            if ((!pgo.Enabled || pgo.ReuseObjects) && File.Exists(objectPath))
             {
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: reused native object {Path.GetFileName(objectPath)}");
@@ -198,6 +218,11 @@ internal static class HostedBuildDriver
             link.Add("/DEBUG");
         if (request.Lto)
             link.Add("/LTCG");
+        if (request.Configuration == CTildeNativeBuildConfiguration.Release)
+            link.Add("/OPT:REF,ICF");
+        link.AddRange(pgo.LinkFlags);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: native link flags {string.Join(' ', link)}");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
         return linked.ExitCode;
@@ -207,6 +232,7 @@ internal static class HostedBuildDriver
         HostedCompiler compiler,
         BuildRequest request,
         bool useExecutableRuntimePath,
+        PgoContext pgo,
         CancellationToken cancellationToken)
     {
         var executable = request.ExecutablePath!;
@@ -216,9 +242,7 @@ internal static class HostedBuildDriver
             executable = await WslPathAsync(compiler.Command, executable, request.RootDirectory, cancellationToken);
             prefix = ["--exec", compiler.WslCompiler!];
         }
-        var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new List<string> { "-Og", "-g3", "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls" }
-            : ["-O2"];
+        var configuration = NativeOptimizationSettings.GnuCompile(request, includeSections: true).ToList();
         var compilerName = (compiler.WslCompiler ?? compiler.Command).ToLowerInvariant();
         if (request.Configuration == CTildeNativeBuildConfiguration.Debug && compilerName.Contains("gcc", StringComparison.Ordinal))
             configuration.Add("-fvar-tracking-assignments");
@@ -231,14 +255,20 @@ internal static class HostedBuildDriver
             common.Add("-pthread");
         if (request.Lto)
             common.Add("-flto");
+        common.AddRange(pgo.CompileFlags);
         common.AddRange(["-Wall", "-Wextra", "-Werror"]);
+        if (request.Trace)
+        {
+            Console.Error.WriteLine($"trace: native profile {NativeOptimizationSettings.Describe(request)}");
+            Console.Error.WriteLine($"trace: native compile flags {string.Join(' ', common)}");
+        }
 
         var objects = new List<string>();
         foreach (var originalSource in hostedSources)
         {
-            var objectPath = CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
+            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, originalSource, ".o") : CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
             objects.Add(objectPath);
-            if (File.Exists(objectPath))
+            if (!pgo.Enabled && File.Exists(objectPath))
             {
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: reused native object {Path.GetFileName(objectPath)}");
@@ -279,8 +309,10 @@ internal static class HostedBuildDriver
         var link = new List<string>(prefix);
         link.AddRange(linkedObjects);
         link.AddRange(["-o", executable]);
-        if (request.Lto)
-            link.Add("-flto");
+        link.AddRange(NativeOptimizationSettings.GnuLink(request));
+        link.AddRange(pgo.LinkFlags);
+        if (request.Configuration == CTildeNativeBuildConfiguration.Release)
+            link.Add("-Wl,--gc-sections");
         if (usesPthreads)
             link.Add("-pthread");
         if (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows())
@@ -289,6 +321,8 @@ internal static class HostedBuildDriver
             link.Add("-ldl");
         if (useExecutableRuntimePath && (compiler.Kind == HostedCompilerKind.WslGnu || !OperatingSystem.IsWindows()))
             link.Add("-Wl,-rpath,$ORIGIN");
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: native link flags {string.Join(' ', link)}");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
         return linked.ExitCode;
@@ -304,6 +338,7 @@ internal static class HostedBuildDriver
             .Append(compiler.WslCompiler).Append('\n')
             .Append(File.Exists(compiler.Command) ? File.GetLastWriteTimeUtc(compiler.Command).Ticks : 0L).Append('\n')
             .Append(request.Configuration).Append('\n')
+            .Append(NativeOptimizationSettings.Describe(request)).Append('\n')
             .Append(flags).Append('\n')
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)
@@ -318,8 +353,198 @@ internal static class HostedBuildDriver
         return Path.Combine(cache, key + extension);
     }
 
+    private static string PgoObjectPath(PgoContext pgo, string source, string extension)
+    {
+        var directory = Path.Combine(pgo.Directory!, "objects");
+        Directory.CreateDirectory(directory);
+        var sourceHash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.GetFullPath(source)))).ToLowerInvariant()[..16];
+        return Path.Combine(directory, Path.GetFileNameWithoutExtension(source) + "-" + sourceHash + extension);
+    }
+
+    private static async Task<string> ReadCompilerIdentityAsync(HostedCompiler compiler, string workingDirectory, CancellationToken cancellationToken)
+    {
+        var arguments = compiler.Kind == HostedCompilerKind.Msvc
+            ? new List<string> { "/Bv" }
+            : compiler.Kind == HostedCompilerKind.WslGnu
+                ? new List<string> { "--exec", compiler.WslCompiler!, "--version" }
+                : new List<string> { "--version" };
+        var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
+            workingDirectory, compiler.Environment, ForwardOutput: false), cancellationToken);
+        var output = (result.StandardOutput + result.StandardError).Trim();
+        if (result.ExitCode != 0 && output.Length == 0)
+            throw new NativeBuildException("Could not query the hosted compiler identity required for native build caching and PGO.");
+        return $"{compiler.Command}\n{compiler.WslCompiler}\n{output}";
+    }
+
+    private static async Task<PgoContext> PreparePgoAsync(
+        HostedCompiler compiler,
+        string compilerIdentity,
+        BuildRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.PgoMode == NativePgoMode.Off)
+            return PgoContext.Off;
+        var canonical = new StringBuilder()
+            .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
+            .Append(compilerIdentity).Append('\n')
+            .Append(request.Architecture).Append('\n')
+            .Append(request.Optimization).Append('\n')
+            .Append(request.CpuTarget).Append('\n')
+            .Append(request.FloatingPoint).Append('\n')
+            .Append(request.Lto).Append('\n');
+        foreach (var source in request.GeneratedSourcePaths.OrderBy(path => path, StringComparer.Ordinal))
+            canonical.Append(Path.GetFileName(source)).Append(':')
+                .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
+        var identityText = canonical.ToString();
+        var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identityText))).ToLowerInvariant();
+        var directory = Path.Combine(request.PgoDirectory!, identity);
+        var marker = Path.Combine(directory, "identity.txt");
+        if (request.PgoMode == NativePgoMode.Generate)
+        {
+            Directory.CreateDirectory(directory);
+            if (File.Exists(marker) && !File.ReadAllText(marker).Equals(identityText, StringComparison.Ordinal))
+                throw new NativeBuildException($"PGO profile identity in '{directory}' is stale; remove that identity directory and regenerate training data.");
+            AtomicFile.WriteTextIfChanged(marker, identityText);
+        }
+        else
+        {
+            if (!File.Exists(marker))
+                throw new NativeBuildException($"Matching PGO training data is absent in '{directory}'. Build with --pgo generate and run representative training first.");
+            if (!File.ReadAllText(marker).Equals(identityText, StringComparison.Ordinal))
+                throw new NativeBuildException($"PGO training data in '{directory}' is stale for the current generated C, compiler, or native settings.");
+        }
+
+        string ToolPath(string path) => compiler.Kind == HostedCompilerKind.WslGnu
+            ? WslPathAsync(compiler.Command, path, request.RootDirectory, cancellationToken).GetAwaiter().GetResult()
+            : path;
+        var isMsvc = compiler.Kind == HostedCompilerKind.Msvc;
+        var isClang = !isMsvc && compilerIdentity.Contains("clang", StringComparison.OrdinalIgnoreCase);
+        IReadOnlyList<string> compileFlags;
+        IReadOnlyList<string> linkFlags;
+        if (isMsvc)
+        {
+            // The identity directory already isolates this profile. Keep the MSVC
+            // database basename short because pgomgr still has MAX_PATH-sensitive
+            // code paths when it derives the matching .pgc filenames.
+            const string baseName = "ctilde";
+            var database = Path.Combine(directory, baseName + ".pgd");
+            if (request.PgoMode == NativePgoMode.Generate)
+            {
+                AtomicFile.WriteTextIfChanged(Path.Combine(directory, "training-environment.txt"), $"VCPROFILE_PATH={directory}{Environment.NewLine}");
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: MSVC PGO training requires VCPROFILE_PATH={directory}");
+            }
+            else if (!Directory.EnumerateFiles(directory, baseName + "!*.pgc", SearchOption.TopDirectoryOnly).Any())
+                throw new NativeBuildException($"MSVC PGO training did not produce .pgc data for identity '{identity}'. Run the generate-profile executable with VCPROFILE_PATH='{directory}' before --pgo use.");
+            compileFlags = [];
+            linkFlags = request.PgoMode == NativePgoMode.Generate
+                ? [$"/GENPROFILE:PGD={database}"]
+                : [$"/USEPROFILE:PGD={database}"];
+        }
+        else if (isClang)
+        {
+            if (request.PgoMode == NativePgoMode.Generate)
+            {
+                var pattern = ToolPath(Path.Combine(directory, "default-%p.profraw"));
+                compileFlags = [$"-fprofile-instr-generate={pattern}"];
+                linkFlags = [$"-fprofile-instr-generate={pattern}"];
+            }
+            else
+            {
+                var rawProfiles = Directory.EnumerateFiles(directory, "*.profraw", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray();
+                if (rawProfiles.Length == 0)
+                    throw new NativeBuildException($"Clang PGO training did not produce .profraw data beneath '{directory}'. Run the generate-profile executable before --pgo use.");
+                var merged = Path.Combine(directory, "merged.profdata");
+                await MergeClangProfilesAsync(compiler, compilerIdentity, request, rawProfiles, merged, cancellationToken);
+                var toolMerged = ToolPath(merged);
+                compileFlags = [$"-fprofile-instr-use={toolMerged}"];
+                linkFlags = [$"-fprofile-instr-use={toolMerged}"];
+            }
+        }
+        else
+        {
+            var toolDirectory = ToolPath(directory);
+            if (request.PgoMode == NativePgoMode.Use && !Directory.EnumerateFiles(directory, "*.gcda", SearchOption.AllDirectories).Any())
+                throw new NativeBuildException($"GCC PGO training did not produce .gcda data beneath '{directory}'. Run the generate-profile executable before --pgo use.");
+            compileFlags = request.PgoMode == NativePgoMode.Generate
+                ? [$"-fprofile-generate={toolDirectory}"]
+                : [$"-fprofile-use={toolDirectory}", "-fprofile-correction"];
+            linkFlags = compileFlags;
+        }
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: PGO identity {identity} directory {directory}");
+        return new PgoContext(directory, compileFlags, linkFlags, isMsvc && request.PgoMode == NativePgoMode.Use);
+    }
+
+    private static async Task MergeClangProfilesAsync(
+        HostedCompiler compiler,
+        string compilerIdentity,
+        BuildRequest request,
+        IReadOnlyList<string> profiles,
+        string output,
+        CancellationToken cancellationToken)
+    {
+        var version = System.Text.RegularExpressions.Regex.Match(compilerIdentity, @"clang version\s+(\d+)", System.Text.RegularExpressions.RegexOptions.IgnoreCase).Groups[1].Value;
+        var candidates = string.IsNullOrEmpty(version) ? new[] { "llvm-profdata" } : new[] { $"llvm-profdata-{version}", "llvm-profdata" };
+        foreach (var candidate in candidates)
+        {
+            string command;
+            var prefix = new List<string>();
+            if (compiler.Kind == HostedCompilerKind.WslGnu)
+            {
+                command = compiler.Command;
+                prefix.AddRange(["--exec", candidate]);
+            }
+            else
+            {
+                command = NativeToolDiscovery.FindOnPath(candidate) ?? string.Empty;
+                if (command.Length == 0)
+                    continue;
+            }
+            var arguments = new List<string>(prefix) { "merge", "-o" };
+            arguments.Add(compiler.Kind == HostedCompilerKind.WslGnu
+                ? await WslPathAsync(compiler.Command, output, request.RootDirectory, cancellationToken)
+                : output);
+            foreach (var profile in profiles)
+                arguments.Add(compiler.Kind == HostedCompilerKind.WslGnu
+                    ? await WslPathAsync(compiler.Command, profile, request.RootDirectory, cancellationToken)
+                    : profile);
+            var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(command, arguments, request.RootDirectory,
+                compiler.Environment, ForwardOutput: false), cancellationToken);
+            if (result.ExitCode == 0)
+            {
+                if (request.Trace)
+                    Console.Error.WriteLine($"trace: merged Clang profiles with {candidate}");
+                return;
+            }
+        }
+        throw new NativeBuildException($"Could not discover a matching llvm-profdata tool. Tried {string.Join(", ", candidates)}.");
+    }
+
     private static async Task<string> WslPathAsync(string wsl, string path, string workingDirectory, CancellationToken cancellationToken)
     {
+        var windowsRoot = OperatingSystem.IsWindows() ? Path.GetPathRoot(path) : null;
+        if (windowsRoot is { Length: 3 } && windowsRoot[1] == ':' && windowsRoot[2] == Path.DirectorySeparatorChar)
+        {
+            var key = wsl + "\n" + windowsRoot;
+            string? wslRoot;
+            lock (WslDriveRootsLock)
+                WslDriveRoots.TryGetValue(key, out wslRoot);
+            if (wslRoot is null)
+            {
+                var rootResult = await NativeProcessRunner.RunAsync(new NativeProcessRequest(wsl,
+                    ["--exec", "wslpath", "-a", "-u", windowsRoot], workingDirectory, ForwardOutput: false), cancellationToken);
+                if (rootResult.ExitCode != 0 || string.IsNullOrWhiteSpace(rootResult.StandardOutput))
+                    throw new NativeBuildException($"Could not translate Windows drive root '{windowsRoot}' to a WSL path: {rootResult.StandardError.Trim()}");
+                wslRoot = rootResult.StandardOutput.Trim().TrimEnd('/');
+                lock (WslDriveRootsLock)
+                    WslDriveRoots[key] = wslRoot;
+            }
+
+            var relative = Path.GetRelativePath(windowsRoot, Path.GetFullPath(path)).Replace('\\', '/');
+            return relative == "." ? wslRoot : $"{wslRoot}/{relative}";
+        }
+
         var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(wsl,
             ["--exec", "wslpath", "-a", "-u", path], workingDirectory, ForwardOutput: false), cancellationToken);
         if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
@@ -341,6 +566,11 @@ internal static class HostedBuildDriver
         HostedCompilerKind Kind,
         IReadOnlyDictionary<string, string>? Environment,
         string? WslCompiler);
+    private sealed record PgoContext(string? Directory, IReadOnlyList<string> CompileFlags, IReadOnlyList<string> LinkFlags, bool ReuseObjects)
+    {
+        public static PgoContext Off { get; } = new(null, [], [], false);
+        public bool Enabled => Directory is not null;
+    }
     private enum HostedCompilerKind { Msvc, Gnu, WslGnu }
 
     private static HostedOperatingSystem? ResolveOperatingSystem(HostedCompiler compiler)
@@ -363,9 +593,7 @@ internal static class FreestandingBuildDriver
         Directory.CreateDirectory(Path.GetDirectoryName(image)!);
         await ValidateCompilerAsync(compiler, request, cancellationToken);
 
-        var configuration = request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? new[] { "-Og", "-g3", "-fno-omit-frame-pointer" }
-            : ["-O2"];
+        var configuration = NativeOptimizationSettings.GnuCompile(request, includeSections: false);
         var common = new List<string>
         {
             "-std=gnu23", "-ffreestanding", "-fno-builtin", "-fno-stack-protector",
@@ -376,6 +604,11 @@ internal static class FreestandingBuildDriver
         if (request.Lto)
             common.Add("-flto");
         common.AddRange(settings.CompileOptions);
+        if (request.Trace)
+        {
+            Console.Error.WriteLine($"trace: native profile {NativeOptimizationSettings.Describe(request)}");
+            Console.Error.WriteLine($"trace: native compile flags {string.Join(' ', common)}");
+        }
 
         var sources = request.GeneratedSourcePaths.Concat(settings.NativeSources).ToArray();
         var objects = new List<string>();
@@ -427,14 +660,15 @@ internal static class FreestandingBuildDriver
             link.Add(await ToolPathAsync(compiler, path, request.RootDirectory, cancellationToken));
         link.AddRange(["-nostdlib", "-nostartfiles", "-no-pie", "-Wl,--gc-sections"]);
         link.AddRange(ArchitectureFlags(request.Architecture));
-        if (request.Lto)
-            link.Add("-flto");
+        link.AddRange(NativeOptimizationSettings.GnuLink(request));
         link.Add("-T");
         link.Add(await ToolPathAsync(compiler, settings.LinkerScriptPath!, request.RootDirectory, cancellationToken));
         link.Add($"-Wl,-e,{settings.EntrySymbol}");
         link.AddRange(settings.LinkOptions);
         link.Add("-o");
         link.Add(await ToolPathAsync(compiler, image, request.RootDirectory, cancellationToken));
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: native link flags {string.Join(' ', link)}");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             request.RootDirectory, ForwardOutput: true), cancellationToken);
         if (linked.ExitCode == 0 && request.Trace)
@@ -535,6 +769,7 @@ internal static class FreestandingBuildDriver
             .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
             .Append(compiler.Command).Append('\n').Append(compiler.WslCompiler).Append('\n')
             .Append(request.Architecture).Append('\n').AppendJoin('\n', flags).Append('\n')
+            .Append(NativeOptimizationSettings.Describe(request)).Append('\n')
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)
         {

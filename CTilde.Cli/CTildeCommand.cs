@@ -127,7 +127,9 @@ internal static class CTildeCommand
         if (options.Inputs.Count != 0 || options.InputDirectory is not null || options.TargetSpecified ||
             options.Output is not null || options.OutputDirectory is not null || options.HeaderOutput is not null ||
             options.SymbolMap is not null || options.NativeOutput is not null || options.Configuration is not null ||
-            options.Compiler is not null || options.Lto || options.DebugInfo || options.DebugMemory is not null)
+            options.Compiler is not null || options.Lto || options.Optimization is not null || options.CpuTarget is not null ||
+            options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
+            options.DebugInfo || options.DebugMemory is not null)
             return UsageError("Standard-library validation cannot be combined with application build options.");
 
         try
@@ -216,7 +218,14 @@ internal static class CTildeCommand
             if (request.CLayout == GeneratedCLayout.Unity)
                 changedOutputs += AtomicFile.WriteTextIfChanged(request.GeneratedCPath!, generated.ToString()) ? 1 : 0;
             else
-                changedOutputs += WriteBundle(request.GeneratedDirectory!, bundle!.Artifacts, request.GeneratedHeaderPath);
+            {
+                var artifacts = bundle!.Artifacts.AsEnumerable();
+                if (request.Target == CompilationTarget.EspIdf)
+                    artifacts = artifacts.Select(artifact => artifact.Kind == GeneratedCArtifactKind.CMakeFragment && artifact.RelativePath == "ctilde_sources.cmake"
+                        ? artifact with { Content = NativeOptimizationSettings.AppendEspGeneratedSourceOptions(artifact.Content, request) }
+                        : artifact);
+                changedOutputs += WriteBundle(request.GeneratedDirectory!, artifacts, request.GeneratedHeaderPath);
+            }
             if (request.GeneratedHeaderPath is not null)
                 changedOutputs += AtomicFile.WriteTextIfChanged(request.GeneratedHeaderPath, generatedHeader.ToString()) ? 1 : 0;
             if (request.SymbolMapPath is not null)
@@ -259,6 +268,7 @@ internal static class CTildeCommand
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Run || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
             options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
+            options.Optimization is not null || options.CpuTarget is not null || options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
             options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null ||
             options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null || options.LinkerScript is not null || options.EntrySymbol is not null ||
             options.NativeSources.Count != 0 || options.ObjectFiles.Count != 0 || options.Libraries.Count != 0 || options.CompileOptions.Count != 0 || options.LinkOptions.Count != 0)
@@ -419,6 +429,8 @@ internal static class CTildeCommand
         Console.Error.WriteLine("       ctilde clean --project <ctilde.json> [--trace]");
         Console.Error.WriteLine("       ctilde format [--check] <file-or-directory>...");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
+        Console.Error.WriteLine("                      --optimization speed|aggressive --cpu-target baseline|avx2 --floating-point precise|fast");
+        Console.Error.WriteLine("                      --pgo off|generate|use [--pgo-directory <project-relative-directory>]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");
         Console.Error.WriteLine("                    --compile-option <value> --link-option <value> --native-output <image>");

@@ -174,7 +174,7 @@ internal sealed partial class CEmitter : ILoweringServices
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
             .Concat(_arrayTypes.Select(type => ArrayDescriptorName(type.ElementType!)))
             .Concat(_stringLiterals.Values.Select(id => $"ct_sl_{id}"))
-            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class)
+            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsStringSurface)
                 .SelectMany(type => new[] { DescriptorName(type), VTableName(type) }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { DescriptorName(type), DelegateFactoryName(type), DelegateDropName(type) }))
@@ -1697,9 +1697,11 @@ internal sealed partial class CEmitter : ILoweringServices
         return prototype ? signature + ";" : signature;
     }
 
-    private static string InstanceStorageType(TypeSymbol type) => type.FullName == "Esp.Idf.EspError"
-        ? "esp_err_t"
-        : NameMangler.Type(type);
+    private static string InstanceStorageType(TypeSymbol type) => type.IsStringSurface
+        ? "ct_string"
+        : type.FullName == "Esp.Idf.EspError"
+            ? "esp_err_t"
+            : NameMangler.Type(type);
 
     internal void RegisterDeclaredTypes()
     {

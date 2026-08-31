@@ -1,4 +1,5 @@
 using System;
+using System.Runtime;
 using System.Simd;
 
 namespace HostedIoExample;
@@ -164,6 +165,69 @@ public sealed class Camera
         }
     }
 
+    // Untimed benchmark census. Production render paths intentionally do not count rays.
+    public long CountPacketPathSegments(Hittable world, uint renderSeed)
+    {
+        InitializeForRender();
+        PacketRandomGenerator random = new PacketRandomGenerator(renderSeed);
+        long tracedSegments = 0L;
+        int row = 0;
+        while (row < imageHeight)
+        {
+            int column = 0;
+            while (column < ImageWidth)
+            {
+                int laneCount = ImageWidth - column;
+                if (laneCount > 4)
+                    laneCount = 4;
+                U32x4 columns = U32x4.Create((uint)column, (uint)(column + 1), (uint)(column
+                    + 2), (uint)(column + 3));
+                Mask32x4 active = PacketMasks.First(laneCount);
+                int sample = 0;
+                while (sample < SamplesPerPixel)
+                {
+                    random.Reseed(PacketRandomGenerator.SampleSeeds(renderSeed, columns,
+                        U32x4.Splat((uint)row), sample, active));
+                    RayPacket rays = GetRay4(F32x4.FromU32(columns), F32x4.Splat((float)row),
+                        active, random);
+                    CountRayColor4(ref rays, active, MaxDepth, world, random, ref tracedSegments);
+                    sample++;
+                }
+                column += laneCount;
+            }
+            row++;
+        }
+        return tracedSegments;
+    }
+
+    // Untimed scalar oracle census for the scalar benchmark variant.
+    public long CountScalarPathSegments(Hittable world, uint renderSeed)
+    {
+        InitializeForRender();
+        RandomGenerator random = new RandomGenerator(renderSeed);
+        long tracedSegments = 0L;
+        int row = 0;
+        while (row < imageHeight)
+        {
+            int column = 0;
+            while (column < ImageWidth)
+            {
+                int sample = 0;
+                while (sample < SamplesPerPixel)
+                {
+                    random.Reseed(RandomGenerator.SampleSeed(renderSeed, column,
+                        row, sample));
+                    Ray ray = GetRay(column, row, random);
+                    CountRayColor(ray, MaxDepth, world, random, ref tracedSegments);
+                    sample++;
+                }
+                column++;
+            }
+            row++;
+        }
+        return tracedSegments;
+    }
+
     [NoAlloc]
     public void InitializeForRender()
     {
@@ -269,6 +333,45 @@ public sealed class Camera
             return Vec3.Zero;
         }
         return SkyColor(ray);
+    }
+
+    [NoAlloc]
+    private void CountRayColor4(ref RayPacket rays, Mask32x4 active, int depth, Hittable world,
+        PacketRandomGenerator random, ref long tracedSegments)
+    {
+        if (depth <= 0 || active.None())
+            return;
+        tracedSegments += (long)Cpu.PopCount(active.MoveMask());
+        HitPacket hits;
+        RayInterval4 interval = RayInterval4.Splat(0.001f, 1000000000000000000000000000000.0f);
+        world.Hit4(ref rays, ref interval, active, out hits);
+        Vec3x4 attenuation;
+        RayPacket scattered;
+        Mask32x4 scatteredMask = PacketMaterials.Scatter(ref rays, ref hits, hits.HitMask,
+            random, out attenuation, out scattered);
+        if (scatteredMask.Any())
+            CountRayColor4(ref scattered, scatteredMask, depth - 1, world, random,
+            ref tracedSegments);
+    }
+
+    [NoAlloc]
+    private void CountRayColor(Ray ray, int depth, Hittable world, RandomGenerator random,
+        ref long tracedSegments)
+    {
+        if (depth <= 0)
+            return;
+        tracedSegments++;
+        HitRecord hit;
+        bool hasHit = world.Hit(ray, new Interval(0.001f, 1000000000000000000000000000000.0f),
+            out hit);
+        if (!hasHit)
+            return;
+        Vec3 attenuation;
+        Ray scattered;
+        bool didScatter = hit.SurfaceMaterial.Scatter(ray, hit, random, out attenuation,
+            out scattered);
+        if (didScatter)
+            CountRayColor(scattered, depth - 1, world, random, ref tracedSegments);
     }
 
     [NoAlloc]

@@ -237,7 +237,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic reference counts must preserve managed-header alignment\");");
         writer.WriteLine("typedef void (*ct_drop_value_fn)(void*);");
         writer.WriteLine("typedef struct ct_cleanup_record { struct ct_cleanup_record* Previous; void* Value; ct_drop_value_fn Drop; bool Active; } ct_cleanup_record;");
-        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
+        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_NULL, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_FORMAT, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
         writer.WriteLine("CT_NORETURN static void ct_raise_runtime_fault(ct_runtime_fault_kind kind, const char* code, const char* file, int line);");
         if (_usesExceptions)
         {
@@ -672,11 +672,11 @@ internal sealed partial class CEmitter
             writer.WriteLine();
         foreach (var inline in _inlineArrayTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.InlineArray(inline)} {NameMangler.InlineArray(inline)};");
-        foreach (var type in EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError"))
+        foreach (var type in EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError"))
             writer.WriteLine($"typedef {(type.Kind == DeclaredTypeKind.Struct && type.AggregateLayout == AggregateLayoutKind.Union ? "union" : "struct")} {NameMangler.Type(type)} {NameMangler.Type(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.Array(array.ElementType!)} {NameMangler.Array(array.ElementType!)};");
-        foreach (var type in EmittedTypes.Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface or DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface or DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
             writer.WriteLine($"extern const ct_type_descriptor {DescriptorName(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"extern const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)};");
@@ -812,7 +812,7 @@ internal sealed partial class CEmitter
 
     private IEnumerable<TypeSymbol> OrderLayoutTypes()
     {
-        var types = EmittedTypes.Where(type => type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError").ToArray();
+        var types = EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError").ToArray();
         var emitted = new HashSet<TypeSymbol>();
         var visiting = new HashSet<TypeSymbol>();
         foreach (var type in types)

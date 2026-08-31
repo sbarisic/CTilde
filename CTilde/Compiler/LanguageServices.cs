@@ -234,7 +234,7 @@ public sealed partial class LanguageServiceSnapshot
             return new LanguageHover(effectHover, token.Span);
         if (TryGetBoundEntry(tree, token.Span, out var boundEntry) && IsAssemblyResult(boundEntry))
             return new LanguageHover($"{boundEntry.Type.DisplayName} {token.Text} (assembly-function result)", token.Span);
-        if (token.Kind != SyntaxKind.IdentifierToken && !OperatorFacts.IsSupported(token.Kind))
+        if (token.Kind != SyntaxKind.IdentifierToken && token.Kind != SyntaxKind.StringKeyword && !OperatorFacts.IsSupported(token.Kind))
         {
             var builtIn = TypeFacts.BuiltIn(token.Text);
             if (builtIn is not null)
@@ -517,7 +517,9 @@ public sealed partial class LanguageServiceSnapshot
             Add("Pointer", LanguageCompletionKind.Property, "byte* Pointer", "0", documentationId: "P:System.Runtime.NativeUtf8String.Pointer");
         }
         var type = receiver.Type.Symbol;
-        if (type is null && (receiver.Type.IsValueType || receiver.Type.Kind is CTypeKind.String or CTypeKind.Array))
+        if (type is null && receiver.Type.Kind == CTypeKind.String)
+            type = _model.Types.GetValueOrDefault("System.String") ?? _model.Types.GetValueOrDefault("System.Object");
+        else if (type is null && (receiver.Type.IsValueType || receiver.Type.Kind == CTypeKind.Array))
             type = _model.Types.GetValueOrDefault("System.Object");
         if (type is null)
             return;
@@ -561,6 +563,11 @@ public sealed partial class LanguageServiceSnapshot
 
     private IEnumerable<object> ResolveToken(DocumentContext context, SyntaxToken token)
     {
+        if (token.Kind == SyntaxKind.StringKeyword && _model.Types.TryGetValue("System.String", out var stringType))
+        {
+            yield return stringType;
+            yield break;
+        }
         if (OperatorFacts.IsSupported(token.Kind))
         {
             if (context.MemberDeclaration is OperatorDeclarationSyntax declaration && declaration.OperatorToken.Span == token.Span &&
@@ -595,6 +602,8 @@ public sealed partial class LanguageServiceSnapshot
         {
             var receiver = InferExpression(context, member.Receiver);
             var receiverType = receiver.StaticType ?? receiver.Type?.Symbol;
+            if (receiverType is null && receiver.Type?.Kind == CTypeKind.String)
+                receiverType = _model.Types.GetValueOrDefault("System.String") ?? _model.Types.GetValueOrDefault("System.Object");
             if (receiverType is null && receiver.Type?.IsNativeUtf8String == true)
                 receiverType = _model.Types.GetValueOrDefault("System.Runtime.NativeUtf8String");
             if (receiverType is not null)
@@ -664,7 +673,9 @@ public sealed partial class LanguageServiceSnapshot
             return [];
         var receiver = InferExpression(context, member.Receiver);
         var type = receiver.StaticType ?? receiver.Type?.Symbol;
-        if (type is null && receiver.Type is { } valueType && (valueType.IsValueType || valueType.Kind is CTypeKind.String or CTypeKind.Array))
+        if (type is null && receiver.Type?.Kind == CTypeKind.String)
+            type = _model.Types.GetValueOrDefault("System.String") ?? _model.Types.GetValueOrDefault("System.Object");
+        else if (type is null && receiver.Type is { } valueType && (valueType.IsValueType || valueType.Kind == CTypeKind.Array))
             type = _model.Types.GetValueOrDefault("System.Object");
         return type is null ? [] : Hierarchy(type).SelectMany(candidate => candidate.Methods).Where(method => !method.IsOperator && method.Name == member.Name && method.IsStatic == (receiver.StaticType is not null));
     }
@@ -904,7 +915,7 @@ public sealed partial class LanguageServiceSnapshot
         .FirstOrDefault();
 
     private static SyntaxToken? NavigationTokenAt(SyntaxTree tree, int position) => tree.Tokens
-        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || OperatorFacts.IsSupported(token.Kind)))
+        .Where(token => !token.IsMissing && (token.Kind is SyntaxKind.IdentifierToken or SyntaxKind.StringKeyword || OperatorFacts.IsSupported(token.Kind)))
         .Where(token => position >= token.Span.Start && position <= token.Span.End)
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();

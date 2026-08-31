@@ -419,7 +419,7 @@ internal sealed partial class TypedIrBodyLowerer
         var type = _emitter.CTypeName(_method.ReturnType);
         var expression = _emitter.Architecture switch
         {
-            CompilationArchitecture.X86 or CompilationArchitecture.X64 => $"#if defined(__FMA__)\n    ct_result.ct_simd = _mm_fmadd_ps({left}.ct_simd, {right}.ct_simd, {addend}.ct_simd);\n#else\n    ct_result.ct_simd = _mm_add_ps(_mm_mul_ps({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);\n#endif",
+            CompilationArchitecture.X86 or CompilationArchitecture.X64 => $"#if defined(__FMA__) || (defined(_MSC_VER) && defined(__AVX2__))\n    ct_result.ct_simd = _mm_fmadd_ps({left}.ct_simd, {right}.ct_simd, {addend}.ct_simd);\n#else\n    ct_result.ct_simd = _mm_add_ps(_mm_mul_ps({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);\n#endif",
             CompilationArchitecture.Arm64 => $"#if defined(__ARM_FEATURE_FMA)\n    ct_result.ct_simd = vfmaq_f32({addend}.ct_simd, {left}.ct_simd, {right}.ct_simd);\n#else\n    ct_result.ct_simd = vaddq_f32(vmulq_f32({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);\n#endif",
             CompilationArchitecture.Arm32 => $"ct_result.ct_simd = vaddq_f32(vmulq_f32({left}.ct_simd, {right}.ct_simd), {addend}.ct_simd);",
             _ => string.Empty,
@@ -466,7 +466,7 @@ internal sealed partial class TypedIrBodyLowerer
                 __m128 ct_b1 = _mm_loadu_ps(&{right}.u_3_M21);
                 __m128 ct_b2 = _mm_loadu_ps(&{right}.u_3_M31);
                 __m128 ct_b3 = _mm_loadu_ps(&{right}.u_3_M41);
-                #if defined(__FMA__)
+                #if defined(__FMA__) || (defined(_MSC_VER) && defined(__AVX2__))
                 #define CT_MAT4_ROW(ROW) _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##4), ct_b3, _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##3), ct_b2, _mm_fmadd_ps(_mm_set1_ps({left}.u_3_M##ROW##2), ct_b1, _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##1), ct_b0))))
                 #else
                 #define CT_MAT4_ROW(ROW) _mm_add_ps(_mm_add_ps(_mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##1), ct_b0), _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##2), ct_b1)), _mm_add_ps(_mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##3), ct_b2), _mm_mul_ps(_mm_set1_ps({left}.u_3_M##ROW##4), ct_b3)))
@@ -518,7 +518,7 @@ internal sealed partial class TypedIrBodyLowerer
                 __m128 ct_r1 = _mm_loadu_ps(&ct_self->u_3_M21);
                 __m128 ct_r2 = _mm_loadu_ps(&ct_self->u_3_M31);
                 __m128 ct_r3 = _mm_loadu_ps(&ct_self->u_3_M41);
-                #if defined(__FMA__)
+                #if defined(__FMA__) || (defined(_MSC_VER) && defined(__AVX2__))
                 __m128 ct_value = _mm_fmadd_ps(_mm_set1_ps({value}.u_1_W), ct_r3, _mm_fmadd_ps(_mm_set1_ps({value}.u_1_Z), ct_r2, _mm_fmadd_ps(_mm_set1_ps({value}.u_1_Y), ct_r1, _mm_mul_ps(_mm_set1_ps({value}.u_1_X), ct_r0))));
                 #else
                 __m128 ct_value = _mm_add_ps(_mm_add_ps(_mm_mul_ps(_mm_set1_ps({value}.u_1_X), ct_r0), _mm_mul_ps(_mm_set1_ps({value}.u_1_Y), ct_r1)), _mm_add_ps(_mm_mul_ps(_mm_set1_ps({value}.u_1_Z), ct_r2), _mm_mul_ps(_mm_set1_ps({value}.u_1_W), ct_r3)));
@@ -560,7 +560,7 @@ internal sealed partial class TypedIrBodyLowerer
         var z = $"{left}.u_1_W*{right}.u_1_Z+{left}.u_1_X*{right}.u_1_Y-{left}.u_1_Y*{right}.u_1_X+{left}.u_1_Z*{right}.u_1_W";
         var w = $"{left}.u_1_W*{right}.u_1_W-{left}.u_1_X*{right}.u_1_X-{left}.u_1_Y*{right}.u_1_Y-{left}.u_1_Z*{right}.u_1_Z";
         var lanes = $"""
-            #if defined(__FMA__) || defined(__ARM_FEATURE_FMA)
+            #if defined(__FMA__) || (defined(_MSC_VER) && defined(__AVX2__)) || defined(__ARM_FEATURE_FMA)
             float ct_x = fmaf({left}.u_1_W, {right}.u_1_X, fmaf({left}.u_1_X, {right}.u_1_W, fmaf({left}.u_1_Y, {right}.u_1_Z, -{left}.u_1_Z*{right}.u_1_Y)));
             float ct_y = fmaf({left}.u_1_W, {right}.u_1_Y, fmaf(-{left}.u_1_X, {right}.u_1_Z, fmaf({left}.u_1_Y, {right}.u_1_W, {left}.u_1_Z*{right}.u_1_X)));
             float ct_z = fmaf({left}.u_1_W, {right}.u_1_Z, fmaf({left}.u_1_X, {right}.u_1_Y, fmaf(-{left}.u_1_Y, {right}.u_1_X, {left}.u_1_Z*{right}.u_1_W)));

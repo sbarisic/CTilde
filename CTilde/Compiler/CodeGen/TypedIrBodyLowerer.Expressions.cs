@@ -661,7 +661,7 @@ internal sealed partial class TypedIrBodyLowerer
             IsConstInitStorage = receiver?.IsConstInitStorage == true,
         };
         return !forWrite && property.Type.ContainsManagedReferences
-            ? OwnResult(property.Type, getterCode, prelude)
+            ? OwnResult(property.Type, getterCode, prelude, symbol: property)
             : result;
     }
 
@@ -1025,7 +1025,9 @@ internal sealed partial class TypedIrBodyLowerer
                 if (member.Name == "ToString" && SupportsBuiltInToString(receiver.Type))
                     return LowerBuiltInToString(syntax, member, receiver, captureForDefer);
                 containingType = receiver.Type.Symbol;
-                if (containingType is null && (receiver.Type.Kind is CTypeKind.String or CTypeKind.Array || receiver.Type.IsValueType))
+                if (containingType is null && receiver.Type.Kind == CTypeKind.String)
+                    containingType = _model.Types.GetValueOrDefault("System.String") ?? _model.Types.GetValueOrDefault("System.Object");
+                else if (containingType is null && (receiver.Type.Kind == CTypeKind.Array || receiver.Type.IsValueType))
                     containingType = _model.Types.GetValueOrDefault("System.Object");
                 methodName = member.Name;
                 requireStatic = false;
@@ -1153,7 +1155,9 @@ internal sealed partial class TypedIrBodyLowerer
         else
         {
             if (receiverCode is not null)
-                callArguments[0] = selected.ContainingType.FullName == "Esp.Idf.EspError"
+                callArguments[0] = selected.ContainingType.IsStringSurface
+                    ? $"(ct_string*)(void*){receiverCode}"
+                    : selected.ContainingType.FullName == "Esp.Idf.EspError"
                     ? $"(esp_err_t*)(void*){receiverCode}"
                     : $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
             call = $"{nativeImportSlot ?? selected.CName}({string.Join(", ", callArguments)})";

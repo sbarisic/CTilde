@@ -87,7 +87,8 @@ internal sealed partial class CEmitter
             AddType(type);
         foreach (var name in RuntimeFaultTypeNames)
             AddType(Model.Types.GetValueOrDefault(name));
-        if (program.Functions.Any(function => function.Body.ExternUses.Any(use => use.Method.ExternName == "ct_random_argument_out_of_range")))
+        if (program.Functions.Any(function => function.Body.ExternUses.Any(use =>
+                use.Method.ExternName is "ct_random_argument_out_of_range" or "ct_string_argument_out_of_range")))
             AddType(Model.Types.GetValueOrDefault("System.ArgumentOutOfRangeException"));
         if (Model.Types.ContainsKey("System.IO.IOException"))
         {

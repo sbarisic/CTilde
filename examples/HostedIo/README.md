@@ -31,7 +31,9 @@ Done: 1200x675.
 
 ## Performance and determinism
 
-The Draft 0.38 performance gate uses modular MSVC Release with LTO, `CreateFinal`, width 320, 16 samples, and depth 16. After two warmups, nine interleaved pairs measured 8,069.56 ms for `RenderScalar` and 3,041.98 ms for packet rendering: a 2.65x median speedup, with packets faster in all nine pairs. Those figures predate the Raylib window refactor; the benchmark now hashes an in-memory RGBA buffer and excludes file and presentation work. Run `Test/Test-HostedSimd.ps1` from the repository root to produce a current machine-specific report.
+`Test/Test-HostedSimd.ps1` now emits schema-version-2 reports for scalar baseline precise, single-thread packet baseline precise, parallel baseline precise, parallel AVX2 precise/fast, and parallel AVX2 precise/fast with PGO. Timed runs use the actual twelve-thread `ParallelRenderSession`; variant order rotates and reverses across iterations. Reports include wall and process CPU time, normalized CPU utilization, primary and exact traced-ray rates, per-worker time and pixel counts, load imbalance, checksums, executable size, resolved flags, and SIMD/FMA evidence. Exact path segments come from a separate untimed census, so production timings remain uninstrumented. Reports identify the current `object-midpoint-bvh`; `flattened-sah-bvh` is reserved as a future comparison rather than claimed as implemented.
+
+The checked-in manifest deliberately remains `speed`, `baseline`, `precise`, and PGO `off` for portable production behavior. The benchmark creates isolated temporary manifests for AVX2, fast floating point, and explicit PGO generate, training, and use phases. Ignored JSON results are written below `artifacts/hosted-simd`.
 
 The conformance runner uses the same sources with small odd-width cameras. Its checked RGBA buffer hashes cover deterministic packet output and repeated rendering. Focused checks cover tail masks, list/BVH hit behavior, AABB edge cases, divergent child order and materials, rejection sampling, and scalar formulas without running the full production profile during every compiler test.
 

@@ -1,0 +1,214 @@
+namespace System.Text;
+
+public sealed class StringBuilder
+{
+    private byte[] buffer;
+    private int length;
+
+    public StringBuilder() : this(16)
+    {
+    }
+
+    public StringBuilder(int capacity)
+    {
+        if (capacity < 0)
+            System.StringRuntime.ArgumentOutOfRange();
+        buffer = new byte[capacity];
+        length = 0;
+    }
+
+    public int Length
+    {
+        get
+        {
+            return length;
+        }
+    }
+
+    public int Capacity
+    {
+        get
+        {
+            return buffer.Length;
+        }
+    }
+
+    public StringBuilder EnsureCapacity(int capacity)
+    {
+        if (capacity < 0)
+            System.StringRuntime.ArgumentOutOfRange();
+        if (capacity <= buffer.Length)
+            return this;
+        int next = buffer.Length;
+        if (next < 16)
+            next = 16;
+        while (next < capacity)
+        {
+            if (next > 1073741823)
+                System.StringRuntime.OutOfMemory();
+            next = next * 2;
+        }
+        byte[] replacement = new byte[next];
+        for (int index = 0; index < length; index++)
+            replacement[index] = buffer[index];
+        buffer = replacement;
+        return this;
+    }
+
+    public StringBuilder Clear()
+    {
+        length = 0;
+        return this;
+    }
+
+    public StringBuilder Append(char value)
+    {
+        if (length == 2147483647)
+            System.StringRuntime.Overflow();
+        EnsureCapacity(length + 1);
+        buffer[length] = (byte)value;
+        length++;
+        return this;
+    }
+
+    public StringBuilder Append(string value)
+    {
+        if (value == null)
+            return this;
+        return Append(value, 0, value.Length);
+    }
+
+    public StringBuilder Append(string value, int startIndex, int count)
+    {
+        if (value == null)
+            System.StringRuntime.ArgumentNull();
+        if (startIndex < 0 || count < 0 || startIndex > value.Length - count)
+            System.StringRuntime.ArgumentOutOfRange();
+        if (count > 2147483647 - length)
+            System.StringRuntime.Overflow();
+        EnsureCapacity(length + count);
+        for (int index = 0; index < count; index++)
+            buffer[length + index] = (byte)value[startIndex + index];
+        length += count;
+        return this;
+    }
+
+    public StringBuilder Append(bool value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(byte value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(sbyte value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(short value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(ushort value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(int value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(uint value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(long value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(ulong value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(float value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(double value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(rune value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(nint value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(nuint value)
+    {
+        return Append(value.ToString());
+    }
+
+    public StringBuilder Append(object value)
+    {
+        if (value != null)
+            Append(value.ToString());
+        return this;
+    }
+
+    public StringBuilder AppendLine()
+    {
+        return Append('\n');
+    }
+
+    public StringBuilder AppendLine(string value)
+    {
+        Append(value);
+        return AppendLine();
+    }
+
+    public StringBuilder AppendFormat(string format, object arg0)
+    {
+        return Append(System.String.Format(format, arg0));
+    }
+
+    public StringBuilder AppendFormat(string format, object arg0, object arg1)
+    {
+        return Append(System.String.Format(format, arg0, arg1));
+    }
+
+    public StringBuilder AppendFormat(string format, object arg0, object arg1, object arg2)
+    {
+        return Append(System.String.Format(format, arg0, arg1, arg2));
+    }
+
+    public StringBuilder AppendFormat(string format, object arg0, object arg1, object arg2,
+        object arg3)
+    {
+        return Append(System.String.Format(format, arg0, arg1, arg2, arg3));
+    }
+
+    public StringBuilder AppendFormat(string format, object[] arguments)
+    {
+        return Append(System.String.Format(format, arguments));
+    }
+
+    public override string ToString()
+    {
+        return System.StringRuntime.FromBytes(buffer, 0, length);
+    }
+}

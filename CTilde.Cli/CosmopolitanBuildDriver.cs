@@ -27,15 +27,18 @@ internal static class CosmopolitanBuildDriver
         {
             "-std=gnu23", "-ffunction-sections", "-fdata-sections", "-Wall", "-Wextra", "-Werror",
         };
-        common.AddRange(request.Configuration == CTildeNativeBuildConfiguration.Debug
-            ? ["-Og", "-g3", "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls"]
-            : request.CosmopolitanMode == CosmopolitanRuntimeMode.Tiny ? ["-Os"] : ["-O2"]);
+        common.AddRange(NativeOptimizationSettings.CosmopolitanCompile(request));
         common.AddRange(ModeFlags(request.CosmopolitanMode));
         if (request.Lto)
             common.Add("-flto");
         var usesPthreads = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
         if (usesPthreads)
             common.Add("-pthread");
+        if (request.Trace)
+        {
+            Console.Error.WriteLine($"trace: native profile {NativeOptimizationSettings.Describe(request)}");
+            Console.Error.WriteLine($"trace: native compile flags {string.Join(' ', common)}");
+        }
 
         var objects = new List<string>();
         foreach (var source in request.GeneratedSourcePaths)
@@ -68,11 +71,12 @@ internal static class CosmopolitanBuildDriver
         foreach (var path in objects)
             link.Add(await ToolPathAsync(compiler, path, request.RootDirectory, cancellationToken));
         link.AddRange(ModeFlags(request.CosmopolitanMode));
-        if (request.Lto)
-            link.Add("-flto");
+        link.AddRange(NativeOptimizationSettings.CosmopolitanLink(request));
         if (usesPthreads)
             link.Add("-pthread");
         link.AddRange(["-Wl,--gc-sections", "-o", await ToolPathAsync(compiler, carrier, request.RootDirectory, cancellationToken)]);
+        if (request.Trace)
+            Console.Error.WriteLine($"trace: native link flags {string.Join(' ', link)}");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             request.RootDirectory, DeterministicEnvironment), cancellationToken);
         if (linked.ExitCode != 0)
@@ -177,6 +181,7 @@ internal static class CosmopolitanBuildDriver
             .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
             .Append(compiler.Command).Append('\n').Append(compiler.WslCompiler).Append('\n').Append(compilerIdentity).Append('\n')
             .Append(request.Architecture).Append('\n').Append(request.CosmopolitanMode).Append('\n')
+            .Append(NativeOptimizationSettings.Describe(request)).Append('\n')
             .AppendJoin('\n', flags).Append('\n')
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)

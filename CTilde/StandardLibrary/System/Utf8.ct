@@ -4,6 +4,50 @@ namespace System.Text;
 
 public static class Utf8
 {
+    public static unsafe string GetString(
+        [Nullable]
+        byte* value, nuint maxBytes)
+    {
+        return Utf8Runtime.GetStringPointer(value, maxBytes);
+    }
+
+    public static unsafe bool TryGetString(
+        [Nullable]
+        byte* value, nuint maxBytes, out string result)
+    {
+        bool success;
+        result = Utf8Runtime.TryGetStringPointer(value, maxBytes, out success);
+        return success;
+    }
+
+    public static unsafe string GetString(ReadOnlyNativeBuffer<byte> value)
+    {
+        return Utf8Runtime.GetStringBuffer(value);
+    }
+
+    public static unsafe bool TryGetString(ReadOnlyNativeBuffer<byte> value, out string result)
+    {
+        bool success;
+        result = Utf8Runtime.TryGetStringBuffer(value, out success);
+        return success;
+    }
+
+    public static nuint GetByteCount(string value)
+    {
+        if (value == null)
+            System.StringRuntime.ArgumentNull();
+        return(nuint)value.Length;
+    }
+
+    public static unsafe bool TryCopyTo(string value, NativeBuffer<byte> destination,
+        bool nullTerminate, out nuint bytesWritten)
+    {
+        bytesWritten = 0;
+        if (value == null)
+            System.StringRuntime.ArgumentNull();
+        return Utf8Runtime.TryCopyTo(value, destination, nullTerminate, out bytesWritten);
+    }
+
     [NoAlloc]
     public static bool TryDecode(string source, int offset, out rune value, out int bytesRead)
     {
@@ -192,4 +236,101 @@ public static class Utf8
         }
         return scalar <= 1114111u;
     }
+}
+
+public static class Ascii
+{
+    [NoAlloc]
+    public static bool IsWhiteSpace(char value)
+    {
+        return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value
+            == '\f' || value == '\v';
+    }
+
+    [NoAlloc]
+    public static bool IsLetter(char value)
+    {
+        return value >= 'A' && value <= 'Z' || value >= 'a' && value <= 'z';
+    }
+
+    [NoAlloc]
+    public static bool IsDigit(char value)
+    {
+        return value >= '0' && value <= '9';
+    }
+
+    [NoAlloc]
+    public static char ToLower(char value)
+    {
+        if (value >= 'A' && value <= 'Z')
+            return(char)(value + ('a' - 'A'));
+        return value;
+    }
+
+    [NoAlloc]
+    public static char ToUpper(char value)
+    {
+        if (value >= 'a' && value <= 'z')
+            return(char)(value - ('a' - 'A'));
+        return value;
+    }
+
+    [NoAlloc]
+    public static int CompareIgnoreCase(string left, string right)
+    {
+        if (left == right)
+            return 0;
+        if (left == null)
+            return -1;
+        if (right == null)
+            return 1;
+        int count = left.Length;
+        if (right.Length < count)
+            count = right.Length;
+        for (int index = 0; index < count; index++)
+        {
+            char a = ToLower(left[index]);
+            char b = ToLower(right[index]);
+            if (a < b)
+                return -1;
+            if (a > b)
+                return 1;
+        }
+        if (left.Length < right.Length)
+            return -1;
+        if (left.Length > right.Length)
+            return 1;
+        return 0;
+    }
+
+    [NoAlloc]
+    public static bool EqualsIgnoreCase(string left, string right)
+    {
+        return CompareIgnoreCase(left, right) == 0;
+    }
+}
+
+internal static class Utf8Runtime
+{
+    [Extern("ct_utf8_get_string_pointer")]
+    internal static unsafe string GetStringPointer(
+        [Nullable]
+        byte* value, nuint maxBytes);
+
+    [Extern("ct_utf8_try_get_string_pointer")]
+    internal static unsafe string TryGetStringPointer(
+        [Nullable]
+        byte* value, nuint maxBytes, out bool success);
+
+    [Extern("ct_utf8_get_string_buffer")]
+    internal static unsafe string GetStringBuffer(ReadOnlyNativeBuffer<byte> value);
+
+    [Extern("ct_utf8_try_get_string_buffer")]
+    internal static unsafe string TryGetStringBuffer(ReadOnlyNativeBuffer<byte> value,
+        out bool success);
+
+    [Extern("ct_utf8_try_copy_to")]
+    [NoAlloc]
+    internal static unsafe bool TryCopyTo(string value, NativeBuffer<byte> destination,
+        bool nullTerminate, out nuint bytesWritten);
 }

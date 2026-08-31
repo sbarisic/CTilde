@@ -1,0 +1,4 @@
+{
+  "target": "hosted",
+  "sources": ["Program.ct"]
+}

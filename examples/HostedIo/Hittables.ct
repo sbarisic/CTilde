@@ -74,8 +74,8 @@ public struct Aabb
             Max.X, ref near, ref far, active);
         result = IntersectAxis4(rays.Origins.Y, rays.Directions.Y, Min.Y, Max.Y,
             ref near, ref far, result);
-        result = IntersectAxis4(rays.Origins.Z, rays.Directions.Z, Min.Z, Max.Z, ref near,
-            ref far, result);
+        result = IntersectAxis4(rays.Origins.Z, rays.Directions.Z, Min.Z, Max.Z,
+            ref near, ref far, result);
         entry = near;
         return result;
     }
@@ -261,8 +261,8 @@ public sealed class Sphere : Hittable
         Mask32x4 secondValid = Mask32x4.And(hasRoot, Mask32x4.And(F32x4.CompareGreaterThan(second,
             interval.Min), F32x4.CompareLessThan(second, interval.Max)));
         result.HitMask = Mask32x4.Or(firstValid, secondValid);
-        result.Distances = F32x4.Select(result.HitMask, F32x4.Select(firstValid, first,
-            second), interval.Max);
+        result.Distances = F32x4.Select(result.HitMask, F32x4.Select(firstValid,
+            first, second), interval.Max);
         result.Points = rays.At(result.Distances);
         Vec3x4 outwardNormals = (result.Points - Vec3x4.Splat(center)) / F32x4.Splat(radius);
         result.FrontFaceMask = Mask32x4.And(result.HitMask, F32x4.CompareLessThan(rays.Directions.Dot(outwardNormals),
@@ -542,7 +542,8 @@ public sealed class BvhNode : Hittable
         F32x4 leftEntry;
         F32x4 rightEntry;
         Mask32x4 canHitLeft = leftBounds.Hit4(ref rays, ref interval, bounded, out leftEntry);
-        Mask32x4 canHitRight = rightBounds.Hit4(ref rays, ref interval, bounded, out rightEntry);
+        Mask32x4 canHitRight = rightBounds.Hit4(ref rays, ref interval, bounded,
+            out rightEntry);
         Hittable first = left;
         Hittable second = right;
         Mask32x4 canHitFirst = canHitLeft;

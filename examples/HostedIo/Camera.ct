@@ -260,8 +260,8 @@ public sealed class Camera
     {
         Vec3x4 unitDirection = rays.Directions.Normalize();
         F32x4 blend = F32x4.Splat(0.5f) * (unitDirection.Y + F32x4.Splat(1.0f));
-        return Vec3x4.Splat(Vec3.One) * (F32x4.Splat(1.0f) - blend) +
-            Vec3x4.Splat(new Vec3(0.5f, 0.7f, 1.0f)) * blend;
+        return Vec3x4.Splat(Vec3.One) * (F32x4.Splat(1.0f) - blend) + Vec3x4.Splat(new Vec3(0.5f,
+            0.7f, 1.0f)) * blend;
     }
 
     private void WriteColor(FileHandle image, Vec3 accumulated)

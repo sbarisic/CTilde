@@ -158,8 +158,8 @@ public sealed class PacketRandomGenerator
     [NoAlloc]
     public F32x4 NextFloat(Mask32x4 active)
     {
-        return F32x4.Select(active, F32x4.FromU32(NextUInt(active).ShiftRight<8>()) /
-            F32x4.Splat(16777216.0f), F32x4.Zero);
+        return F32x4.Select(active, F32x4.FromU32(NextUInt(active).ShiftRight<8>())
+            / F32x4.Splat(16777216.0f), F32x4.Zero);
     }
 
     [NoAlloc]

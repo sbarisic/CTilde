@@ -173,10 +173,19 @@ internal static partial class ConformanceTests
                 using System.Simd;
                 public static class Program
                 {
+                    [NoAlloc]
+                    [NoThrow]
+                    [NoBlock]
+                    [NoRuntime]
+                    private static U32x4 Fused(U32x4 left, U32x4 right, U32x4 addend)
+                    {
+                        return left * right + addend;
+                    }
+
                     [EntryPoint] public static unsafe void Main()
                     {
                         U32x4 left = U32x4.Create(0xffffffffu, 0x80000000u, 3u, 0x40000001u);
-                        U32x4 product = left * U32x4.Create(2u, 3u, 7u, 4u);
+                        U32x4 product = Fused(left, U32x4.Create(2u, 3u, 7u, 4u), U32x4.Zero);
                         Console.WriteLine(product.GetLane<0>() == 0xfffffffeu && product.GetLane<1>() == 0x80000000u
                             && product.GetLane<2>() == 21u && product.GetLane<3>() == 4u);
                         U32x4 shifted = left.ShiftLeft<0>().ShiftRight<31>();
@@ -232,6 +241,9 @@ internal static partial class ConformanceTests
                 && emitted.Contains("_mm_movemask_ps", StringComparison.Ordinal) && emitted.Contains("_mm_min_ps", StringComparison.Ordinal)
                 && emitted.Contains("_mm_max_ps", StringComparison.Ordinal) && emitted.Contains("_mm_set1_epi32", StringComparison.Ordinal),
                 "The hosted x64 backend did not emit every packet SIMD operation family.");
+            Assert(System.Text.RegularExpressions.Regex.IsMatch(emitted,
+                    @"=\s+ct_o_[0-9a-f]+\(ct_o_[0-9a-f]+\("),
+                "Single-use same-block SIMD operators were materialized instead of fused.");
         });
 
         suite.Run("draft 0.38 HostedIo packet golden and traversal fixtures", () =>

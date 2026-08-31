@@ -2,7 +2,7 @@
 
 This hosted C~ project renders the final randomized sphere scene from the first [Ray Tracing in One Weekend](https://raytracing.github.io/books/RayTracingInOneWeekend.html) book to `image.ppm`. It is an original single-precision C~ adaptation with deterministic random sampling.
 
-The renderer demonstrates the draft 0.14 object model rather than adding special graphics intrinsics. It uses `System.Vec3`, operator overloads, virtual hittable and material methods, arrays of managed references, automatic reference counting, recursive ray scattering, `System.Math`, and an owned file handle closed through `defer`.
+The renderer demonstrates the object model, scalar-layout geometry, and opt-in hosted-x64 SIMD pipeline. Production rendering traces four columns at a time through `System.Simd.Vec3x4`; `RenderScalar` retains the independent one-ray implementation for benchmarks and focused correctness comparisons. The project also uses managed references, automatic reference counting, recursive ray scattering, `System.Math`, and an owned file handle closed through `defer`.
 
 ## Build and render
 
@@ -37,17 +37,19 @@ P3
 
 Open it with a PPM-capable viewer such as GIMP or ImageMagick.
 
-The draft 0.14 acceptance run used the modular MSVC Release build with LTO on 2026-08-20. The full 1200x675, 500-sample, 50-bounce render completed in 4,420.348 seconds (1:13:40.348) and produced SHA-256 `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`. Elapsed time is machine-specific; the hash is the reproducibility record.
+The Draft 0.38 performance gate uses modular MSVC Release with LTO, `CreateFinal`, width 320, 16 samples, and depth 16. After two warmups, nine interleaved pairs measured 8,069.56 ms for `RenderScalar` and 3,041.98 ms for packet rendering: a 2.65x median speedup, with packets faster in all nine pairs. The optimized checksum for this profile is `3FA451E880DA69D2E30663F957053760085AA5C37D2CAF2E6454A4A4BFE7837B`. Run `Test/Test-HostedSimd.ps1` from the repository root to reproduce the machine-specific report.
+
+The report-only full 1200x675, 500-sample, depth-50 comparison completed in 3,623.72 seconds (1:00:23.72) for `RenderScalar` and 1,495.34 seconds (24:55.34) for packets, a 2.42x speedup. The scalar checksum remains `4084366E15EACF65F73758C22C0A12589B30EC09362B9749DA690A7D71B1D5A4`; the optimized checksum is `723C4DCFEC3776326D17E04C42AB83B84FFCF847F4A4F59464C31C173D243671`. These elapsed times are machine-specific; the checksums are the reproducibility records.
 
 ## Renderer structure
 
-- `RandomGenerator.ct` supplies a project-local xorshift32 generator. Scene construction and rendering use separate seeds. Every `(column, row, sample)` reseeds its own stream through a documented 32-bit avalanche mix, so output does not depend on row scheduling. It is not a cryptographic generator.
-- `Hittables.ct` contains hit records, robust slab-tested axis-aligned bounds, spheres, the fixed-capacity 512-object reference world, and a deterministic midpoint BVH. ARC owns the sphere array, BVH nodes, and material references without creating cycles.
-- `Materials.ct` implements Lambertian, fuzzy metal, and dielectric scattering, including reflection, refraction, total internal reflection, and Schlick reflectance.
-- `Camera.ct` implements jittered multisampling, recursive color evaluation, gamma-2 correction, a positionable camera, and thin-lens defocus blur.
+- `RandomGenerator.ct` supplies both scalar xorshift32 and masked `U32x4` packet generators. Every `(column, row, sample)` lane is reseeded through the same documented 32-bit avalanche mix, so output does not depend on row scheduling. It is not a cryptographic generator.
+- `Hittables.ct` contains scalar and structure-of-arrays hit records, robust slab-tested bounds, spheres, the fixed-capacity 512-object reference world, and a deterministic midpoint BVH. Packet traversal keeps per-lane closest distances and prunes children without scalar fallback. ARC owns the sphere array, BVH nodes, and material references without creating cycles.
+- `Materials.ct` implements scalar and masked packet Lambertian, fuzzy-metal, and dielectric scattering, including divergent reflection, refraction, total internal reflection, and Schlick reflectance.
+- `Camera.ct` constructs rays directly from packed columns, jitter, and defocus samples. It implements recursive masked color evaluation, gamma-2 correction, a positionable camera, thin-lens defocus blur, and final-lane-only extraction for PPM output.
 - `Scene.ct` constructs the randomized small spheres, ground, and three large feature spheres, then builds the BVH once. Production rendering uses the BVH; conformance compares it with the original list traversal.
 
-The conformance runner uses the same sources with a 256×144, four-sample, eight-bounce camera. That acceptance profile validates SHA-256 `5709717E43C2752ECE14180A8B5E424B96638D7E34FA726CC60248DDEAB121DF`, list/BVH hit equivalence, AABB edge cases, scheduling-independent sample streams, and a fixed-ray primitive-test reduction without running the full production render during every compiler test.
+The conformance runner uses the same sources with a small odd-width camera. Its optimized golden is SHA-256 `799529CAE793F5C425EB3A15805991ACA7926EE66733906D940935093CAA6FB0` under MSVC, GCC 13.3, and Clang 18.1. Focused checks cover tail masks, list/BVH hit behavior, AABB edge cases, divergent child order and materials, rejection sampling, and deterministic repeated renders without running the full production profile during every compiler test.
 
 Emit-only and manual native compilation remain available:
 

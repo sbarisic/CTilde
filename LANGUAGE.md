@@ -1,16 +1,16 @@
 # C~ language specification
 
-Specification version: draft 0.41
+Specification version: draft 0.42
 
 ## Status
 
-This document is the normative specification for C~ draft 0.41.
+This document is the normative specification for C~ draft 0.42.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.41 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.42 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.41 adds controlled native optimization, CPU, and floating-point profiles, hosted PGO for MSVC, GCC, and Clang, and the compiler-backed `System.String` and checked UTF-8 conversion foundations. Draft 0.40 remains the historical timing, random, spin, and scalar-math revision. Runtime ABI 16 and debug metadata version 3 are unchanged.
+Draft 0.42 adds invariant scalar and enum parsing, automatic UTF-8 Windows consoles, strict UTF-8 encoding objects, and synchronous hosted/Cosmopolitan streams, directories, paths, and metadata. Draft 0.41 remains the historical native-optimization and compiler-backed string revision. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
-`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.41 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
+`CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.42 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
 The words **must**, **must not**, **should**, and **may** define language requirements.
 
@@ -185,11 +185,15 @@ Supported escapes are `\0`, `\a`, `\b`, `\t`, `\n`, `\v`, `\f`, `\r`, `\"`, `\'`
 
 ### String literals
 
-Strings use double quotes and the character escape set. Draft 0.41 has no verbatim, raw, or interpolated strings.
+Strings use double quotes and the character escape set. Draft 0.42 has no verbatim, raw, or interpolated strings.
 
 String storage is UTF-8. `Length` counts UTF-8 code units, not Unicode scalar values. Indexing returns one read-only `char` code unit.
 
 The built-in `string` type and the embedded or physical `System.String` declaration are the same sealed managed type. That declaration defines methods and implemented interfaces, but it cannot define storage, constructors, a different base class, or another layout. User declarations cannot replace it. Its instance surface provides ordinal, case-sensitive search, prefix and suffix tests, byte-range substring and copying, insertion, removal, replacement, single-byte trimming, splitting, and segment enumeration. Unless stated otherwise, every index, count, length, and segment offset is a UTF-8 byte offset.
+
+The built-in scalar keywords and compiler-owned `System.Boolean`, fixed-width integer, native-integer, `System.Single`, and `System.Double` declarations have one type identity. Their `Parse` and `TryParse` methods use invariant syntax and optional `System.Globalization.NumberStyles`. Leading and trailing ASCII whitespace are permitted by default. Decimal integer parsing checks the destination range; hexadecimal parsing interprets the destination's fixed-width bit pattern. Floating-point parsing is deterministic nearest-even binary32 or binary64 and accepts decimal/exponent forms, signed zero, `NaN`, and signed `Infinity`. `TryParse` returns false and clears its output for null, malformed, or overflowing text. `Parse` distinguishes null, format (`CTP0001`), overflow (`CTP0002`), and invalid-style (`CTP0003`) failures.
+
+`System.Enum.Parse<T>` and `TryParse<T>` require a closed enum type. They accept declared names, decimal values in the enum's underlying range, and comma-separated name combinations. Name matching is ordinal and case-sensitive unless the explicit ASCII ignore-case overload is selected. Only reachable closed enum parsers and their names enter generated output.
 
 `String.Empty` is the immortal empty string. Full-range substrings and no-op replacements or trims return the original reference; zero-length constructed results use the immortal empty string. `StringSegment` retains its source and byte range until materialized. Splitting preserves leading, trailing, and adjacent empty entries unless `RemoveEmptyEntries` is selected. A zero result count returns an empty array; one returns the unsplit remainder.
 
@@ -588,7 +592,7 @@ Draft 0.35 supplies `Pair<TFirst,TSecond>`, `Option<T>`, `Result<TOk,TErr>`, pur
 
 `default(T)` is valid for every complete non-`void` type, including a type parameter. It recursively zero-initializes value storage, produces false, zero, or null as appropriate, and never invokes a constructor. There is no target-typed `default` literal.
 
-`System.Text.Utf8` decodes managed-string bytes or external native buffers and encodes a `rune` into a native destination. Its scalar helpers are `[NoAlloc]`, not `[NoRuntime]`; native-to-managed string conversion allocates one owned string. Invalid offsets, continuation starts, truncation, overlong forms, surrogates, and values above `U+10FFFF` fail with NUL and zero output counts. An encoding destination that is too small remains unchanged. Unicode escape syntax is not part of Draft 0.41.
+`System.Text.Utf8` decodes managed-string bytes or external native buffers and encodes a `rune` into a native destination. Its scalar helpers are `[NoAlloc]`, not `[NoRuntime]`; native-to-managed string conversion allocates one owned string. Invalid offsets, continuation starts, truncation, overlong forms, surrogates, and values above `U+10FFFF` fail with NUL and zero output counts. An encoding destination that is too small remains unchanged. Unicode escape syntax is not part of Draft 0.42.
 
 ### SIMD and scalar geometry
 
@@ -759,6 +763,12 @@ The compiler places every C~ method in the interrupt call closure in ESP-IDF IRA
 ## Core library
 
 Hosted and ESP-IDF compilations import `Object`, runtime-fault exceptions, `Console`, `Environment`, single- and double-precision `Math`, and the mutable `Vec2`, `Vec3`, and `Vec4` value types as applicable to the target. Freestanding imports only the object/storage core, primitive and managed value support, `Memory`, target queries, endian helpers, MMIO, and CPU intrinsics; it does not expose exceptions, console or process services, managed threading, ESP-IDF APIs, or libm-backed math. The exact API and runtime behavior are in [STDLIB.md](STDLIB.md).
+
+Hosted Windows startup changes attached console input and output code pages to UTF-8 after runtime fault initialization and before static initialization. It flushes output and restores the prior code pages after static finalization. Redirected handles and pipes are not console-transcoded and receive exact UTF-8 bytes. `Console.InputEncoding` and `OutputEncoding` are read-only and report the strict `System.Text.Encoding.UTF8` singleton on every console-bearing target.
+
+Hosted Windows/Linux and Cosmopolitan provide synchronous `System.IO`. The move-only `FileHandle` operations remain available and add 64-bit seek, position, length, truncation, and flush. Managed `FileStream`, `StreamReader`, and `StreamWriter` own or borrow explicit resources and require idempotent `Dispose`; use after disposal throws `ObjectDisposedException`. UTF-8 readers strip one leading BOM, reject malformed or truncated UTF-8, recognize LF and CRLF, and preserve embedded NUL bytes. Writers use a 4096-byte buffer, deterministic LF line endings, and emit the UTF-8 BOM once only for `UTF8WithBom` at the beginning of an empty seekable stream.
+
+`File`, `Directory`, and `Path` provide synchronous byte/text helpers, copying, moving, deletion, recursive creation and deletion, current-directory access, platform separators, and deterministic ordinally sorted full-path enumeration. Recursive deletion inspects links and reparse points and never traverses them. `FileMetadata` reports kind, attributes, length, and explicitly available Unix-second/nanosecond timestamps; metadata inspection itself does not follow symbolic links. Missing-path `Exists` calls return false. Other native failures throw `IOException` with a platform error code and operation. Async I/O, watchers, globbing, lazy enumeration, and per-stream concurrency are not part of Draft 0.42.
 
 `Vec2`, `Vec3`, and `Vec4` remain scalar geometry structures. `System.Simd` defines fixed 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with constant lane access, shuffle, comparisons, selection, and arithmetic. Scalar lowering is the default. `CpuFeature.Simd128`, `Target.HasFeature`, manifest `cpuFeatures`, and CLI `--cpu-feature simd128` enable architecture-validated x86 or Arm intrinsic lowering explicitly.
 
@@ -1025,7 +1035,7 @@ A thread starts at most once. Joining before start, starting twice, or joining i
 
 ## Managed lifetime and failures
 
-C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.41 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, closure state, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
+C~ source has no `delete` operator, destructors, user finalizers, or weak references. Draft 0.42 uses thread-safe, non-moving automatic reference counting for classes, arrays, strings, boxes, interface views, closure state, and references nested in naturally laid-out structures. Heap objects begin with one atomic owned reference and are reclaimed on the thread that releases the last owned reference. Dynamic strings and arrays each occupy one checked contiguous allocation. Static and empty strings are immortal. Static managed fields own their values until runtime shutdown, when they are dropped in exact reverse initialization order and cleared.
 
 Parameters and `this` are borrowed. Managed-reference and reference-containing structure results are owned. Owning locals, fields, properties, array elements, temporaries, boxes, and structure copies retain or transfer their contents as required. Cleanup runs on normal block exit, return, break, continue, and C~ exception propagation. Reference cycles intentionally leak in draft 0.25.
 
@@ -1094,7 +1104,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.41 when:
+A compiler conforms to draft 0.42 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1102,7 +1112,7 @@ A compiler conforms to draft 0.41 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.41 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.42 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1113,4 +1123,4 @@ The canonical backend is GNU C23. Draft 0.41 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.41 defers Unicode escape syntax, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned shared-library mapping, macOS loader support, dynamic C~ runtime module registration, and flattened or SAH BVH construction.
+Draft 0.42 defers Unicode escape syntax, locale-aware parsing and formatting, Unicode normalization and collation, UTF-16 encodings, asynchronous I/O, file watchers and mapping, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned shared-library mapping, macOS loader support, dynamic C~ runtime module registration, and flattened or SAH BVH construction.

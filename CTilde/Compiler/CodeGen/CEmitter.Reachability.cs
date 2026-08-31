@@ -87,6 +87,8 @@ internal sealed partial class CEmitter
             AddType(type);
         foreach (var name in RuntimeFaultTypeNames)
             AddType(Model.Types.GetValueOrDefault(name));
+        if (_externUses.Any(use => use.Method.ExternName == "ct_encoding_get_string"))
+            AddType(Model.Types.GetValueOrDefault("System.DecoderFallbackException"));
         if (program.Functions.Any(function => function.Body.ExternUses.Any(use =>
                 use.Method.ExternName is "ct_random_argument_out_of_range" or "ct_string_argument_out_of_range")))
             AddType(Model.Types.GetValueOrDefault("System.ArgumentOutOfRangeException"));
@@ -96,6 +98,11 @@ internal sealed partial class CEmitter
             AddType(Model.Types.GetValueOrDefault("System.IO.FileMode"));
             AddType(Model.Types.GetValueOrDefault("System.IO.FileAccess"));
             AddType(Model.Types.GetValueOrDefault("System.IO.FileHandle"));
+            // Hosted-I/O support retains extern declarations as a deterministic ABI
+            // surface. Keep their aggregate signature types available whenever that
+            // support is emitted, even if the metadata call itself is unreachable.
+            if (_usesHostedIo)
+                AddType(Model.Types.GetValueOrDefault("System.IO.FileMetadata"));
         }
 
         while (pending.Count != 0)

@@ -2,6 +2,22 @@ namespace System;
 
 public static class Console
 {
+    public static System.Text.Encoding InputEncoding
+    {
+        get
+        {
+            return System.Text.Encoding.UTF8;
+        }
+    }
+
+    public static System.Text.Encoding OutputEncoding
+    {
+        get
+        {
+            return System.Text.Encoding.UTF8;
+        }
+    }
+
     [Extern("ct_write_string")]
     [NoAlloc]
     public static void Write(string value);

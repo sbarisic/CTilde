@@ -58,7 +58,7 @@ internal sealed class AnalysisServices : ILoweringServices
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
             .Concat(_arrayTypes.Select(type => CEmitter.ArrayDescriptorName(type.ElementType!)))
             .Concat(_stringLiterals.Values.SelectMany(id => new[] { $"ct_sl_{id}", $"ct_slb_{id}" }))
-            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class)
+            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsCompilerBackedSurface)
                 .SelectMany(type => new[] { CEmitter.DescriptorName(type), CEmitter.VTableName(type) }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { CEmitter.DescriptorName(type), CEmitter.DelegateFactoryName(type), CEmitter.DelegateDropName(type) }))
@@ -87,6 +87,11 @@ internal sealed class AnalysisServices : ILoweringServices
             }));
 
     public void RegisterExceptions() => UsesExceptions = true;
+    public string RegisterEnumParser(TypeSymbol type)
+    {
+        UsesExceptions = true;
+        return $"ct_enum_parse_{NameMangler.TypeCode(type.Type)}";
+    }
 
     public MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter)
     {

@@ -1084,6 +1084,19 @@ internal sealed partial class Parser
                 NextToken();
                 return new LiteralExpressionSyntax(_source, token.Span, token.Value, token.Kind);
             case SyntaxKind.IdentifierToken:
+            case SyntaxKind.BoolKeyword:
+            case SyntaxKind.ByteKeyword:
+            case SyntaxKind.SbyteKeyword:
+            case SyntaxKind.ShortKeyword:
+            case SyntaxKind.UshortKeyword:
+            case SyntaxKind.IntKeyword:
+            case SyntaxKind.UintKeyword:
+            case SyntaxKind.LongKeyword:
+            case SyntaxKind.UlongKeyword:
+            case SyntaxKind.NintKeyword:
+            case SyntaxKind.NuintKeyword:
+            case SyntaxKind.FloatKeyword:
+            case SyntaxKind.DoubleKeyword:
                 NextToken();
                 var typeArguments = LooksLikeInvocationTypeArguments() ? ParseInvocationTypeArguments() : [];
                 return new NameExpressionSyntax(_source, TextSpan.FromBounds(token.Span.Start, typeArguments.IsDefaultOrEmpty ? token.Span.End : typeArguments[^1].Span.End), token.Text, typeArguments);

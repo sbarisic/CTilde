@@ -130,3 +130,28 @@ public sealed class SynchronizationLockException : Exception
     {
     }
 }
+
+public sealed class ObjectDisposedException : Exception
+{
+    public ObjectDisposedException() : base("The object has been disposed.")
+    {
+    }
+
+    public ObjectDisposedException(string message) : base(message)
+    {
+    }
+}
+
+public sealed class EndOfStreamException : Exception
+{
+    public EndOfStreamException() : base("The end of the stream was reached.")
+    {
+    }
+}
+
+public sealed class DecoderFallbackException : Exception
+{
+    public DecoderFallbackException() : base("The input is not valid UTF-8.")
+    {
+    }
+}

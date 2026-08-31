@@ -45,6 +45,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly HashSet<CType> _functionPointerTypes = [];
     private readonly HashSet<CType> _nativeBufferTypes = [];
     private readonly HashSet<string> _usedMathSymbols = new(StringComparer.Ordinal);
+    private readonly HashSet<TypeSymbol> _enumParseTypes = [];
     private readonly HashSet<TypeSymbol> _synchronousDelegateTypes = [];
     private readonly HashSet<string> _emittedThunks = new(StringComparer.Ordinal);
     private readonly Dictionary<(TypeSymbol DelegateType, MethodSymbol Method, bool VirtualDispatch), string> _delegateThunks = [];
@@ -67,12 +68,14 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly Dictionary<(MethodSymbol Method, int Start, int Length, string Kind), int> _debugSiteIds = [];
     private bool _usesExceptions;
     private bool _usesHostedIo;
+    private bool _usesHostedFilesystem;
     private bool _usesNativeIntegers;
     private bool _usesNativeUtf8;
     private bool _usesManagedThreading;
     private bool _usesMonotonicClock;
     private bool _usesRandomRangeFailure;
     private bool _usesSpinPause;
+    private bool _ryuCoreEmitted;
     private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
 
@@ -174,7 +177,7 @@ internal sealed partial class CEmitter : ILoweringServices
         _arrayTypes.SelectMany(type => new[] { NameMangler.Array(type.ElementType!), $"ct_new_{NameMangler.Array(type.ElementType!)}" })
             .Concat(_arrayTypes.Select(type => ArrayDescriptorName(type.ElementType!)))
             .Concat(_stringLiterals.Values.Select(id => $"ct_sl_{id}"))
-            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsStringSurface)
+            .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsCompilerBackedSurface)
                 .SelectMany(type => new[] { DescriptorName(type), VTableName(type) }))
             .Concat(Model.UserTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate)
                 .SelectMany(type => new[] { DescriptorName(type), DelegateFactoryName(type), DelegateDropName(type) }))
@@ -206,6 +209,12 @@ internal sealed partial class CEmitter : ILoweringServices
     public IEnumerable<CType> BoxedTypes => _boxedTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal);
 
     public void RegisterExceptions() => _usesExceptions = true;
+    public string RegisterEnumParser(TypeSymbol type)
+    {
+        _enumParseTypes.Add(type);
+        _usesExceptions = true;
+        return $"ct_enum_parse_{NameMangler.TypeCode(type.Type)}";
+    }
 
     public MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter)
     {
@@ -253,6 +262,8 @@ internal sealed partial class CEmitter : ILoweringServices
                 _usesHostedIo = true;
                 _usesExceptions = true;
             }
+            if (IsHostedFilesystemSymbol(method.ExternName))
+                _usesHostedFilesystem = true;
             if (IsMathSymbol(method.ExternName))
                 _usedMathSymbols.Add(method.ExternName);
             if (method.ExternName == "ct_monotonic_nanoseconds")
@@ -508,9 +519,22 @@ internal sealed partial class CEmitter : ILoweringServices
         var skipInitializer = false;
         var skipFunction = false;
         var skipFunctionDepth = 0;
+        var skipInternalHeaderRegion = false;
         foreach (var sourceLine in prefix.Split('\n'))
         {
             var line = sourceLine.TrimEnd('\r');
+            if (line == "/* CTILDE_INTERNAL_HEADER_SKIP_BEGIN */")
+            {
+                skipInternalHeaderRegion = true;
+                continue;
+            }
+            if (line == "/* CTILDE_INTERNAL_HEADER_SKIP_END */")
+            {
+                skipInternalHeaderRegion = false;
+                continue;
+            }
+            if (skipInternalHeaderRegion)
+                continue;
             // ESP-IDF expands IRAM_ATTR with __COUNTER__. Repeating it on an
             // internal prototype and the later definition selects two different
             // subsections and GCC rejects the conflict. Residency belongs to the
@@ -754,9 +778,19 @@ internal sealed partial class CEmitter : ILoweringServices
     private static string ExternalizeDefinitions(string source, bool runtimeUnit)
     {
         var writer = new StringBuilder();
+        var preserveInternalLinkage = false;
         foreach (var sourceLine in source.Split('\n'))
         {
             var line = sourceLine.TrimEnd('\r');
+            if (runtimeUnit && line == "/* CTILDE_INTERNAL_HEADER_SKIP_BEGIN */")
+                preserveInternalLinkage = true;
+            if (preserveInternalLinkage)
+            {
+                writer.Append(line).Append('\n');
+                if (line == "/* CTILDE_INTERNAL_HEADER_SKIP_END */")
+                    preserveInternalLinkage = false;
+                continue;
+            }
             if (runtimeUnit && line.Contains("ct_module_descriptor ct_program_module;", StringComparison.Ordinal))
             {
                 writer.Append("extern ct_module_descriptor ct_program_module;\n");

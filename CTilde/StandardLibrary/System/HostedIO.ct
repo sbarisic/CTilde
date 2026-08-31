@@ -4,12 +4,52 @@ namespace System.IO;
 
 public enum FileMode : byte
 {
-    Open=0, Create=1, Append=2
+    Open=0, Create=1, Append=2, CreateNew=3, OpenOrCreate=4, Truncate=5
 }
 
 public enum FileAccess : byte
 {
     Read=0, Write=1, ReadWrite=2
+}
+
+public enum SeekOrigin : byte
+{
+    Begin=0, Current=1, End=2
+}
+
+public enum FileSystemEntryKind : byte
+{
+    None=0, File=1, Directory=2, SymbolicLink=3, Other=4
+}
+
+public enum FileAttributes : uint
+{
+    None=0, ReadOnly=1, Hidden=2, Directory=4, SymbolicLink=8
+}
+
+public struct FileTimestamp
+{
+    public long Seconds;
+    public int Nanoseconds;
+
+    public FileTimestamp(long seconds, int nanoseconds)
+    {
+        Seconds = seconds;
+        Nanoseconds = nanoseconds;
+    }
+}
+
+public struct FileMetadata
+{
+    public FileSystemEntryKind Kind;
+    public FileAttributes Attributes;
+    public long Length;
+    public bool HasCreationTime;
+    public FileTimestamp CreationTime;
+    public bool HasAccessTime;
+    public FileTimestamp AccessTime;
+    public bool HasModificationTime;
+    public FileTimestamp ModificationTime;
 }
 
 [NativeType("uintptr_t", "stdint.h")]
@@ -18,14 +58,23 @@ public opaque FileHandle;
 public class IOException : System.Exception
 {
     private int errorCode;
+    private string operation;
+    private string path;
 
     public IOException(string message) : this(message, 0)
     {
     }
 
-    public IOException(string message, int errorCode) : base(message)
+    public IOException(string message, int errorCode) : this(message, errorCode,
+        "", "")
+    {
+    }
+
+    public IOException(string message, int errorCode, string operation, string path) : base(message)
     {
         this.errorCode = errorCode;
+        this.operation = operation;
+        this.path = path;
     }
 
     public int ErrorCode
@@ -33,6 +82,22 @@ public class IOException : System.Exception
         get
         {
             return errorCode;
+        }
+    }
+
+    public string Operation
+    {
+        get
+        {
+            return operation;
+        }
+    }
+
+    public string Path
+    {
+        get
+        {
+            return path;
         }
     }
 }
@@ -62,4 +127,143 @@ public static class File
     public static void Close(
         [Consumes]
         FileHandle file);
+
+    [Extern("ct_host_file_seek")]
+    public static long Seek(
+        [Borrowed]
+        FileHandle file, long offset, SeekOrigin origin);
+
+    [Extern("ct_host_file_position")]
+    public static long Position(
+        [Borrowed]
+        FileHandle file);
+
+    [Extern("ct_host_file_length")]
+    public static long Length(
+        [Borrowed]
+        FileHandle file);
+
+    [Extern("ct_host_file_set_length")]
+    public static void SetLength(
+        [Borrowed]
+        FileHandle file, long length);
+
+    [Extern("ct_host_file_flush")]
+    public static void Flush(
+        [Borrowed]
+        FileHandle file);
+
+    [Extern("ct_host_file_exists")]
+    public static bool Exists(string path);
+
+    [Extern("ct_host_file_delete")]
+    public static void Delete(string path);
+
+    [Extern("ct_host_file_move")]
+    public static void Move(string source, string destination, bool overwrite);
+
+    public static void Move(string source, string destination)
+    {
+        Move(source, destination, false);
+    }
+
+    [Extern("ct_host_file_copy")]
+    public static void Copy(string source, string destination, bool overwrite);
+
+    public static void Copy(string source, string destination)
+    {
+        Copy(source, destination, false);
+    }
+
+    [Extern("ct_host_file_metadata")]
+    public static FileMetadata GetMetadata(string path);
+
+    public static FileStream OpenRead(string path)
+    {
+        return new FileStream(path, FileMode.Open, FileAccess.Read);
+    }
+
+    public static FileStream Create(string path)
+    {
+        return new FileStream(path, FileMode.Create, FileAccess.ReadWrite);
+    }
+
+    public static FileStream OpenWrite(string path)
+    {
+        return new FileStream(path, FileMode.Create, FileAccess.Write);
+    }
+
+    public static byte[] ReadAllBytes(string path)
+    {
+        FileStream stream = OpenRead(path);
+        defer stream.Dispose();
+        long length = stream.Length;
+        if (length < 0 || length > 2147483647)
+            throw new System.OverflowException();
+        byte[] result = new byte[(int)length];
+        stream.ReadExactly(result, 0, result.Length);
+        return result;
+    }
+
+    public static void WriteAllBytes(string path, byte[] value)
+    {
+        if (value == null)
+            throw new System.ArgumentNullException();
+        FileStream stream = OpenWrite(path);
+        defer stream.Dispose();
+        stream.Write(value, 0, value.Length);
+    }
+
+    public static string ReadAllText(string path)
+    {
+        FileStream stream = OpenRead(path);
+        defer stream.Dispose();
+        StreamReader reader = new StreamReader(stream, System.Text.Encoding.UTF8,
+            true);
+        defer reader.Dispose();
+        return reader.ReadToEnd();
+    }
+
+    public static string[] ReadAllLines(string path)
+    {
+        string[] lines = ReadAllText(path).Split('\n');
+        for (int index = 0; index < lines.Length; index++)
+            if (lines[index].Length > 0 && lines[index][lines[index].Length - 1]
+            == '\r')
+            lines[index] = lines[index].Substring(0, lines[index].Length - 1);
+        return lines;
+    }
+
+    public static void WriteAllText(string path, string value)
+    {
+        FileStream stream = OpenWrite(path);
+        defer stream.Dispose();
+        StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.UTF8,
+            true);
+        defer writer.Dispose();
+        writer.Write(value);
+    }
+
+    public static void AppendAllText(string path, string value)
+    {
+        FileStream stream = new FileStream(path, FileMode.Append, FileAccess.Write);
+        defer stream.Dispose();
+        StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.UTF8,
+            true);
+        defer writer.Dispose();
+        writer.Write(value);
+    }
+
+    public static void WriteAllLines(string path, string[] lines)
+    {
+        if (lines == null)
+            throw new System.ArgumentNullException();
+        FileStream stream = OpenWrite(path);
+        defer stream.Dispose();
+        StreamWriter writer = new StreamWriter(stream, System.Text.Encoding.UTF8,
+            true);
+        defer writer.Dispose();
+        for (int index = 0; index < lines.Length; index++)
+            writer.WriteLine(lines[index]);
+    }
 }

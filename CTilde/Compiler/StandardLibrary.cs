@@ -69,8 +69,8 @@ internal static class StandardLibrary
         if ((vectors & StandardVectorTypes.PacketGeometry) != 0)
             vectors |= StandardVectorTypes.Vec3 | StandardVectorTypes.Simd;
         var files = target == CompilationTarget.Freestanding
-            ? new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
-            : new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+            ? new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
+            : new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
         if ((foundations & (StandardFoundationTypes.TimeSpan | StandardFoundationTypes.Stopwatch)) != 0)
             files.Add("TimeSpan.ct");
         if ((foundations & StandardFoundationTypes.Random) != 0)
@@ -106,7 +106,10 @@ internal static class StandardLibrary
             files.Add("Quaternion.ct");
         }
         if (includeHostedIo)
+        {
             files.Add("HostedIO.ct");
+            files.Add("HostedStreams.ct");
+        }
         if (target == CompilationTarget.EspIdf)
             files.Add("EspIdf.ct");
         return files;

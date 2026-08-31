@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.Globalization;
 using System.Runtime;
 using System.Threading;
 using Esp.Idf;
@@ -120,6 +121,11 @@ public struct ArcHolder
     public string Text;
 }
 
+public enum QemuParseMode : byte
+{
+    None=0, Integer=1, FloatingPoint=2, All=3,
+}
+
 public static class Program
 {
     private static bool ValidateDraft040Foundations()
@@ -139,6 +145,19 @@ public static class Program
         watch.Stop();
         return zeroSequence && ordinarySequence && maximumSequence && watch.Elapsed
             > TimeSpan.Zero;
+    }
+
+    private static bool ValidateDraft042Parsing()
+    {
+        int signed;
+        float subnormal;
+        QemuParseMode mode;
+        return int.TryParse(" -2147483648 ", out signed) && signed == -2147483648
+            && int.Parse("FFFFFFFF", NumberStyles.HexNumber) == -1 && float.TryParse("1.40129846e-45",
+            out subnormal) && subnormal == 1.40129846e-45f && double.Parse("6.25e2")
+            == 625.0d && double.Parse("-0") == -0.0d && double.Parse("NaN") != double.Parse("NaN")
+            && Enum.TryParse<QemuParseMode>("Integer, FloatingPoint", out mode) && mode
+            == QemuParseMode.All;
     }
 
     private const int Ws2812Pin = 4;
@@ -373,6 +392,10 @@ public static class Program
                 Console.WriteLine("draft40 foundations: ok");
             else
                 Console.WriteLine("DRAFT40_FOUNDATIONS_FAILED");
+            if (ValidateDraft042Parsing())
+                Console.WriteLine("draft42 parsing: ok");
+            else
+                Console.WriteLine("DRAFT42_PARSING_FAILED");
             Console.Write("free heap: ");
             Console.WriteLine(EspSystem.GetFreeHeapSize());
             Console.Write("tick: ");

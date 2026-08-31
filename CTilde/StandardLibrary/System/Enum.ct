@@ -1,0 +1,18 @@
+namespace System;
+
+public static class Enum
+{
+    [Extern("ct_enum_parse_intrinsic")]
+    public static T Parse<T>(string value);
+
+    [Extern("ct_enum_parse_intrinsic_ignore_case")]
+    public static T Parse<T>(string value, bool ignoreCase);
+
+    [Extern("ct_enum_try_parse_intrinsic")]
+    [NoAlloc]
+    public static bool TryParse<T>(string value, out T result);
+
+    [Extern("ct_enum_try_parse_intrinsic_ignore_case")]
+    [NoAlloc]
+    public static bool TryParse<T>(string value, bool ignoreCase, out T result);
+}

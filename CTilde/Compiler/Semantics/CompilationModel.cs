@@ -44,6 +44,7 @@ internal sealed partial class CompilationModel
         ResolveBaseTypes();
         DeclareMembers();
         ValidateStringSurface();
+        ValidatePrimitiveSurfaces();
         ValidateInheritanceMembers();
         Documentation = DocumentationIndex.Build(this, target);
         ValidateRecursivePointerExposure();
@@ -169,7 +170,7 @@ internal sealed partial class CompilationModel
         }
         var baseType = syntax.Name == "object" && Types.TryGetValue("System.Object", out var objectType)
             ? objectType.Type
-            : TypeFacts.BuiltIn(syntax.Name);
+            : PrimitiveSurfaceType(syntax.Name) ?? TypeFacts.BuiltIn(syntax.Name);
         if (baseType is null)
         {
             var candidates = ResolveNamedTypeCandidates(syntax.Name, tree).ToArray();
@@ -1832,10 +1833,11 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1266", "NativeUtf8String is scoped and cannot be returned.", method.ReturnType.Source, method.ReturnType.Span);
                     if (returnType.ContainsAtomic)
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be returned by value.", method.ReturnType.Source, method.ReturnType.Span);
-                    var methodParameters = DeclareParameters(method.Parameters, tree, external is not null || nativeImport is not null || export is not null);
+                    var enumIntrinsic = type.FullName == "System.Enum" && externalName?.StartsWith("ct_enum_", StringComparison.Ordinal) == true;
+                    var methodParameters = DeclareParameters(method.Parameters, tree, (external is not null || nativeImport is not null || export is not null) && !enumIntrinsic);
                     foreach (var parameter in methodParameters.Where(parameter => parameter.Type.ContainsAtomic && parameter.PassingKind == ParameterPassingKind.Value))
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be passed by value.", parameter.Syntax!.Source, parameter.Syntax.Span);
-                    if (external is not null || nativeImport is not null || export is not null)
+                    if ((external is not null || nativeImport is not null || export is not null) && !enumIntrinsic)
                     {
                         if (!method.TypeParameters.IsDefaultOrEmpty || ForbiddenNativeBoundaryType(returnType))
                             Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", method.ReturnType.Source, method.ReturnType.Span);
@@ -1959,6 +1961,53 @@ internal sealed partial class CompilationModel
             Diagnostics.Add("CT1320", "System.String is a compiler-backed sealed surface and cannot declare storage, constructors, or change its inheritance contract.", type.Syntax.Source, type.Syntax.Span);
     }
 
+    internal static CType? PrimitiveSurfaceType(string name) => name switch
+    {
+        "System.Boolean" => CType.Bool,
+        "System.Byte" => CType.Byte,
+        "System.SByte" => CType.Sbyte,
+        "System.Int16" => CType.Short,
+        "System.UInt16" => CType.Ushort,
+        "System.Int32" => CType.Int,
+        "System.UInt32" => CType.Uint,
+        "System.Int64" => CType.Long,
+        "System.UInt64" => CType.Ulong,
+        "System.IntPtr" => CType.Nint,
+        "System.UIntPtr" => CType.Nuint,
+        "System.Single" => CType.Float,
+        "System.Double" => CType.Double,
+        _ => null,
+    };
+
+    internal static string? PrimitiveSurfaceName(CType type) => type.Kind switch
+    {
+        CTypeKind.Bool => "System.Boolean",
+        CTypeKind.Byte => "System.Byte",
+        CTypeKind.Sbyte => "System.SByte",
+        CTypeKind.Short => "System.Int16",
+        CTypeKind.Ushort => "System.UInt16",
+        CTypeKind.Int => "System.Int32",
+        CTypeKind.Uint => "System.UInt32",
+        CTypeKind.Long => "System.Int64",
+        CTypeKind.Ulong => "System.UInt64",
+        CTypeKind.Nint => "System.IntPtr",
+        CTypeKind.Nuint => "System.UIntPtr",
+        CTypeKind.Float => "System.Single",
+        CTypeKind.Double => "System.Double",
+        _ => null,
+    };
+
+    private void ValidatePrimitiveSurfaces()
+    {
+        foreach (var type in Types.Values.Where(candidate => candidate.IsPrimitiveSurface && candidate.Syntax is not null))
+        {
+            var invalid = !type.IsStatic || type.Fields.Count != 0 || type.Properties.Count != 0 ||
+                          type.Constructors.Count != 0 || type.BaseType is not null || type.Interfaces.Count != 0;
+            if (invalid)
+                Diagnostics.Add("CT1321", $"{type.FullName} is a compiler-backed primitive surface and may only declare static methods.", type.Syntax!.Source, type.Syntax.Span);
+        }
+    }
+
     private static bool IsSimdType(CType type) =>
         type.Symbol?.Namespace == "System.Simd" || type.ElementType is not null && IsSimdType(type.ElementType);
 
@@ -2022,6 +2071,7 @@ internal sealed partial class CompilationModel
     private void DeclareEnum(TypeSymbol type, TypeDeclarationSyntax declaration, SyntaxTree tree)
     {
         var underlying = declaration.EnumUnderlyingType is null ? CType.Int : ResolveType(declaration.EnumUnderlyingType, tree);
+        type.UnderlyingType = underlying;
         if (underlying.Kind is not CTypeKind.Byte and not CTypeKind.Sbyte and not CTypeKind.Short and not CTypeKind.Ushort and not CTypeKind.Int and not CTypeKind.Uint and not CTypeKind.Long and not CTypeKind.Ulong)
             Diagnostics.Add("CT1208", "An enum underlying type must be an integral type other than bool or char.", declaration.Source, declaration.EnumUnderlyingType?.Span ?? declaration.Span);
         var value = BigInteger.Zero;

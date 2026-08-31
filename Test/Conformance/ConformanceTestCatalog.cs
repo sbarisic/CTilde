@@ -74,6 +74,8 @@ internal static class ConformanceTestCatalog
         "draft 0.41 sealed receiver devirtualization",
         "draft 0.41 checked native UTF-8 conversion",
         "draft 0.41 native UTF-8 fixture ownership",
+        "draft 0.42 invariant scalar and enum parsing",
+        "draft 0.42 hosted streams UTF-8 and filesystem",
         "draft 0.8 native ABI foundations",
         "enum and struct object behavior",
         "Environment Exit",

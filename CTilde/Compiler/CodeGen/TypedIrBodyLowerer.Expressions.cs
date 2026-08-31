@@ -962,6 +962,9 @@ internal sealed partial class TypedIrBodyLowerer
             typeArguments = name.TypeArguments;
         parts.Push(name.Name);
         var qualified = string.Join('.', parts);
+        if (typeArguments.IsDefaultOrEmpty && TypeFacts.BuiltIn(qualified) is { } builtIn &&
+            CompilationModel.PrimitiveSurfaceName(builtIn) is { } surfaceName)
+            return _model.Types.GetValueOrDefault(surfaceName);
         if (!typeArguments.IsDefaultOrEmpty)
         {
             var typeSyntax = new TypeSyntax(expression.Source, expression.Span, qualified, TypeArguments: typeArguments);
@@ -1084,7 +1087,9 @@ internal sealed partial class TypedIrBodyLowerer
         if (selected.IsUnsafe)
             RequireUnsafe(syntax);
         CheckAccess(selected, syntax);
-        _emitter.RegisterExternUse(selected, syntax);
+        var enumParseIntrinsic = selected.ContainingType.FullName == "System.Enum" && selected.ExternName?.StartsWith("ct_enum_", StringComparison.Ordinal) == true;
+        if (!enumParseIntrinsic)
+            _emitter.RegisterExternUse(selected, syntax);
         var nativeImportSlot = selected.IsNativeImport ? _emitter.RegisterNativeImportUse(selected, syntax) : null;
         var virtualDispatch = RequiresVirtualDispatch(selected, receiver, receiver?.IsBaseReceiver == true);
         _emitter.Effects.RecordCall(_method, selected, syntax, virtualDispatch);
@@ -1132,6 +1137,9 @@ internal sealed partial class TypedIrBodyLowerer
             : LowerArguments(arguments, selected.Parameters, syntax.Arguments,
                 SimdOperation.IsPureFusionKernel(selected));
         prelude.AddRange(loweredArguments.Prelude);
+
+        if (enumParseIntrinsic)
+            return LowerEnumParseIntrinsic(selected, loweredArguments.Codes, prelude, syntax);
 
         if (!captureForDefer && TryLowerAtomicCall(selected, receiverCode, loweredArguments.Codes, arguments, prelude, syntax, out var atomicResult))
             return atomicResult;

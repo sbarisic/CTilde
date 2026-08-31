@@ -1,12 +1,12 @@
 # Ryu provenance
 
-The files in this directory are copied without source changes from Ulf Adams'
-Ryu repository at commit `4c0618b0e44f7ef027ebae05d2cc7812048f7c8f`:
+The files in this directory are copied from Ulf Adams' Ryu repository at commit
+`4c0618b0e44f7ef027ebae05d2cc7812048f7c8f`; trailing whitespace is normalized:
 
 <https://github.com/ulfjack/ryu/tree/4c0618b0e44f7ef027ebae05d2cc7812048f7c8f>
 
 CTilde embeds the selected C implementation files into generated output only
-when invariant floating-point composite formatting is reachable. The code is
+when invariant floating-point formatting or parsing is reachable. The code is
 available under either `LICENSE-Apache2` or `LICENSE-Boost`; CTilde uses it
 under the Boost Software License 1.0.
 
@@ -24,6 +24,9 @@ b179bfc1ff9ec2f869a52ccfa310a2acaa5e45a8dece6b53754757b24cb1b6cf  ryu/d2s_full_t
 d05df15c7d3f1184512fe9d42779833ce7ec821652612dce4b551c6a81241fa1  ryu/f2s_intrinsics.h
 43b90fd303a5c81a0c878d0c47cc9e5f054ad24ad29e432f12155cd8df935888  ryu/f2s.c
 11bbb7dc123b33fa607da2449c6e96fbede79396b45379528342e8f4cef7a9c0  ryu/ryu.h
+e21bd83c38cb4a7e79e038f186aeef8866fd05613d971f21533cb98c57bdc44d  ryu/ryu_parse.h
+0e0066bd6a7d8dad20db4c54fc41b8abb4e892476ba972bd553d369040b23678  ryu/s2d.c
+9ce535a5ec65d72167571de60795b5fc86f5ff50bf6407cf2fed658b373fd52c  ryu/s2f.c
 1eb85fc97224598dad1852b5d6483bbcf0aa8608790dcc657a5a2a761ae9c8c6  LICENSE-Apache2
 beb8e42e9d6b4284e03304d05a81a0755200a965fc8d0a5e0aea1e84cf805d6e  LICENSE-Boost
 ```

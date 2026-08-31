@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.41 and runtime ABI 16. Draft 0.41 changes native compiler optimization policy and adds a compiler-backed standard-library surface over the existing string representation. It does not change public layouts, names, or lifecycle functions.
+This document defines the generated C contract for C~ draft 0.42 and runtime ABI 16. Draft 0.42 adds compiler-backed scalar parsing and broader hosted/Cosmopolitan I/O without changing public layouts, names, or lifecycle functions. Draft 0.41 remains the historical native-optimization and string-surface revision.
 
-Draft 0.41 retains runtime ABI 16 and debug metadata version 3. CPU, floating-point, LTO, and PGO settings affect native code generation only. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]`, introduced in Draft 0.39, uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.42 retains runtime ABI 16 and debug metadata version 3. CPU, floating-point, LTO, and PGO settings affect native code generation only. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]`, introduced in Draft 0.39, uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
 Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
@@ -316,6 +316,8 @@ Hosted input and file declarations bind to compiler-owned external symbols. The 
 
 `Console.ReadLine` accumulates native bytes, validates complete UTF-8, and copies the result into an ARC-owned `ct_string`. It frees its temporary native buffer before returning or throwing. EOF before any byte returns a null managed reference; other lines return an owned string.
 
+On Windows, hosted startup queries attached input/output console handles, saves their code pages, and selects `CP_UTF8` before static initialization. Shutdown flushes and restores those pages after static finalization. Redirected files and pipes are never passed through console code-page conversion.
+
 `System.IO.FileHandle` has the nominal C representation `uintptr_t`. A nonzero value identifies a native wrapper containing `FILE*` and the declared access mode; this wrapper is not a managed object. `File.Open` produces ownership, borrowed read/write calls preserve it, and `File.Close` consumes it, calls `fclose`, frees the wrapper, and only then throws a close error if necessary.
 
 The file ABI uses the ordinary mappings:
@@ -325,10 +327,15 @@ uintptr_t ct_host_file_open(ct_string* path, file_mode mode, file_access access)
 uintptr_t ct_host_file_read(uintptr_t file, uint8_t* data, size_t length);
 void ct_host_file_write_buffer(uintptr_t file, const uint8_t* data, size_t length);
 void ct_host_file_write_string(uintptr_t file, ct_string* value);
+int64_t ct_host_file_seek(uintptr_t file, int64_t offset, seek_origin origin);
+int64_t ct_host_file_position(uintptr_t file);
+int64_t ct_host_file_length(uintptr_t file);
+void ct_host_file_set_length(uintptr_t file, int64_t length);
+void ct_host_file_flush(uintptr_t file);
 void ct_host_file_close(uintptr_t file);
 ```
 
-The actual enum typedef names are deterministically mangled. Windows converts validated UTF-8 paths to UTF-16 before `_wfopen_s`; POSIX passes the validated, zero-terminated bytes to `fopen`. File contents remain uninterpreted bytes.
+Managed `FileStream` stores the same handle in private `uintptr_t` storage and delegates to compiler-owned `ct_host_stream_*` wrappers. Its public layout is not native ABI. Directory, path, and metadata helpers likewise use compiler-owned symbols and managed strings or arrays; `FileMetadata` is a natural-layout value with signed Unix seconds and nanoseconds. Windows converts validated UTF-8 paths to UTF-16 before CRT or Win32 calls; POSIX uses validated, zero-terminated UTF-8. File contents remain uninterpreted bytes until an explicit strict `Encoding.UTF8` decode.
 
 ## Extern methods
 
@@ -429,7 +436,7 @@ Header-driven project bindings emit reserved project-private `ct_idf_*` adapter 
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.41.
+This section records constraints that remain after draft 0.42.
 
 Fixed-width SIMD values are internal C~ value types. They are rejected in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use x86/Arm intrinsics or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI.
 
@@ -489,6 +496,9 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 | `CTS0004` | Invalid canonical UTF-8 during native-to-managed conversion |
 | `CTS0005` | No NUL terminator within the supplied native pointer bound |
 | `CTS0006` | Invalid composite or scalar format specification |
+| `CTP0001` | Invalid invariant scalar or enum format |
+| `CTP0002` | Parsed value exceeded its destination range |
+| `CTP0003` | Invalid `NumberStyles` combination |
 | `CTO0001`, `CTO0003` | `InvalidCastException` |
 | `CTE0001` | Unhandled C~ exception |
 | `CTE0003` | C~ exception escaped a native export or callback barrier |
@@ -498,7 +508,7 @@ Hosted and ESP-IDF runtime checks throw immortal, preinitialized standard-librar
 
 Unsafe pointer dereference and indexing do not use these managed checks.
 
-Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the integer divide-by-zero runtime fault is `CTD0001`. Draft 0.40 adds catchable random-range origin `CTR0001` and fatal monotonic-clock code `CTK0001`. Draft 0.41 adds checked native UTF-8 failures `CTS0004` and `CTS0005` plus formatting failure `CTS0006`.
+Draft 0.39 assigns the native-import failures `CTI0001` through `CTI0003`; the integer divide-by-zero runtime fault is `CTD0001`. Draft 0.40 adds catchable random-range origin `CTR0001` and fatal monotonic-clock code `CTK0001`. Draft 0.41 adds checked native UTF-8 failures `CTS0004` and `CTS0005` plus formatting failure `CTS0006`. Draft 0.42 adds invariant parsing failures `CTP0001` through `CTP0003`.
 
 `CTM0002`, `CTM0003`, `CTE0003`, `CTT0001`, `CTT0002`, ABI mismatch, and cleanup corruption remain panics. Allocation failure before thread attachment is also a panic. `CTILDE_CONFORMANCE` enables allocation-failure injection for tests only; production builds expose no injection API. `Environment.Exit`, native `abort`, reset, and power loss bypass managed cleanup.
 

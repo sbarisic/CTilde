@@ -1,0 +1,48 @@
+using System;
+using System.Globalization;
+using System.IO;
+using System.Text;
+
+namespace StandardLibraryExample;
+
+public enum TourMode : byte
+{
+    None=0, Parsing=1, Files=2, All=3,
+}
+
+public static class ParsingIoExamples
+{
+    public static void Run()
+    {
+        Console.WriteLine("-- invariant parsing and UTF-8 files --");
+        int signedValue = int.Parse(" -42 ");
+        uint hexadecimal = uint.Parse("ff", NumberStyles.HexNumber);
+        double scientific = double.Parse("6.25e2", NumberStyles.Float);
+        bool logical;
+        bool parsed = bool.TryParse("TRUE", out logical);
+        TourMode mode = Enum.Parse<TourMode>("Parsing, Files", true);
+        Console.WriteLine("parsed=" + parsed.ToString() + "; int=" + signedValue.ToString()
+            + "; hex=" + hexadecimal.ToString() + "; float=" + scientific.ToString()
+            + "; enum=" + mode.ToString());
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "ctilde-stdlib-tour");
+        if (Directory.Exists(directory))
+            Directory.Delete(directory, true);
+        Directory.CreateDirectory(directory);
+        string path = Path.Combine(directory, "unicode.txt");
+        File.WriteAllText(path, "café 🐟\nsecond line\n");
+        FileStream stream = File.OpenRead(path);
+        defer stream.Dispose();
+        stream.Seek(6, SeekOrigin.Begin);
+        long position = stream.Position;
+        long length = stream.Length;
+        FileMetadata metadata = File.GetMetadata(path);
+        string text = File.ReadAllText(path);
+        string[] entries = Directory.GetFileSystemEntries(directory);
+        Console.WriteLine("seek=" + position.ToString() + "; length=" + length.ToString()
+            + "; metadata=" + metadata.Length.ToString() + "; entries=" + entries.Length.ToString());
+        Console.WriteLine(text.TrimEnd('\n'));
+        stream.Dispose();
+        Directory.Delete(directory, true);
+        Console.WriteLine("utf8-console=" + Console.OutputEncoding.GetString(Encoding.UTF8.GetBytes("café 🐟")));
+    }
+}

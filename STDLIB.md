@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.41 and runtime ABI 16. Draft 0.41 adds the compiler-backed `System.String` surface, `StringSegment`, `StringBuilder`, invariant formatting, ASCII helpers, and checked native UTF-8 conversion alongside the native build controls. Runtime ABI 16 and debug metadata version 3 are unchanged.
+This document is the canonical standard-library reference for C~ Draft 0.42 and runtime ABI 16. Draft 0.42 adds compiler-backed scalar parsing, enum parsing, strict UTF-8 encoding objects and console behavior, and synchronous streams, directories, paths, and metadata on hosted and Cosmopolitan targets. Draft 0.41 remains the historical string and native-build-control revision. Runtime ABI 16 and debug metadata version 3 are unchanged.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -64,7 +64,7 @@ The parameterless constructor uses an empty message. The string constructor also
 
 `ToString()` returns the fully qualified runtime type name. It appends `": "` and `Message` when the message is not empty. Derived exception classes inherit this behavior, so the result uses the derived runtime type name.
 
-The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `ArgumentOutOfRangeException`, `OutOfMemoryException`, `ThreadStateException`, and `SynchronizationLockException`. The runtime preinitializes one immortal object of each type during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread origin metadata rather than mutable fields on the shared object.
+The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `ArgumentOutOfRangeException`, `OutOfMemoryException`, `ThreadStateException`, `SynchronizationLockException`, `ObjectDisposedException`, `EndOfStreamException`, and `DecoderFallbackException`. The runtime preinitializes compiler-raised fault objects during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread exception-origin metadata rather than mutable fields on the shared object.
 
 ## Console
 
@@ -113,6 +113,16 @@ Smaller integer types use the language overload rules. A signed widening target 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
 
 On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at EOF. `ReadLine()` flushes standard output, reads one UTF-8 line, removes LF and one preceding CR, and returns an owned string. It returns `null` only when EOF occurs before any byte. Invalid UTF-8, input errors, and lines beyond the managed-string length limit throw `System.IO.IOException`. These input methods can allocate and are unavailable to `[NoAlloc]` call paths and ESP-IDF.
+
+`Console.InputEncoding` and `OutputEncoding` are read-only and return `System.Text.Encoding.UTF8`. On Windows, runtime startup switches only attached console handles to UTF-8 and remembers their prior code pages. Normal shutdown flushes and restores those pages after static finalization. Redirected streams and pipes remain byte-exact UTF-8. `Encoding.UTF8` is strict and emits no preamble; `Encoding.UTF8WithBom` is equally strict and identifies a three-byte UTF-8 preamble for text writers.
+
+## Invariant parsing
+
+`bool`, every fixed-width and native-width integer, `float`, and `double` expose `Parse(string)` and `TryParse(string, out T)` through their compiler-owned `System.*` surfaces. Numeric types also accept `System.Globalization.NumberStyles`. `Integer`, `Float`, and `HexNumber` are the supported composite styles. Invalid flag combinations throw `ArgumentException`; `TryParse` returns false and clears its output only for input null, syntax failure, or overflow.
+
+Decimal integer parsing accepts an optional sign when enabled and checks the exact destination range. Hexadecimal input has the destination's fixed width, so signed values use two's-complement interpretation. Boolean input accepts only ASCII-case-insensitive `True` and `False`. Floating input supports decimal points, exponents, signed zero, `NaN`, and positive or negative `Infinity`; the pinned Ryu parser produces deterministic nearest-even bits without locale or libc conversion. `Parse` throws `ArgumentNullException`, `FormatException` (`CTP0001`), or `OverflowException` (`CTP0002`). `System.Convert` forwards string input to these default parsers.
+
+`System.Enum.Parse<T>` and `TryParse<T>` accept declared names, underlying decimal values, and comma-separated name combinations. The optional ignore-case form performs ASCII-only case folding. Numeric input must fit the declared underlying type. Aliases are accepted, unknown names fail, and non-enum type arguments are rejected during compilation.
 
 ## Math
 
@@ -311,15 +321,16 @@ Threads run on `_beginthreadex`, POSIX threads, or FreeRTOS tasks. `Start` publi
 
 `SpinWait` performs exponentially increasing `Cpu.Pause` work for ten calls and then calls `Thread.Yield`; its counter saturates. `SpinLock` is non-recursive and unfair, does not track thread ownership, and uses acquire compare-exchange plus release store. It contains `Atomic<int>` and is therefore non-copyable. The caller that successfully enters must call `Exit`.
 
-## Hosted file I/O
+## Hosted and Cosmopolitan I/O
 
-The hosted target adds synchronous binary-file operations:
+Hosted Windows/Linux and Cosmopolitan add synchronous binary files, directories, metadata, streams, and strict UTF-8 text:
 
 ```csharp
 namespace System.IO;
 
-public enum FileMode : byte { Open, Create, Append }
+public enum FileMode : byte { Open, Create, Append, CreateNew, OpenOrCreate, Truncate }
 public enum FileAccess : byte { Read, Write, ReadWrite }
+public enum SeekOrigin : byte { Begin, Current, End }
 
 [NativeType("uintptr_t", "stdint.h")]
 public opaque FileHandle;
@@ -338,13 +349,18 @@ public static class File
     public static unsafe nuint Read([Borrowed] FileHandle file, NativeBuffer<byte> destination);
     public static unsafe void Write([Borrowed] FileHandle file, ReadOnlyNativeBuffer<byte> source);
     public static void Write([Borrowed] FileHandle file, string value);
+    public static long Seek([Borrowed] FileHandle file, long offset, SeekOrigin origin);
+    public static long Position([Borrowed] FileHandle file);
+    public static long Length([Borrowed] FileHandle file);
+    public static void SetLength([Borrowed] FileHandle file, long length);
+    public static void Flush([Borrowed] FileHandle file);
     public static void Close([Consumes] FileHandle file);
 }
 ```
 
 `Open` accepts UTF-8 paths, rejects embedded NUL bytes, and either returns a non-null owned handle or throws `IOException`. Windows converts paths to UTF-16 and opens them through the wide CRT API; POSIX hosts pass validated UTF-8 bytes to `fopen`. Files always use binary mode.
 
-`Open` supports `Open` with every access, `Create` with `Write` or `ReadWrite`, and `Append` with `Write`. Other combinations throw with `EINVAL`. `Open` never truncates, `Create` creates or truncates, and `Append` creates or writes at the end.
+`Open` supports explicit create-new, open-or-create, and existing-file truncation in addition to the original modes. Unsupported mode/access combinations throw with `EINVAL`. File offsets and lengths are signed 64-bit values. `SetLength` requires writable access; negative lengths fail.
 
 `Read` copies at most the destination length and returns a `nuint` count. Zero from a nonempty destination means EOF. Buffer and string writes complete fully or throw; string writes emit exact UTF-8 bytes without a newline. `Close` flushes, closes, frees native handle storage, and consumes ownership even when the native close reports an error.
 
@@ -355,7 +371,11 @@ FileHandle file = File.Open(path, FileMode.Open, FileAccess.Read);
 defer File.Close(file);
 ```
 
-`IOException.ErrorCode` is host-dependent. Concurrent access to one handle requires external native synchronization. Seeking, directories, metadata, deletion, streams, automatic disposal, file locking, and asynchronous I/O are not part of this subset.
+`Stream` defines capabilities, length and position, ranged reads/writes, byte operations, `ReadExactly`, seek, truncation, flush, copy, and idempotent disposal. `FileStream` owns one private runtime handle and throws `ObjectDisposedException` after disposal. Stream instances are not thread-safe. `StreamReader` buffers in 4096-byte chunks, strips one leading UTF-8 BOM, handles LF and CRLF, and validates strict UTF-8 across the complete input. `StreamWriter` uses a 4096-byte output buffer, deterministic LF endings, optional `leaveOpen`, and writes one BOM only when `UTF8WithBom` begins an empty seekable stream.
+
+`File` includes existence, copy/move/delete, metadata, byte-array, text, line, append, and stream helpers. `Directory` includes existence, recursive creation/deletion, move, current-directory access, and ordinally sorted full-path enumeration. Recursive deletion never follows symbolic links or Windows reparse points. `Path` provides target separators, combine, file/directory name, extension, root, and rooted-path operations.
+
+`FileMetadata` reports `FileSystemEntryKind`, portable `FileAttributes`, length, and creation/access/modification timestamps with explicit availability flags. Each `FileTimestamp` stores signed Unix seconds plus nanoseconds. POSIX metadata uses `lstat`; Windows reports reparse points as links. `IOException.ErrorCode` is host-dependent and its operation identifies the failing API. Concurrent access to one handle or stream requires external synchronization. Async I/O, sharing controls, watchers, memory mapping, globbing, and lazy enumeration are not part of Draft 0.42.
 
 ## Environment
 

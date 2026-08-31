@@ -1,0 +1,603 @@
+using System.Text;
+
+namespace System.IO;
+
+public abstract class Stream
+{
+    public abstract bool CanRead
+    {
+        get;
+    }
+
+    public abstract bool CanWrite
+    {
+        get;
+    }
+
+    public abstract bool CanSeek
+    {
+        get;
+    }
+
+    public abstract long Length
+    {
+        get;
+    }
+
+    public abstract long Position
+    {
+        get;
+        set;
+    }
+
+    public abstract int Read(byte[] buffer, int offset, int count);
+
+    public abstract void Write(byte[] buffer, int offset, int count);
+
+    public abstract long Seek(long offset, SeekOrigin origin);
+
+    public abstract void SetLength(long length);
+
+    public abstract void Flush();
+
+    public abstract void Dispose();
+
+    public int ReadByte()
+    {
+        byte[] value = new byte[1];
+        if (Read(value, 0, 1) == 0)
+            return -1;
+        return(int)value[0];
+    }
+
+    public void WriteByte(byte value)
+    {
+        byte[] buffer = new byte[1];
+        buffer[0] = value;
+        Write(buffer, 0, 1);
+    }
+
+    public void ReadExactly(byte[] buffer, int offset, int count)
+    {
+        int completed = 0;
+        while (completed < count)
+        {
+            int read = Read(buffer, offset + completed, count - completed);
+            if (read == 0)
+                throw new System.EndOfStreamException();
+            completed += read;
+        }
+    }
+
+    public void CopyTo(Stream destination)
+    {
+        if (destination == null)
+            throw new System.ArgumentNullException();
+        byte[] buffer = new byte[4096];
+        int read = Read(buffer, 0, buffer.Length);
+        while (read != 0)
+        {
+            destination.Write(buffer, 0, read);
+            read = Read(buffer, 0, buffer.Length);
+        }
+    }
+}
+
+public sealed class FileStream : Stream
+{
+    private nuint handle;
+    private FileAccess access;
+
+    public FileStream(string path, FileMode mode, FileAccess access)
+    {
+        handle = FileRuntime.Open(path, mode, access);
+        this.access = access;
+    }
+
+    internal nuint RuntimeHandle
+    {
+        get
+        {
+            RequireOpen();
+            return handle;
+        }
+    }
+
+    public override bool CanRead
+    {
+        get
+        {
+            return handle != (nuint)0 && access != FileAccess.Write;
+        }
+    }
+
+    public override bool CanWrite
+    {
+        get
+        {
+            return handle != (nuint)0 && access != FileAccess.Read;
+        }
+    }
+
+    public override bool CanSeek
+    {
+        get
+        {
+            return handle != (nuint)0;
+        }
+    }
+
+    public override long Length
+    {
+        get
+        {
+            RequireOpen();
+            return FileRuntime.Length(handle);
+        }
+    }
+
+    public override long Position
+    {
+        get
+        {
+            RequireOpen();
+            return FileRuntime.Position(handle);
+        }
+        set
+        {
+            RequireOpen();
+            FileRuntime.Seek(handle, value, SeekOrigin.Begin);
+        }
+    }
+
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        RequireOpen();
+        ValidateRange(buffer, offset, count);
+        return FileRuntime.Read(handle, buffer, offset, count);
+    }
+
+    public override void Write(byte[] buffer, int offset, int count)
+    {
+        RequireOpen();
+        ValidateRange(buffer, offset, count);
+        FileRuntime.Write(handle, buffer, offset, count);
+    }
+
+    public override long Seek(long offset, SeekOrigin origin)
+    {
+        RequireOpen();
+        return FileRuntime.Seek(handle, offset, origin);
+    }
+
+    public override void SetLength(long length)
+    {
+        RequireOpen();
+        FileRuntime.SetLength(handle, length);
+    }
+
+    public override void Flush()
+    {
+        RequireOpen();
+        FileRuntime.Flush(handle);
+    }
+
+    public override void Dispose()
+    {
+        if (handle == (nuint)0)
+            return;
+        nuint current = handle;
+        handle = (nuint)0;
+        FileRuntime.Close(current);
+    }
+
+    private void RequireOpen()
+    {
+        if (handle == (nuint)0)
+            throw new System.ObjectDisposedException();
+    }
+
+    private static void ValidateRange(byte[] buffer, int offset, int count)
+    {
+        if (buffer == null)
+            throw new System.ArgumentNullException();
+        if (offset < 0 || count < 0 || offset > buffer.Length - count)
+            throw new System.ArgumentOutOfRangeException();
+    }
+}
+
+internal static class FileRuntime
+{
+    [Extern("ct_host_stream_open")]
+    internal static nuint Open(string path, FileMode mode, FileAccess access);
+
+    [Extern("ct_host_stream_read")]
+    internal static int Read(nuint handle, byte[] buffer, int offset, int count);
+
+    [Extern("ct_host_stream_write")]
+    internal static void Write(nuint handle, byte[] buffer, int offset, int count);
+
+    [Extern("ct_host_stream_seek")]
+    internal static long Seek(nuint handle, long offset, SeekOrigin origin);
+
+    [Extern("ct_host_stream_position")]
+    internal static long Position(nuint handle);
+
+    [Extern("ct_host_stream_length")]
+    internal static long Length(nuint handle);
+
+    [Extern("ct_host_stream_set_length")]
+    internal static void SetLength(nuint handle, long length);
+
+    [Extern("ct_host_stream_flush")]
+    internal static void Flush(nuint handle);
+
+    [Extern("ct_host_stream_close")]
+    internal static void Close(nuint handle);
+
+    [Extern("ct_host_path_separator")]
+    internal static char PathSeparator();
+}
+
+public sealed class StreamReader
+{
+    private Stream stream;
+    private Encoding encoding;
+    private bool leaveOpen;
+    private bool disposed;
+    private string content;
+    private int position;
+
+    public StreamReader(Stream stream) : this(stream, Encoding.UTF8, false)
+    {
+    }
+
+    public StreamReader(Stream stream, Encoding encoding, bool leaveOpen)
+    {
+        if (stream == null)
+            throw new System.ArgumentNullException();
+        this.stream = stream;
+        this.encoding = encoding;
+        this.leaveOpen = leaveOpen;
+        content = null;
+    }
+
+    public bool EndOfStream
+    {
+        get
+        {
+            EnsureLoaded();
+            return position >= content.Length;
+        }
+    }
+
+    public string ReadToEnd()
+    {
+        EnsureLoaded();
+        string result = content.Substring(position);
+        position = content.Length;
+        return result;
+    }
+
+    public string ReadLine()
+    {
+        EnsureLoaded();
+        if (position >= content.Length)
+            return null;
+        int end = content.IndexOf('\n', position);
+        if (end < 0)
+            end = content.Length;
+        int count = end - position;
+        if (count > 0 && content[position + count - 1] == '\r')
+            count--;
+        string result = content.Substring(position, count);
+        position = end;
+        if (end < content.Length)
+            position++;
+        return result;
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        if (!leaveOpen)
+            stream.Dispose();
+    }
+
+    private void EnsureLoaded()
+    {
+        if (disposed)
+            throw new System.ObjectDisposedException();
+        if (content != null)
+            return;
+        byte[] bytes = ReadRemainingBytes();
+        int offset = 0;
+        if (bytes.Length >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2]
+            == 0xbf)
+            offset = 3;
+        content = encoding.GetString(bytes, offset, bytes.Length - offset);
+    }
+
+    private byte[] ReadRemainingBytes()
+    {
+        int capacity = 4096;
+        bool seekable = stream.CanSeek;
+        if (seekable)
+        {
+            long remaining = stream.Length - stream.Position;
+            if (remaining < 0 || remaining > 2147483647)
+                throw new System.OverflowException();
+            capacity = (int)remaining;
+        }
+        byte[] buffer = new byte[capacity];
+        int length = 0;
+        while (true)
+        {
+            if (length == buffer.Length)
+            {
+                int next = buffer.Length * 2;
+                if (buffer.Length == 0)
+                    next = 4096;
+                if (next < buffer.Length)
+                    throw new System.OverflowException();
+                byte[] expanded = new byte[next];
+                for (int index = 0; index < length; index++)
+                    expanded[index] = buffer[index];
+                buffer = expanded;
+            }
+            int read = stream.Read(buffer, length, buffer.Length - length);
+            if (read == 0)
+                break;
+            length += read;
+        }
+        if (length == buffer.Length)
+            return buffer;
+        byte[] exact = new byte[length];
+        for (int index = 0; index < length; index++)
+            exact[index] = buffer[index];
+        return exact;
+    }
+}
+
+public sealed class StreamWriter
+{
+    private Stream stream;
+    private Encoding encoding;
+    private bool leaveOpen;
+    private bool disposed;
+    private byte[] buffer;
+    private int buffered;
+
+    public StreamWriter(Stream stream) : this(stream, Encoding.UTF8, false)
+    {
+    }
+
+    public StreamWriter(Stream stream, Encoding encoding, bool leaveOpen)
+    {
+        if (stream == null)
+            throw new System.ArgumentNullException();
+        this.stream = stream;
+        this.encoding = encoding;
+        this.leaveOpen = leaveOpen;
+        buffer = new byte[4096];
+        bool seekable = stream.CanSeek;
+        if (encoding.EmitsPreamble && seekable && stream.Length == 0)
+        {
+            byte[] preamble = new byte[3];
+            preamble[0] = (byte)0xef;
+            preamble[1] = (byte)0xbb;
+            preamble[2] = (byte)0xbf;
+            stream.Write(preamble, 0, 3);
+        }
+    }
+
+    public void Write(string value)
+    {
+        RequireOpen();
+        if (value == null)
+            return;
+        byte[] bytes = encoding.GetBytes(value);
+        int offset = 0;
+        while (offset < bytes.Length)
+        {
+            int available = buffer.Length - buffered;
+            if (available == 0)
+            {
+                FlushBuffer();
+                available = buffer.Length;
+            }
+            int count = bytes.Length - offset;
+            if (count > available)
+                count = available;
+            for (int index = 0; index < count; index++)
+                buffer[buffered + index] = bytes[offset + index];
+            buffered += count;
+            offset += count;
+        }
+    }
+
+    public void WriteLine()
+    {
+        Write("\n");
+    }
+
+    public void WriteLine(string value)
+    {
+        Write(value);
+        Write("\n");
+    }
+
+    public void Flush()
+    {
+        RequireOpen();
+        FlushBuffer();
+        stream.Flush();
+    }
+
+    public void Dispose()
+    {
+        if (disposed)
+            return;
+        disposed = true;
+        try
+        {
+            FlushBuffer();
+            stream.Flush();
+        }
+        finally
+        {
+            if (!leaveOpen)
+                stream.Dispose();
+        }
+    }
+
+    private void RequireOpen()
+    {
+        if (disposed)
+            throw new System.ObjectDisposedException();
+    }
+
+    private void FlushBuffer()
+    {
+        if (buffered == 0)
+            return;
+        stream.Write(buffer, 0, buffered);
+        buffered = 0;
+    }
+}
+
+public static class Path
+{
+    public static char DirectorySeparatorChar
+    {
+        get
+        {
+            return FileRuntime.PathSeparator();
+        }
+    }
+
+    public static char AltDirectorySeparatorChar
+    {
+        get
+        {
+            if (DirectorySeparatorChar == '\\')
+                return '/';
+            return '/';
+        }
+    }
+
+    public static string Combine(string left, string right)
+    {
+        if (left == null || right == null)
+            throw new System.ArgumentNullException();
+        if (left.Length == 0)
+            return right;
+        if (right.Length == 0)
+            return left;
+        char separator = DirectorySeparatorChar;
+        if (left[left.Length - 1] == '/' || left[left.Length - 1] == '\\')
+            return left + right;
+        return left + separator.ToString() + right;
+    }
+
+    public static string GetFileName(string path)
+    {
+        Require(path);
+        int slash = path.LastIndexOf('/');
+        int backslash = path.LastIndexOf('\\');
+        int index = backslash;
+        if (slash > backslash)
+            index = slash;
+        return path.Substring(index + 1);
+    }
+
+    public static string GetDirectoryName(string path)
+    {
+        Require(path);
+        int slash = path.LastIndexOf('/');
+        int backslash = path.LastIndexOf('\\');
+        int index = backslash;
+        if (slash > backslash)
+            index = slash;
+        if (index < 0)
+            return "";
+        return path.Substring(0, index);
+    }
+
+    public static string GetExtension(string path)
+    {
+        string name = GetFileName(path);
+        int dot = name.LastIndexOf('.');
+        if (dot <= 0)
+            return "";
+        return name.Substring(dot);
+    }
+
+    public static bool HasExtension(string path)
+    {
+        return GetExtension(path).Length != 0;
+    }
+
+    public static string GetPathRoot(string path)
+    {
+        Require(path);
+        if (path.Length == 0)
+            return "";
+        if (path[0] == '/' || path[0] == '\\')
+            return path.Substring(0, 1);
+        if (path.Length >= 2 && path[1] == ':')
+        {
+            if (path.Length >= 3 && (path[2] == '/' || path[2] == '\\'))
+                return path.Substring(0, 3);
+            return path.Substring(0, 2);
+        }
+        return "";
+    }
+
+    public static bool IsPathRooted(string path)
+    {
+        Require(path);
+        if (path.Length == 0)
+            return false;
+        if (path[0] == '/' || path[0] == '\\')
+            return true;
+        return path.Length >= 2 && path[1] == ':';
+    }
+
+    private static void Require(string path)
+    {
+        if (path == null)
+            throw new System.ArgumentNullException();
+    }
+}
+
+public static class Directory
+{
+    [Extern("ct_host_directory_exists")]
+    public static bool Exists(string path);
+
+    [Extern("ct_host_directory_create")]
+    public static void CreateDirectory(string path);
+
+    [Extern("ct_host_directory_delete")]
+    public static void Delete(string path, bool recursive);
+
+    public static void Delete(string path)
+    {
+        Delete(path, false);
+    }
+
+    [Extern("ct_host_directory_move")]
+    public static void Move(string source, string destination);
+
+    [Extern("ct_host_directory_get_current")]
+    public static string GetCurrentDirectory();
+
+    [Extern("ct_host_directory_set_current")]
+    public static void SetCurrentDirectory(string path);
+
+    [Extern("ct_host_directory_entries")]
+    public static string[] GetFileSystemEntries(string path);
+}

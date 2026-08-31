@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.41 includes controlled native optimization, CPU, and floating-point profiles, hosted PGO for MSVC, GCC, and Clang, and compiler-backed UTF-8 strings with ordinal operations, splitting, `StringBuilder`, invariant formatting, and explicit checked native conversion. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
+Draft 0.42 makes attached Windows consoles use UTF-8, adds invariant scalar and enum parsing, and expands hosted and Cosmopolitan I/O with seekable streams, directories, metadata, paths, and strict UTF-8 text files. Draft 0.41 remains the historical native-optimization and compiler-backed string revision. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -111,7 +111,7 @@ public static class Program
 
 SIMD lane values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` for explicit supported-target intrinsic lowering, or set top-level `simdOptimizations: true` to optimize scalar geometry in hosted x64 applications and implicitly select SIMD128. `Vec3x4` stores three `F32x4` components in exactly 48 bytes.
 
-The [feature example](examples/Features/Program.ct) covers more syntax, the [standard-library tour](examples/StandardLibrary/README.md) exercises the Draft 0.40/0.41 APIs, and the [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
+The [feature example](examples/Features/Program.ct) covers more syntax, the [standard-library tour](examples/StandardLibrary/README.md) exercises the Draft 0.40 through 0.42 APIs, and the [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
 
 ## Build the compiler
 
@@ -258,7 +258,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 - `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
 - `Editors.sln` contains the three Visual Studio extension projects.
-- `Examples.sln` contains the 13 example projects, including a Draft 0.40/0.41 standard-library tour and the three grouped T-CAN variants.
+- `Examples.sln` contains the 13 example projects, including a Draft 0.40 through 0.42 standard-library tour and the three grouped T-CAN variants.
 - `CTilde.StandardLibrary.sln` contains the physical standard-library project.
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
@@ -282,7 +282,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.41 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.42 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

@@ -44,7 +44,7 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("#include <errno.h>");
             if (_usesHostedIo)
-                writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#include <wchar.h>\n#endif");
+                writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#include <wchar.h>\n#include <io.h>\n#include <direct.h>\n#else\n#include <sys/types.h>\n#include <sys/stat.h>\n#include <unistd.h>\n#include <dirent.h>\n#endif");
         }
         if (_usesMonotonicClock)
         {
@@ -65,6 +65,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef __declspec(align(n)) base name\n#else\n#define CT_ALIGNED_TYPEDEF(base, name, n) typedef base name __attribute__((aligned(n)))\n#endif");
         if (!IsFreestanding)
             writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#include <windows.h>\n#endif");
+        if (!IsFreestanding && !IsEspIdf)
+            writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#endif");
         if (_usesManagedThreading)
         {
             writer.WriteLine("#if defined(_MSC_VER)");
@@ -253,7 +255,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("static_assert(_Alignof(ct_atomic_u32) == _Alignof(uint32_t), \"C~ atomic header fields must preserve managed-header alignment\");");
         writer.WriteLine("typedef void (*ct_drop_value_fn)(void*);");
         writer.WriteLine("typedef struct ct_cleanup_record { struct ct_cleanup_record* Previous; void* Value; ct_drop_value_fn Drop; bool Active; } ct_cleanup_record;");
-        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_NULL, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_FORMAT, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK } ct_runtime_fault_kind;");
+        writer.WriteLine("typedef enum ct_runtime_fault_kind { CT_FAULT_NULL, CT_FAULT_BOUNDS, CT_FAULT_DIVIDE, CT_FAULT_CAST, CT_FAULT_OVERFLOW, CT_FAULT_ARGUMENT, CT_FAULT_ARGUMENT_NULL, CT_FAULT_ARGUMENT_OUT_OF_RANGE, CT_FAULT_FORMAT, CT_FAULT_OUT_OF_MEMORY, CT_FAULT_THREAD_STATE, CT_FAULT_SYNCHRONIZATION_LOCK, CT_FAULT_DECODER } ct_runtime_fault_kind;");
         writer.WriteLine("CT_NORETURN static void ct_raise_runtime_fault(ct_runtime_fault_kind kind, const char* code, const char* file, int line);");
         if (_usesExceptions)
         {
@@ -565,7 +567,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_write_float(float value) { (void)fprintf(stdout, \"%.9g\", (double)value); }");
             writer.WriteLine("void ct_write_double(double value) { (void)fprintf(stdout, \"%.17g\", value); }");
             writer.WriteLine("void ct_write_bool(bool value) { (void)fputs(value ? \"True\" : \"False\", stdout); }");
-            writer.WriteLine($"void ct_write_line(void) {{ (void)fputc('\\n', stdout);{(EmitDebugInstrumentation ? " (void)fflush(stdout);" : string.Empty)} }}");
+            writer.WriteLine("void ct_write_line(void) { (void)fputc('\\n', stdout); (void)fflush(stdout); }");
         }
         if (!IsEspIdf && !IsFreestanding)
             writer.WriteLine("void ct_environment_exit(int32_t code) { exit((int)code); }");
@@ -677,11 +679,11 @@ internal sealed partial class CEmitter
             writer.WriteLine();
         foreach (var inline in _inlineArrayTypes.OrderBy(NameMangler.TypeCode, StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.InlineArray(inline)} {NameMangler.InlineArray(inline)};");
-        foreach (var type in EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError"))
+        foreach (var type in EmittedTypes.Where(type => !type.IsCompilerBackedSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError"))
             writer.WriteLine($"typedef {(type.Kind == DeclaredTypeKind.Struct && type.AggregateLayout == AggregateLayoutKind.Union ? "union" : "struct")} {NameMangler.Type(type)} {NameMangler.Type(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"typedef struct {NameMangler.Array(array.ElementType!)} {NameMangler.Array(array.ElementType!)};");
-        foreach (var type in EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface or DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => !type.IsCompilerBackedSurface && type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface or DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
             writer.WriteLine($"extern const ct_type_descriptor {DescriptorName(type)};");
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
             writer.WriteLine($"extern const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)};");
@@ -817,7 +819,7 @@ internal sealed partial class CEmitter
 
     private IEnumerable<TypeSymbol> OrderLayoutTypes()
     {
-        var types = EmittedTypes.Where(type => !type.IsStringSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError").ToArray();
+        var types = EmittedTypes.Where(type => !type.IsCompilerBackedSurface && type.Kind is not DeclaredTypeKind.Enum and not DeclaredTypeKind.Newtype and not DeclaredTypeKind.Opaque and not DeclaredTypeKind.Interface && !type.IsBitField && type.FullName != "Esp.Idf.EspError").ToArray();
         var emitted = new HashSet<TypeSymbol>();
         var visiting = new HashSet<TypeSymbol>();
         foreach (var type in types)
@@ -1061,6 +1063,13 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_atomic_store_relaxed(&ct_attached_thread_count, 1u);");
         writer.WriteLine("}");
         writer.WriteLine("static void ct_thread_publish_ready(void) { if (ct_atomic_load_relaxed(&ct_runtime_phase) != CT_RUNTIME_INITIALIZING) ct_fail(\"CTT0002\", \"<runtime-init>\", 0); ct_atomic_store_release(&ct_runtime_phase, CT_RUNTIME_READY); }");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("static UINT ct_console_saved_input_cp; static UINT ct_console_saved_output_cp; static bool ct_console_restore_input; static bool ct_console_restore_output;");
+        writer.WriteLine("static void ct_console_utf8_init(void) { DWORD mode; HANDLE input = GetStdHandle(STD_INPUT_HANDLE); HANDLE output = GetStdHandle(STD_OUTPUT_HANDLE); if (input != NULL && input != INVALID_HANDLE_VALUE && GetConsoleMode(input, &mode)) { ct_console_saved_input_cp = GetConsoleCP(); ct_console_restore_input = ct_console_saved_input_cp != 0u && SetConsoleCP(CP_UTF8) != 0; } if (output != NULL && output != INVALID_HANDLE_VALUE && GetConsoleMode(output, &mode)) { ct_console_saved_output_cp = GetConsoleOutputCP(); ct_console_restore_output = ct_console_saved_output_cp != 0u && SetConsoleOutputCP(CP_UTF8) != 0; } }");
+        writer.WriteLine("static void ct_console_utf8_fini(void) { (void)fflush(stdout); (void)fflush(stderr); if (ct_console_restore_input) (void)SetConsoleCP(ct_console_saved_input_cp); if (ct_console_restore_output) (void)SetConsoleOutputCP(ct_console_saved_output_cp); ct_console_restore_input = false; ct_console_restore_output = false; }");
+        writer.WriteLine("#else");
+        writer.WriteLine("static void ct_console_utf8_init(void) { } static void ct_console_utf8_fini(void) { (void)fflush(stdout); (void)fflush(stderr); }");
+        writer.WriteLine("#endif");
         writer.WriteLine("void ct_thread_attach(void)");
         writer.WriteLine("{");
         writer.WriteLine("    if (ct_thread_current() != NULL || ct_atomic_load_acquire(&ct_runtime_phase) != CT_RUNTIME_READY) ct_fail(\"CTT0002\", \"<thread-attach>\", 0);");
@@ -1094,6 +1103,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_thread_attach_primary(&ct_primary_thread_state);");
         writer.WriteLine("    if (ct_program_module.AbiVersion != CTILDE_RUNTIME_ABI_VERSION) ct_fail(\"CTT0003\", \"<runtime-init>\", 0);");
         writer.WriteLine("    ct_runtime_faults_init();");
+        if (!IsEspIdf)
+            writer.WriteLine("    ct_console_utf8_init();");
         if (HasNativeImports)
             writer.WriteLine("    ct_native_imports_init();");
         if (_usesExceptions)
@@ -1125,6 +1136,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    ct_program_module.Finalize();");
         if (HasNativeImports)
             writer.WriteLine("    ct_native_imports_fini();");
+        if (!IsEspIdf)
+            writer.WriteLine("    ct_console_utf8_fini();");
         if (EmitDebugObjects)
             writer.WriteLine("    ct_debug_report_leaks();");
         writer.WriteLine("    ct_thread_detach();");

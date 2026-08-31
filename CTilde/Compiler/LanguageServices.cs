@@ -632,12 +632,18 @@ public sealed partial class LanguageServiceSnapshot
         if (context.TypeSymbol is not null)
         {
             var requireStatic = IsStatic(context.MemberDeclaration);
+            var foundMember = false;
             foreach (var value in Hierarchy(context.TypeSymbol)
                 .SelectMany(type => type.Fields.Cast<object>().Concat(type.Properties).Concat(type.Methods))
                 .Where(symbol => IdentifierEquals(SymbolName(symbol), tokenName) && IsUnqualifiedMember(symbol, requireStatic, context.TypeSymbol)))
+            {
+                foundMember = true;
                 yield return value;
+            }
+            if (foundMember)
+                yield break;
         }
-        var typeSymbol = _model.ResolveNamedType(token.Text, context.Tree) ?? VisibleTypes(context.Tree).FirstOrDefault(type => IdentifierEquals(type.Name, tokenName));
+        var typeSymbol = ResolveStaticType(token.Text, context.Tree) ?? VisibleTypes(context.Tree).FirstOrDefault(type => IdentifierEquals(type.Name, tokenName));
         if (typeSymbol is not null)
             yield return typeSymbol;
     }
@@ -730,7 +736,7 @@ public sealed partial class LanguageServiceSnapshot
                     if (property is not null)
                         return new(property.Type, null);
                 }
-                return new(null, _model.ResolveNamedType(name.Name, context.Tree));
+                return new(null, ResolveStaticType(name.Name, context.Tree));
             case MemberAccessExpressionSyntax member:
                 var qualifiedType = QualifiedName(member) is { } qualifiedName
                     ? _model.ResolveNamedType(qualifiedName, context.Tree)
@@ -845,6 +851,13 @@ public sealed partial class LanguageServiceSnapshot
         return new MemberAccessExpressionSyntax(context.Tree.Text, TextSpan.FromBounds(receiver.Span.Start, replacement.End), receiver, name);
     }
 
+    private TypeSymbol? ResolveStaticType(string name, SyntaxTree tree)
+    {
+        if (TypeFacts.BuiltIn(name) is { } builtIn && CompilationModel.PrimitiveSurfaceName(builtIn) is { } surfaceName)
+            return _model.Types.GetValueOrDefault(surfaceName);
+        return _model.ResolveNamedType(name, tree);
+    }
+
     private static ExpressionSyntax? TextualReceiver(SourceText source, int dot)
     {
         var text = source.Text;
@@ -915,7 +928,7 @@ public sealed partial class LanguageServiceSnapshot
         .FirstOrDefault();
 
     private static SyntaxToken? NavigationTokenAt(SyntaxTree tree, int position) => tree.Tokens
-        .Where(token => !token.IsMissing && (token.Kind is SyntaxKind.IdentifierToken or SyntaxKind.StringKeyword || OperatorFacts.IsSupported(token.Kind)))
+        .Where(token => !token.IsMissing && (token.Kind == SyntaxKind.IdentifierToken || TypeFacts.BuiltIn(token.Text) is not null || OperatorFacts.IsSupported(token.Kind)))
         .Where(token => position >= token.Span.Start && position <= token.Span.End)
         .OrderBy(token => token.Span.Length)
         .FirstOrDefault();

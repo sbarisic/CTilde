@@ -17,6 +17,9 @@
   <member id="T:System.ArgumentNullException"><summary>Represents a required managed argument that was null.</summary></member>
   <member id="T:System.ArgumentOutOfRangeException"><summary>Represents an argument outside the range accepted by an operation.</summary></member>
   <member id="T:System.FormatException"><summary>Represents malformed composite or scalar formatting input.</summary></member>
+  <member id="T:System.ObjectDisposedException"><summary>Represents access to an explicitly disposed managed resource.</summary></member>
+  <member id="T:System.EndOfStreamException"><summary>Represents an unexpected end while reading an exact byte count.</summary></member>
+  <member id="T:System.DecoderFallbackException"><summary>Represents invalid or truncated strict UTF-8 input.</summary></member>
   <member id="T:System.ThreadStateException"><summary>Represents an invalid managed-thread lifecycle or native scheduler configuration.</summary></member>
   <member id="T:System.SynchronizationLockException"><summary>Represents an attempt to release a mutex that the current thread does not own.</summary></member>
 
@@ -57,6 +60,8 @@
   <member id="P:System.StringSegment.IsEmpty"><summary>Gets whether the segment has zero bytes.</summary></member>
 
   <member id="T:System.Console"><summary>Writes formatted values to the target console.</summary><remarks>Hosted output uses the process streams. ESP-IDF output uses the configured UART console.</remarks></member>
+  <member id="P:System.Console.InputEncoding"><summary>Gets the strict UTF-8 console input encoding.</summary></member>
+  <member id="P:System.Console.OutputEncoding"><summary>Gets the strict UTF-8 console output encoding.</summary></member>
   <member id="M:System.Console.WriteLine()"><summary>Writes a line terminator.</summary></member>
   <member id="M:System.Console.Write(string)"><summary>Writes a managed string.</summary><param name="value">The string to write.</param></member>
   <member id="M:System.Console.WriteLine(string)"><summary>Writes a managed string followed by a line terminator.</summary><param name="value">The string to write.</param></member>
@@ -343,4 +348,21 @@
   <member id="P:System.Runtime.NativeUtf8String.Null"><summary>Gets a null UTF-8 view.</summary></member>
   <member id="P:System.Runtime.NativeUtf8String.ByteLength"><summary>Gets the UTF-8 byte length without the terminator.</summary></member>
   <member id="P:System.Runtime.NativeUtf8String.Pointer"><summary>Gets the borrowed null-terminated byte pointer.</summary><remarks>Access requires an unsafe context.</remarks></member>
+
+  <member id="T:System.Globalization.NumberStyles"><summary>Controls invariant numeric whitespace, sign, decimal-point, exponent, and hexadecimal syntax.</summary></member>
+  <member id="T:System.Boolean"><summary>Provides the compiler-backed Boolean parsing surface.</summary></member>
+  <member id="M:System.Boolean.Parse(string)"><summary>Parses invariant True or False text.</summary></member>
+  <member id="M:System.Boolean.TryParse(string,bool&amp;)"><summary>Attempts to parse invariant Boolean text and clears the result on failure.</summary></member>
+  <member id="T:System.Int32"><summary>Provides the compiler-backed signed 32-bit parsing surface.</summary></member>
+  <member id="M:System.Int32.Parse(string)"><summary>Parses an invariant signed 32-bit integer.</summary></member>
+  <member id="M:System.Int32.TryParse(string,int&amp;)"><summary>Attempts to parse an invariant signed 32-bit integer and clears the result on failure.</summary></member>
+  <member id="T:System.Double"><summary>Provides the compiler-backed binary64 parsing surface.</summary></member>
+  <member id="M:System.Double.Parse(string)"><summary>Parses invariant binary64 text with deterministic nearest-even conversion.</summary></member>
+  <member id="M:System.Double.TryParse(string,double&amp;)"><summary>Attempts to parse invariant binary64 text and clears the result on failure.</summary></member>
+  <member id="T:System.Enum"><summary>Provides compiler-generated parsing for reachable closed enum types.</summary></member>
+  <member id="M:System.Enum.Parse&lt;T&gt;(string)"><summary>Parses a declared enum name, decimal value, or comma-separated name combination.</summary></member>
+  <member id="M:System.Enum.TryParse&lt;T&gt;(string,T&amp;)"><summary>Attempts to parse an enum and clears the result on failure.</summary></member>
+  <member id="T:System.Text.Encoding"><summary>Represents one strict UTF-8 encoding policy.</summary></member>
+  <member id="P:System.Text.Encoding.UTF8"><summary>Gets strict UTF-8 without a byte-order mark.</summary></member>
+  <member id="P:System.Text.Encoding.UTF8WithBom"><summary>Gets strict UTF-8 with a writer preamble.</summary></member>
 </doc>

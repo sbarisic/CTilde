@@ -46,4 +46,5 @@ internal interface ILoweringServices
     string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax);
     void RegisterType(CType type);
     void RegisterBox(CType type);
+    string RegisterEnumParser(TypeSymbol type);
 }

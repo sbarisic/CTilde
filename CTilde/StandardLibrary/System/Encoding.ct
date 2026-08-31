@@ -1,0 +1,74 @@
+namespace System.Text;
+
+public readonly struct Encoding
+{
+    private readonly bool emitBom;
+
+    private Encoding(bool emitBom)
+    {
+        this.emitBom = emitBom;
+    }
+
+    public static Encoding UTF8
+    {
+        get
+        {
+            return new Encoding(false);
+        }
+    }
+
+    public static Encoding UTF8WithBom
+    {
+        get
+        {
+            return new Encoding(true);
+        }
+    }
+
+    public bool EmitsPreamble
+    {
+        get
+        {
+            return emitBom;
+        }
+    }
+
+    public int GetByteCount(string value)
+    {
+        if (value == null)
+            throw new System.ArgumentNullException();
+        return value.Length;
+    }
+
+    public byte[] GetBytes(string value)
+    {
+        if (value == null)
+            throw new System.ArgumentNullException();
+        return EncodingRuntime.GetBytes(value);
+    }
+
+    public string GetString(byte[] value)
+    {
+        if (value == null)
+            throw new System.ArgumentNullException();
+        return EncodingRuntime.GetString(value, 0, value.Length);
+    }
+
+    public string GetString(byte[] value, int offset, int count)
+    {
+        if (value == null)
+            throw new System.ArgumentNullException();
+        if (offset < 0 || count < 0 || offset > value.Length - count)
+            throw new System.ArgumentOutOfRangeException();
+        return EncodingRuntime.GetString(value, offset, count);
+    }
+}
+
+internal static class EncodingRuntime
+{
+    [Extern("ct_encoding_get_bytes")]
+    internal static byte[] GetBytes(string value);
+
+    [Extern("ct_encoding_get_string")]
+    internal static string GetString(byte[] value, int offset, int count);
+}

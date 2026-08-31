@@ -1,0 +1,7 @@
+namespace System.Globalization;
+
+public enum NumberStyles
+{
+    None=0, AllowLeadingWhite=1, AllowTrailingWhite=2, AllowLeadingSign=4, AllowDecimalPoint=8,
+        AllowExponent=16, AllowHexSpecifier=32, Integer=7, Float=31, HexNumber=35,
+}

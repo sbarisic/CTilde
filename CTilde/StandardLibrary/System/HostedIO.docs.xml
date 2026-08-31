@@ -7,6 +7,9 @@
   <member id="E:System.IO.FileMode.Open"><summary>Opens an existing file without truncating it.</summary></member>
   <member id="E:System.IO.FileMode.Create"><summary>Creates a file or truncates an existing file.</summary></member>
   <member id="E:System.IO.FileMode.Append"><summary>Creates a file or opens it for writes at the end.</summary></member>
+  <member id="E:System.IO.FileMode.CreateNew"><summary>Creates a new file and fails if it already exists.</summary></member>
+  <member id="E:System.IO.FileMode.OpenOrCreate"><summary>Opens a file or creates it when missing.</summary></member>
+  <member id="E:System.IO.FileMode.Truncate"><summary>Truncates an existing file and fails when it is missing.</summary></member>
   <member id="T:System.IO.FileAccess"><summary>Specifies the permitted operations on a hosted file.</summary></member>
   <member id="E:System.IO.FileAccess.Read"><summary>Permits reads.</summary></member>
   <member id="E:System.IO.FileAccess.Write"><summary>Permits writes.</summary></member>
@@ -24,4 +27,19 @@
   <member id="M:System.IO.File.Write(System.IO.FileHandle,System.Runtime.ReadOnlyNativeBuffer&lt;byte&gt;)"><summary>Writes an entire byte buffer to a hosted file.</summary><param name="file">A borrowed writable file handle.</param><param name="source">The bytes to write.</param><exception cref="System.IO.IOException">The handle is not writable or a complete native write cannot be performed.</exception></member>
   <member id="M:System.IO.File.Write(System.IO.FileHandle,string)"><summary>Writes a managed string's exact UTF-8 bytes without a line terminator.</summary><param name="file">A borrowed writable file handle.</param><param name="value">The non-null managed string to write.</param><exception cref="System.IO.IOException">The handle is not writable or a complete native write cannot be performed.</exception></member>
   <member id="M:System.IO.File.Close(System.IO.FileHandle)"><summary>Flushes, closes, and consumes an owned hosted file handle.</summary><param name="file">The owned handle to consume.</param><exception cref="System.IO.IOException">The native close reports an error. The handle is consumed even when this exception is thrown.</exception></member>
+
+  <member id="T:System.IO.SeekOrigin"><summary>Selects the base position for a 64-bit seek.</summary></member>
+  <member id="T:System.IO.FileTimestamp"><summary>Stores signed Unix seconds and nanoseconds.</summary></member>
+  <member id="T:System.IO.FileMetadata"><summary>Describes a file, directory, link, or other filesystem entry without following links.</summary></member>
+  <member id="M:System.IO.File.Seek(System.IO.FileHandle,long,System.IO.SeekOrigin)"><summary>Moves an owned file handle and returns its absolute position.</summary></member>
+  <member id="M:System.IO.File.SetLength(System.IO.FileHandle,long)"><summary>Changes a writable file's length.</summary></member>
+  <member id="M:System.IO.File.Flush(System.IO.FileHandle)"><summary>Flushes buffered native file output.</summary></member>
+  <member id="M:System.IO.File.GetMetadata(string)"><summary>Returns metadata for a path without following symbolic links.</summary></member>
+  <member id="T:System.IO.Stream"><summary>Defines synchronous byte I/O, seeking, flushing, copying, and explicit disposal.</summary></member>
+  <member id="T:System.IO.FileStream"><summary>Owns one private hosted file handle until idempotent disposal.</summary></member>
+  <member id="T:System.IO.StreamReader"><summary>Reads strict UTF-8 text, strips one leading BOM, and recognizes LF or CRLF lines.</summary></member>
+  <member id="T:System.IO.StreamWriter"><summary>Writes strict UTF-8 through a 4096-byte buffer with deterministic LF line endings.</summary></member>
+  <member id="T:System.IO.Directory"><summary>Provides synchronous directory creation, deletion, move, current-directory, and sorted enumeration operations.</summary></member>
+  <member id="M:System.IO.Directory.GetFileSystemEntries(string)"><summary>Returns full paths sorted by ordinal UTF-8 bytes.</summary></member>
+  <member id="T:System.IO.Path"><summary>Provides target-aware path separators and lexical path operations.</summary></member>
 </doc>

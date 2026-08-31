@@ -15,9 +15,16 @@ internal sealed partial class CEmitter
             EmitStringUtilitySupport(writer, externNames);
         var usesUtf8Conversion = externNames.Overlaps([
             "ct_utf8_get_string_pointer", "ct_utf8_try_get_string_pointer", "ct_utf8_get_string_buffer",
-            "ct_utf8_try_get_string_buffer", "ct_utf8_try_copy_to"]);
+            "ct_utf8_try_get_string_buffer", "ct_utf8_try_copy_to", "ct_encoding_get_bytes", "ct_encoding_get_string"]);
         if (usesUtf8Conversion)
             EmitUtf8ConversionSupport(writer, externNames);
+        var usesParsing = _enumParseTypes.Count != 0 || externNames.Any(name => name is not null &&
+            (name.StartsWith("ct_parse_", StringComparison.Ordinal) || name.StartsWith("ct_try_parse_", StringComparison.Ordinal)));
+        if (usesParsing)
+        {
+            EmitParsingSupport(writer, externNames);
+            EmitEnumParsingSupport(writer);
+        }
         if (_usesMonotonicClock)
         {
             writer.WriteLine("int64_t ct_monotonic_nanoseconds(void)");
@@ -40,7 +47,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_random_argument_out_of_range(void) { ct_raise_runtime_fault(CT_FAULT_ARGUMENT_OUT_OF_RANGE, \"CTR0001\", \"<random>\", 0); }");
         if (_usesSpinPause)
             writer.WriteLine("void ct_spin_pause(void) { ct_cpu_pause(); }");
-        if (usesStringUtilities || usesUtf8Conversion || _usesMonotonicClock || _usesRandomRangeFailure || _usesSpinPause)
+        if (usesStringUtilities || usesUtf8Conversion || usesParsing || _usesMonotonicClock || _usesRandomRangeFailure || _usesSpinPause)
             writer.WriteLine();
     }
 
@@ -179,8 +186,10 @@ internal sealed partial class CEmitter
         }
     }
 
-    private static void EmitRyuFormattingSupport(CWriter writer)
+    private void EmitRyuFormattingSupport(CWriter writer)
     {
+        _ryuCoreEmitted = true;
+        writer.WriteLine("/* CTILDE_INTERNAL_HEADER_SKIP_BEGIN */");
         writer.WriteLine("/* Ryu 4c0618b0, Boost Software License 1.0; see third_party/ryu/4c0618b0. */");
         writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
         writer.WriteLine("#pragma GCC diagnostic push");
@@ -206,6 +215,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
         writer.WriteLine("#pragma GCC diagnostic pop");
         writer.WriteLine("#endif");
+        writer.WriteLine("/* CTILDE_INTERNAL_HEADER_SKIP_END */");
     }
 
     private static void WriteRyuResource(CWriter writer, string file)
@@ -276,5 +286,15 @@ internal sealed partial class CEmitter
             writer.WriteLine("ct_string* ct_utf8_try_get_string_buffer(const uint8_t* value_data, size_t value_length, bool* success) { return ct_utf8_copy_checked(value_data, value_length, false, false, success); }");
         if (used.Contains("ct_utf8_try_copy_to"))
             writer.WriteLine("bool ct_utf8_try_copy_to(ct_string* value, uint8_t* destination_data, size_t destination_length, bool null_terminate, uintptr_t* bytes_written) { *bytes_written = 0u; size_t required = (size_t)value->Length + (null_terminate ? 1u : 0u); if (destination_length < required) return false; if (value->Length != 0) memcpy(destination_data, value->Data, (size_t)value->Length); if (null_terminate) destination_data[value->Length] = 0; *bytes_written = (uintptr_t)required; return true; }");
+        if (used.Contains("ct_encoding_get_bytes"))
+        {
+            var bytes = NameMangler.Array(CType.Byte);
+            writer.WriteLine($"{bytes}* ct_encoding_get_bytes(ct_string* value) {{ (void)ct_require_nonnull(value, \"<encoding>\", 0); {bytes}* result = ct_new_{bytes}(value->Length, \"<encoding>\", 0); if (value->Length != 0) memcpy(result->Data, value->Data, (size_t)value->Length); return result; }}");
+        }
+        if (used.Contains("ct_encoding_get_string"))
+        {
+            var bytes = NameMangler.Array(CType.Byte);
+            writer.WriteLine($"ct_string* ct_encoding_get_string({bytes}* value, int32_t offset, int32_t count) {{ (void)ct_require_nonnull(value, \"<encoding>\", 0); if (!ct_utf8_validate_bytes(value->Data + offset, (size_t)count)) ct_raise_runtime_fault(CT_FAULT_DECODER, \"CTS0004\", \"<encoding>\", 0); return ct_string_from_bytes(value->Data + offset, count, \"<encoding>\", 0); }}");
+        }
     }
 }

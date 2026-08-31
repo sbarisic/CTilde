@@ -1,22 +1,22 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.41 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.42 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
-Draft 0.41 adds controlled native optimization profiles, x64 AVX2 targeting, precise/fast floating point, hosted PGO, schema-2 parallel HostedIo benchmarking, and the compiler-backed string, splitting, builder, invariant-formatting, ASCII, and checked native UTF-8 foundations. Remaining follow-ups are:
+Draft 0.42 adds invariant scalar and enum parsing, attached-console UTF-8 handling, strict UTF-8 encoding objects, and synchronous hosted/Cosmopolitan streams, directories, paths, and metadata. Remaining follow-ups are:
 
 - [ ] Add a flattened, cache-oriented SAH BVH and compare it as a new benchmark accelerator against `object-midpoint-bvh`.
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
-- [ ] Add parsing and general conversion APIs, culture-aware formatting, Unicode casing, normalization, collation and grapheme segmentation, and regular expressions only after their portability and allocation contracts are specified.
+- [ ] Add checked numeric-to-numeric conversions, culture-aware parsing/formatting, Unicode casing, normalization, collation and grapheme segmentation, and regular expressions only after their portability and allocation contracts are specified.
 - [ ] Add dependency-source navigation plus an explicit design for module-local `internal` access and semantic import aliases. Current manifest aliases name module placements; they do not alter namespaces.
 - [ ] Extend closure source-debug metadata beyond the current generated-method mapping and add dedicated lambda editor-service fixtures.
 - [ ] Permit iterator suspension across cleanup regions after defining state-machine ownership for `try`, `catch`, `finally`, `lock`, and `defer`.
 
 - [ ] Design user-defined conversions and any additional operator families as an explicit language revision. Candidate families include bitwise, logical, remainder, increment, and decrement; arithmetic, equality, and ordering are implemented.
 - [ ] Add wall-clock time, calendars, time zones, timeout and cancellation abstractions only after defining their runtime and portability contracts. Draft 0.40 provides monotonic elapsed time only.
-- [ ] Extend hosted I/O when applications require seeking, directories, metadata, deletion, higher-level streams, or encoding-aware text files.
+- [ ] Add asynchronous I/O, explicit sharing controls, filesystem watchers, memory-mapped files, globbing, and lazy directory enumeration only after their ownership and cross-platform contracts are specified.
 - [ ] Add ARC-safe managed-reference atomics only after defining a reclamation protocol that makes atomic loads safe.
 - [ ] Define safe long-lived native-resource storage before permitting owned opaque handles in fields.
 

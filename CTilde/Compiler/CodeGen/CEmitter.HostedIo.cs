@@ -2,10 +2,15 @@ namespace CTilde;
 
 internal sealed partial class CEmitter
 {
-    private static bool IsHostedIoSymbol(string name) => name is
-        "ct_console_read" or "ct_console_read_line" or
-        "ct_host_file_open" or "ct_host_file_read" or
-        "ct_host_file_write_buffer" or "ct_host_file_write_string" or "ct_host_file_close";
+    private static bool IsHostedIoSymbol(string name) => name is "ct_console_read" or "ct_console_read_line" ||
+        name == "ct_host_path_separator" ||
+        name.StartsWith("ct_host_file_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_host_stream_", StringComparison.Ordinal) ||
+        name.StartsWith("ct_host_directory_", StringComparison.Ordinal);
+
+    private static bool IsHostedFilesystemSymbol(string name) => name == "ct_host_path_separator" ||
+        name is "ct_host_file_exists" or "ct_host_file_delete" or "ct_host_file_move" or "ct_host_file_copy" or "ct_host_file_metadata" ||
+        name.StartsWith("ct_host_directory_", StringComparison.Ordinal);
 
     private void EmitHostedIoSupport(CWriter writer)
     {
@@ -13,11 +18,12 @@ internal sealed partial class CEmitter
             return;
 
         var ioException = Model.Types["System.IO.IOException"];
-        var ioConstructor = ioException.Constructors.Single(constructor => constructor.Parameters.Length == 2);
+        var ioConstructor = ioException.Constructors.Single(constructor => constructor.Parameters.Length == 4);
         var handle = CTypeName(Model.Types["System.IO.FileHandle"].Type);
         var mode = CTypeName(Model.Types["System.IO.FileMode"].Type);
         var access = CTypeName(Model.Types["System.IO.FileAccess"].Type);
         var exceptionType = NameMangler.Type(ioException);
+        var byteArray = NameMangler.Array(CType.Byte);
 
         writer.WriteLine("typedef struct ct_host_file { FILE* Stream; uint8_t Access; } ct_host_file;");
         writer.WriteLine("static bool ct_host_utf8_valid(const uint8_t* data, size_t length)");
@@ -51,18 +57,21 @@ internal sealed partial class CEmitter
         writer.WriteLine("    }");
         writer.WriteLine("    return true;");
         writer.WriteLine("}");
-        writer.WriteLine("CT_NORETURN static void ct_host_io_throw(const char* operation, int error_code)");
+        writer.WriteLine("CT_NORETURN static void ct_host_io_throw_path(const char* operation, int error_code, ct_string* path)");
         writer.WriteLine("{");
         writer.WriteLine("    char buffer[128];");
         writer.WriteLine("    int length = snprintf(buffer, sizeof(buffer), \"%s failed with host error %d.\", operation, error_code);");
         writer.WriteLine("    ct_string* message = ct_string_from_format(buffer, length, sizeof(buffer), \"<host-io>\", 0);");
-        writer.WriteLine($"    {exceptionType}* exception = {ioConstructor.CName}(message, (int32_t)error_code);");
+        writer.WriteLine("    ct_string* operation_text = ct_string_from_bytes((const uint8_t*)operation, (int32_t)strlen(operation), \"<host-io>\", 0);");
+        writer.WriteLine($"    {exceptionType}* exception = {ioConstructor.CName}(message, (int32_t)error_code, operation_text, path == NULL ? ct_empty_string : path);");
         writer.WriteLine("    ct_release_fast((ct_object*)(void*)message);");
+        writer.WriteLine("    ct_release_fast((ct_object*)(void*)operation_text);");
         writer.WriteLine("    ct_object* owned_exception = (ct_object*)(void*)exception;");
         writer.WriteLine("    ct_cleanup_record cleanup;");
         writer.WriteLine("    ct_cleanup_push(&cleanup, &owned_exception, ct_drop_ref_value);");
         writer.WriteLine("    ct_throw(owned_exception, \"<host-io>\", 0);");
         writer.WriteLine("}");
+        writer.WriteLine("CT_NORETURN static void ct_host_io_throw(const char* operation, int error_code) { ct_host_io_throw_path(operation, error_code, NULL); }");
         writer.WriteLine("static ct_host_file* ct_host_file_require(uintptr_t handle)");
         writer.WriteLine("{");
         writer.WriteLine("    return (ct_host_file*)ct_require_nonnull((void*)handle, \"<host-io>\", 0);");
@@ -123,31 +132,48 @@ internal sealed partial class CEmitter
         writer.WriteLine($"{handle} ct_host_file_open(ct_string* path, {mode} mode, {access} access)");
         writer.WriteLine("{");
         writer.WriteLine("    (void)ct_require_nonnull(path, \"<host-io>\", 0);");
-        writer.WriteLine("    if (memchr(path->Data, 0, (size_t)path->Length) != NULL) ct_host_io_throw(\"File.Open\", EINVAL);");
-        writer.WriteLine("    if (!ct_host_utf8_valid(path->Data, (size_t)path->Length)) ct_host_io_throw(\"File.Open\", EILSEQ);");
+        writer.WriteLine("    if (memchr(path->Data, 0, (size_t)path->Length) != NULL) ct_host_io_throw_path(\"File.Open\", EINVAL, path);");
+        writer.WriteLine("    if (!ct_host_utf8_valid(path->Data, (size_t)path->Length)) ct_host_io_throw_path(\"File.Open\", EILSEQ, path);");
         writer.WriteLine("    const char* native_mode = NULL;");
         writer.WriteLine("    if (mode == 0u && access == 0u) native_mode = \"rb\";");
         writer.WriteLine("    else if (mode == 0u && (access == 1u || access == 2u)) native_mode = \"r+b\";");
         writer.WriteLine("    else if (mode == 1u && access == 1u) native_mode = \"wb\";");
         writer.WriteLine("    else if (mode == 1u && access == 2u) native_mode = \"w+b\";");
         writer.WriteLine("    else if (mode == 2u && access == 1u) native_mode = \"ab\";");
-        writer.WriteLine("    else ct_host_io_throw(\"File.Open\", EINVAL);");
+        writer.WriteLine("    else if (mode == 3u && access == 1u) native_mode = \"wbx\";");
+        writer.WriteLine("    else if (mode == 3u && access == 2u) native_mode = \"w+bx\";");
+        writer.WriteLine("    else if (mode == 4u && (access == 0u || access == 1u || access == 2u)) native_mode = access == 0u ? \"rb\" : \"r+b\";");
+        writer.WriteLine("    else if (mode == 5u && access == 1u) native_mode = \"wb\";");
+        writer.WriteLine("    else if (mode == 5u && access == 2u) native_mode = \"w+b\";");
+        writer.WriteLine("    else ct_host_io_throw_path(\"File.Open\", EINVAL, path);");
         writer.WriteLine("    FILE* stream = NULL; int open_error = 0;");
         writer.WriteLine("#if defined(_WIN32)");
         writer.WriteLine("    int wide_length = path->Length == 0 ? 0 : MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (const char*)(const void*)path->Data, path->Length, NULL, 0);");
-        writer.WriteLine("    if (wide_length == 0 && path->Length != 0) ct_host_io_throw(\"File.Open\", EILSEQ);");
+        writer.WriteLine("    if (wide_length == 0 && path->Length != 0) ct_host_io_throw_path(\"File.Open\", EILSEQ, path);");
         writer.WriteLine("    wchar_t* wide_path = (wchar_t*)malloc(((size_t)wide_length + 1u) * sizeof(wchar_t));");
-        writer.WriteLine("    if (wide_path == NULL) ct_host_io_throw(\"File.Open\", ENOMEM);");
+        writer.WriteLine("    if (wide_path == NULL) ct_host_io_throw_path(\"File.Open\", ENOMEM, path);");
         writer.WriteLine("    if (wide_length != 0) (void)MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, (const char*)(const void*)path->Data, path->Length, wide_path, wide_length);");
         writer.WriteLine("    wide_path[wide_length] = L'\\0';");
+        writer.WriteLine("    if (mode == 5u && _waccess(wide_path, 0) != 0) { int error = errno; free(wide_path); ct_host_io_throw_path(\"File.Open\", error == 0 ? ENOENT : error, path); }");
         writer.WriteLine("    wchar_t wide_mode[4] = { (wchar_t)native_mode[0], (wchar_t)native_mode[1], (wchar_t)native_mode[2], L'\\0' };");
-        writer.WriteLine("    open_error = (int)_wfopen_s(&stream, wide_path, wide_mode); free(wide_path);");
+        writer.WriteLine("    open_error = (int)_wfopen_s(&stream, wide_path, wide_mode);");
         writer.WriteLine("#else");
+        writer.WriteLine("    if (mode == 5u) { struct stat existing; if (stat((const char*)(const void*)path->Data, &existing) != 0) ct_host_io_throw_path(\"File.Open\", errno == 0 ? ENOENT : errno, path); }");
         writer.WriteLine("    errno = 0; stream = fopen((const char*)(const void*)path->Data, native_mode); open_error = stream == NULL ? errno : 0;");
         writer.WriteLine("#endif");
-        writer.WriteLine("    if (stream == NULL) ct_host_io_throw(\"File.Open\", open_error == 0 ? -1 : open_error);");
+        writer.WriteLine("    if (stream == NULL && mode == 4u && open_error == ENOENT) {");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("        open_error = (int)_wfopen_s(&stream, wide_path, L\"w+b\");");
+        writer.WriteLine("#else");
+        writer.WriteLine("        errno = 0; stream = fopen((const char*)(const void*)path->Data, \"w+b\"); open_error = stream == NULL ? errno : 0;");
+        writer.WriteLine("#endif");
+        writer.WriteLine("    }");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("    free(wide_path);");
+        writer.WriteLine("#endif");
+        writer.WriteLine("    if (stream == NULL) ct_host_io_throw_path(\"File.Open\", open_error == 0 ? -1 : open_error, path);");
         writer.WriteLine("    ct_host_file* file = (ct_host_file*)malloc(sizeof(ct_host_file));");
-        writer.WriteLine("    if (file == NULL) { (void)fclose(stream); ct_host_io_throw(\"File.Open\", ENOMEM); }");
+        writer.WriteLine("    if (file == NULL) { (void)fclose(stream); ct_host_io_throw_path(\"File.Open\", ENOMEM, path); }");
         writer.WriteLine("    file->Stream = stream; file->Access = (uint8_t)access;");
         writer.WriteLine($"    return ({handle})(uintptr_t)file;");
         writer.WriteLine("}");
@@ -180,6 +206,53 @@ internal sealed partial class CEmitter
         writer.WriteLine("    errno = 0; int result = fclose(stream); int close_error = errno; free(file);");
         writer.WriteLine("    if (result != 0) ct_host_io_throw(\"File.Close\", close_error == 0 ? -1 : close_error);");
         writer.WriteLine("}");
+        writer.WriteLine("static int64_t ct_host_file_tell_core(ct_host_file* file)");
+        writer.WriteLine("{");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("    __int64 value = _ftelli64(file->Stream); if (value < 0) ct_host_io_throw(\"File.Position\", errno == 0 ? -1 : errno); return (int64_t)value;");
+        writer.WriteLine("#else");
+        writer.WriteLine("    off_t value = ftello(file->Stream); if (value < 0) ct_host_io_throw(\"File.Position\", errno == 0 ? -1 : errno); return (int64_t)value;");
+        writer.WriteLine("#endif");
+        writer.WriteLine("}");
+        writer.WriteLine("static int64_t ct_host_file_seek_core(ct_host_file* file, int64_t offset, uint8_t origin)");
+        writer.WriteLine("{");
+        writer.WriteLine("    int native_origin = origin == 0u ? SEEK_SET : origin == 1u ? SEEK_CUR : origin == 2u ? SEEK_END : -1; if (native_origin < 0) ct_host_io_throw(\"File.Seek\", EINVAL); errno = 0;");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("    if (_fseeki64(file->Stream, (__int64)offset, native_origin) != 0) ct_host_io_throw(\"File.Seek\", errno == 0 ? -1 : errno);");
+        writer.WriteLine("#else");
+        writer.WriteLine("    if ((int64_t)(off_t)offset != offset) ct_host_io_throw(\"File.Seek\", EOVERFLOW);");
+        writer.WriteLine("    if (fseeko(file->Stream, (off_t)offset, native_origin) != 0) ct_host_io_throw(\"File.Seek\", errno == 0 ? -1 : errno);");
+        writer.WriteLine("#endif");
+        writer.WriteLine("    return ct_host_file_tell_core(file);");
+        writer.WriteLine("}");
+        writer.WriteLine($"int64_t ct_host_file_seek({handle} handle, int64_t offset, {CTypeName(Model.Types["System.IO.SeekOrigin"].Type)} origin) {{ return ct_host_file_seek_core(ct_host_file_require((uintptr_t)handle), offset, (uint8_t)origin); }}");
+        writer.WriteLine($"int64_t ct_host_file_position({handle} handle) {{ return ct_host_file_tell_core(ct_host_file_require((uintptr_t)handle)); }}");
+        writer.WriteLine($"int64_t ct_host_file_length({handle} handle) {{ ct_host_file* file = ct_host_file_require((uintptr_t)handle); int64_t position = ct_host_file_tell_core(file); int64_t length = ct_host_file_seek_core(file, 0, 2u); (void)ct_host_file_seek_core(file, position, 0u); return length; }}");
+        writer.WriteLine($"void ct_host_file_set_length({handle} handle, int64_t length)");
+        writer.WriteLine("{");
+        writer.WriteLine("    if (length < 0) ct_host_io_throw(\"File.SetLength\", EINVAL);");
+        writer.WriteLine("    ct_host_file* file = ct_host_file_require((uintptr_t)handle);");
+        writer.WriteLine("    if (file->Access == 0u) ct_host_io_throw(\"File.SetLength\", EINVAL);");
+        writer.WriteLine("    if (fflush(file->Stream) != 0) ct_host_io_throw(\"File.SetLength\", errno == 0 ? -1 : errno);");
+        writer.WriteLine("#if defined(_WIN32)");
+        writer.WriteLine("    errno_t error = _chsize_s(_fileno(file->Stream), (__int64)length); if (error != 0) ct_host_io_throw(\"File.SetLength\", (int)error);");
+        writer.WriteLine("#else");
+        writer.WriteLine("    if ((int64_t)(off_t)length != length) ct_host_io_throw(\"File.SetLength\", EOVERFLOW);");
+        writer.WriteLine("    if (ftruncate(fileno(file->Stream), (off_t)length) != 0) ct_host_io_throw(\"File.SetLength\", errno == 0 ? -1 : errno);");
+        writer.WriteLine("#endif");
+        writer.WriteLine("}");
+        writer.WriteLine($"void ct_host_file_flush({handle} handle) {{ ct_host_file* file = ct_host_file_require((uintptr_t)handle); if (fflush(file->Stream) != 0) ct_host_io_throw(\"File.Flush\", errno == 0 ? -1 : errno); }}");
+        writer.WriteLine($"uintptr_t ct_host_stream_open(ct_string* path, {mode} mode, {access} access) {{ return (uintptr_t)ct_host_file_open(path, mode, access); }}");
+        writer.WriteLine($"int32_t ct_host_stream_read(uintptr_t handle, {byteArray}* buffer, int32_t offset, int32_t count) {{ uintptr_t read = ct_host_file_read(({handle})handle, buffer->Data + offset, (size_t)count); if (read > (uintptr_t)INT32_MAX) ct_host_io_throw(\"Stream.Read\", EOVERFLOW); return (int32_t)read; }}");
+        writer.WriteLine($"void ct_host_stream_write(uintptr_t handle, {byteArray}* buffer, int32_t offset, int32_t count) {{ ct_host_file_write_buffer(({handle})handle, buffer->Data + offset, (size_t)count); }}");
+        writer.WriteLine($"int64_t ct_host_stream_seek(uintptr_t handle, int64_t offset, {CTypeName(Model.Types["System.IO.SeekOrigin"].Type)} origin) {{ return ct_host_file_seek(({handle})handle, offset, origin); }}");
+        writer.WriteLine($"int64_t ct_host_stream_position(uintptr_t handle) {{ return ct_host_file_position(({handle})handle); }}");
+        writer.WriteLine($"int64_t ct_host_stream_length(uintptr_t handle) {{ return ct_host_file_length(({handle})handle); }}");
+        writer.WriteLine($"void ct_host_stream_set_length(uintptr_t handle, int64_t length) {{ ct_host_file_set_length(({handle})handle, length); }}");
+        writer.WriteLine($"void ct_host_stream_flush(uintptr_t handle) {{ ct_host_file_flush(({handle})handle); }}");
+        writer.WriteLine($"void ct_host_stream_close(uintptr_t handle) {{ ct_host_file_close(({handle})handle); }}");
+        if (_usesHostedFilesystem)
+            EmitHostedFilesystemSupport(writer);
         writer.WriteLine();
     }
 }

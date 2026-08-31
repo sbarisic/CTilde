@@ -166,9 +166,30 @@ internal sealed class TypeSymbol
         }
     }
     public bool IsStringSurface => FullName == "System.String";
+    public CType? PrimitiveSurfaceType => FullName switch
+    {
+        "System.Boolean" => CType.Bool,
+        "System.Byte" => CType.Byte,
+        "System.SByte" => CType.Sbyte,
+        "System.Int16" => CType.Short,
+        "System.UInt16" => CType.Ushort,
+        "System.Int32" => CType.Int,
+        "System.UInt32" => CType.Uint,
+        "System.Int64" => CType.Long,
+        "System.UInt64" => CType.Ulong,
+        "System.IntPtr" => CType.Nint,
+        "System.UIntPtr" => CType.Nuint,
+        "System.Single" => CType.Float,
+        "System.Double" => CType.Double,
+        _ => null,
+    };
+    public bool IsPrimitiveSurface => PrimitiveSurfaceType is not null;
+    public bool IsCompilerBackedSurface => IsStringSurface || IsPrimitiveSurface;
 
     public CType Type => IsConstantParameter
         ? new CType(CTypeKind.Constant, Symbol: this, ElementType: ConstantParameterType)
+        : PrimitiveSurfaceType is { } primitive
+            ? primitive
         : IsStringSurface
             ? CType.String
         : new(FullName == "Esp.Idf.EspError"

@@ -35,6 +35,7 @@ internal sealed partial class CEmitter
         ("CT_FAULT_OUT_OF_MEMORY", "System.OutOfMemoryException", "ct_fault_out_of_memory"),
         ("CT_FAULT_THREAD_STATE", "System.ThreadStateException", "ct_fault_thread_state"),
         ("CT_FAULT_SYNCHRONIZATION_LOCK", "System.SynchronizationLockException", "ct_fault_synchronization_lock"),
+        ("CT_FAULT_DECODER", "System.DecoderFallbackException", "ct_fault_decoder"),
     ];
 
     private IEnumerable<(string Kind, string TypeName, string StorageName)> ActiveRuntimeFaultTypes =>
@@ -43,6 +44,7 @@ internal sealed partial class CEmitter
             "System.ArgumentNullException" => _externUses.Any(use => use.Method.ExternName == "ct_string_argument_null"),
             "System.ArgumentOutOfRangeException" => _usesRandomRangeFailure ||
                 _externUses.Any(use => use.Method.ExternName == "ct_string_argument_out_of_range"),
+            "System.DecoderFallbackException" => _externUses.Any(use => use.Method.ExternName == "ct_encoding_get_string"),
             _ => true,
         });
 
@@ -215,7 +217,7 @@ internal sealed partial class CEmitter
         uint id = 2;
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Interface).OrderBy(type => type.FullName, StringComparer.Ordinal))
             writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", NULL, &ct_default_vtable, NULL, 0u, {id++}u, 0u, 1u, false, NULL }};");
-        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsStringSurface).OrderBy(type => type.FullName, StringComparer.Ordinal))
+        foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsCompilerBackedSurface).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
             var interfaces = EmitInterfaceTable(writer, DescriptorName(type), VTableName(type), ImplementedInterfaces(type));

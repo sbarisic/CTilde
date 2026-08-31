@@ -157,7 +157,7 @@ internal static partial class ConformanceTests
                 var generated = RunNativeProfileCli(root, manifest, "--build", "--trace");
                 Assert(generated.ExitCode == 0, generated.StandardOutput + generated.StandardError);
                 var markers = Directory.EnumerateFiles(Path.Combine(root, "build", "generated-pgo"), "identity.txt", SearchOption.AllDirectories).ToArray();
-                Assert(markers.Length == 1 && File.ReadAllText(markers[0]).Contains("draft-0.41", StringComparison.Ordinal),
+                Assert(markers.Length == 1 && File.ReadAllText(markers[0]).Contains("draft-0.42", StringComparison.Ordinal),
                     "PGO generation did not create one Draft-versioned build identity.");
 
                 WriteNativeProfileManifest(manifest, "speed", "baseline", "precise", "generate", "build/stale-pgo");

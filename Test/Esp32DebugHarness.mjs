@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { DapMessageFramer, findUniqueSourceLine, withTimeout } from './Esp32HardwareSupport.mjs';
+import { DapMessageFramer, resolveEsp32DebugSourceLines, withTimeout } from './Esp32HardwareSupport.mjs';
 
 class DapClient {
   #child;
@@ -94,14 +94,7 @@ const reportPath = path.resolve(requiredOption('report'));
 const serialPort = options.get('port') ?? 'COM4';
 const baudRate = Number.parseInt(options.get('baud') ?? '460800', 10);
 const source = readFileSync(sourcePath, 'utf8');
-const lines = {
-  firstStatement: findUniqueSourceLine(source, 'EspError configureError = Ws2812.Configure'),
-  exerciseCall: findUniqueSourceLine(source, 'ExerciseArc();'),
-  arcObject: findUniqueSourceLine(source, 'node.Text = index.ToString();'),
-  arcIterationEnd: findUniqueSourceLine(source, 'index++;'),
-  afterSelfTests: findUniqueSourceLine(source, 'Console.Write("free heap: ");'),
-  loopDelay: findUniqueSourceLine(source, 'FreeRtos.DelayMilliseconds(500u);'),
-};
+const lines = resolveEsp32DebugSourceLines(source);
 
 const result = {
   passed: false,

@@ -33,6 +33,20 @@ export function findUniqueSourceLine(source, anchor) {
   return matches[0];
 }
 
+export const esp32DebugSourceAnchors = Object.freeze({
+  firstStatement: 'EspError configureError = Ws2812.Configure',
+  exerciseCall: 'ExerciseArc();',
+  arcObject: 'node.Text = index.ToString();',
+  arcIterationEnd: 'index++;',
+  afterSelfTests: 'Console.Write("minimum free heap: ");',
+  loopDelay: 'FreeRtos.DelayMilliseconds(500u);',
+});
+
+export function resolveEsp32DebugSourceLines(source) {
+  return Object.fromEntries(Object.entries(esp32DebugSourceAnchors)
+    .map(([name, anchor]) => [name, findUniqueSourceLine(source, anchor)]));
+}
+
 function requiredNumber(transcript, label) {
   const expression = new RegExp(`${escapeRegex(label)}\\s*(\\d+)`, 'i');
   const match = expression.exec(transcript);

@@ -23,7 +23,7 @@ internal static class DebugPreparation
         if (request.DebugMapPath is null || !File.Exists(request.DebugMapPath))
             throw new NativeBuildException("The compiler did not produce the required C~ debug map.");
 
-        var backend = native.Backend;
+        var backend = SelectDebuggerBackend(native);
         string? gdbCommand = null;
         string? serialPython = null;
         string[] gdbPrefix = [];
@@ -111,6 +111,9 @@ internal static class DebugPreparation
         if (request.Trace)
             Console.Error.WriteLine($"trace: wrote debug target {request.DebugTargetPath}");
     }
+
+    internal static string SelectDebuggerBackend(NativeBuildOutcome native) =>
+        native.Backend == "msvc" ? "msvc" : "gdb";
 
     internal static DebugStubKind SelectStub(BuildRequest request) => request.Target switch
     {

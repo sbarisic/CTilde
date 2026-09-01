@@ -15,6 +15,7 @@ import {
   parseMemoryValidationTranscript,
   parseObjectSymbols,
   parseRuntimeFailureTranscript,
+  resolveEsp32DebugSourceLines,
   serializeHardwareReport,
   withTimeout,
   validateMemoryBaseline,
@@ -26,6 +27,17 @@ test('source anchors must be unique', () => {
   assert.equal(findUniqueSourceLine('first\nunique anchor\nlast\n', 'unique anchor'), 2);
   assert.throws(() => findUniqueSourceLine('same\nsame\n', 'same'), /matched 2 lines/);
   assert.throws(() => findUniqueSourceLine('none\n', 'missing'), /matched 0 lines/);
+});
+
+test('ESP32 debugger anchors resolve uniquely against the checked-in example', () => {
+  const source = readFileSync(new URL('../examples/TCan485/Program.ct', import.meta.url), 'utf8');
+  const lines = resolveEsp32DebugSourceLines(source);
+  assert.deepEqual(Object.keys(lines), [
+    'firstStatement', 'exerciseCall', 'arcObject', 'arcIterationEnd', 'afterSelfTests', 'loopDelay',
+  ]);
+  assert.equal(lines.afterSelfTests, findUniqueSourceLine(source, 'Console.Write("minimum free heap: ");'));
+  for (const line of Object.values(lines))
+    assert.ok(Number.isInteger(line) && line > 0);
 });
 
 test('firmware transcript extracts measurements and alternating transitions', () => {

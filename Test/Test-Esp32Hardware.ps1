@@ -390,7 +390,7 @@ try {
     Invoke-Checked "npm" @("run", "compile") (Join-Path $repositoryDirectory "editors\vscode")
     Invoke-Checked "node" @("--test", $supportTest)
 
-    Write-Host "`n=== ABI 16 Release workload ==="
+    Write-Host "`n=== ABI 17 Release workload ==="
     & $buildScript -IdfPath $IdfPath -Target esp32 -Port $Port -Source $programSource -Clean
     if ($LASTEXITCODE -ne 0) { throw "Release firmware build failed with exit code $LASTEXITCODE." }
     $sizeOutput = Invoke-Captured "idf.py" @("size") $ProjectDirectory

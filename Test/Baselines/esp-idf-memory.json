@@ -7,56 +7,74 @@
   "targets": {
     "esp32": {
       "observed": {
-        "binaryBytes": 1009888,
-        "imageBytes": 1009764,
-        "flashCode": 696614,
-        "flashData": 204380,
+        "binaryBytes": 1010400,
+        "imageBytes": 1010276,
+        "flashCode": 696742,
+        "flashData": 204764,
         "iram": 90779,
-        "dram": 38871
+        "dram": 38951
       },
       "maximum": {
-        "binaryBytes": 1030086,
-        "imageBytes": 1029960,
-        "flashCode": 710547,
-        "flashData": 208468,
+        "binaryBytes": 1030608,
+        "imageBytes": 1030482,
+        "flashCode": 710677,
+        "flashData": 208860,
         "iram": 92595,
-        "dram": 39649
+        "dram": 39731
       }
     },
     "esp32c3": {
       "observed": {
-        "binaryBytes": 1072512,
-        "imageBytes": 1072142,
-        "flashCode": 776986,
-        "flashData": 206596,
+        "binaryBytes": 1072624,
+        "imageBytes": 1072254,
+        "flashCode": 776674,
+        "flashData": 207020,
         "iram": 0,
-        "dram": 109488
+        "dram": 109568
       },
       "maximum": {
-        "binaryBytes": 1093963,
-        "imageBytes": 1093585,
-        "flashCode": 792526,
-        "flashData": 210728,
+        "binaryBytes": 1094077,
+        "imageBytes": 1093700,
+        "flashCode": 792208,
+        "flashData": 211161,
         "iram": 512,
-        "dram": 111678
+        "dram": 111760
       }
     }
   },
   "hardware": {
     "observed": {
-      "freeHeap": 268224,
-      "minimumFreeHeap": 249316,
-      "stackHighWater": 6804,
-      "tick": 15,
-      "transitions": 25
+      "freeHeap": 268144,
+      "minimumFreeHeap": 249236,
+      "stackHighWater": 6852,
+      "tick": 13,
+      "transitions": 54
     },
     "minimum": {
-      "freeHeap": 264128,
-      "minimumFreeHeap": 245220,
-      "stackHighWater": 6292
+      "freeHeap": 264048,
+      "minimumFreeHeap": 245140,
+      "stackHighWater": 6340
     }
   },
   "layout": {
+    "array:bool": [
+      20,
+      4,
+      20,
+      1
+    ],
+    "array:byte": [
+      20,
+      4,
+      20,
+      1
+    ],
+    "array:char": [
+      20,
+      4,
+      20,
+      1
+    ],
     "array:Examples.TCan485MemoryValidation.LayoutReferences": [
       20,
       4,
@@ -64,6 +82,18 @@
       12
     ],
     "array:int": [
+      20,
+      4,
+      20,
+      4
+    ],
+    "array:string": [
+      20,
+      4,
+      20,
+      4
+    ],
+    "array:System.Object": [
       20,
       4,
       20,
@@ -91,8 +121,8 @@
       20
     ],
     "totals": [
-      720,
-      204,
+      1000,
+      304,
       496
     ],
     "type:Examples.TCan485MemoryValidation.LayoutEmpty": [
@@ -111,11 +141,19 @@
       20,
       4
     ],
+    "type:System.ArgumentNullException": [
+      20,
+      4
+    ],
     "type:System.DivideByZeroException": [
       20,
       4
     ],
     "type:System.Exception": [
+      20,
+      4
+    ],
+    "type:System.FormatException": [
       20,
       4
     ],
@@ -152,7 +190,7 @@
       4
     ],
     "vtable": [
-      12,
+      16,
       4
     ]
   }

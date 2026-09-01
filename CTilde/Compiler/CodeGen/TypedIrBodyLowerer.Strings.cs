@@ -107,7 +107,28 @@ internal sealed partial class TypedIrBodyLowerer
             _ => throw new InvalidOperationException($"Unsupported scalar string segment '{receiver.Type.DisplayName}'."),
         };
         prelude.Add($"char {buffer}[{capacity}];");
-        prelude.Add($"int {length} = snprintf({buffer}, sizeof({buffer}), {format}, {argument});");
+        if (_emitter.Target == CompilationTarget.Freestanding)
+        {
+            switch (receiver.Type.Kind)
+            {
+                case CTypeKind.Byte or CTypeKind.Ushort or CTypeKind.Uint or CTypeKind.Ulong or CTypeKind.Nuint:
+                    prelude.Add($"int32_t {length} = ct_format_u64_decimal((uint64_t){value}, false, {buffer});");
+                    break;
+                case CTypeKind.Sbyte or CTypeKind.Short or CTypeKind.Int or CTypeKind.Long or CTypeKind.Nint:
+                    prelude.Add($"int32_t {length} = ct_format_i64_decimal((int64_t){value}, {buffer});");
+                    break;
+                case CTypeKind.Float:
+                    _emitter.RequireFreestandingFloatFormatting();
+                    prelude.Add($"int32_t {length} = (int32_t)f2s_buffered_n({value}, {buffer});");
+                    break;
+                case CTypeKind.Double:
+                    _emitter.RequireFreestandingFloatFormatting();
+                    prelude.Add($"int32_t {length} = (int32_t)d2s_buffered_n({value}, {buffer});");
+                    break;
+            }
+        }
+        else
+            prelude.Add($"int {length} = snprintf({buffer}, sizeof({buffer}), {format}, {argument});");
         prelude.Add($"if ({length} < 0 || (size_t){length} >= sizeof({buffer})) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTS0002\", {_emitter.SourceArgument(syntax)});");
         prelude.Add($"{buildName}_parts[{index}] = (const uint8_t*){buffer};");
         prelude.Add($"{buildName}_lengths[{index}] = (int32_t){length};");

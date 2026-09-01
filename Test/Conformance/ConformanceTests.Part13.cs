@@ -266,8 +266,8 @@ internal static partial class ConformanceTests
             using var header = new StringWriter();
             Assert(compilation.EmitC(c).Success && compilation.EmitDebugMap(map).Success && compilation.EmitCHeader(header).Success, "Draft 0.15 artifact emission failed.");
             using var document = JsonDocument.Parse(map.ToString());
-            Assert(document.RootElement.GetProperty("version").GetInt32() == 3 && document.RootElement.GetProperty("runtimeAbi").GetInt32() == 16, "Debug metadata did not use v3/ABI 16.");
-            Assert(header.ToString().Contains("CTILDE_RUNTIME_ABI_VERSION UINT32_C(16)", StringComparison.Ordinal), "The native header did not declare ABI 16.");
+            Assert(document.RootElement.GetProperty("version").GetInt32() == 3 && document.RootElement.GetProperty("runtimeAbi").GetInt32() == 17, "Debug metadata did not use v3/ABI 17.");
+            Assert(header.ToString().Contains("CTILDE_RUNTIME_ABI_VERSION UINT32_C(17)", StringComparison.Ordinal), "The native header did not declare ABI 17.");
         });
     }
 }

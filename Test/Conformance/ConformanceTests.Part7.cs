@@ -14,7 +14,7 @@ internal static partial class ConformanceTests
             var importOnly = Compile("using System.IO; public static class Program { [EntryPoint] public static void Main() { } }");
             Assert(!importOnly.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "An unused hosted System.IO import was rejected.");
             var esp = Compile(source, new CompilationOptions(CompilationTarget.EspIdf));
-            Assert(esp.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Hosted I/O was available to ESP-IDF.");
+            Assert(!esp.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Console I/O was unavailable to ESP-IDF.");
 
             var service = LanguageServiceSnapshot.Create([SyntaxTree.ParseText("using System.IO; public static class P { public void M() { File. } }", "hosted-io.ct")]);
             var text = "using System.IO; public static class P { public void M() { File. } }";
@@ -23,7 +23,7 @@ internal static partial class ConformanceTests
             Assert(open.DocumentationId is not null && service.GetDocumentation(open.DocumentationId)?.Summary.Contains("Opens", StringComparison.Ordinal) == true, "Hosted File.Open documentation was unavailable.");
 
             var espService = LanguageServiceSnapshot.Create([SyntaxTree.ParseText(text, "esp-io.ct")], new CompilationOptions(CompilationTarget.EspIdf));
-            Assert(!espService.GetCompletions("esp-io.ct", text.IndexOf("File.", StringComparison.Ordinal) + "File.".Length).Any(completion => completion.Label == "Open"), "Hosted File completion appeared for ESP-IDF.");
+            Assert(espService.GetCompletions("esp-io.ct", text.IndexOf("File.", StringComparison.Ordinal) + "File.".Length).Any(completion => completion.Label == "Open"), "File completion was unavailable for ESP-IDF.");
         });
 
         suite.Run("hosted I/O ownership and reserved symbols", () =>

@@ -181,14 +181,13 @@ public sealed class List<T> : System.IEnumerable<T>
     private bool InvokeEquality(System.Equality<T> equality, T left, T right)
     {
         callbackDepth++;
-        try
-        {
-            return equality(left, right);
-        }
-        finally
-        {
-            callbackDepth--;
-        }
+        defer EndCallback();
+        return equality(left, right);
+    }
+
+    private void EndCallback()
+    {
+        callbackDepth--;
     }
 
     private void EnsureCapacity(int required)
@@ -509,20 +508,18 @@ public sealed class Queue<T> : System.IEnumerable<T>
         {
             int index = PhysicalIndex(offset);
             callbackDepth++;
-            bool equal = false;
-            try
-            {
-                equal = equality(items[index], value);
-            }
-            finally
-            {
-                callbackDepth--;
-            }
+            defer EndCallback();
+            bool equal = equality(items[index], value);
             if (equal)
                 return true;
             offset++;
         }
         return false;
+    }
+
+    private void EndCallback()
+    {
+        callbackDepth--;
     }
 
     public void Clear()

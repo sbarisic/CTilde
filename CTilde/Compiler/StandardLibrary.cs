@@ -39,7 +39,6 @@ internal static class StandardLibrary
         StandardVectorTypes vectors = StandardVectorTypes.None,
         StandardFoundationTypes foundations = StandardFoundationTypes.None)
     {
-        includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors, foundations), key =>
         {
             var files = FilesFor(key.Target, key.HostedIo, key.Vectors, key.Foundations);
@@ -57,7 +56,6 @@ internal static class StandardLibrary
         IReadOnlyDictionary<string, string>? overrides = null,
         bool applyTransforms = true)
     {
-        includeHostedIo &= target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan;
         return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors, StandardFoundationTypes.All), includeNativeIntegers, includeNativeUtf8,
             includeHostedIo, target == CompilationTarget.Freestanding, Path.GetFullPath(sourceRoot), overrides, applyTransforms);
     }
@@ -68,27 +66,22 @@ internal static class StandardLibrary
             vectors |= StandardVectorTypes.Vec2 | StandardVectorTypes.Vec3 | StandardVectorTypes.Vec4;
         if ((vectors & StandardVectorTypes.PacketGeometry) != 0)
             vectors |= StandardVectorTypes.Vec3 | StandardVectorTypes.Simd;
-        var files = target == CompilationTarget.Freestanding
-            ? new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "MemoryFreestanding.ct", "Endian.ct", "Target.ct" }
-            : new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "Console.ct", "Environment.ct", "Math.ct", "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+        var files = new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "Console.ct", "Environment.ct", "Math.ct", target == CompilationTarget.Freestanding ? "MemoryFreestanding.ct" : "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
+        if (target == CompilationTarget.Freestanding)
+            files.Add("FreestandingFault.ct");
         if ((foundations & (StandardFoundationTypes.TimeSpan | StandardFoundationTypes.Stopwatch)) != 0)
             files.Add("TimeSpan.ct");
         if ((foundations & StandardFoundationTypes.Random) != 0)
             files.Add("Random.ct");
-        if (target != CompilationTarget.Freestanding && (foundations & StandardFoundationTypes.Stopwatch) != 0)
+        if ((foundations & StandardFoundationTypes.Stopwatch) != 0)
             files.Add("Diagnostics.ct");
-        if (target == CompilationTarget.Freestanding && (vectors & (StandardVectorTypes.Vec2 | StandardVectorTypes.Vec3 | StandardVectorTypes.Vec4 | StandardVectorTypes.Simd | StandardVectorTypes.Geometry)) != 0)
-            files.Add("Math.ct");
         files.Add("Generics.ct");
         files.Add("ArrayAlgorithms.ct");
         files.Add("Utf8.ct");
         files.Add("Iteration.ct");
-        if (target != CompilationTarget.Freestanding)
-        {
-            files.Add("LinearCollections.ct");
-            files.Add("HashCollections.ct");
-            files.Add("IteratorEnumerable.ct");
-        }
+        files.Add("LinearCollections.ct");
+        files.Add("HashCollections.ct");
+        files.Add("IteratorEnumerable.ct");
         if ((vectors & StandardVectorTypes.Vec2) != 0)
             files.Add("Vec2.ct");
         if ((vectors & StandardVectorTypes.Vec3) != 0)
@@ -180,7 +173,7 @@ internal static class StandardLibrary
         {
             CompilationTarget.EspIdf => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "EspIdf.docs.xml" },
             CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml" },
-            _ => new[] { "System.docs.xml", "Generics.docs.xml", "Geometry.docs.xml" },
+            _ => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml" },
         };
         var assembly = typeof(StandardLibrary).Assembly;
         return [.. names.Select(name =>
@@ -229,14 +222,35 @@ internal static class StandardLibrary
                 text = text.Replace("    // CTILDE_NATIVE_INTEGER_OVERLOADS", NativeIntegerConsoleOverloads, StringComparison.Ordinal);
             if (applyTransforms && file == "Console.ct" && includeHostedIo)
                 text = text.Replace("    // CTILDE_HOSTED_INPUT_MEMBERS", HostedConsoleInputMembers, StringComparison.Ordinal);
-            if (applyTransforms && file == "Memory.ct" && includeNativeUtf8)
+            if (applyTransforms && (file is "Memory.ct" or "MemoryFreestanding.ct") && includeNativeUtf8)
                 text = text.Replace("// CTILDE_NATIVE_UTF8_DECLARATION", NativeUtf8Declaration, StringComparison.Ordinal);
             if (applyTransforms && file == "Simd.ct" && freestanding)
                 text = StripRegions(text, "// CTILDE_CHECKED_SIMD_BEGIN", "// CTILDE_CHECKED_SIMD_END");
+            if (applyTransforms && freestanding)
+                text = RewriteFreestandingFaults(text);
             trees.Add(SyntaxTree.ParseStandardLibrary(SourceText.From(text, path)));
         }
 
         return trees.ToImmutable();
+    }
+
+    private static string RewriteFreestandingFaults(string text)
+    {
+        foreach (var (exception, helper) in new[]
+                 {
+                     ("ArgumentException", "Argument"),
+                     ("ArgumentNullException", "ArgumentNull"),
+                     ("ArgumentOutOfRangeException", "ArgumentOutOfRange"),
+                     ("EndOfStreamException", "EndOfStream"),
+                     ("IndexOutOfRangeException", "IndexOutOfRange"),
+                     ("InvalidOperationException", "InvalidOperation"),
+                     ("KeyNotFoundException", "KeyNotFound"),
+                     ("ObjectDisposedException", "ObjectDisposed"),
+                     ("OutOfMemoryException", "OutOfMemory"),
+                     ("OverflowException", "Overflow"),
+                 })
+            text = text.Replace($"throw new System.{exception}();", $"System.Runtime.FreestandingFault.{helper}();", StringComparison.Ordinal);
+        return text;
     }
 
     private static string StripRegions(string text, string begin, string end)

@@ -282,11 +282,13 @@ internal static class EffectAnalyzer
         }
 
         if (!body.Method.IsConstructor && body.Method.ReturnType.ContainsManagedReferences ||
-            body.Method.Parameters.Any(parameter => parameter.Type.ContainsManagedReferences))
+            body.Method.Parameters.Any(parameter => parameter.Type.ContainsManagedReferences &&
+                !(body.Method.RuntimeImplementation is not null && parameter.Type.IsNativeUtf8String)))
             operations.Add(new EffectOperation(syntax, EffectKind.UsesRuntime, "managed method signature"));
 
         foreach (var semantic in body.Semantics.Values
                      .Where(semantic => semantic.Type.ContainsManagedReferences &&
+                         !(body.Method.RuntimeImplementation is not null && semantic.Type.IsNativeUtf8String && semantic.Symbol is ParameterSymbol) &&
                          semantic.Symbol is LocalSymbol or ParameterSymbol or FieldSymbol)
                      .GroupBy(semantic => semantic.Syntax)
                      .Select(group => group.First()))

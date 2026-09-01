@@ -75,6 +75,7 @@ internal sealed partial class CompilationModel
     public MethodSymbol? EntryPoint { get; private set; }
     public IReadOnlyDictionary<RuntimeImplementationRole, MethodSymbol> RuntimeImplementations { get; private set; } =
         ImmutableDictionary<RuntimeImplementationRole, MethodSymbol>.Empty;
+    public ImmutableHashSet<RuntimeImplementationRole> RequiredRuntimeImplementations { get; internal set; } = [];
     public bool FreestandingRuntimeRequired { get; set; }
     public bool FreestandingHeapRequired { get; set; }
     public EffectAnalysis Effects { get; set; } = EffectAnalysis.Empty;
@@ -1913,10 +1914,10 @@ internal sealed partial class CompilationModel
                          methodParameters is not [{ Type.Kind: CTypeKind.Pointer, Type.ElementType.Kind: CTypeKind.Void }]))
                         Diagnostics.Add("CT1292", "TaskEntry requires an ESP-IDF public static non-generic exported void(void*) method body.", taskEntryAttribute.Source, taskEntryAttribute.Span);
                     if (runtimeImplAttribute is not null &&
-                        (_target != CompilationTarget.Freestanding || runtimeImplementation is null ||
+                        (_target is not (CompilationTarget.Freestanding or CompilationTarget.EspIdf) || runtimeImplementation is null ||
                          !isStatic || !hasBody || isAbstractMethod || external is not null || export is not null || entry is not null ||
                          taskEntryAttribute is not null || nakedAttribute is not null || !method.TypeParameters.IsDefaultOrEmpty || noAlloc is null))
-                        Diagnostics.Add("CT1299", "RuntimeImpl requires a freestanding non-generic static body-bearing NoAlloc method without native-entry attributes.", runtimeImplAttribute.Source, runtimeImplAttribute.Span);
+                        Diagnostics.Add("CT1299", "RuntimeImpl requires a freestanding or ESP-IDF non-generic static body-bearing NoAlloc method without native-entry attributes.", runtimeImplAttribute.Source, runtimeImplAttribute.Span);
                     if (nakedAttribute is not null && !IsValidNakedMethod(symbol))
                         Diagnostics.Add("CT1302", "Naked requires a freestanding public static unsafe non-generic NoAlloc exported void() assembly function without operands, or the compatible one-statement NoAlloc asm form.", nakedAttribute.Source, nakedAttribute.Span);
                     if (interruptSafeAttribute is not null && external is null && !isAssemblyFunction)
@@ -1931,7 +1932,7 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1306", "Interrupt requires an ESP-IDF public static unsafe non-generic exported void(void*) method body without conflicting entry or placement attributes.", interruptAttribute.Source, interruptAttribute.Span);
                     if (symbol.IsVirtual && accessibility == Accessibility.Private)
                         Diagnostics.Add("CT1228", "A virtual or override method cannot be private.", method.Source, method.Span);
-                    if (symbol.IsNoRuntime && (returnType.ContainsManagedReferences || methodParameters.Any(parameter => parameter.Type.ContainsManagedReferences)))
+                    if (symbol.IsNoRuntime && runtimeImplAttribute is null && (returnType.ContainsManagedReferences || methodParameters.Any(parameter => parameter.Type.ContainsManagedReferences)))
                         Diagnostics.Add("CT1305", "NoRuntime methods cannot have managed parameters or results.", method.Source, method.Span);
                     AddMethod(type.Methods, symbol);
                     _activeTypeParameters = previousTypeParameters;
@@ -2114,7 +2115,7 @@ internal sealed partial class CompilationModel
             receiver.Name is "Runtime" or "System.Runtime.Runtime" &&
             Enum.TryParse<RuntimeImplementationRole>(member.Name, ignoreCase: false, out var role))
             return role;
-        Diagnostics.Add("CT1299", "RuntimeImpl requires one Runtime.Allocate, Runtime.Free, or Runtime.Panic role.", attribute.Source, attribute.Span);
+        Diagnostics.Add("CT1299", "RuntimeImpl requires one declared System.Runtime.Runtime role.", attribute.Source, attribute.Span);
         return null;
     }
 
@@ -2154,19 +2155,74 @@ internal sealed partial class CompilationModel
         foreach (var pair in RuntimeImplementations)
         {
             var method = pair.Value;
-            var valid = pair.Key switch
-            {
-                RuntimeImplementationRole.Allocate => method.ReturnType is { Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void } &&
-                    method.Parameters is [{ PassingKind: ParameterPassingKind.Value, Type.Kind: CTypeKind.Nuint }],
-                RuntimeImplementationRole.Free => method.ReturnType == CType.Void &&
-                    method.Parameters is [{ PassingKind: ParameterPassingKind.Value, Type: { Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void } }],
-                RuntimeImplementationRole.Panic => method.ReturnType == CType.Void && method.Parameters is [{ PassingKind: ParameterPassingKind.Value } parameter] &&
-                    parameter.Type.Symbol?.FullName == "System.Runtime.RuntimePanicInfo",
-                _ => false,
-            };
+            var valid = IsValidRuntimeImplementationSignature(pair.Key, method);
             if (!valid)
                 Diagnostics.Add("CT1299", $"Runtime role '{pair.Key}' has an invalid signature.", method.Syntax!.Source, method.Syntax.Span);
         }
+    }
+
+    private static bool IsValidRuntimeImplementationSignature(RuntimeImplementationRole role, MethodSymbol method)
+    {
+        static bool Named(CType type, string name) => type.Symbol?.FullName == "System.Runtime." + name;
+        static bool Value(ParameterSymbol parameter, CType type) => parameter.PassingKind == ParameterPassingKind.Value && parameter.Type == type;
+        static bool NamedValue(ParameterSymbol parameter, string name) => parameter.PassingKind == ParameterPassingKind.Value && Named(parameter.Type, name);
+        static bool Out(ParameterSymbol parameter, CType type) => parameter.PassingKind == ParameterPassingKind.Out && parameter.Type == type;
+        static bool NamedOut(ParameterSymbol parameter, string name) => parameter.PassingKind == ParameterPassingKind.Out && Named(parameter.Type, name);
+        static bool VoidPointer(CType type) => type is { Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void };
+        static bool Buffer(ParameterSymbol parameter, CTypeKind kind) => parameter.PassingKind == ParameterPassingKind.Value &&
+            parameter.Type.Kind == kind && parameter.Type.ElementType == CType.Byte;
+        static bool Path(ParameterSymbol parameter) => parameter.PassingKind == ParameterPassingKind.Value && parameter.Type.Kind == CTypeKind.NativeUtf8String;
+        static bool Result(MethodSymbol candidate) => Named(candidate.ReturnType, "RuntimeResult");
+        static bool Transfer(MethodSymbol candidate) => Named(candidate.ReturnType, "RuntimeTransferResult");
+        static bool NoParameters(MethodSymbol candidate) => candidate.Parameters.Length == 0;
+        static bool Handle(ParameterSymbol parameter) => Value(parameter, CType.Nuint);
+
+        var p = method.Parameters;
+        return role switch
+        {
+            RuntimeImplementationRole.Allocate => VoidPointer(method.ReturnType) && p is [{ PassingKind: ParameterPassingKind.Value, Type.Kind: CTypeKind.Nuint }],
+            RuntimeImplementationRole.Free => method.ReturnType == CType.Void && p.Length == 1 && VoidPointer(p[0].Type) && p[0].PassingKind == ParameterPassingKind.Value,
+            RuntimeImplementationRole.Panic => method.ReturnType == CType.Void && p.Length == 1 && NamedValue(p[0], "RuntimePanicInfo"),
+            RuntimeImplementationRole.Exit => method.ReturnType == CType.Void && p.Length == 1 && Value(p[0], CType.Int),
+            RuntimeImplementationRole.ConsoleWrite => Transfer(method) && p.Length == 1 && Buffer(p[0], CTypeKind.ReadOnlyNativeBuffer),
+            RuntimeImplementationRole.ConsoleRead => Transfer(method) && p.Length == 1 && Buffer(p[0], CTypeKind.NativeBuffer),
+            RuntimeImplementationRole.ConsoleFlush => Result(method) && NoParameters(method),
+            RuntimeImplementationRole.MonotonicNanoseconds => method.ReturnType == CType.Long && NoParameters(method),
+            RuntimeImplementationRole.PathSeparator => method.ReturnType == CType.Char && NoParameters(method),
+            RuntimeImplementationRole.MathFloatUnary => method.ReturnType == CType.Float && p.Length == 2 && NamedValue(p[0], "RuntimeUnaryMathOperation") && Value(p[1], CType.Float),
+            RuntimeImplementationRole.MathFloatBinary => method.ReturnType == CType.Float && p.Length == 3 && NamedValue(p[0], "RuntimeBinaryMathOperation") && Value(p[1], CType.Float) && Value(p[2], CType.Float),
+            RuntimeImplementationRole.MathDoubleUnary => method.ReturnType == CType.Double && p.Length == 2 && NamedValue(p[0], "RuntimeUnaryMathOperation") && Value(p[1], CType.Double),
+            RuntimeImplementationRole.MathDoubleBinary => method.ReturnType == CType.Double && p.Length == 3 && NamedValue(p[0], "RuntimeBinaryMathOperation") && Value(p[1], CType.Double) && Value(p[2], CType.Double),
+            RuntimeImplementationRole.FileOpen => Result(method) && p.Length == 4 && Path(p[0]) && NamedValue(p[1], "RuntimeFileMode") && NamedValue(p[2], "RuntimeFileAccess") && Out(p[3], CType.Nuint),
+            RuntimeImplementationRole.FileRead => Transfer(method) && p.Length == 2 && Handle(p[0]) && Buffer(p[1], CTypeKind.NativeBuffer),
+            RuntimeImplementationRole.FileWrite => Transfer(method) && p.Length == 2 && Handle(p[0]) && Buffer(p[1], CTypeKind.ReadOnlyNativeBuffer),
+            RuntimeImplementationRole.FileSeek => Result(method) && p.Length == 4 && Handle(p[0]) && Value(p[1], CType.Long) && NamedValue(p[2], "RuntimeSeekOrigin") && Out(p[3], CType.Long),
+            RuntimeImplementationRole.FileLength => Result(method) && p.Length == 2 && Handle(p[0]) && Out(p[1], CType.Long),
+            RuntimeImplementationRole.FileSetLength => Result(method) && p.Length == 2 && Handle(p[0]) && Value(p[1], CType.Long),
+            RuntimeImplementationRole.FileFlush or RuntimeImplementationRole.FileClose => Result(method) && p.Length == 1 && Handle(p[0]),
+            RuntimeImplementationRole.PathMetadata => Result(method) && p.Length == 2 && Path(p[0]) && NamedOut(p[1], "RuntimeFileMetadata"),
+            RuntimeImplementationRole.FileDelete => Result(method) && p.Length == 1 && Path(p[0]),
+            RuntimeImplementationRole.PathMove => Result(method) && p.Length == 3 && Path(p[0]) && Path(p[1]) && Value(p[2], CType.Bool),
+            RuntimeImplementationRole.DirectoryCreate => Result(method) && p.Length == 1 && Path(p[0]),
+            RuntimeImplementationRole.DirectoryDelete => Result(method) && p.Length == 2 && Path(p[0]) && Value(p[1], CType.Bool),
+            RuntimeImplementationRole.DirectoryOpen => Result(method) && p.Length == 2 && Path(p[0]) && Out(p[1], CType.Nuint),
+            RuntimeImplementationRole.DirectoryRead => Transfer(method) && p.Length == 3 && Handle(p[0]) && Buffer(p[1], CTypeKind.NativeBuffer) && NamedOut(p[2], "RuntimeFileMetadata"),
+            RuntimeImplementationRole.DirectoryClose => Result(method) && p.Length == 1 && Handle(p[0]),
+            RuntimeImplementationRole.CurrentDirectoryGet => Transfer(method) && p.Length == 1 && Buffer(p[0], CTypeKind.NativeBuffer),
+            RuntimeImplementationRole.CurrentDirectorySet => Result(method) && p.Length == 1 && Path(p[0]),
+            RuntimeImplementationRole.ThreadCreate => Result(method) && p.Length == 6 && p[0].PassingKind == ParameterPassingKind.Value &&
+                p[0].Type is { Kind: CTypeKind.FunctionPointer, FunctionPointer: { ParameterTypes: [{ Kind: CTypeKind.Pointer, ElementType.Kind: CTypeKind.Void }], ReturnType.Kind: CTypeKind.Void } } &&
+                p[1].PassingKind == ParameterPassingKind.Value && VoidPointer(p[1].Type) && Value(p[2], CType.Uint) && NamedValue(p[3], "RuntimeThreadPriority") && Out(p[4], CType.Nuint) && Out(p[5], CType.Uint),
+            RuntimeImplementationRole.ThreadJoin or RuntimeImplementationRole.ThreadClose => Result(method) && p.Length == 1 && Handle(p[0]),
+            RuntimeImplementationRole.ThreadSleep => Result(method) && p.Length == 1 && Value(p[0], CType.Uint),
+            RuntimeImplementationRole.ThreadYield => Result(method) && NoParameters(method),
+            RuntimeImplementationRole.ThreadStateGet => VoidPointer(method.ReturnType) && NoParameters(method),
+            RuntimeImplementationRole.ThreadStateSet => method.ReturnType == CType.Void && p.Length == 1 && p[0].PassingKind == ParameterPassingKind.Value && VoidPointer(p[0].Type),
+            RuntimeImplementationRole.MutexCreate => Result(method) && p.Length == 1 && Out(p[0], CType.Nuint),
+            RuntimeImplementationRole.MutexEnter or RuntimeImplementationRole.MutexExit or RuntimeImplementationRole.MutexClose => Result(method) && p.Length == 1 && Handle(p[0]),
+            RuntimeImplementationRole.MutexTryEnter => Result(method) && p.Length == 2 && Handle(p[0]) && Out(p[1], CType.Bool),
+            _ => false,
+        };
     }
 
     private void ValidateEntryPoint()

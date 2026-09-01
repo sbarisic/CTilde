@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.42 makes attached Windows consoles use UTF-8, adds invariant scalar and enum parsing, and expands hosted and Cosmopolitan I/O with seekable streams, directories, metadata, paths, and strict UTF-8 text files. Draft 0.41 remains the historical native-optimization and compiler-backed string revision. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, ESP-IDF, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
+Draft 0.43 makes the standard library available to freestanding and ESP-IDF programs through typed runtime-service providers for allocation, panic, console, time, math, files, directories, threads, mutexes, and runtime TLS. ESP-IDF retains its built-in platform adapters unless a complete service group is overridden. Draft 0.42 remains the historical UTF-8 parsing and hosted-I/O revision. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -242,9 +242,9 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path.
 
-The generated header exposes exported methods and runtime ABI 16 lifecycle functions. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
+The generated header exposes exported methods and runtime ABI 17 lifecycle functions. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
-Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, and managed allocation failure are catchable exceptions. ABI, runtime lifecycle, thread attachment, ARC corruption, and native-boundary failures are panics.
+Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, and managed allocation failure are catchable exceptions on exception-capable targets. Freestanding routes these faults to its panic provider. ABI, runtime lifecycle, thread attachment, ARC corruption, and native-boundary failures are always panics.
 
 ## Visual Studio Code
 
@@ -282,9 +282,9 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.42 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.43 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
-- [C_ABI.md](C_ABI.md): generated C, ABI 16, and native interop.
+- [C_ABI.md](C_ABI.md): generated C, ABI 17, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): measured implementation and validation status.
 - [TODO.md](TODO.md): outstanding work only.

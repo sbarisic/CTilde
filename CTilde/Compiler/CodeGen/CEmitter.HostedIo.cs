@@ -14,8 +14,13 @@ internal sealed partial class CEmitter
 
     private void EmitHostedIoSupport(CWriter writer)
     {
-        if (!_usesHostedIo || IsEspIdf)
+        if (!_usesHostedIo)
             return;
+        if (IsFreestanding || UsesEspRuntimeIo)
+        {
+            EmitRuntimeIoSupport(writer);
+            return;
+        }
 
         var ioException = Model.Types["System.IO.IOException"];
         var ioConstructor = ioException.Constructors.Single(constructor => constructor.Parameters.Length == 4);

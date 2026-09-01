@@ -310,13 +310,33 @@
   <member id="M:System.Endian.FromLittleEndian(le32)"><summary>Converts a 32-bit little-endian representation to a native numeric value.</summary><param name="value">The little-endian representation.</param><returns>The native numeric value.</returns></member>
 
   <member id="T:System.Runtime.TargetProfile"><summary>Identifies the selected compilation profile.</summary></member>
+  <member id="T:System.Runtime.TargetEnvironment"><summary>Identifies whether the target runs natively or in a supported emulator.</summary></member>
   <member id="T:System.Runtime.TargetArchitecture"><summary>Identifies the resolved native target architecture.</summary></member>
-  <member id="T:System.Runtime.Runtime"><summary>Identifies a user-supplied freestanding runtime implementation role.</summary></member>
-  <member id="T:System.Runtime.RuntimePanicInfo"><summary>Provides the stable code and source location for a freestanding terminal failure.</summary><remarks>The byte pointers refer to compiler-owned zero-terminated ASCII data for the duration of the panic call.</remarks></member>
+  <member id="T:System.Runtime.CpuFeature"><summary>Identifies an explicitly selected portable CPU feature contract.</summary></member>
+  <member id="T:System.Runtime.Runtime"><summary>Identifies a user-supplied freestanding or ESP-IDF runtime service role.</summary></member>
+  <member id="T:System.Runtime.RuntimeStatus"><summary>Identifies a portable runtime-service result status.</summary></member>
+  <member id="T:System.Runtime.RuntimeResult"><summary>Reports a runtime-service status and backend-defined native error code.</summary></member>
+  <member id="M:System.Runtime.RuntimeResult.#ctor(System.Runtime.RuntimeStatus,int)"><summary>Creates a runtime result.</summary><param name="status">The portable status.</param><param name="nativeCode">The backend-defined native error code, or zero.</param></member>
+  <member id="P:System.Runtime.RuntimeResult.Ok"><summary>Gets a successful runtime result with native code zero.</summary></member>
+  <member id="T:System.Runtime.RuntimeTransferResult"><summary>Reports a runtime-service status, native error code, and byte count.</summary></member>
+  <member id="M:System.Runtime.RuntimeTransferResult.#ctor(System.Runtime.RuntimeStatus,int,nuint)"><summary>Creates a runtime transfer result.</summary><param name="status">The portable status.</param><param name="nativeCode">The backend-defined native error code, or zero.</param><param name="count">The transferred or required byte count.</param></member>
+  <member id="T:System.Runtime.RuntimeFileMode"><summary>Identifies the requested runtime file creation or opening mode.</summary></member>
+  <member id="T:System.Runtime.RuntimeFileAccess"><summary>Identifies the requested runtime file access.</summary></member>
+  <member id="T:System.Runtime.RuntimeSeekOrigin"><summary>Identifies the base position for a runtime file seek.</summary></member>
+  <member id="T:System.Runtime.RuntimeFileKind"><summary>Identifies a runtime filesystem entry kind.</summary></member>
+  <member id="T:System.Runtime.RuntimeFileAttributes"><summary>Provides portable runtime filesystem attributes.</summary></member>
+  <member id="T:System.Runtime.RuntimeFileTimestamp"><summary>Stores a Unix timestamp as seconds and nanoseconds.</summary></member>
+  <member id="T:System.Runtime.RuntimeFileMetadata"><summary>Stores portable runtime filesystem metadata and timestamp availability.</summary></member>
+  <member id="T:System.Runtime.RuntimeUnaryMathOperation"><summary>Identifies a scalar unary math operation requested from a provider.</summary></member>
+  <member id="T:System.Runtime.RuntimeBinaryMathOperation"><summary>Identifies a scalar binary math operation requested from a provider.</summary></member>
+  <member id="T:System.Runtime.RuntimeThreadPriority"><summary>Identifies the portable priority requested from a thread provider.</summary></member>
+  <member id="T:System.Runtime.RuntimePanicInfo"><summary>Provides the stable code, source location, service status, and native code for a terminal failure.</summary><remarks>The byte pointers refer to compiler-owned zero-terminated ASCII data for the duration of the panic call.</remarks></member>
   <member id="T:System.Runtime.Target"><summary>Provides compile-time constants for target-dependent source selection.</summary><remarks>Target queries emit no runtime storage or calls.</remarks></member>
   <member id="P:System.Runtime.Target.Profile"><summary>Gets the selected compilation profile.</summary></member>
+  <member id="P:System.Runtime.Target.Environment"><summary>Gets the selected native or emulated target environment.</summary></member>
   <member id="P:System.Runtime.Target.Architecture"><summary>Gets the resolved target architecture.</summary></member>
   <member id="P:System.Runtime.Target.PointerSize"><summary>Gets the target pointer size in bytes.</summary></member>
+  <member id="M:System.Runtime.Target.HasFeature(System.Runtime.CpuFeature)"><summary>Reports whether a CPU feature contract was explicitly selected.</summary><param name="feature">The feature to query.</param><returns>True when the feature is part of the target contract.</returns></member>
   <member id="T:System.Runtime.Mmio"><summary>Provides exact-width volatile memory-mapped I/O operations.</summary><remarks>Access is unsafe. The caller must provide a naturally aligned address.</remarks></member>
   <member id="M:System.Runtime.Mmio.Read&lt;T&gt;(nuint)"><summary>Performs an ordered volatile load.</summary><param name="address">The naturally aligned native address.</param><returns>The loaded value.</returns></member>
   <member id="M:System.Runtime.Mmio.Write&lt;T&gt;(nuint,T)"><summary>Performs an ordered volatile store.</summary><param name="address">The naturally aligned native address.</param><param name="value">The value to store.</param></member>

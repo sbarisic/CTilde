@@ -130,8 +130,8 @@ $manifestRunText = ($manifestRunOutput | ForEach-Object { $_.ToString() }) -join
 if ($manifestRunExitCode -ne 0) {
     throw "The manifest-driven QEMU run failed with exit code $manifestRunExitCode. Output:`n$manifestRunText"
 }
-if ($manifestRunText.Trim() -ne 'CTILDE_QEMU_OK') {
-    throw "The manifest-driven QEMU output was not exactly the CTILDE_QEMU_OK marker. Output:`n$manifestRunText"
+if ((($manifestRunText -split "`r?`n") | Where-Object { $_.Trim() -eq 'CTILDE_QEMU_OK' }).Count -ne 1) {
+    throw "The manifest-driven QEMU output did not contain exactly one CTILDE_QEMU_OK marker. Output:`n$manifestRunText"
 }
 
 Write-Output 'QEMU freestanding smoke test passed.'

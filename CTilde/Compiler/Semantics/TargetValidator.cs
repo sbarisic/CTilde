@@ -65,8 +65,9 @@ internal static class TargetValidator
                 model.Diagnostics.Add("CT4101", $"External symbol '{method.ExternName}' conflicts with an ESP-IDF target symbol.", method.Syntax!.Source, method.Syntax.Span);
             }
 
-            foreach (var use in emitter.ExternUses.Where(use => use.Method.ExternName == "ct_environment_exit"))
-                model.Diagnostics.Add("CT4105", "System.Environment.Exit is not available for the ESP-IDF target; use Esp.Idf.EspSystem.Restart when a reset is intended.", use.Syntax.Source, use.Syntax.Span);
+            if (!model.RuntimeImplementations.ContainsKey(RuntimeImplementationRole.Exit))
+                foreach (var use in emitter.ExternUses.Where(use => use.Method.ExternName == "ct_environment_exit"))
+                    model.Diagnostics.Add("CT4105", "System.Environment.Exit on ESP-IDF requires RuntimeImpl(Runtime.Exit); use Esp.Idf.EspSystem.Restart when a reset is intended.", use.Syntax.Source, use.Syntax.Span);
         }
 
         var complete = new HashSet<TypeSymbol>();

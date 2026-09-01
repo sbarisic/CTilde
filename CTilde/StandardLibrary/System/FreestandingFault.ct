@@ -1,0 +1,54 @@
+namespace System.Runtime;
+
+internal static class FreestandingFault
+{
+    [Extern("ct_fs_fault_argument")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void Argument();
+
+    [Extern("ct_fs_fault_argument_null")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void ArgumentNull();
+
+    [Extern("ct_fs_fault_argument_out_of_range")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void ArgumentOutOfRange();
+
+    [Extern("ct_fs_fault_end_of_stream")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void EndOfStream();
+
+    [Extern("ct_fs_fault_index_out_of_range")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void IndexOutOfRange();
+
+    [Extern("ct_fs_fault_invalid_operation")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void InvalidOperation();
+
+    [Extern("ct_fs_fault_key_not_found")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void KeyNotFound();
+
+    [Extern("ct_fs_fault_object_disposed")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void ObjectDisposed();
+
+    [Extern("ct_fs_fault_out_of_memory")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void OutOfMemory();
+
+    [Extern("ct_fs_fault_overflow")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void Overflow();
+}

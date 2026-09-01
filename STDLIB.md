@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.42 and runtime ABI 16. Draft 0.42 adds compiler-backed scalar parsing, enum parsing, strict UTF-8 encoding objects and console behavior, and synchronous streams, directories, paths, and metadata on hosted and Cosmopolitan targets. Draft 0.41 remains the historical string and native-build-control revision. Runtime ABI 16 and debug metadata version 3 are unchanged.
+This document is the canonical standard-library reference for C~ Draft 0.43 and runtime ABI 17. Draft 0.43 makes the common standard library available to freestanding and ESP-IDF projects through typed runtime-service providers. ESP-IDF keeps its built-in platform adapters unless a complete service group is overridden. Draft 0.42 remains the historical scalar-parsing and hosted-I/O revision. Debug metadata remains version 3.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -66,6 +66,8 @@ The parameterless constructor uses an empty message. The string constructor also
 
 The standard library also declares `NullReferenceException`, `IndexOutOfRangeException`, `DivideByZeroException`, `InvalidCastException`, `OverflowException`, `ArgumentException`, `ArgumentOutOfRangeException`, `OutOfMemoryException`, `ThreadStateException`, `SynchronizationLockException`, `ObjectDisposedException`, `EndOfStreamException`, and `DecoderFallbackException`. The runtime preinitializes compiler-raised fault objects during `ct_runtime_initialize`. Managed runtime checks throw these singletons without allocating, including inside strict `[NoAlloc]` call paths. Their diagnostic code and source location are per-thread exception-origin metadata rather than mutable fields on the shared object.
 
+Freestanding exposes these types so common library code has one surface, but source `throw`, `try`, and `catch` regions remain unavailable. Compiler and standard-library failures call the configured panic provider directly.
+
 ## Console
 
 `System.Console` provides standard-output operations:
@@ -73,7 +75,6 @@ The standard library also declares `NullReferenceException`, `IndexOutOfRangeExc
 ```csharp
 public static class Console
 {
-    // Hosted only.
     public static int Read();
     public static string ReadLine();
 
@@ -112,7 +113,7 @@ Smaller integer types use the language overload rules. A signed widening target 
 
 `WriteLine(value)` writes the value followed by one newline byte. Parameterless `WriteLine()` writes only the newline.
 
-On hosted targets, `Read()` returns the next input byte as `0..255` or `-1` at EOF. `ReadLine()` flushes standard output, reads one UTF-8 line, removes LF and one preceding CR, and returns an owned string. It returns `null` only when EOF occurs before any byte. Invalid UTF-8, input errors, and lines beyond the managed-string length limit throw `System.IO.IOException`. These input methods can allocate and are unavailable to `[NoAlloc]` call paths and ESP-IDF.
+`Read()` returns the next input byte as `0..255` or `-1` at EOF. `ReadLine()` flushes standard output, reads one UTF-8 line, removes LF and one preceding CR, and returns an owned string. It returns `null` only when EOF occurs before any byte. Hosted and ESP-IDF builds use their platform console unless overridden; freestanding uses the complete console provider group. Invalid UTF-8, input errors, and lines beyond the managed-string length limit throw `System.IO.IOException` on exception-capable targets and route to panic on freestanding. These input methods can allocate and are unavailable to `[NoAlloc]` call paths.
 
 `Console.InputEncoding` and `OutputEncoding` are read-only and return `System.Text.Encoding.UTF8`. On Windows, runtime startup switches only attached console handles to UTF-8 and remembers their prior code pages. Normal shutdown flushes and restores those pages after static finalization. Redirected streams and pipes remain byte-exact UTF-8. `Encoding.UTF8` is strict and emits no preamble; `Encoding.UTF8WithBom` is equally strict and identifies a three-byte UTF-8 preamble for text writers.
 
@@ -126,7 +127,7 @@ Decimal integer parsing accepts an optional sign when enabled and checks the exa
 
 ## Math
 
-`System.Math` provides allocation-free single- and double-precision functions on hosted, Cosmopolitan, and ESP-IDF targets:
+`System.Math` provides allocation-free single- and double-precision functions on every target:
 
 ```csharp
 public static class Math
@@ -182,7 +183,7 @@ public static class Math
 }
 ```
 
-`Pi`, `E`, and `Tau` are the nearest C~ `float` constants; the `64` variants are the nearest `double` constants. Angles use radians. Float overloads map to the corresponding target C library functions with an `f` suffix, and double overloads map to their unsuffixed forms.
+`Pi`, `E`, and `Tau` are the nearest C~ `float` constants; the `64` variants are the nearest `double` constants. Angles use radians. Hosted, Cosmopolitan, and default ESP-IDF overloads map to the corresponding target C library functions. Freestanding dispatches through the matching unary or binary float/double provider role; ESP-IDF can override the same roles individually.
 
 NaN, infinity, signed-zero, rounding, and domain behavior follow the target C library. `Min` and `Max` return the numeric operand when exactly one operand is NaN. C~ does not expose `errno` or floating-point exception state. These functions do not throw C~ exceptions. The native-build driver links `libm` on Unix and WSL. Manual GNU links must place `-lm` after the generated translation unit.
 
@@ -247,13 +248,13 @@ Matrices use row-major fields and row-vector composition: `A * B` applies `A` an
 
 `System.TimeSpan` is an eight-byte readonly value containing one signed nanosecond count. It is available on every target. `Zero`, exact nanoseconds, truncated whole microseconds, milliseconds, and seconds, fractional millisecond and second totals, integer unit factories, arithmetic, equality, and ordering allocate no storage. Negative durations are valid, and integer construction and arithmetic use the language's wrapping rules.
 
-`System.Diagnostics.Stopwatch` is available on hosted, Cosmopolitan, and ESP-IDF targets. It is a mutable allocation-free value with `StartNew`, `Start`, `Stop`, `Reset`, `Restart`, `IsRunning`, `Elapsed`, `ElapsedNanoseconds`, and truncated `ElapsedMilliseconds`. `GetTimestampNanoseconds()` reads the same monotonic clock directly. Repeated starts and stops are idempotent, copied values have independent state, and instances are not thread-safe. The runtime uses `QueryPerformanceCounter`, `clock_gettime(CLOCK_MONOTONIC)`, or `esp_timer_get_time` according to the target. Clock support is omitted unless reachable; a native clock failure is fatal code `CTK0001`.
+`System.Diagnostics.Stopwatch` is available on every target. It is a mutable allocation-free value with `StartNew`, `Start`, `Stop`, `Reset`, `Restart`, `IsRunning`, `Elapsed`, `ElapsedNanoseconds`, and truncated `ElapsedMilliseconds`. `GetTimestampNanoseconds()` reads the same monotonic clock directly. Repeated starts and stops are idempotent, copied values have independent state, and instances are not thread-safe. The runtime uses `QueryPerformanceCounter`, `clock_gettime(CLOCK_MONOTONIC)`, `esp_timer_get_time`, or `Runtime.MonotonicNanoseconds` according to the target and override. Clock support is omitted unless reachable; a failed query is fatal code `CTK0001`.
 
 `System.Random` is an allocation-free value available on every target. Its default constructor uses seed zero; the `ulong` constructor and `Reseed` select another stable sequence. `NextUInt()` implements PCG-XSH-RR 64/32 with the fixed Draft 0.40 state transition. `NextUInt(maxExclusive)` and `NextInt(minInclusive, maxExclusive)` use rejection sampling for unbiased half-open ranges. `NextFloat()` returns a value in `[0,1)` from 24 random bits. Invalid ranges throw `ArgumentOutOfRangeException`. Seeded sequences are a cross-target compatibility contract.
 
 ## Threading
 
-`System.Threading` is available on hosted and ESP-IDF targets:
+`System.Threading` is available on every target. Freestanding use requires the thread or mutex provider group plus allocation, free, and runtime TLS:
 
 ```csharp
 public enum MemoryOrder { Relaxed, Acquire, Release, AcquireRelease, SequentiallyConsistent }
@@ -317,13 +318,13 @@ public struct SpinLock
 
 Atomics accept Boolean, integral, native-integral, enum, and unsafe-pointer storage. They are non-copyable. Pointer atomics omit fetch operations; arithmetic fetches require integral storage and bitwise fetches require Boolean or integral storage. Invalid dynamic memory orders throw `ArgumentException` without managed allocation.
 
-Threads run on `_beginthreadex`, POSIX threads, or FreeRTOS tasks. `Start` publishes delegate state, `Join` acquires worker completion, and non-default priority failures are explicit. The runtime retains the worker state through completion. Mutexes are recursive and provide acquire/release ordering. Prefer `lock (mutex) { ... }` when lexical cleanup is possible.
+Threads run on `_beginthreadex`, POSIX threads, FreeRTOS tasks, or the configured freestanding provider. `Start` publishes delegate state, `Join` acquires worker completion, and non-default priority failures are explicit. The runtime retains the worker state through completion. Mutexes are recursive and provide acquire/release ordering. Prefer `lock (mutex) { ... }` when lexical cleanup is possible.
 
 `SpinWait` performs exponentially increasing `Cpu.Pause` work for ten calls and then calls `Thread.Yield`; its counter saturates. `SpinLock` is non-recursive and unfair, does not track thread ownership, and uses acquire compare-exchange plus release store. It contains `Atomic<int>` and is therefore non-copyable. The caller that successfully enters must call `Exit`.
 
-## Hosted and Cosmopolitan I/O
+## File and directory I/O
 
-Hosted Windows/Linux and Cosmopolitan add synchronous binary files, directories, metadata, streams, and strict UTF-8 text:
+Every target exposes synchronous binary files, directories, metadata, streams, and strict UTF-8 text. Hosted and Cosmopolitan use their platform implementations, ESP-IDF uses VFS defaults unless overridden, and freestanding requires the file and filesystem provider groups:
 
 ```csharp
 namespace System.IO;
@@ -358,7 +359,7 @@ public static class File
 }
 ```
 
-`Open` accepts UTF-8 paths, rejects embedded NUL bytes, and either returns a non-null owned handle or throws `IOException`. Windows converts paths to UTF-16 and opens them through the wide CRT API; POSIX hosts pass validated UTF-8 bytes to `fopen`. Files always use binary mode.
+`Open` accepts UTF-8 paths, rejects embedded NUL bytes, and either returns a non-null owned handle or fails. Native adapters throw `IOException`; freestanding and explicit ESP-IDF provider status failures route to panic. Windows converts paths to UTF-16 and opens them through the wide CRT API; POSIX hosts pass validated UTF-8 bytes to `fopen`. Provider paths receive borrowed validated UTF-8 plus explicit byte lengths. Files always use binary mode.
 
 `Open` supports explicit create-new, open-or-create, and existing-file truncation in addition to the original modes. Unsupported mode/access combinations throw with `EINVAL`. File offsets and lengths are signed 64-bit values. `SetLength` requires writable access; negative lengths fail.
 
@@ -375,7 +376,7 @@ defer File.Close(file);
 
 `File` includes existence, copy/move/delete, metadata, byte-array, text, line, append, and stream helpers. `Directory` includes existence, recursive creation/deletion, move, current-directory access, and ordinally sorted full-path enumeration. Recursive deletion never follows symbolic links or Windows reparse points. `Path` provides target separators, combine, file/directory name, extension, root, and rooted-path operations.
 
-`FileMetadata` reports `FileSystemEntryKind`, portable `FileAttributes`, length, and creation/access/modification timestamps with explicit availability flags. Each `FileTimestamp` stores signed Unix seconds plus nanoseconds. POSIX metadata uses `lstat`; Windows reports reparse points as links. `IOException.ErrorCode` is host-dependent and its operation identifies the failing API. Concurrent access to one handle or stream requires external synchronization. Async I/O, sharing controls, watchers, memory mapping, globbing, and lazy enumeration are not part of Draft 0.42.
+`FileMetadata` reports `FileSystemEntryKind`, portable `FileAttributes`, length, and creation/access/modification timestamps with explicit availability flags. Each `FileTimestamp` stores signed Unix seconds plus nanoseconds. POSIX metadata uses `lstat`; Windows reports reparse points as links. `IOException.ErrorCode` is host-dependent and its operation identifies the failing API. Freestanding providers return the portable status plus a backend-defined native code to the panic boundary. Concurrent access to one handle or stream requires external synchronization. Async I/O, sharing controls, watchers, memory mapping, globbing, and lazy enumeration are not part of Draft 0.43.
 
 ## Environment
 
@@ -390,7 +391,7 @@ public static class Environment
 
 `Exit` terminates the process immediately with the supplied native exit code. It does not run pending finally blocks or defers.
 
-`Environment.Exit` is hosted-only. An ESP-IDF compilation that calls it reports `CT4105`. Firmware that intentionally needs a reset must call `Esp.Idf.EspSystem.Restart`.
+Hosted and Cosmopolitan terminate through their process adapter. Freestanding dispatches to `Runtime.Exit`. ESP-IDF permits `Environment.Exit` only when `Runtime.Exit` is implemented; firmware that specifically needs a reset can call `Esp.Idf.EspSystem.Restart` without overriding the process-style service.
 
 ## Runtime memory
 
@@ -411,22 +412,37 @@ public static class Memory
 
 Hosted and ESP-IDF conformance builds compiled with `CTILDE_CONFORMANCE` also expose `Memory.TestFailAllocationAfter(int successfulAllocations)`. It injects managed allocation failure for runtime tests and is not available in production or the freestanding library.
 
-### Freestanding runtime roles
+### Target runtime roles
 
-Freestanding adds these compiler-recognized declarations:
+Freestanding and ESP-IDF expose compiler-recognized roles through `System.Runtime.Runtime`. The core result types are:
 
 ```csharp
-public enum Runtime { Allocate, Free, Panic }
+public enum RuntimeStatus : byte { Success, EndOfStream, BufferTooSmall, NotFound, /* ... */ }
+
+public readonly struct RuntimeResult
+{
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
+}
+
+public readonly struct RuntimeTransferResult
+{
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
+    public readonly nuint Count;
+}
 
 public readonly struct RuntimePanicInfo
 {
     public unsafe readonly byte* Code;
     public unsafe readonly byte* File;
     public readonly int Line;
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
 }
 ```
 
-`[RuntimeImpl(Runtime.Allocate)]`, `[RuntimeImpl(Runtime.Free)]`, and `[RuntimeImpl(Runtime.Panic)]` select the user implementations of managed allocation, deallocation, and terminal failure. They are not ordinary library dispatch APIs and have no runtime storage. Panic is required for reachable ordinary freestanding code; allocation and free are required only when the reachable program needs the managed heap. The exact signatures, bootstrap-safe closure, and allocator contract are normative in [LANGUAGE.md](LANGUAGE.md).
+`[RuntimeImpl]` selects typed implementations for allocation, free, panic, exit, console input/output/flush, monotonic time, scalar math, file handles and transfer, path metadata and mutation, directory enumeration, current-directory access, threads, mutexes, and runtime thread-local state. These are compiler roots, not ordinary library dispatch APIs, and have no runtime storage. Freestanding requires only the roles reached by the program, with complete file, filesystem, thread, and mutex groups. ESP-IDF retains platform defaults; declaring any member of a grouped override requires the complete group. The exact role list, signatures, bootstrap-safe closure, status semantics, and allocator contract are normative in [LANGUAGE.md](LANGUAGE.md).
 
 ## Runtime native buffers
 
@@ -597,7 +613,7 @@ The GNU C23 program defines one runtime. Unity output embeds it once; modular so
 
 Invalid casts and type-mismatched unboxing throw `InvalidCastException` with origin codes `CTO0001` and `CTO0003`. Null unboxing throws `NullReferenceException` with `CTO0002`.
 
-An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its origin. Throwing a null exception reference throws `NullReferenceException` with `CTE0002`. An exception escaping a supported synchronous unmanaged callback panics with `CTE0003`. Hosted fatal termination exits with `EXIT_FAILURE`; ESP-IDF calls `abort()` after writing the diagnostic.
+An unhandled exception reports `CTE0001`, its fully qualified runtime type, and its origin. Throwing a null exception reference throws `NullReferenceException` with `CTE0002`. An exception escaping a supported synchronous unmanaged callback panics with `CTE0003`. Hosted fatal termination exits with `EXIT_FAILURE`; ESP-IDF applies its configured panic policy after writing the diagnostic; freestanding faults call `Runtime.Panic` directly.
 
 Null, bounds, divide-by-zero, cast/unbox, size-overflow, embedded-NUL, and attached managed-OOM conditions are catchable through the built-in allocation-free exceptions. Hosted console and file failures continue to create catchable `System.IO.IOException` values. Unattached native entry (`CTT0001`), invalid lifecycle (`CTT0002`), ABI mismatch, ARC corruption, cleanup corruption, and native-boundary exception escape remain panics. Runtime and thread lifecycle are native ABI operations and intentionally have no C~ standard-library wrapper.
 
@@ -607,6 +623,6 @@ Standard-library declarations use native `[Extern]` bindings internally. Known C
 
 The initial Cosmopolitan x64 audit has passed one portable managed-runtime APE on Linux/WSL and Windows. Broader math, environment, exports/callbacks, Unicode-path, custom-section, and final-retention cases remain explicit acceptance work. Arm64 and fat-image claims remain later gates; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
-The checked library roadmap includes richer hosted I/O, SIMD buffer operations, parsing and conversion, and safe long-lived native-resource storage. Later work can add streams, directories, wall-clock calendars, culture-aware formatting, Unicode casing and normalization, and regular expressions. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
+The checked library roadmap includes SIMD buffer operations and safe long-lived native-resource storage. Later work can add wall-clock calendars, culture-aware formatting, Unicode casing and normalization, and regular expressions. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
 
 Project binding manifests can add generated source-compatible ESP-IDF APIs alongside this handwritten surface. Their tracked C~ declarations use ordinary extern and ownership contracts, while project-private adapters consume the installed public headers, native constants, validated initializer macros, nested configuration fields, bounded fixed UTF-8 arrays, and selected output structures. Generated APIs are project declarations, not additions to the embedded standard library. `[NoAlloc]` describes only C~-heap behavior; a generated ESP-IDF call may allocate native memory. Long-lived owned-resource fields and retained callback lifetime rules remain deferred. Generated bindings do not infer `[InterruptSafe]`.

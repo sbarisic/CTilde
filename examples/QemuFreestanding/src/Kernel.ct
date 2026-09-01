@@ -1,3 +1,4 @@
+using System;
 using System.Runtime;
 
 [Packed(4)]
@@ -34,12 +35,16 @@ public static class BootImage
         outb output, $0xe9
     }
 
+    [RuntimeImpl(Runtime.ConsoleWrite)]
     [NoAlloc]
+    [NoThrow]
     [NoBlock]
-    private static unsafe void Write(string message)
+    [NoRuntime]
+    private static unsafe RuntimeTransferResult ConsoleWrite(ReadOnlyNativeBuffer<byte> value)
     {
-        for (int index = 0; index < message.Length; index++)
-            DebugWrite(message[index]);
+        for (int index = 0; (nuint)index < value.Length; index++)
+            DebugWrite((char)value.Pointer[index]);
+        return new RuntimeTransferResult(RuntimeStatus.Success, 0, value.Length);
     }
 
     [NoAlloc]
@@ -65,13 +70,9 @@ public static class BootImage
 
     [Export("kernel_main")]
     [NoAlloc]
-    [NoBlock]
     public static unsafe int Main()
     {
-        Write("CTILDE_QEMU_OK\n");
-        while (true)
-        {
-        }
+        Console.Write("CTILDE_QEMU_OK\n");
         return 0;
     }
 

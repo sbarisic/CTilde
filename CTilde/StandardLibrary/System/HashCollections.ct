@@ -267,31 +267,21 @@ public sealed class Map<TKey, TValue> : System.IEnumerable<System.Pair<TKey, TVa
     private int ComputeHash(TKey key)
     {
         callbackDepth++;
-        int hash = 0;
-        try
-        {
-            hash = hasher(key);
-        }
-        finally
-        {
-            callbackDepth--;
-        }
+        defer EndCallback();
+        int hash = hasher(key);
         return hash & 2147483647;
     }
 
     private bool InvokeEquality(TKey left, TKey right)
     {
         callbackDepth++;
-        bool result = false;
-        try
-        {
-            result = equality(left, right);
-        }
-        finally
-        {
-            callbackDepth--;
-        }
-        return result;
+        defer EndCallback();
+        return equality(left, right);
+    }
+
+    private void EndCallback()
+    {
+        callbackDepth--;
     }
 
     private int Bucket(int hash)

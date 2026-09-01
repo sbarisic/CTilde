@@ -14,4 +14,4 @@ wsl ./build/kernel-native-start.elf
 $LASTEXITCODE
 ```
 
-The expected exit code is `0`. The fixed arena is an example allocator, not a production allocator.
+The expected exit code is `0`. The fixed arena is an example allocator, not a production allocator. Draft 0.43 also permits this target to use the ordinary console, time, math, file, directory, stream, thread, and mutex APIs when the project supplies the corresponding typed `RuntimeImpl` service group; see the normative role table in [LANGUAGE.md](../../LANGUAGE.md).

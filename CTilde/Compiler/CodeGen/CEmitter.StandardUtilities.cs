@@ -27,27 +27,50 @@ internal sealed partial class CEmitter
         }
         if (_usesMonotonicClock)
         {
-            writer.WriteLine("int64_t ct_monotonic_nanoseconds(void)");
-            writer.WriteLine("{");
-            writer.WriteLine("#if defined(_WIN32)");
-            writer.WriteLine("    LARGE_INTEGER frequency; LARGE_INTEGER counter;");
-            writer.WriteLine("    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0 || !QueryPerformanceCounter(&counter) || counter.QuadPart < 0) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
-            writer.WriteLine("    uint64_t divisor = (uint64_t)frequency.QuadPart; uint64_t value = (uint64_t)counter.QuadPart; uint64_t seconds = value / divisor; uint64_t remainder = value % divisor;");
-            writer.WriteLine("    if (seconds > (uint64_t)INT64_MAX / UINT64_C(1000000000) || remainder > UINT64_MAX / UINT64_C(1000000000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
-            writer.WriteLine("    return (int64_t)(seconds * UINT64_C(1000000000) + remainder * UINT64_C(1000000000) / divisor);");
-            writer.WriteLine("#elif defined(ESP_PLATFORM)");
-            writer.WriteLine("    int64_t microseconds = esp_timer_get_time(); if (microseconds < 0 || microseconds > INT64_MAX / INT64_C(1000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0); return microseconds * INT64_C(1000);");
-            writer.WriteLine("#else");
-            writer.WriteLine("    struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 || value.tv_nsec >= 1000000000L || (uint64_t)value.tv_sec > (uint64_t)INT64_MAX / UINT64_C(1000000000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
-            writer.WriteLine("    return (int64_t)((uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec);");
-            writer.WriteLine("#endif");
-            writer.WriteLine("}");
+            if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.MonotonicNanoseconds))
+            {
+                writer.WriteLine("int64_t ct_monotonic_nanoseconds(void) { return ct_runtime_monotonic_nanoseconds(); }");
+            }
+            else
+            {
+                writer.WriteLine("int64_t ct_monotonic_nanoseconds(void)");
+                writer.WriteLine("{");
+                writer.WriteLine("#if defined(_WIN32)");
+                writer.WriteLine("    LARGE_INTEGER frequency; LARGE_INTEGER counter;");
+                writer.WriteLine("    if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0 || !QueryPerformanceCounter(&counter) || counter.QuadPart < 0) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
+                writer.WriteLine("    uint64_t divisor = (uint64_t)frequency.QuadPart; uint64_t value = (uint64_t)counter.QuadPart; uint64_t seconds = value / divisor; uint64_t remainder = value % divisor;");
+                writer.WriteLine("    if (seconds > (uint64_t)INT64_MAX / UINT64_C(1000000000) || remainder > UINT64_MAX / UINT64_C(1000000000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
+                writer.WriteLine("    return (int64_t)(seconds * UINT64_C(1000000000) + remainder * UINT64_C(1000000000) / divisor);");
+                writer.WriteLine("#elif defined(ESP_PLATFORM)");
+                writer.WriteLine("    int64_t microseconds = esp_timer_get_time(); if (microseconds < 0 || microseconds > INT64_MAX / INT64_C(1000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0); return microseconds * INT64_C(1000);");
+                writer.WriteLine("#else");
+                writer.WriteLine("    struct timespec value; if (clock_gettime(CLOCK_MONOTONIC, &value) != 0 || value.tv_sec < 0 || value.tv_nsec < 0 || value.tv_nsec >= 1000000000L || (uint64_t)value.tv_sec > (uint64_t)INT64_MAX / UINT64_C(1000000000)) ct_fail(\"CTK0001\", \"<monotonic-clock>\", 0);");
+                writer.WriteLine("    return (int64_t)((uint64_t)value.tv_sec * UINT64_C(1000000000) + (uint64_t)value.tv_nsec);");
+                writer.WriteLine("#endif");
+                writer.WriteLine("}");
+            }
         }
         if (_usesRandomRangeFailure)
             writer.WriteLine("void ct_random_argument_out_of_range(void) { ct_raise_runtime_fault(CT_FAULT_ARGUMENT_OUT_OF_RANGE, \"CTR0001\", \"<random>\", 0); }");
+        var freestandingFaults = new (string Symbol, string Kind, string Code)[]
+        {
+            ("ct_fs_fault_argument", "CT_FAULT_ARGUMENT", "CTA0001"),
+            ("ct_fs_fault_argument_null", "CT_FAULT_ARGUMENT_NULL", "CTN0001"),
+            ("ct_fs_fault_argument_out_of_range", "CT_FAULT_ARGUMENT_OUT_OF_RANGE", "CTR0001"),
+            ("ct_fs_fault_end_of_stream", "CT_FAULT_ARGUMENT", "CTIO0002"),
+            ("ct_fs_fault_index_out_of_range", "CT_FAULT_BOUNDS", "CTA0003"),
+            ("ct_fs_fault_invalid_operation", "CT_FAULT_ARGUMENT", "CTO0004"),
+            ("ct_fs_fault_key_not_found", "CT_FAULT_ARGUMENT", "CTK0002"),
+            ("ct_fs_fault_object_disposed", "CT_FAULT_ARGUMENT", "CTO0005"),
+            ("ct_fs_fault_out_of_memory", "CT_FAULT_OUT_OF_MEMORY", "CTM0001"),
+            ("ct_fs_fault_overflow", "CT_FAULT_OVERFLOW", "CTS0002"),
+        };
+        foreach (var fault in freestandingFaults.Where(fault => externNames.Contains(fault.Symbol)))
+            writer.WriteLine($"void {fault.Symbol}(void) {{ ct_raise_runtime_fault({fault.Kind}, \"{fault.Code}\", \"<standard-library>\", 0); }}");
         if (_usesSpinPause)
             writer.WriteLine("void ct_spin_pause(void) { ct_cpu_pause(); }");
-        if (usesStringUtilities || usesUtf8Conversion || usesParsing || _usesMonotonicClock || _usesRandomRangeFailure || _usesSpinPause)
+        if (usesStringUtilities || usesUtf8Conversion || usesParsing || _usesMonotonicClock || _usesRandomRangeFailure || _usesSpinPause ||
+            freestandingFaults.Any(fault => externNames.Contains(fault.Symbol)))
             writer.WriteLine();
     }
 
@@ -188,6 +211,8 @@ internal sealed partial class CEmitter
 
     private void EmitRyuFormattingSupport(CWriter writer)
     {
+        if (_ryuCoreEmitted)
+            return;
         _ryuCoreEmitted = true;
         writer.WriteLine("/* CTILDE_INTERNAL_HEADER_SKIP_BEGIN */");
         writer.WriteLine("/* Ryu 4c0618b0, Boost Software License 1.0; see third_party/ryu/4c0618b0. */");
@@ -199,6 +224,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("#define CT_RYU_RESTORE_NDEBUG 1");
         writer.WriteLine("#define NDEBUG 1");
         writer.WriteLine("#endif");
+        if (IsFreestanding)
+            writer.WriteLine("#define assert(condition) ((void)0)");
         foreach (var file in new[] { "ryu.h", "common.h", "digit_table.h", "d2s_full_table.h", "d2s_intrinsics.h", "f2s_intrinsics.h", "d2fixed_full_table.h", "d2s.c" })
             WriteRyuResource(writer, file);
         writer.WriteLine("#define to_chars ct_ryu_f2s_to_chars");
@@ -212,13 +239,15 @@ internal sealed partial class CEmitter
         writer.WriteLine("#undef CT_RYU_RESTORE_NDEBUG");
         writer.WriteLine("#undef NDEBUG");
         writer.WriteLine("#endif");
+        if (IsFreestanding)
+            writer.WriteLine("#undef assert");
         writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
         writer.WriteLine("#pragma GCC diagnostic pop");
         writer.WriteLine("#endif");
         writer.WriteLine("/* CTILDE_INTERNAL_HEADER_SKIP_END */");
     }
 
-    private static void WriteRyuResource(CWriter writer, string file)
+    private void WriteRyuResource(CWriter writer, string file)
     {
         using var stream = typeof(CEmitter).Assembly.GetManifestResourceStream($"CTilde.Ryu.{file}") ??
             throw new InvalidOperationException($"Missing embedded Ryu resource '{file}'.");
@@ -228,7 +257,8 @@ internal sealed partial class CEmitter
         while (reader.ReadLine() is { } line)
         {
             var trimmed = line.TrimStart();
-            if (trimmed.StartsWith("#include \"ryu/", StringComparison.Ordinal))
+            if (trimmed.StartsWith("#include \"ryu/", StringComparison.Ordinal) ||
+                (IsFreestanding && trimmed.StartsWith("#include <", StringComparison.Ordinal)))
                 continue;
             if (!skippingFunction && IsUnusedRyuWrapper(trimmed))
             {

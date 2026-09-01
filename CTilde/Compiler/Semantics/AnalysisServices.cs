@@ -52,6 +52,7 @@ internal sealed class AnalysisServices : ILoweringServices
     public TargetEnvironment Environment => Model.Environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
     public void RequireMathSymbol(string symbol) { }
+    public void RequireFreestandingFloatFormatting() { }
     public bool SimdOptimizations => Model.SimdOptimizations;
 
     public IEnumerable<string> DynamicGeneratedSymbols =>

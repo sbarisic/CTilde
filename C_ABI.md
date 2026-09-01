@@ -2,11 +2,11 @@
 
 ## Status
 
-This document defines the generated C contract for C~ draft 0.42 and runtime ABI 16. Draft 0.42 adds compiler-backed scalar parsing and broader hosted/Cosmopolitan I/O without changing public layouts, names, or lifecycle functions. Draft 0.41 remains the historical native-optimization and string-surface revision.
+This document defines the generated C contract for C~ draft 0.43 and runtime ABI 17. Draft 0.43 adds typed freestanding and ESP-IDF runtime-service roles for the standard library. Draft 0.42 remains the historical scalar-parsing and hosted-I/O revision.
 
-Draft 0.42 retains runtime ABI 16 and debug metadata version 3. CPU, floating-point, LTO, and PGO settings affect native code generation only. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 16 output is not ABI-compatible with ABI 15 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]`, introduced in Draft 0.39, uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
+Draft 0.43 uses runtime ABI 17 and debug metadata version 3. CPU, floating-point, LTO, and PGO settings affect native code generation only. SIMD values cannot cross native boundaries; matrices and quaternions use the existing natural-layout aggregate rules. Ordinary effect contracts do not change native signatures, public headers, name mangling, or ABI identity. An `[Interrupt]` export intentionally emits the requested native symbol directly with the fixed `void(void*)` ABI and records that fact in the header signature. ABI 17 output is not ABI-compatible with ABI 16 or older generated modules. `[Export]`, function/data `[Extern]`, linker symbols, and documented runtime ABI names remain stable native names; all other generated names are implementation artifacts. `[NativeImport]`, introduced in Draft 0.39, uses private runtime-resolved slots and does not add a public ABI name. `[Used]` guarantees final-image retention on supported ELF and COFF toolchains. Open generics, interface references, SIMD values, `Atomic<T>`, `Thread`, and `Mutex` cannot cross a native boundary.
 
-Debug information is additive and does not change runtime ABI 16. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
+Debug information is additive and does not change runtime ABI 17. Source-debug output may contain `#line` directives and private non-inlined exception hooks. Instrumented debug-preparation output additionally contains logical probes, a private debugger control block, per-thread debug frames, and optional private allocation-registry or guarded-allocation prefixes. These layouts exist only inside the matching instrumented image, are absent from ordinary output, and are not exported native contracts. Debug-map and target-descriptor version 3 include aggregate layout metadata alongside closed-generic names, interface views, atomic storage, runtime thread IDs, and Thread/Mutex presentation.
 
 The default output is one GNU C23 translation unit. Modular output uses the same optimized program and runtime fragments to produce shared public/internal headers, one runtime implementation, one `source_<stable-hash>.c` file per reachable source identity, one entry/module-lifecycle file, a deterministic JSON symbol map, and an ESP-IDF CMake source fragment. Export wrappers share their defining source partition. GCC-compatible extensions are permitted by default. Changes to this document require conformance tests.
 
@@ -30,9 +30,9 @@ The ESP-IDF profile additionally asserts four-byte pointers and includes `ctilde
 
 The freestanding profile supports GNU-compatible GCC and Clang ELF drivers only. It includes only `stdbool.h`, `stddef.h`, `stdint.h`, `inttypes.h`, `limits.h`, and `float.h`, uses internal byte loops instead of libc memory/string calls, and emits no CRT, libm, pthread, TLS, console, filesystem, exception, or process dependency. The native build uses `-ffreestanding`, `-fno-builtin`, `-fno-stack-protector`, section splitting, `-nostdlib`, `-nostartfiles`, a caller-selected linker script, and an explicit entry symbol. Compiler predefined macros must match the declared C~ architecture.
 
-Cosmopolitan x86-64 is a Draft 0.24 target. It retains ABI 16 hosted object/runtime semantics while linking through `x86_64-unknown-cosmo-cc`. The unwrapped APE is the distribution artifact and `<image>.dbg` is the retained ELF/DWARF carrier. C~ does not reconstruct Cosmopolitan startup objects, linker scripts, register reservations, or TLS flags. Arm64 and fat-image contracts remain deferred; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
+Cosmopolitan x86-64 is a Draft 0.24 target. It uses the current ABI 17 hosted object/runtime semantics while linking through `x86_64-unknown-cosmo-cc`. The unwrapped APE is the distribution artifact and `<image>.dbg` is the retained ELF/DWARF carrier. C~ does not reconstruct Cosmopolitan startup objects, linker scripts, register reservations, or TLS flags. Arm64 and fat-image contracts remain deferred; see [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
-Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. The support is absent when those APIs are unused and is never emitted for ESP-IDF.
+Hosted programs that use console input or `System.IO` additionally include the C error and Windows wide-path headers required by their platform branch. ESP-IDF uses its libc/VFS adapters by default, while declared complete provider groups replace them. Freestanding output contains only provider bridges. All three forms are absent when the corresponding APIs are unreachable.
 
 ## Scalar mapping
 
@@ -90,7 +90,7 @@ Generated prefixes identify symbol kinds:
 
 Unity definitions use translation-unit-local linkage where possible. Modular definitions used by another artifact have internal-header declarations and external linkage but remain compiler-private. `public` and `internal` are C~ access rules; they do not export a native symbol.
 
-`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 16.
+`Compilation.EmitSymbolMap`, CLI `--symbol-map`, and modular bundles emit version 1 JSON sorted by compact name. Each entry includes the compact name, full canonical identity, kind, signature/result type, and source location. The map declares runtime ABI 17.
 
 ## Managed object header
 
@@ -304,19 +304,21 @@ void ct_runtime_initialize(void);
 void ct_runtime_shutdown(void);
 ```
 
-The caller invokes initialization before an ordinary exported wrapper and invokes shutdown after the last call. Initialization establishes one compiler-owned execution state, validates ABI 16, and initializes static fields. Shutdown finalizes statics, drains ARC releases, and validates that cleanup state is empty. There are no attach/detach operations. A naked-only image defines `CTILDE_HAS_RUNTIME 0`, omits these declarations, and emits no managed runtime.
+The caller invokes initialization before an ordinary exported wrapper and invokes shutdown after the last call. Initialization establishes one compiler-owned execution state, validates ABI 17, and initializes static fields. Shutdown finalizes statics, drains ARC releases, and validates that cleanup state is empty. There are no public attach/detach operations. A naked-only image defines `CTILDE_HAS_RUNTIME 0`, omits these declarations, and emits no managed runtime.
 
-Runtime-role bridges call the unique C~ implementations selected by `[RuntimeImpl(Runtime.Allocate)]`, `[RuntimeImpl(Runtime.Free)]`, and `[RuntimeImpl(Runtime.Panic)]`. Allocation changes zero to one, panics on null, and clears returned storage through an internal loop. Generated deallocation does not pass null. Faults call the panic bridge directly; a returning panic is followed by an infinite compiler barrier loop.
+Runtime-role bridges call unique C~ implementations selected by `[RuntimeImpl(Runtime.*)]`. ABI 17 includes allocation/free/panic/exit; console transfer and flush; monotonic time; path and scalar-math dispatch; file, metadata, directory, and current-directory operations; thread creation/join/close/sleep/yield; runtime TLS get/set; and mutex lifecycle operations. Paths cross this private boundary as borrowed `ct_native_utf8_string` values. Handles are `uintptr_t`. Result structures carry the stable byte-sized status ordinal, native error code, and optional transferred byte count. File and directory metadata use fixed-width fields and Unix-second/nanosecond timestamps with explicit availability bits.
+
+Allocation changes zero to one, panics on null, and clears returned storage through an internal loop. Generated deallocation does not pass null. Freestanding faults and failed services call the panic bridge directly; a returning panic is followed by an infinite compiler barrier loop. ESP-IDF uses its libc/VFS, timer, FreeRTOS, and TLS adapters by default; a complete declared service group replaces the corresponding default bridge.
 
 A narrow `[Naked]` export emits one GNU `__attribute__((naked, noreturn))` definition. Its basic assembly is copied without the normal operand or percent transformation. It has no wrapper, prologue, epilogue, runtime-ready check, cleanup, exception barrier, or implicit return. Its section and naked state participate in native-header signature identity.
 
-## Hosted console and file I/O
+## Console and file I/O
 
-Hosted input and file declarations bind to compiler-owned external symbols. The emitter defines those symbols only when a resolved call uses them. Each operation can create and throw `System.IO.IOException`, so using one also enables the ordinary per-thread C~ exception runtime.
+Console and file declarations bind to compiler-owned external symbols. The emitter defines those symbols only when a resolved call uses them. Hosted, Cosmopolitan, and default ESP-IDF adapter failures create `System.IO.IOException`. Freestanding and explicit ESP-IDF provider status failures call the panic boundary directly.
 
 `Console.ReadLine` accumulates native bytes, validates complete UTF-8, and copies the result into an ARC-owned `ct_string`. It frees its temporary native buffer before returning or throwing. EOF before any byte returns a null managed reference; other lines return an owned string.
 
-On Windows, hosted startup queries attached input/output console handles, saves their code pages, and selects `CP_UTF8` before static initialization. Shutdown flushes and restores those pages after static finalization. Redirected files and pipes are never passed through console code-page conversion.
+On Windows, hosted startup queries attached input/output console handles, saves their code pages, and selects `CP_UTF8` before static initialization. Shutdown flushes and restores those pages after static finalization. Redirected files and pipes are never passed through console code-page conversion. ESP-IDF uses libc/VFS by default; freestanding and ESP-IDF overrides receive explicit byte spans and status results.
 
 `System.IO.FileHandle` has the nominal C representation `uintptr_t`. A nonzero value identifies a native wrapper containing `FILE*` and the declared access mode; this wrapper is not a managed object. `File.Open` produces ownership, borrowed read/write calls preserve it, and `File.Close` consumes it, calls `fclose`, frees the wrapper, and only then throws a close error if necessary.
 
@@ -361,7 +363,7 @@ Reachable imports are ordered by ordinal logical library and symbol. Compatible 
 
 The loader address is transferred into the structurally typed function-pointer slot with a checked size assertion and byte copy. Generated code does not alias data and function pointers or rely on a warning-producing cast. Taking the C~ method address reads the resolved slot directly. Resolution runs after panic and runtime-fault setup and before C~ static initialization. Libraries remain loaded through reverse static finalization and unload afterward in reverse load order. Failures report `CTI0001`, `CTI0002`, or `CTI0003` with logical and mapped names, symbol when applicable, declaration location, and native loader details before entering the configured panic path.
 
-This facility loads ordinary native C ABI libraries only. It does not expose handles, provide automatic marshalling, register C~-managed module descriptors, or change runtime ABI 16. Cosmopolitan, ESP-IDF, freestanding, macOS, versioned `.so` names, and non-default calling conventions are outside Draft 0.39 native-import support.
+This facility loads ordinary native C ABI libraries only. It does not expose handles, provide automatic marshalling, register C~-managed module descriptors, or independently change the selected runtime ABI. Cosmopolitan, ESP-IDF, freestanding, macOS, versioned `.so` names, and non-default calling conventions are outside Draft 0.39 native-import support.
 
 ## Native section placement
 
@@ -393,7 +395,7 @@ Source identities normalize each input against its `SourceOwnerIdentity.SourceId
 
 ## Portable CPU lowering
 
-`Cpu.MemoryBarrier` emits a full compiler and ordinary-memory barrier appropriate to x86/x64, ARM32/ARM64, Xtensa, or RISC-V. It remains distinct from the MMIO I/O barrier. `Cpu.Pause` emits the baseline target hint or a conservative compiler-safe no-op. Byte swap, population count, and leading-zero count use deterministic inline helpers and do not require optional instruction-set extensions. These helpers allocate no C~ storage, call no C~ runtime service, and do not change runtime ABI 16.
+`Cpu.MemoryBarrier` emits a full compiler and ordinary-memory barrier appropriate to x86/x64, ARM32/ARM64, Xtensa, or RISC-V. It remains distinct from the MMIO I/O barrier. `Cpu.Pause` emits the baseline target hint or a conservative compiler-safe no-op. Byte swap, population count, and leading-zero count use deterministic inline helpers and do not require optional instruction-set extensions. These helpers allocate no C~ storage, call no C~ runtime service, and do not independently change the selected runtime ABI.
 
 ## Opaque ownership and exports
 
@@ -430,13 +432,13 @@ The runtime exports `ct_thread_attach()`, `ct_thread_detach()`, `ct_retain(ct_ob
 
 ESP-IDF reserves `app_main` and the built-in `ct_esp_*` shim names. The checked shim ABI uses scalar types, opaque native typedefs, `const char*`, and explicit pointer/`size_t` pairs; ESP-IDF configuration structures, RMT channels, and `led_strip_handle_t` do not cross the C~ boundary. `ct_esp_timer_get_time_us` forwards `esp_timer_get_time()`. GPIO and `ct_esp_ws2812_*` operations return exact `esp_err_t` values.
 
-Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 16.
+Header-driven project bindings emit reserved project-private `ct_idf_*` adapter symbols derived from the canonical manifest identity and selected signature. These adapters are compiled by the owning IDF component and are not exported through the generated native header. Constants are read through native getters; configuration and output structures remain inside adapter translation units. Validated adapters can apply function-like initializer macros, preserve mixed native parameter order, map nested fields and bounded fixed UTF-8 arrays, and expose selected output fields. Generated C~ declarations reuse the existing extern, buffer, UTF-8, opaque, nullable-return, ownership, and synchronous-callback conventions. This does not change runtime ABI 17.
 
 ## Future native interop constraints
 
 Draft 0.24 has verified ordinary generated runtime symbols through the ELF carrier, but `[Used]`, custom `[Section]`, callback metadata, and arbitrary native inputs have not completed Cosmopolitan-specific acceptance. Host ABI objects and general shared libraries are not compatible inputs.
 
-This section records constraints that remain after draft 0.42.
+This section records constraints that remain after draft 0.43.
 
 Fixed-width SIMD values are internal C~ value types. They are rejected in `[Export]`, `[Extern]`, unmanaged function pointers, synchronous native callbacks, public native data, and generated public headers. Their C~ storage remains an exact 16-byte lane aggregate even when generated helpers use x86/Arm intrinsics or scalar code internally. Any future public SIMD ABI must define an explicit flattened storage contract per calling convention and Cosmopolitan architecture slice rather than inheriting a compiler's register ABI.
 

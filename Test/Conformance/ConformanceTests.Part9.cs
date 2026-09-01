@@ -16,7 +16,7 @@ internal static partial class ConformanceTests
             Assert(Compile(noVectors).EmitCHeader(headerWriter).Success, "Generated-header emission failed.");
             var header = headerWriter.ToString();
             Assert(header.Contains("#ifndef CTILDE_EXPORTS_", StringComparison.Ordinal), "The generated native header did not use a content-derived include guard.");
-            Assert(header.Contains("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(16)", StringComparison.Ordinal), "The generated native header did not declare the draft 0.18 runtime ABI.");
+            Assert(header.Contains("#define CTILDE_RUNTIME_ABI_VERSION UINT32_C(17)", StringComparison.Ordinal), "The generated native header did not declare the current runtime ABI.");
 
             const string vec2Only = "public static class Program { [EntryPoint] public static void Main() { Vec2 value = Vec2.One; Console.WriteLine(value.X); } }";
             var generated = Emit(vec2Only);

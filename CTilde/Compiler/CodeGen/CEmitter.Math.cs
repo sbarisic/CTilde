@@ -55,6 +55,25 @@ internal sealed partial class CEmitter
         {
             var parameters = function.ParameterCount == 1 ? $"{function.CType} value" : $"{function.CType} left, {function.CType} right";
             var arguments = function.ParameterCount == 1 ? "value" : "left, right";
+            var role = (function.CType, function.ParameterCount) switch
+            {
+                ("float", 1) => RuntimeImplementationRole.MathFloatUnary,
+                ("float", 2) => RuntimeImplementationRole.MathFloatBinary,
+                ("double", 1) => RuntimeImplementationRole.MathDoubleUnary,
+                _ => RuntimeImplementationRole.MathDoubleBinary,
+            };
+            if (Model.RuntimeImplementations.TryGetValue(role, out var implementation))
+            {
+                var operation = function.ParameterCount == 1 ? UnaryMathOperation(function.RuntimeName) : BinaryMathOperation(function.RuntimeName);
+                var operationType = CTypeName(implementation.Parameters[0].Type);
+                writer.WriteLine($"{function.CType} {function.RuntimeName}({parameters}) {{ return {implementation.CName}(({operationType})UINT8_C({operation}), {arguments}); }}");
+                continue;
+            }
+            if (IsFreestanding)
+            {
+                writer.WriteLine($"{function.CType} {function.RuntimeName}({parameters}) {{ (void){(function.ParameterCount == 1 ? "value" : "left; (void)right")}; ct_runtime_service_fail(\"CTK0002\", UINT8_C(7), 0); return ({function.CType})0; }}");
+                continue;
+            }
             if (function.RuntimeName is "ct_math_min" or "ct_math_min_double")
             {
                 var zero = function.CType == "float" ? "0.0f" : "0.0";
@@ -72,4 +91,34 @@ internal sealed partial class CEmitter
         if (_usedMathSymbols.Count != 0)
             writer.WriteLine();
     }
+
+    private static int UnaryMathOperation(string name) => name switch
+    {
+        "ct_math_sqrt" or "ct_math_sqrt_double" => 0,
+        "ct_math_abs" or "ct_math_abs_double" => 1,
+        "ct_math_tan" or "ct_math_tan_double" => 2,
+        "ct_math_sin" or "ct_math_sin_double" => 3,
+        "ct_math_cos" or "ct_math_cos_double" => 4,
+        "ct_math_acos" or "ct_math_acos_double" => 5,
+        "ct_math_floor" or "ct_math_floor_double" => 6,
+        "ct_math_ceiling" or "ct_math_ceiling_double" => 7,
+        "ct_math_asin" or "ct_math_asin_double" => 8,
+        "ct_math_atan" or "ct_math_atan_double" => 9,
+        "ct_math_exp" or "ct_math_exp_double" => 10,
+        "ct_math_log" or "ct_math_log_double" => 11,
+        "ct_math_log2" or "ct_math_log2_double" => 12,
+        "ct_math_log10" or "ct_math_log10_double" => 13,
+        "ct_math_round" or "ct_math_round_double" => 14,
+        "ct_math_truncate" or "ct_math_truncate_double" => 15,
+        _ => throw new InvalidOperationException($"Unknown unary math service '{name}'."),
+    };
+
+    private static int BinaryMathOperation(string name) => name switch
+    {
+        "ct_math_min" or "ct_math_min_double" => 0,
+        "ct_math_max" or "ct_math_max_double" => 1,
+        "ct_math_atan2" or "ct_math_atan2_double" => 2,
+        "ct_math_pow" or "ct_math_pow_double" => 3,
+        _ => throw new InvalidOperationException($"Unknown binary math service '{name}'."),
+    };
 }

@@ -70,6 +70,12 @@ internal sealed partial class CEmitter
         var stack = Field("stackSize");
         var priority = Field("priority");
 
+        if (IsFreestanding || UsesEspRuntimeThreads)
+        {
+            EmitRuntimeManagedThreadSupport(writer, thread, typeName, start, handle, id, state, stack, priority);
+            return;
+        }
+
         writer.WriteLine("typedef struct ct_managed_thread_payload {");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    HANDLE Handle; unsigned NativeId;");
@@ -227,6 +233,11 @@ internal sealed partial class CEmitter
     {
         var typeName = NameMangler.Type(mutex);
         var handle = mutex.Fields.Single(field => field.Name == "nativeHandle").CName;
+        if (IsFreestanding || UsesEspRuntimeThreads)
+        {
+            EmitRuntimeManagedMutexSupport(writer, typeName, handle);
+            return;
+        }
         writer.WriteLine("typedef struct ct_managed_mutex_payload {");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    CRITICAL_SECTION Mutex; DWORD Owner;");
@@ -306,6 +317,47 @@ internal sealed partial class CEmitter
         writer.WriteLine("#endif");
         writer.WriteLine($"    mutex->{handle} = 0u; free(payload);");
         writer.WriteLine("}");
+        writer.WriteLine();
+    }
+
+    private void EmitRuntimeManagedThreadSupport(CWriter writer, TypeSymbol thread, string typeName,
+        string start, string handle, string id, string state, string stack, string priority)
+    {
+        var result = Model.Types["System.Runtime.RuntimeResult"];
+        string F(string name) => result.Fields.Single(field => field.Name == name).CAccessPath;
+        var resultType = CTypeName(result.Type);
+        var create = Model.RuntimeImplementations[RuntimeImplementationRole.ThreadCreate];
+        var join = Model.RuntimeImplementations[RuntimeImplementationRole.ThreadJoin];
+        var close = Model.RuntimeImplementations[RuntimeImplementationRole.ThreadClose];
+        var sleep = Model.RuntimeImplementations[RuntimeImplementationRole.ThreadSleep];
+        var yield = Model.RuntimeImplementations[RuntimeImplementationRole.ThreadYield];
+        var priorityType = CTypeName(Model.Types["System.Runtime.RuntimeThreadPriority"].Type);
+        writer.WriteLine($"static void ct_runtime_thread_check({resultType} result, const char* code) {{ if ((uint8_t)result.{F("Status")} != 0u) ct_runtime_service_fail(code, (uint8_t)result.{F("Status")}, result.{F("NativeCode")}); }}");
+        writer.WriteLine($"static void ct_managed_thread_worker(void* context) {{ {typeName}* thread = ({typeName}*)context; ct_thread_state worker_state; (void)ct_memset(&worker_state, 0, sizeof(worker_state)); ct_thread_set_current(&worker_state); (void)ct_require_nonnull(thread->{start}, \"<thread-start>\", 0); thread->{start}->ct_invoke(thread->{start}->ct_target); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), UINT64_C(2), 2); ct_thread_set_current(NULL); ct_release_fast((ct_object*)(void*)thread); }}");
+        writer.WriteLine($"static void ct_managed_thread_start({typeName}* thread) {{ thread = ({typeName}*)ct_require_nonnull(thread, \"<thread-start>\", 0); ct_runtime_require_ready(); uint64_t prior = ct_atomic_scalar_compare_exchange((void*)&thread->{state}, sizeof(thread->{state}), UINT64_C(1), UINT64_C(0), 3, 0); if (prior != 0u) ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0101\", \"<thread-start>\", 0); if (thread->{start} == NULL) {{ ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTT0102\", \"<thread-start>\", 0); }} uintptr_t native_handle = 0u; uint32_t runtime_id = 0u; ct_retain_fast((ct_object*)(void*)thread); {resultType} result = {create.CName}(ct_managed_thread_worker, thread, thread->{stack}, ({priorityType})thread->{priority}, &native_handle, &runtime_id); if ((uint8_t)result.{F("Status")} != 0u || native_handle == 0u) {{ ct_release_fast((ct_object*)(void*)thread); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); if ((uint8_t)result.{F("Status")} != 0u) ct_runtime_service_fail(\"CTT0103\", (uint8_t)result.{F("Status")}, result.{F("NativeCode")}); ct_runtime_service_fail(\"CTT0103\", UINT8_C(11), 0); }} thread->{handle} = native_handle; thread->{id} = runtime_id; }}");
+        writer.WriteLine($"static void ct_managed_thread_join({typeName}* thread) {{ thread = ({typeName}*)ct_require_nonnull(thread, \"<thread-join>\", 0); if (ct_atomic_scalar_load((void*)&thread->{state}, sizeof(thread->{state}), 1) == 0u) ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0104\", \"<thread-join>\", 0); ct_runtime_thread_check({join.CName}(thread->{handle}), \"CTT0106\"); ct_atomic_acquire_fence(); }}");
+        writer.WriteLine($"static void ct_managed_thread_sleep(uint32_t milliseconds) {{ ct_runtime_thread_check({sleep.CName}(milliseconds), \"CTT0107\"); }}");
+        writer.WriteLine($"static void ct_managed_thread_yield(void) {{ ct_runtime_thread_check({yield.CName}(), \"CTT0108\"); }}");
+        writer.WriteLine($"static void ct_managed_thread_drop(ct_object* object) {{ {typeName}* thread = ({typeName}*)(void*)object; uintptr_t native_handle = thread->{handle}; if (native_handle == 0u) return; thread->{handle} = 0u; ct_runtime_thread_check({close.CName}(native_handle), \"CTT0109\"); }}");
+        writer.WriteLine();
+    }
+
+    private void EmitRuntimeManagedMutexSupport(CWriter writer, string typeName, string handle)
+    {
+        var result = Model.Types["System.Runtime.RuntimeResult"];
+        string F(string name) => result.Fields.Single(field => field.Name == name).CAccessPath;
+        var resultType = CTypeName(result.Type);
+        var create = Model.RuntimeImplementations[RuntimeImplementationRole.MutexCreate];
+        var enter = Model.RuntimeImplementations[RuntimeImplementationRole.MutexEnter];
+        var tryEnter = Model.RuntimeImplementations[RuntimeImplementationRole.MutexTryEnter];
+        var exit = Model.RuntimeImplementations[RuntimeImplementationRole.MutexExit];
+        var close = Model.RuntimeImplementations[RuntimeImplementationRole.MutexClose];
+        writer.WriteLine($"static void ct_runtime_mutex_check({resultType} result, const char* code) {{ if ((uint8_t)result.{F("Status")} != 0u) ct_runtime_service_fail(code, (uint8_t)result.{F("Status")}, result.{F("NativeCode")}); }}");
+        writer.WriteLine($"static uintptr_t ct_managed_mutex_handle({typeName}* mutex) {{ mutex = ({typeName}*)ct_require_nonnull(mutex, \"<mutex>\", 0); uintptr_t value = (uintptr_t)ct_atomic_scalar_load((void*)&mutex->{handle}, sizeof(mutex->{handle}), 1); if (value != 0u) return value; uintptr_t created = 0u; ct_runtime_mutex_check({create.CName}(&created), \"CTT0110\"); if (created == 0u) ct_runtime_service_fail(\"CTT0110\", UINT8_C(11), 0); uint64_t observed = ct_atomic_scalar_compare_exchange((void*)&mutex->{handle}, sizeof(mutex->{handle}), (uint64_t)created, 0u, 3, 0); if (observed == 0u) return created; ct_runtime_mutex_check({close.CName}(created), \"CTT0110\"); return (uintptr_t)observed; }}");
+        writer.WriteLine($"static void ct_managed_mutex_enter({typeName}* mutex) {{ ct_runtime_mutex_check({enter.CName}(ct_managed_mutex_handle(mutex)), \"CTT0111\"); ct_atomic_acquire_fence(); }}");
+        writer.WriteLine($"static bool ct_managed_mutex_try_enter({typeName}* mutex) {{ bool entered = false; ct_runtime_mutex_check({tryEnter.CName}(ct_managed_mutex_handle(mutex), &entered), \"CTT0111\"); if (entered) ct_atomic_acquire_fence(); return entered; }}");
+        writer.WriteLine($"static void ct_managed_mutex_exit({typeName}* mutex) {{ ct_atomic_fence(2); ct_runtime_mutex_check({exit.CName}(ct_managed_mutex_handle(mutex)), \"CTT0112\"); }}");
+        writer.WriteLine($"static void ct_managed_mutex_drop(ct_object* object) {{ {typeName}* mutex = ({typeName}*)(void*)object; uintptr_t value = mutex->{handle}; if (value == 0u) return; mutex->{handle} = 0u; ct_runtime_mutex_check({close.CName}(value), \"CTT0113\"); }}");
         writer.WriteLine();
     }
 }

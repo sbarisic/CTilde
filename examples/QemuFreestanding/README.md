@@ -1,8 +1,8 @@
 # QEMU freestanding kernel
 
-This example builds a 32-bit x86 Multiboot kernel and boots it directly with QEMU. Unlike the Linux-loaded [freestanding example](../Freestanding/README.md), this image uses no Linux process loader or syscall ABI. It has no libc, CRT, managed heap, console, filesystem, threads, exceptions, or operating-system services.
+This example builds a 32-bit x86 Multiboot kernel and boots it directly with QEMU. Unlike the Linux-loaded [freestanding example](../Freestanding/README.md), this image uses no Linux process loader or syscall ABI. It has no libc, CRT, managed heap, filesystem, threads, exceptions, or operating-system services. Its `Runtime.ConsoleWrite` provider maps the ordinary `System.Console` surface to QEMU's debug port.
 
-The C~ source owns the complete image: `[ConstInit]` emits the Multiboot header as immutable native data, assembly functions implement the debug ports, and a naked assembly function provides `_start`. There are no native assembly source files. Startup initializes the C~ runtime, calls `kernel_main`, shuts the runtime down, and writes the returned status to QEMU's `isa-debug-exit` device at port `0xF4`. The kernel writes its marker by looping over an immutable string literal, which is emitted directly into the image and performs no managed heap allocation.
+The C~ source owns the complete image: `[ConstInit]` emits the Multiboot header as immutable native data, assembly functions implement the debug ports, a runtime provider implements console writes, and a naked assembly function provides `_start`. There are no native assembly source files. Startup initializes the C~ runtime, calls `kernel_main`, shuts the runtime down, and writes the returned status to QEMU's `isa-debug-exit` device at port `0xF4`. The kernel writes its marker through `Console.Write` from an immutable string literal, which performs no managed heap allocation.
 
 ## Prerequisites
 
@@ -58,4 +58,4 @@ The expected output is:
 CTILDE_QEMU_OK
 ```
 
-This first kernel intentionally has one CPU and no VGA, UART, interrupts, paging, Multiboot-information parsing, allocator, GRUB ISO, or physical-hardware portability contract.
+This first kernel intentionally has one CPU and no VGA, UART, interrupts, paging, Multiboot-information parsing, allocator, GRUB ISO, or physical-hardware portability contract. After printing the marker it returns zero, shuts down the C~ runtime, and exits QEMU through the debug-exit port.

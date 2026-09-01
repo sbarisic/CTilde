@@ -16,6 +16,7 @@ internal interface ILoweringServices
     TargetEnvironment Environment { get; }
     bool HasCpuFeature(CpuFeature feature);
     void RequireMathSymbol(string symbol);
+    void RequireFreestandingFloatFormatting();
     bool SimdOptimizations { get; }
 
     string CTypeName(CType type);

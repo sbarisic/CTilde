@@ -307,6 +307,55 @@ internal static partial class ConformanceTests
         return RunProcess(command, [.. prefix, "-std=gnu2x", "-O0", "-Wall", "-Wextra", "-Werror", "-c", "-o", objectPath, cPath]);
     }
 
+    static ProcessResult? CompileFreestandingObject(string source)
+    {
+        var configured = Environment.GetEnvironmentVariable("CTILDE_CC");
+        string command;
+        string[] prefix;
+        if (configured?.StartsWith("wsl:", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            command = "wsl";
+            prefix = ["--exec", configured[4..]];
+        }
+        else if (!string.IsNullOrWhiteSpace(configured) &&
+                 (Path.GetFileNameWithoutExtension(configured).Contains("gcc", StringComparison.OrdinalIgnoreCase) ||
+                  Path.GetFileNameWithoutExtension(configured).Contains("clang", StringComparison.OrdinalIgnoreCase)))
+        {
+            command = configured!;
+            prefix = [];
+        }
+        else if (!OperatingSystem.IsWindows())
+        {
+            command = "cc";
+            prefix = [];
+        }
+        else
+        {
+            return null;
+        }
+
+        var directory = Path.Combine(Path.GetTempPath(), "ctilde-freestanding-tests", Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var cPath = Path.Combine(directory, "program.c");
+            var objectPath = Path.Combine(directory, "program.o");
+            File.WriteAllText(cPath, source, new UTF8Encoding(false));
+            var nativeSource = command == "wsl" ? WslPath(cPath) : cPath;
+            var nativeObject = command == "wsl" ? WslPath(objectPath) : objectPath;
+            var standard = Environment.GetEnvironmentVariable("CTILDE_C_STANDARD");
+            var selectedStandard = string.IsNullOrWhiteSpace(standard) ? "gnu23" : standard;
+            var result = RunProcess(command, [.. prefix, $"-std={selectedStandard}", "-O0", "-ffreestanding", "-fno-builtin", "-Wall", "-Wextra", "-Werror", "-c", "-o", nativeObject, nativeSource]);
+            if (string.IsNullOrWhiteSpace(standard) && selectedStandard == "gnu23" && RejectedCStandard(result))
+                result = RunProcess(command, [.. prefix, "-std=gnu2x", "-O0", "-ffreestanding", "-fno-builtin", "-Wall", "-Wextra", "-Werror", "-c", "-o", nativeObject, nativeSource]);
+            return result;
+        }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
+    }
+
     static ProcessResult RunCompiler(string cPath, string executablePath, bool memoryDiagnostics = false, bool threads = false, bool conformance = false, bool layoutDiagnostics = false)
     {
         var usesDynamicLoader = File.ReadAllText(cPath).Contains("dlopen(", StringComparison.Ordinal);

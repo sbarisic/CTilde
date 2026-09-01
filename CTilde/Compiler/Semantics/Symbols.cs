@@ -115,7 +115,20 @@ internal enum DeclaredTypeKind { Class, Struct, Interface, TypeParameter, Enum, 
 internal enum AggregateLayoutKind { Sequential, Union, Explicit }
 internal enum Accessibility { Private, Internal, Protected, Public }
 internal enum NativeParameterOwnership { Borrowed, Consumes, Retained, Creates }
-internal enum RuntimeImplementationRole { Allocate, Free, Panic }
+internal enum RuntimeImplementationRole
+{
+    Allocate, Free, Panic, Exit,
+    ConsoleWrite, ConsoleRead, ConsoleFlush,
+    MonotonicNanoseconds, PathSeparator,
+    MathFloatUnary, MathFloatBinary, MathDoubleUnary, MathDoubleBinary,
+    FileOpen, FileRead, FileWrite, FileSeek, FileLength, FileSetLength,
+    FileFlush, FileClose, PathMetadata, FileDelete, PathMove,
+    DirectoryCreate, DirectoryDelete, DirectoryOpen, DirectoryRead,
+    DirectoryClose, CurrentDirectoryGet, CurrentDirectorySet,
+    ThreadCreate, ThreadJoin, ThreadClose, ThreadSleep, ThreadYield,
+    ThreadStateGet, ThreadStateSet,
+    MutexCreate, MutexEnter, MutexTryEnter, MutexExit, MutexClose
+}
 
 internal sealed record GenericConstraintSet(
     bool RequiresClass = false,

@@ -75,6 +75,7 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool _usesMonotonicClock;
     private bool _usesRandomRangeFailure;
     private bool _usesSpinPause;
+    private bool _usesFreestandingFloatFormatting;
     private bool _ryuCoreEmitted;
     private ImmutableHashSet<MethodSymbol> _reachableMethods = ImmutableHashSet<MethodSymbol>.Empty;
     private ImmutableHashSet<PropertySymbol> _reachableProperties = ImmutableHashSet<PropertySymbol>.Empty;
@@ -133,6 +134,7 @@ internal sealed partial class CEmitter : ILoweringServices
     public TargetEnvironment Environment => _environment;
     public bool HasCpuFeature(CpuFeature feature) => Model.CpuFeatures.Contains(feature);
     public void RequireMathSymbol(string symbol) => _usedMathSymbols.Add(symbol);
+    public void RequireFreestandingFloatFormatting() => _usesFreestandingFloatFormatting = true;
     public bool SimdOptimizations => Model.SimdOptimizations;
 
     public CompilationModel Model { get; }
@@ -146,6 +148,10 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
     private bool IsQemu => IsEspIdf && _environment == TargetEnvironment.Qemu;
     private bool IsFreestanding => _target == CompilationTarget.Freestanding;
+    private bool HasRuntimeImplementation(RuntimeImplementationRole role) => Model.RuntimeImplementations.ContainsKey(role);
+    private bool UsesEspRuntimeIo => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role == RuntimeImplementationRole.PathSeparator || role is >= RuntimeImplementationRole.FileOpen and <= RuntimeImplementationRole.CurrentDirectorySet);
+    private bool UsesEspRuntimeThreads => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role is >= RuntimeImplementationRole.ThreadCreate and <= RuntimeImplementationRole.MutexClose);
+    private bool UsesEspRuntimeConsole => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role is RuntimeImplementationRole.ConsoleWrite or RuntimeImplementationRole.ConsoleRead or RuntimeImplementationRole.ConsoleFlush);
 
     private string SourceIdentity(MethodSymbol method)
     {
@@ -260,12 +266,15 @@ internal sealed partial class CEmitter : ILoweringServices
             if (IsHostedIoSymbol(method.ExternName))
             {
                 _usesHostedIo = true;
-                _usesExceptions = true;
+                if (!IsFreestanding)
+                    _usesExceptions = true;
             }
             if (IsHostedFilesystemSymbol(method.ExternName))
                 _usesHostedFilesystem = true;
             if (IsMathSymbol(method.ExternName))
                 _usedMathSymbols.Add(method.ExternName);
+            if (IsFreestanding && method.ExternName is "ct_write_float" or "ct_write_double")
+                _usesFreestandingFloatFormatting = true;
             if (method.ExternName == "ct_monotonic_nanoseconds")
                 _usesMonotonicClock = true;
             if (method.ExternName == "ct_random_argument_out_of_range")
@@ -860,12 +869,7 @@ internal sealed partial class CEmitter : ILoweringServices
             entry["used"] = method.IsUsed;
             entry["linkerRetained"] = method.IsUsed;
             entry["runtimeRole"] = method.RuntimeImplementation?.ToString();
-            entry["runtimeRequired"] = method.RuntimeImplementation switch
-            {
-                RuntimeImplementationRole.Panic => Model.FreestandingRuntimeRequired,
-                RuntimeImplementationRole.Allocate or RuntimeImplementationRole.Free => Model.FreestandingHeapRequired,
-                _ => false,
-            };
+            entry["runtimeRequired"] = method.RuntimeImplementation is { } role && Model.RequiredRuntimeImplementations.Contains(role);
             entry["naked"] = method.IsNaked;
             entry["assemblyFunction"] = method.IsAssemblyFunction;
             entry["interrupt"] = method.IsInterrupt;

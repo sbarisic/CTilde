@@ -170,11 +170,11 @@ internal static partial class ConformanceTests
             Assert(Compile(invalidSurface).GetDiagnostics().Any(diagnostic => diagnostic.Code is "CT1321" or "CT1100"),
                 "A compiler-backed primitive surface accepted storage.");
 
-            const string freestandingIo = "using System.IO; public static class Program { public static void Probe() { File.Exists(\"x\"); } }";
+            const string freestandingIo = "using System.IO; public static class Program { [Export(\"probe\")] public static bool Probe() { return File.Exists(\"x\"); } }";
             var ioDiagnostics = Compile(freestandingIo, new CompilationOptions(CompilationTarget.Freestanding,
                 Architecture: CompilationArchitecture.X64)).GetDiagnostics();
-            Assert(ioDiagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error),
-                "Freestanding compilation exposed hosted filesystem APIs.");
+            Assert(ioDiagnostics.Any(diagnostic => diagnostic.Code == "CT4114"),
+                "Reachable freestanding filesystem use did not require its provider group.");
         });
     }
 }

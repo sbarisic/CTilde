@@ -88,7 +88,7 @@ public sealed partial class LanguageServiceSnapshot
                 options.Target,
                 nativeIntegers,
                 nativeUtf8,
-                options.Target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan,
+                StandardLibrary.RequiresHostedIo(_userTrees),
                 StandardVectorTypes.All,
                 StandardFoundationTypes.All))
             .AddRange(_userTrees);

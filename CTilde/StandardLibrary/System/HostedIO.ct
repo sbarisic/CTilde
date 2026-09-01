@@ -167,8 +167,24 @@ public static class File
         Move(source, destination, false);
     }
 
-    [Extern("ct_host_file_copy")]
-    public static void Copy(string source, string destination, bool overwrite);
+    public static void Copy(string source, string destination, bool overwrite)
+    {
+        FileStream input = OpenRead(source);
+        defer input.Dispose();
+        FileMode mode = FileMode.CreateNew;
+        if (overwrite)
+            mode = FileMode.Create;
+        FileStream output = new FileStream(destination, mode, FileAccess.Write);
+        defer output.Dispose();
+        byte[] buffer = new byte[16384];
+        for (; ;)
+        {
+            int count = input.Read(buffer, 0, buffer.Length);
+            if (count == 0)
+                break;
+            output.Write(buffer, 0, count);
+        }
+    }
 
     public static void Copy(string source, string destination)
     {

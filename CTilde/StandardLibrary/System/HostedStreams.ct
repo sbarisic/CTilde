@@ -441,16 +441,15 @@ public sealed class StreamWriter
         if (disposed)
             return;
         disposed = true;
-        try
-        {
-            FlushBuffer();
-            stream.Flush();
-        }
-        finally
-        {
-            if (!leaveOpen)
-                stream.Dispose();
-        }
+        defer DisposeOwnedStream();
+        FlushBuffer();
+        stream.Flush();
+    }
+
+    private void DisposeOwnedStream()
+    {
+        if (!leaveOpen)
+            stream.Dispose();
     }
 
     private void RequireOpen()

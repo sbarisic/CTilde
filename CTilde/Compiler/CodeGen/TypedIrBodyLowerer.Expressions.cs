@@ -411,7 +411,14 @@ internal sealed partial class TypedIrBodyLowerer
             receiver = Materialize(receiver, syntax.Receiver);
             return syntax.Name == "Length"
                 ? new IrExpressionValue { Type = CType.Nuint, Code = $"(uintptr_t){receiver.Code}.Length", Prelude = receiver.Prelude }
-                : new IrExpressionValue { Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType), Code = $"{receiver.Code}.Data", Prelude = receiver.Prelude };
+                : new IrExpressionValue
+                {
+                    Type = new CType(CTypeKind.Pointer, ElementType: receiver.Type.ElementType),
+                    Code = receiver.Type.Kind == CTypeKind.ReadOnlyNativeBuffer
+                        ? $"({_emitter.CTypeName(receiver.Type.ElementType!)}*)(uintptr_t)(const void*){receiver.Code}.Data"
+                        : $"{receiver.Code}.Data",
+                    Prelude = receiver.Prelude,
+                };
         }
         if (receiver.Type.IsNativeUtf8String && syntax.Name is "ByteLength" or "Pointer")
         {
@@ -1683,6 +1690,8 @@ internal sealed partial class TypedIrBodyLowerer
             CTypeKind.Double => "ct_to_string_double",
             _ => throw new InvalidOperationException($"Unsupported ToString receiver '{receiver.Type.DisplayName}'."),
         };
+        if (_emitter.Target == CompilationTarget.Freestanding && receiver.Type.Kind is CTypeKind.Float or CTypeKind.Double)
+            _emitter.RequireFreestandingFloatFormatting();
         var argument = receiver.Type.Kind switch
         {
             CTypeKind.Byte or CTypeKind.Ushort => $"(uint32_t){receiver.Code}",

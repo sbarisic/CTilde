@@ -40,13 +40,13 @@ internal sealed partial class CEmitter
             writer.WriteLine("#error \"C~ native imports are not implemented for this hosted operating system\"");
             writer.WriteLine("#endif");
         }
-        if (_usesHostedIo || _usesManagedThreading)
+        if (!IsFreestanding && (_usesHostedIo || _usesManagedThreading))
         {
             writer.WriteLine("#include <errno.h>");
             if (_usesHostedIo)
                 writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#include <wchar.h>\n#include <io.h>\n#include <direct.h>\n#else\n#include <sys/types.h>\n#include <sys/stat.h>\n#include <unistd.h>\n#include <dirent.h>\n#endif");
         }
-        if (_usesMonotonicClock)
+        if (!IsFreestanding && _usesMonotonicClock)
         {
             writer.WriteLine("#if defined(_WIN32)");
             writer.WriteLine("#include <windows.h>");
@@ -67,7 +67,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#include <windows.h>\n#endif");
         if (!IsFreestanding && !IsEspIdf)
             writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#endif");
-        if (_usesManagedThreading)
+        if (!IsFreestanding && _usesManagedThreading)
         {
             writer.WriteLine("#if defined(_MSC_VER)");
             writer.WriteLine("#include <process.h>");
@@ -193,7 +193,35 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("static void* ct_runtime_allocate_bridge(size_t size);");
             writer.WriteLine("static void ct_runtime_free_bridge(void* value);");
-            writer.WriteLine("static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line);");
+            writer.WriteLine("static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code);");
+            writer.WriteLine("CT_NORETURN static void ct_runtime_service_fail(const char* code, uint8_t status, int32_t native_code);");
+            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length);");
+            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof);");
+            writer.WriteLine("static void ct_runtime_console_flush(void);");
+            writer.WriteLine("CT_NORETURN static void ct_runtime_exit(int32_t code);");
+            writer.WriteLine("static int64_t ct_runtime_monotonic_nanoseconds(void);");
+            writer.WriteLine("static void* ct_runtime_thread_state_get(void);");
+            writer.WriteLine("static void ct_runtime_thread_state_set(void* value);");
+        }
+        if (IsEspIdf && Model.RuntimeImplementations.Count != 0)
+        {
+            if (HasRuntimeImplementation(RuntimeImplementationRole.Allocate)) writer.WriteLine("static void* ct_runtime_allocate_bridge(size_t size);");
+            if (HasRuntimeImplementation(RuntimeImplementationRole.Free)) writer.WriteLine("static void ct_runtime_free_bridge(void* value);");
+            writer.WriteLine("static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code);");
+            writer.WriteLine("CT_NORETURN static void ct_runtime_service_fail(const char* code, uint8_t status, int32_t native_code);");
+            if (UsesEspRuntimeConsole)
+            {
+                writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length);");
+                writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof);");
+                writer.WriteLine("static void ct_runtime_console_flush(void);");
+            }
+            if (HasRuntimeImplementation(RuntimeImplementationRole.Exit)) writer.WriteLine("CT_NORETURN static void ct_runtime_exit(int32_t code);");
+            if (HasRuntimeImplementation(RuntimeImplementationRole.MonotonicNanoseconds)) writer.WriteLine("static int64_t ct_runtime_monotonic_nanoseconds(void);");
+            if (UsesEspRuntimeThreads)
+            {
+                writer.WriteLine("static void* ct_runtime_thread_state_get(void);");
+                writer.WriteLine("static void ct_runtime_thread_state_set(void* value);");
+            }
         }
         writer.WriteLine("typedef struct ct_module_descriptor { uint32_t AbiVersion; const char* Name; void (*Initialize)(void); void (*Finalize)(void); } ct_module_descriptor;");
         writer.WriteLine("static void ct_module_init(void);");
@@ -304,9 +332,9 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         if (EmitDebugInformation)
             writer.WriteLine("    ct_debug_fatal_hook(code, file, line);");
-        if (IsFreestanding)
+        if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Panic))
         {
-            writer.WriteLine("    ct_runtime_panic_bridge(code, file, (int32_t)line);");
+            writer.WriteLine("    ct_runtime_panic_bridge(code, file, (int32_t)line, UINT8_C(11), 0);");
             writer.WriteLine("    for (;;) { __asm__ volatile (\"\" ::: \"memory\"); }");
         }
         else
@@ -506,25 +534,80 @@ internal sealed partial class CEmitter
         writer.WriteLine("    if (length < 0 || (size_t)length >= capacity) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTS0002\", file, line);");
         writer.WriteLine("    return ct_string_from_bytes((const uint8_t*)buffer, (int32_t)length, file, line);");
         writer.WriteLine("}");
-        writer.WriteLine("static ct_string* ct_to_string_int(int32_t value, const char* file, int line) { char buffer[12]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-        writer.WriteLine("static ct_string* ct_to_string_uint(uint32_t value, const char* file, int line) { char buffer[11]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-        writer.WriteLine("static ct_string* ct_to_string_long(int64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-        writer.WriteLine("static ct_string* ct_to_string_ulong(uint64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        if (IsFreestanding || UsesEspRuntimeConsole)
+        {
+            if (_usesFreestandingFloatFormatting)
+                EmitRyuFormattingSupport(writer);
+            writer.WriteLine("static int32_t ct_format_u64_decimal(uint64_t value, bool negative, char* output) { char reversed[20]; int32_t count = 0; do { reversed[count++] = (char)('0' + value % UINT64_C(10)); value /= UINT64_C(10); } while (value != 0u); int32_t length = 0; if (negative) output[length++] = '-'; while (count > 0) output[length++] = reversed[--count]; return length; }");
+            writer.WriteLine("static int32_t ct_format_i64_decimal(int64_t value, char* output) { bool negative = value < 0; uint64_t magnitude = negative ? (uint64_t)(-(value + 1)) + UINT64_C(1) : (uint64_t)value; return ct_format_u64_decimal(magnitude, negative, output); }");
+            writer.WriteLine("static ct_string* ct_to_string_int(int32_t value, const char* file, int line) { char buffer[12]; int32_t length = ct_format_i64_decimal((int64_t)value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_uint(uint32_t value, const char* file, int line) { char buffer[11]; int32_t length = ct_format_u64_decimal((uint64_t)value, false, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_long(int64_t value, const char* file, int line) { char buffer[21]; int32_t length = ct_format_i64_decimal(value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_ulong(uint64_t value, const char* file, int line) { char buffer[20]; int32_t length = ct_format_u64_decimal(value, false, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+        }
+        else
+        {
+            writer.WriteLine("static ct_string* ct_to_string_int(int32_t value, const char* file, int line) { char buffer[12]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_uint(uint32_t value, const char* file, int line) { char buffer[11]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu32, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_long(int64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRId64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_ulong(uint64_t value, const char* file, int line) { char buffer[21]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIu64, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        }
         if (_usesNativeIntegers)
         {
-            writer.WriteLine("static ct_string* ct_to_string_nint(intptr_t value, const char* file, int line) { char buffer[3 * sizeof(intptr_t) + 2]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIdPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-            writer.WriteLine("static ct_string* ct_to_string_nuint(uintptr_t value, const char* file, int line) { char buffer[3 * sizeof(uintptr_t) + 1]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIuPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            if (IsFreestanding || UsesEspRuntimeConsole)
+            {
+                writer.WriteLine("static ct_string* ct_to_string_nint(intptr_t value, const char* file, int line) { char buffer[3 * sizeof(intptr_t) + 2]; int32_t length = ct_format_i64_decimal((int64_t)value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+                writer.WriteLine("static ct_string* ct_to_string_nuint(uintptr_t value, const char* file, int line) { char buffer[3 * sizeof(uintptr_t) + 1]; int32_t length = ct_format_u64_decimal((uint64_t)value, false, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+            }
+            else
+            {
+                writer.WriteLine("static ct_string* ct_to_string_nint(intptr_t value, const char* file, int line) { char buffer[3 * sizeof(intptr_t) + 2]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIdPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+                writer.WriteLine("static ct_string* ct_to_string_nuint(uintptr_t value, const char* file, int line) { char buffer[3 * sizeof(uintptr_t) + 1]; int length = snprintf(buffer, sizeof(buffer), \"%\" PRIuPTR, value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            }
         }
-        writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
-        writer.WriteLine("static ct_string* ct_to_string_double(double value, const char* file, int line) { char buffer[48]; int length = snprintf(buffer, sizeof(buffer), \"%.17g\", value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        if (IsFreestanding && _usesFreestandingFloatFormatting)
+        {
+            writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int32_t length = (int32_t)f2s_buffered_n(value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_double(double value, const char* file, int line) { char buffer[32]; int32_t length = (int32_t)d2s_buffered_n(value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
+        }
+        else if (!IsFreestanding)
+        {
+            writer.WriteLine("static ct_string* ct_to_string_float(float value, const char* file, int line) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+            writer.WriteLine("static ct_string* ct_to_string_double(double value, const char* file, int line) { char buffer[48]; int length = snprintf(buffer, sizeof(buffer), \"%.17g\", value); return ct_string_from_format(buffer, length, sizeof(buffer), file, line); }");
+        }
         writer.WriteLine("static ct_string* ct_to_string_bool(bool value, const char* file, int line) { const char* text = value ? \"True\" : \"False\"; return ct_string_from_bytes((const uint8_t*)text, value ? 4 : 5, file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_char(uint8_t value, const char* file, int line) { return ct_string_from_bytes(&value, 1, file, line); }");
         writer.WriteLine("static uint32_t ct_validate_rune(uint32_t value, const char* file, int line) { if (value > UINT32_C(0x10ffff) || (value >= UINT32_C(0xd800) && value <= UINT32_C(0xdfff))) ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTU0001\", file, line); return value; }");
         writer.WriteLine("static int32_t ct_utf8_encode_rune(uint32_t value, uint8_t buffer[4]) { if (value <= UINT32_C(0x7f)) { buffer[0] = (uint8_t)value; return 1; } if (value <= UINT32_C(0x7ff)) { buffer[0] = (uint8_t)(UINT32_C(0xc0) | (value >> 6)); buffer[1] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 2; } if (value <= UINT32_C(0xffff)) { buffer[0] = (uint8_t)(UINT32_C(0xe0) | (value >> 12)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 3; } buffer[0] = (uint8_t)(UINT32_C(0xf0) | (value >> 18)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 12) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[3] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 4; }");
         writer.WriteLine("static ct_string* ct_to_string_rune(uint32_t value, const char* file, int line) { uint8_t buffer[4]; value = ct_validate_rune(value, file, line); int32_t length = ct_utf8_encode_rune(value, buffer); return ct_string_from_bytes(buffer, length, file, line); }");
-        if (IsFreestanding)
+        if (IsFreestanding || UsesEspRuntimeConsole)
         {
-            // Console and process services are intentionally absent.
+            writer.WriteLine("void ct_write_string(ct_string* value) { if (value != NULL && value->Length > 0) ct_runtime_console_write(value->Data, (size_t)value->Length); }");
+            writer.WriteLine("void ct_write_char(uint8_t value) { ct_runtime_console_write(&value, 1u); }");
+            writer.WriteLine("void ct_write_rune(uint32_t value) { uint8_t buffer[4]; int32_t length = ct_utf8_encode_rune(ct_validate_rune(value, \"<console>\", 0), buffer); ct_runtime_console_write(buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_int(int32_t value) { char buffer[12]; int32_t length = ct_format_i64_decimal((int64_t)value, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_uint(uint32_t value) { char buffer[11]; int32_t length = ct_format_u64_decimal((uint64_t)value, false, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_long(int64_t value) { char buffer[21]; int32_t length = ct_format_i64_decimal(value, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            writer.WriteLine("void ct_write_ulong(uint64_t value) { char buffer[20]; int32_t length = ct_format_u64_decimal(value, false, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            if (_usesNativeIntegers)
+            {
+                writer.WriteLine("void ct_write_nint(intptr_t value) { char buffer[3 * sizeof(intptr_t) + 2]; int32_t length = ct_format_i64_decimal((int64_t)value, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+                writer.WriteLine("void ct_write_nuint(uintptr_t value) { char buffer[3 * sizeof(uintptr_t) + 1]; int32_t length = ct_format_u64_decimal((uint64_t)value, false, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            }
+            if (_usesFreestandingFloatFormatting)
+            {
+                writer.WriteLine("void ct_write_float(float value) { char buffer[32]; int32_t length = (int32_t)f2s_buffered_n(value, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+                writer.WriteLine("void ct_write_double(double value) { char buffer[32]; int32_t length = (int32_t)d2s_buffered_n(value, buffer); ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            }
+            else if (IsEspIdf)
+            {
+                writer.WriteLine("void ct_write_float(float value) { char buffer[32]; int length = snprintf(buffer, sizeof(buffer), \"%.9g\", (double)value); if (length > 0) ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+                writer.WriteLine("void ct_write_double(double value) { char buffer[48]; int length = snprintf(buffer, sizeof(buffer), \"%.17g\", value); if (length > 0) ct_runtime_console_write((const uint8_t*)buffer, (size_t)length); }");
+            }
+            writer.WriteLine("void ct_write_bool(bool value) { const uint8_t* text = (const uint8_t*)(value ? \"True\" : \"False\"); ct_runtime_console_write(text, value ? 4u : 5u); }");
+            writer.WriteLine("void ct_write_line(void) { static const uint8_t newline = (uint8_t)'\\n'; ct_runtime_console_write(&newline, 1u); ct_runtime_console_flush(); }");
+            writer.WriteLine("int32_t ct_console_read(void) { uint8_t value = 0u; bool eof = false; size_t count = ct_runtime_console_read(&value, 1u, &eof); return eof || count == 0u ? -1 : (int32_t)value; }");
+            writer.WriteLine("ct_string* ct_console_read_line(void) { size_t capacity = 64u, length = 0u; uint8_t* data = (uint8_t*)ct_alloc(capacity, \"<console>\", 0); for (;;) { uint8_t value = 0u; bool eof = false; size_t count = ct_runtime_console_read(&value, 1u, &eof); if (eof || count == 0u || value == (uint8_t)'\\n') break; if (length == capacity) { size_t next = capacity * 2u; uint8_t* replacement = (uint8_t*)ct_alloc(next, \"<console>\", 0); (void)memcpy(replacement, data, length); ct_dealloc(data); data = replacement; capacity = next; } data[length++] = value; } if (length != 0u && data[length - 1u] == (uint8_t)'\\r') --length; ct_string* result = ct_string_from_bytes(data, (int32_t)length, \"<console>\", 0); ct_dealloc(data); return result; }");
         }
         else if (IsEspIdf && EmitDebugInstrumentation && !IsQemu)
         {
@@ -569,7 +652,9 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_write_bool(bool value) { (void)fputs(value ? \"True\" : \"False\", stdout); }");
             writer.WriteLine("void ct_write_line(void) { (void)fputc('\\n', stdout); (void)fflush(stdout); }");
         }
-        if (!IsEspIdf && !IsFreestanding)
+        if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Exit))
+            writer.WriteLine("void ct_environment_exit(int32_t code) { ct_runtime_exit(code); }");
+        else if (!IsEspIdf)
             writer.WriteLine("void ct_environment_exit(int32_t code) { exit((int)code); }");
         writer.WriteLine();
     }
@@ -867,13 +952,13 @@ internal sealed partial class CEmitter
 
     private void EmitPlatformAllocation(CWriter writer)
     {
-        if (IsFreestanding)
+        if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Allocate))
         {
             writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) {");
             writer.WriteLine("    size_t payload = size == 0u ? 1u : size;");
             writer.WriteLine("    void* value = ct_runtime_allocate_bridge(payload);");
             writer.WriteLine("    if (value == NULL) ct_fail(\"CTM0001\", file, line);");
-            writer.WriteLine("    (void)ct_memset(value, 0, payload);");
+            writer.WriteLine(IsFreestanding ? "    (void)ct_memset(value, 0, payload);" : "    (void)memset(value, 0, payload);");
             writer.WriteLine("    return value;");
             writer.WriteLine("}");
             writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_runtime_free_bridge(value); }");
@@ -991,11 +1076,19 @@ internal sealed partial class CEmitter
 
     private void EmitThreadStorage(CWriter writer)
     {
-        if (IsFreestanding)
+        if (IsFreestanding || UsesEspRuntimeThreads)
         {
-            writer.WriteLine("static ct_thread_state* ct_thread_current_state = NULL;");
-            writer.WriteLine("static ct_thread_state* ct_thread_current(void) { return ct_thread_current_state; }");
-            writer.WriteLine("static void ct_thread_set_current(ct_thread_state* state) { ct_thread_current_state = state; }");
+            if (_usesManagedThreading || UsesEspRuntimeThreads)
+            {
+                writer.WriteLine("static ct_thread_state* ct_thread_current(void) { return (ct_thread_state*)ct_runtime_thread_state_get(); }");
+                writer.WriteLine("static void ct_thread_set_current(ct_thread_state* state) { ct_runtime_thread_state_set(state); }");
+            }
+            else
+            {
+                writer.WriteLine("static ct_thread_state* ct_thread_current_state = NULL;");
+                writer.WriteLine("static ct_thread_state* ct_thread_current(void) { return ct_thread_current_state; }");
+                writer.WriteLine("static void ct_thread_set_current(ct_thread_state* state) { ct_thread_current_state = state; }");
+            }
         }
         else if (IsEspIdf)
         {
@@ -1350,22 +1443,121 @@ internal sealed partial class CEmitter
 
     private void EmitRuntimeImplementationBridges(CWriter writer)
     {
+        if (IsEspIdf)
+        {
+            EmitEspRuntimeImplementationBridges(writer);
+            return;
+        }
         if (!IsFreestanding)
             return;
+        var runtimeResult = Model.Types["System.Runtime.RuntimeResult"];
+        var transferResult = Model.Types["System.Runtime.RuntimeTransferResult"];
+        string ResultField(TypeSymbol type, string name) => type.Fields.Single(field => field.Name == name).CName;
+        var resultStatus = ResultField(runtimeResult, "Status");
+        var resultNative = ResultField(runtimeResult, "NativeCode");
+        var transferStatus = ResultField(transferResult, "Status");
+        var transferNative = ResultField(transferResult, "NativeCode");
+        var transferCount = ResultField(transferResult, "Count");
+        var resultType = NameMangler.Type(runtimeResult);
+        var transferType = NameMangler.Type(transferResult);
+
         if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Allocate, out var allocate))
             writer.WriteLine($"static void* ct_runtime_allocate_bridge(size_t size) {{ return {allocate.CName}((uintptr_t)size); }}");
         else
-            writer.WriteLine("static void* ct_runtime_allocate_bridge(size_t size) { (void)size; ct_runtime_panic_bridge(\"CTM0002\", \"<runtime>\", 0); return NULL; }");
+            writer.WriteLine("static void* ct_runtime_allocate_bridge(size_t size) { (void)size; ct_runtime_panic_bridge(\"CTM0002\", \"<runtime>\", 0, UINT8_C(10), 0); return NULL; }");
         if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Free, out var free))
             writer.WriteLine($"static void ct_runtime_free_bridge(void* value) {{ {free.CName}(value); }}");
         else
-            writer.WriteLine("static void ct_runtime_free_bridge(void* value) { (void)value; ct_runtime_panic_bridge(\"CTM0002\", \"<runtime>\", 0); }");
+            writer.WriteLine("static void ct_runtime_free_bridge(void* value) { (void)value; ct_runtime_panic_bridge(\"CTM0002\", \"<runtime>\", 0, UINT8_C(10), 0); }");
         if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Panic, out var panic))
         {
             var info = panic.Parameters[0].Type;
-            writer.WriteLine($"static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line) {{ {CTypeName(info)} info = {{ (uint8_t*)(uintptr_t)(const void*)code, (uint8_t*)(uintptr_t)(const void*)file, line }}; {panic.CName}(info); }}");
+            writer.WriteLine($"static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code) {{ {CTypeName(info)} info = {{ (uint8_t*)(uintptr_t)(const void*)code, (uint8_t*)(uintptr_t)(const void*)file, line, ({CTypeName(Model.Types["System.Runtime.RuntimeStatus"].Type)})status, native_code }}; {panic.CName}(info); for (;;) {{ __asm__ volatile (\"\" ::: \"memory\"); }} }}");
         }
+        else
+            writer.WriteLine("static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code) { (void)code; (void)file; (void)line; (void)status; (void)native_code; for (;;) { __asm__ volatile (\"\" ::: \"memory\"); } }");
+        writer.WriteLine("CT_NORETURN static void ct_runtime_service_fail(const char* code, uint8_t status, int32_t native_code) { ct_runtime_panic_bridge(code, \"<runtime-service>\", 0, status, native_code); for (;;) { __asm__ volatile (\"\" ::: \"memory\"); } }");
+
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.ConsoleWrite, out var consoleWrite))
+        {
+            var buffer = CTypeName(consoleWrite.Parameters[0].Type);
+            writer.WriteLine($"static void ct_runtime_console_write(const uint8_t* data, size_t length) {{ size_t offset = 0u; while (offset < length) {{ {transferType} result = {consoleWrite.CName}(data + offset, length - offset); if ((uint8_t)result.{transferStatus} != 0u) ct_runtime_service_fail(\"CTC0001\", (uint8_t)result.{transferStatus}, result.{transferNative}); size_t count = (size_t)result.{transferCount}; if (count == 0u || count > length - offset) ct_runtime_service_fail(\"CTC0002\", UINT8_C(11), 0); offset += count; }} }}");
+        }
+        else
+            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length) { (void)data; (void)length; ct_runtime_service_fail(\"CTC0003\", UINT8_C(7), 0); }");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.ConsoleRead, out var consoleRead))
+        {
+            var buffer = CTypeName(consoleRead.Parameters[0].Type);
+            writer.WriteLine($"static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) {{ {transferType} result = {consoleRead.CName}(data, length); uint8_t status = (uint8_t)result.{transferStatus}; if (status == UINT8_C(1)) {{ *eof = true; return 0u; }} if (status != 0u) ct_runtime_service_fail(\"CTC0004\", status, result.{transferNative}); size_t count = (size_t)result.{transferCount}; if (count > length) ct_runtime_service_fail(\"CTC0005\", UINT8_C(11), 0); *eof = false; return count; }}");
+        }
+        else
+            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) { (void)data; (void)length; (void)eof; ct_runtime_service_fail(\"CTC0006\", UINT8_C(7), 0); return 0u; }");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.ConsoleFlush, out var consoleFlush))
+            writer.WriteLine($"static void ct_runtime_console_flush(void) {{ {resultType} result = {consoleFlush.CName}(); if ((uint8_t)result.{resultStatus} != 0u) ct_runtime_service_fail(\"CTC0007\", (uint8_t)result.{resultStatus}, result.{resultNative}); }}");
+        else
+            writer.WriteLine("static void ct_runtime_console_flush(void) { ct_runtime_service_fail(\"CTC0008\", UINT8_C(7), 0); }");
+
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Exit, out var exit))
+            writer.WriteLine($"CT_NORETURN static void ct_runtime_exit(int32_t code) {{ {exit.CName}(code); ct_runtime_service_fail(\"CTE0102\", UINT8_C(11), 0); }}");
+        else
+            writer.WriteLine("CT_NORETURN static void ct_runtime_exit(int32_t code) { (void)code; ct_runtime_service_fail(\"CTE0101\", UINT8_C(7), 0); }");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.MonotonicNanoseconds, out var clock))
+            writer.WriteLine($"static int64_t ct_runtime_monotonic_nanoseconds(void) {{ return {clock.CName}(); }}");
+        else
+            writer.WriteLine("static int64_t ct_runtime_monotonic_nanoseconds(void) { ct_runtime_service_fail(\"CTK0001\", UINT8_C(7), 0); return 0; }");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.ThreadStateGet, out var stateGet))
+            writer.WriteLine($"static void* ct_runtime_thread_state_get(void) {{ return {stateGet.CName}(); }}");
+        else
+            writer.WriteLine("static void* ct_runtime_thread_state_get(void) { ct_runtime_service_fail(\"CTT0120\", UINT8_C(7), 0); return NULL; }");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.ThreadStateSet, out var stateSet))
+            writer.WriteLine($"static void ct_runtime_thread_state_set(void* value) {{ {stateSet.CName}(value); }}");
+        else
+            writer.WriteLine("static void ct_runtime_thread_state_set(void* value) { (void)value; ct_runtime_service_fail(\"CTT0121\", UINT8_C(7), 0); }");
         if (Model.RuntimeImplementations.Count != 0)
             writer.WriteLine();
+    }
+
+    private void EmitEspRuntimeImplementationBridges(CWriter writer)
+    {
+        if (Model.RuntimeImplementations.Count == 0)
+            return;
+        var runtimeResult = Model.Types["System.Runtime.RuntimeResult"];
+        var transferResult = Model.Types["System.Runtime.RuntimeTransferResult"];
+        string Field(TypeSymbol type, string name) => type.Fields.Single(field => field.Name == name).CName;
+        if (HasRuntimeImplementation(RuntimeImplementationRole.Allocate))
+            writer.WriteLine($"static void* ct_runtime_allocate_bridge(size_t size) {{ return {Model.RuntimeImplementations[RuntimeImplementationRole.Allocate].CName}((uintptr_t)size); }}");
+        if (HasRuntimeImplementation(RuntimeImplementationRole.Free))
+            writer.WriteLine($"static void ct_runtime_free_bridge(void* value) {{ {Model.RuntimeImplementations[RuntimeImplementationRole.Free].CName}(value); }}");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Panic, out var panic))
+        {
+            var info = panic.Parameters[0].Type;
+            writer.WriteLine($"static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code) {{ {CTypeName(info)} info = {{ (uint8_t*)(uintptr_t)(const void*)code, (uint8_t*)(uintptr_t)(const void*)file, line, ({CTypeName(Model.Types["System.Runtime.RuntimeStatus"].Type)})status, native_code }}; {panic.CName}(info); esp_system_abort(code); }}");
+        }
+        else
+            writer.WriteLine("static void ct_runtime_panic_bridge(const char* code, const char* file, int32_t line, uint8_t status, int32_t native_code) { (void)file; (void)line; (void)status; (void)native_code; esp_system_abort(code); }");
+        writer.WriteLine("CT_NORETURN static void ct_runtime_service_fail(const char* code, uint8_t status, int32_t native_code) { ct_runtime_panic_bridge(code, \"<runtime-service>\", 0, status, native_code); esp_system_abort(code); }");
+        if (UsesEspRuntimeConsole)
+        {
+            var resultType = CTypeName(runtimeResult.Type);
+            var transferType = CTypeName(transferResult.Type);
+            var resultStatus = Field(runtimeResult, "Status"); var resultNative = Field(runtimeResult, "NativeCode");
+            var transferStatus = Field(transferResult, "Status"); var transferNative = Field(transferResult, "NativeCode"); var transferCount = Field(transferResult, "Count");
+            var write = Model.RuntimeImplementations[RuntimeImplementationRole.ConsoleWrite];
+            var read = Model.RuntimeImplementations[RuntimeImplementationRole.ConsoleRead];
+            var flush = Model.RuntimeImplementations[RuntimeImplementationRole.ConsoleFlush];
+            writer.WriteLine($"static void ct_runtime_console_write(const uint8_t* data, size_t length) {{ size_t offset = 0u; while (offset < length) {{ {transferType} result = {write.CName}(data + offset, length - offset); if ((uint8_t)result.{transferStatus} != 0u) ct_runtime_service_fail(\"CTC0001\", (uint8_t)result.{transferStatus}, result.{transferNative}); size_t count = (size_t)result.{transferCount}; if (count == 0u || count > length - offset) ct_runtime_service_fail(\"CTC0002\", UINT8_C(11), 0); offset += count; }} }}");
+            writer.WriteLine($"static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) {{ {transferType} result = {read.CName}(data, length); uint8_t status = (uint8_t)result.{transferStatus}; if (status == UINT8_C(1)) {{ *eof = true; return 0u; }} if (status != 0u) ct_runtime_service_fail(\"CTC0004\", status, result.{transferNative}); size_t count = (size_t)result.{transferCount}; if (count > length) ct_runtime_service_fail(\"CTC0005\", UINT8_C(11), 0); *eof = false; return count; }}");
+            writer.WriteLine($"static void ct_runtime_console_flush(void) {{ {resultType} result = {flush.CName}(); if ((uint8_t)result.{resultStatus} != 0u) ct_runtime_service_fail(\"CTC0007\", (uint8_t)result.{resultStatus}, result.{resultNative}); }}");
+        }
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.Exit, out var exit))
+            writer.WriteLine($"CT_NORETURN static void ct_runtime_exit(int32_t code) {{ {exit.CName}(code); esp_system_abort(\"Runtime.Exit returned\"); }}");
+        if (Model.RuntimeImplementations.TryGetValue(RuntimeImplementationRole.MonotonicNanoseconds, out var clock))
+            writer.WriteLine($"static int64_t ct_runtime_monotonic_nanoseconds(void) {{ return {clock.CName}(); }}");
+        if (UsesEspRuntimeThreads)
+        {
+            writer.WriteLine($"static void* ct_runtime_thread_state_get(void) {{ return {Model.RuntimeImplementations[RuntimeImplementationRole.ThreadStateGet].CName}(); }}");
+            writer.WriteLine($"static void ct_runtime_thread_state_set(void* value) {{ {Model.RuntimeImplementations[RuntimeImplementationRole.ThreadStateSet].CName}(value); }}");
+        }
+        writer.WriteLine();
     }
 }

@@ -12,7 +12,113 @@ public enum TargetEnvironment
 
 public enum Runtime
 {
-    Allocate, Free, Panic
+    Allocate, Free, Panic, Exit, ConsoleWrite, ConsoleRead, ConsoleFlush, MonotonicNanoseconds,
+        PathSeparator, MathFloatUnary, MathFloatBinary, MathDoubleUnary, MathDoubleBinary,
+        FileOpen, FileRead, FileWrite, FileSeek, FileLength, FileSetLength, FileFlush,
+        FileClose, PathMetadata, FileDelete, PathMove, DirectoryCreate, DirectoryDelete,
+        DirectoryOpen, DirectoryRead, DirectoryClose, CurrentDirectoryGet, CurrentDirectorySet,
+        ThreadCreate, ThreadJoin, ThreadClose, ThreadSleep, ThreadYield, ThreadStateGet,
+        ThreadStateSet, MutexCreate, MutexEnter, MutexTryEnter, MutexExit, MutexClose
+}
+
+public enum RuntimeStatus : byte
+{
+    Success, EndOfStream, BufferTooSmall, NotFound, AlreadyExists, AccessDenied,
+        InvalidArgument, NotSupported, Busy, TimedOut, OutOfMemory, IoError
+}
+
+public readonly struct RuntimeResult
+{
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
+
+    public RuntimeResult(RuntimeStatus status, int nativeCode)
+    {
+        Status = status;
+        NativeCode = nativeCode;
+    }
+
+    public static RuntimeResult Ok
+    {
+        get
+        {
+            return new RuntimeResult(RuntimeStatus.Success, 0);
+        }
+    }
+}
+
+public readonly struct RuntimeTransferResult
+{
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
+    public readonly nuint Count;
+
+    public RuntimeTransferResult(RuntimeStatus status, int nativeCode, nuint count)
+    {
+        Status = status;
+        NativeCode = nativeCode;
+        Count = count;
+    }
+}
+
+public enum RuntimeFileMode : byte
+{
+    Open, Create, Append, CreateNew, OpenOrCreate, Truncate
+}
+
+public enum RuntimeFileAccess : byte
+{
+    Read, Write, ReadWrite
+}
+
+public enum RuntimeSeekOrigin : byte
+{
+    Begin, Current, End
+}
+
+public enum RuntimeFileKind : byte
+{
+    None, File, Directory, SymbolicLink, Other
+}
+
+public enum RuntimeFileAttributes : uint
+{
+    None=0, ReadOnly=1, Hidden=2, Directory=4, SymbolicLink=8
+}
+
+public struct RuntimeFileTimestamp
+{
+    public long Seconds;
+    public int Nanoseconds;
+}
+
+public struct RuntimeFileMetadata
+{
+    public RuntimeFileKind Kind;
+    public RuntimeFileAttributes Attributes;
+    public long Length;
+    public bool HasCreationTime;
+    public RuntimeFileTimestamp CreationTime;
+    public bool HasAccessTime;
+    public RuntimeFileTimestamp AccessTime;
+    public bool HasModificationTime;
+    public RuntimeFileTimestamp ModificationTime;
+}
+
+public enum RuntimeUnaryMathOperation : byte
+{
+    SquareRoot, Absolute, Tangent, Sine, Cosine, ArcCosine, Floor, Ceiling, ArcSine,
+        ArcTangent, Exponential, Logarithm, Logarithm2, Logarithm10, Round, Truncate
+}
+
+public enum RuntimeBinaryMathOperation : byte
+{
+    Minimum, Maximum, ArcTangent2, Power
+}
+
+public enum RuntimeThreadPriority : byte
+{
+    Lowest, BelowNormal, Normal, AboveNormal, Highest
 }
 
 public readonly struct RuntimePanicInfo
@@ -20,6 +126,8 @@ public readonly struct RuntimePanicInfo
     public unsafe readonly byte* Code;
     public unsafe readonly byte* File;
     public readonly int Line;
+    public readonly RuntimeStatus Status;
+    public readonly int NativeCode;
 }
 
 public enum TargetArchitecture

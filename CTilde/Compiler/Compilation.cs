@@ -79,7 +79,7 @@ public sealed class Compilation
             var architecture = ResolveArchitecture(target, Options.Architecture);
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
             var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
-            var hostedIo = (target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && StandardLibrary.RequiresHostedIo(SyntaxTrees);
+            var hostedIo = StandardLibrary.RequiresHostedIo(SyntaxTrees);
             var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);
             var foundations = StandardLibrary.RequiredFoundations(SyntaxTrees);
             var allSyntaxTrees = (_standardLibraryOverride ?? StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors, foundations)).AddRange(SyntaxTrees);

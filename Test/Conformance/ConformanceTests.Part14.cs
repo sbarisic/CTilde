@@ -144,7 +144,7 @@ internal static partial class ConformanceTests
             Assert(text.Contains("#pragma pack(push, 2)", StringComparison.Ordinal) && text.Contains("C~ aggregate pack mismatch", StringComparison.Ordinal), "The public header omitted balanced packing or its assertion.");
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
-            var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var internalHeader = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             Assert(internalHeader.Contains("ct_layout", StringComparison.Ordinal) && internalHeader.Contains("#pragma pack(push, 2)", StringComparison.Ordinal), "Modular output did not use the aggregate layout renderer.");
             using var debugMap = new StringWriter();
             var debugCompilation = Compile(source, new CompilationOptions(DebugInformation: DebugInformationMode.Instrumented));

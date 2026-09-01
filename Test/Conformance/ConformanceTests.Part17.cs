@@ -100,5 +100,116 @@ internal static partial class ConformanceTests
             const string unknown = "public delegate void Work(); public static class Program { private static void Done() { } [NoRecursion] private static void Run(Work work) { work(); } [EntryPoint] public static void Main() { Work work = Done; Run(work); } }";
             Assert(Compile(unknown).GetDiagnostics().Any(diagnostic => diagnostic.Code == "CT2206"), "NoRecursion accepted open delegate dispatch.");
         });
+
+        suite.Run("draft 0.44 stack usage contracts and metadata", () =>
+        {
+            const string valid = "public static class Native { [Extern(\"native_leaf\")][StackUsage(64)] public static void Leaf(); } public static class Program { [StackUsage(512)][EntryPoint] public static void Main() { Native.Leaf(); } }";
+            var compilation = Compile(valid);
+            Assert(!compilation.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error),
+                string.Join(Environment.NewLine, compilation.GetDiagnostics()));
+            using var map = new StringWriter();
+            Assert(compilation.EmitSymbolMap(map).Success, "Stack-usage symbol map emission failed.");
+            Assert(map.ToString().Contains("\"stackUsageBytes\": 512", StringComparison.Ordinal) &&
+                map.ToString().Contains("\"stackUsageBytes\": 64", StringComparison.Ordinal) &&
+                map.ToString().Contains("\"entryPoint\": true", StringComparison.Ordinal),
+                "Stack contracts or native-root metadata were omitted from the symbol map.\n" + map);
+
+            const string invalid = "public abstract class A { [StackUsage(8)] public abstract void M(); } public static class Program { [StackUsage(0)] [EntryPoint] public static void Main() { } }";
+            var diagnostics = Compile(invalid).GetDiagnostics();
+            Assert(diagnostics.Count(diagnostic => diagnostic.Code == "CT1323") >= 2,
+                "Malformed or abstract StackUsage declarations did not report CT1323.");
+
+            var optionRoot = Path.Combine(Path.GetTempPath(), "ctilde-stack-option-tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(optionRoot);
+            try
+            {
+                var input = Path.Combine(optionRoot, "Program.ct");
+                File.WriteAllText(input, "public static class Program { [EntryPoint] public static void Main() { } }");
+                Assert(CTilde.Cli.CommandLineOptions.TryParse(["--check", "--stack-report", Path.Combine(optionRoot, "stack.json"), input],
+                    out var parsed, out var parseError, out _) && parseError is null, "Stack-report CLI options did not parse.");
+                try
+                {
+                    _ = CTilde.Cli.BuildRequestResolver.Resolve(parsed!);
+                    Assert(false, "A stack report was accepted without a native build.");
+                }
+                catch (CTilde.Cli.CommandLineException exception)
+                {
+                    Assert(exception.Message.Contains("native-build", StringComparison.Ordinal) ||
+                        exception.Message.Contains("--build or --run", StringComparison.Ordinal), exception.Message);
+                }
+            }
+            finally
+            {
+                if (Directory.Exists(optionRoot)) Directory.Delete(optionRoot, true);
+            }
+        });
+
+        suite.Run("draft 0.44 GCC stack report analysis", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ctilde-stack-report-tests", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                var usage = Path.Combine(root, "program.su");
+                var graph = Path.Combine(root, "program.ci");
+                var symbols = Path.Combine(root, "symbols.json");
+                var report = Path.Combine(root, "stack.json");
+                File.WriteAllText(usage, "program.c:1:1:main\t16\tstatic\nprogram.c:2:1:ct_method\t32\tstatic\n");
+                File.WriteAllText(graph, "graph: { title: \"program.c\"\nnode: { title: \"main\" label: \"main\" }\nnode: { title: \"ct_method\" label: \"ct_method\" }\nnode: { title: \"native_leaf\" label: \"native_leaf\" }\nedge: { sourcename: \"main\" targetname: \"ct_method\" }\nedge: { sourcename: \"ct_method\" targetname: \"native_leaf\" }\n}\n");
+                void WriteSymbols(uint bound) => File.WriteAllText(symbols, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    symbols = new object[]
+                    {
+                        new { name = "ct_method", identity = "method:Program::Main()->void", kind = "method", entryPoint = true, used = false, stackUsageBytes = bound },
+                        new { name = "native_leaf", identity = "method:Native::Leaf()->void", kind = "extern", stackUsageBytes = 8u },
+                    }
+                }));
+                var request = new CTilde.Cli.BuildRequest([], CompilationTarget.Hosted, CompilationArchitecture.X64, null,
+                    root, null, Path.Combine(root, "program.c"), null, false, false, true, false,
+                    CTildeNativeBuildConfiguration.Release, "gcc", Path.Combine(root, "program"), null, null,
+                    GeneratedCLayout.Unity, null, symbols, report, false);
+                var native = new CTilde.Cli.NativeBuildOutcome(0, "gcc", "gcc", null, [usage, graph]);
+                WriteSymbols(64);
+                var passing = CTilde.Cli.StackUsageReporter.Analyze(request, native);
+                Assert(!passing.ContractFailure && File.ReadAllText(report).Contains("\"worstCaseBytes\": 40", StringComparison.Ordinal),
+                    "A complete trusted-boundary stack contract did not pass with the expected longest path.");
+                WriteSymbols(16);
+                var failing = CTilde.Cli.StackUsageReporter.Analyze(request, native);
+                Assert(failing.ContractFailure && failing.Messages.Any(message => message.Contains("CT2226", StringComparison.Ordinal)),
+                    "An exceeded native stack contract did not fail with CT2226 evidence.");
+
+                File.WriteAllText(usage, "program.c:1:1:worker\t8\tstatic\nprogram.c:2:1:ct_task\t24\tstatic\n");
+                File.WriteAllText(graph, "graph: { title: \"program.c\"\nnode: { title: \"worker\" label: \"worker\" }\nnode: { title: \"ct_task\" label: \"ct_task\" }\nedge: { sourcename: \"worker\" targetname: \"ct_task\" }\n}\n");
+                File.WriteAllText(symbols, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    symbols = new object[]
+                    {
+                        new { name = "ct_task", identity = "method:Program::Worker(:void*)->void", kind = "method", export = "worker", entryPoint = false, used = false, taskStackBytes = 64u },
+                    }
+                }));
+                var task = CTilde.Cli.StackUsageReporter.Analyze(request, native);
+                var taskReport = File.ReadAllText(report);
+                Assert(!task.ContractFailure && taskReport.Contains("\"headroomBytes\": 32", StringComparison.Ordinal) &&
+                    taskReport.Contains("\"status\": \"verified\"", StringComparison.Ordinal),
+                    "A complete TaskEntry graph did not report verified byte headroom.");
+
+                File.WriteAllText(usage, "program.c:1:1:ct_recursive\t12\tstatic\n");
+                File.WriteAllText(graph, "graph: { title: \"program.c\"\nnode: { title: \"ct_recursive\" label: \"ct_recursive\" }\nedge: { sourcename: \"ct_recursive\" targetname: \"ct_recursive\" }\n}\n");
+                File.WriteAllText(symbols, System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    symbols = new object[]
+                    {
+                        new { name = "ct_recursive", identity = "method:Program::Recursive()->void", kind = "method", entryPoint = false, used = false, stackUsageBytes = 128u },
+                    }
+                }));
+                var recursive = CTilde.Cli.StackUsageReporter.Analyze(request, native);
+                Assert(recursive.ContractFailure && File.ReadAllText(report).Contains("recursive-cycle", StringComparison.Ordinal),
+                    "A recursive stack contract was not reported as incomplete.");
+            }
+            finally
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, true);
+            }
+        });
     }
 }

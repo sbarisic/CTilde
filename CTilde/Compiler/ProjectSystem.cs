@@ -118,6 +118,7 @@ public sealed record CTildeProjectBuildConfiguration(
     GeneratedCLayout CLayout,
     string GeneratedDirectory,
     string? SymbolMapPath,
+    string? StackReportPath,
     bool Lto,
     CTildeNativeBuildConfiguration Configuration,
     string Compiler,
@@ -648,10 +649,15 @@ public static class CTildeProjectFile
         var generatedDirectoryDefault = target == CompilationTarget.EspIdf ? "main/generated" : "build/generated/modules";
         var generatedDirectory = ResolveProjectPath(document?.GeneratedDirectory ?? generatedDirectoryDefault, "build.generatedDirectory", root, manifestPath, isDirectory: true);
         var symbolMap = document?.SymbolMap is null ? null : ResolveProjectPath(document.SymbolMap, "build.symbolMap", root, manifestPath, isDirectory: false);
+        var stackReport = document?.StackReport is null ? null : ResolveProjectPath(document.StackReport, "build.stackReport", root, manifestPath, isDirectory: false);
         if (PathsEqual(generatedC, generatedHeader))
             throw new CTildeProjectException($"Properties 'build.generatedC' and 'build.generatedHeader' in '{manifestPath}' must name different files.");
         if (sourceFiles.Any(path => PathsEqual(path, generatedC) || PathsEqual(path, generatedHeader)))
             throw new CTildeProjectException($"Generated output paths in '{manifestPath}' must not overwrite a project source file.");
+        if (stackReport is not null && (sourceFiles.Any(path => PathsEqual(path, stackReport)) ||
+            PathsEqual(stackReport, generatedC) || PathsEqual(stackReport, generatedHeader) ||
+            symbolMap is not null && PathsEqual(stackReport, symbolMap)))
+            throw new CTildeProjectException($"Property 'build.stackReport' in '{manifestPath}' must name a distinct non-source file.");
 
         var configuration = document?.Configuration switch
         {
@@ -728,7 +734,7 @@ public static class CTildeProjectFile
                 throw new CTildeProjectException($"Property 'build.image' in '{manifestPath}' must name a distinct non-source file.");
         }
 
-        return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, lto,
+        return new CTildeProjectBuildConfiguration(generatedC, generatedHeader, cLayout, generatedDirectory, symbolMap, stackReport, lto,
             configuration, compiler, executable, espIdfProjectDirectory, optimization, cpuTarget, floatingPoint, pgo);
     }
 
@@ -1060,6 +1066,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("cLayout")] string? CLayout,
         [property: JsonPropertyName("generatedDirectory")] string? GeneratedDirectory,
         [property: JsonPropertyName("symbolMap")] string? SymbolMap,
+        [property: JsonPropertyName("stackReport")] string? StackReport,
         [property: JsonPropertyName("lto")] bool? Lto,
         [property: JsonPropertyName("configuration")] string? Configuration,
         [property: JsonPropertyName("compiler")] string? Compiler,

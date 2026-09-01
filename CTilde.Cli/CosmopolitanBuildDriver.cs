@@ -22,6 +22,8 @@ internal static class CosmopolitanBuildDriver
         Directory.CreateDirectory(Path.GetDirectoryName(image)!);
         var compiler = ResolveCompiler(request.Compiler);
         var compilerIdentity = await ValidateCompilerAsync(compiler, request, cancellationToken);
+        if (request.StackReportPath is not null && compilerIdentity.Contains("clang", StringComparison.OrdinalIgnoreCase))
+            throw new NativeBuildException("Static stack reporting requires GCC; Clang does not emit GCC callgraph-info artifacts.");
 
         var common = new List<string>
         {
@@ -31,6 +33,8 @@ internal static class CosmopolitanBuildDriver
         common.AddRange(ModeFlags(request.CosmopolitanMode));
         if (request.Lto)
             common.Add("-flto");
+        if (request.StackReportPath is not null)
+            common.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         var usesPthreads = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
         if (usesPthreads)
             common.Add("-pthread");
@@ -45,7 +49,9 @@ internal static class CosmopolitanBuildDriver
         {
             var objectPath = CachedObjectPath(request, compiler, compilerIdentity, source, common);
             objects.Add(objectPath);
-            if (File.Exists(objectPath))
+            var hasStackSidecars = request.StackReportPath is null ||
+                (File.Exists(Path.ChangeExtension(objectPath, ".su")) && (request.Lto || File.Exists(Path.ChangeExtension(objectPath, ".ci"))));
+            if (File.Exists(objectPath) && hasStackSidecars)
             {
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: reused Cosmopolitan object {Path.GetFileName(objectPath)}");
@@ -72,6 +78,8 @@ internal static class CosmopolitanBuildDriver
             link.Add(await ToolPathAsync(compiler, path, request.RootDirectory, cancellationToken));
         link.AddRange(ModeFlags(request.CosmopolitanMode));
         link.AddRange(NativeOptimizationSettings.CosmopolitanLink(request));
+        if (request.StackReportPath is not null)
+            link.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         if (usesPthreads)
             link.Add("-pthread");
         link.AddRange(["-Wl,--gc-sections", "-o", await ToolPathAsync(compiler, carrier, request.RootDirectory, cancellationToken)]);
@@ -96,7 +104,12 @@ internal static class CosmopolitanBuildDriver
             Console.Error.WriteLine($"trace: retained Cosmopolitan ELF/DWARF carrier {carrier}");
             Console.Error.WriteLine($"trace: wrote x86-64 APE executable {image}");
         }
-        return new NativeBuildOutcome(unwrapped.ExitCode, "cosmopolitan", compiler.Command, compiler.WslCompiler);
+        var objectStackFiles = objects.SelectMany(path => new[] { Path.ChangeExtension(path, ".su"), Path.ChangeExtension(path, ".ci") }).Where(File.Exists);
+        var ltransStackFiles = Directory.EnumerateFiles(Path.GetDirectoryName(carrier)!, "*.ltrans*.su", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(Path.GetDirectoryName(carrier)!, "*.ltrans*.ci", SearchOption.TopDirectoryOnly)).ToArray();
+        var stackFiles = request.StackReportPath is null ? [] : (request.Lto && ltransStackFiles.Length != 0 ? ltransStackFiles : objectStackFiles.Concat(ltransStackFiles))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
+        return new NativeBuildOutcome(unwrapped.ExitCode, "cosmopolitan-gcc", compiler.Command, compiler.WslCompiler, stackFiles);
     }
 
     private static CosmopolitanCompiler ResolveCompiler(string configured)
@@ -186,15 +199,39 @@ internal static class CosmopolitanBuildDriver
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)
         {
-            foreach (var header in new[] { "ctilde_internal.h", "ctilde_runtime.h" })
-            {
-                var path = Path.Combine(request.GeneratedDirectory!, header);
-                identity.Append(header).Append(':')
+            foreach (var path in GeneratedHeaderClosure(source, request.GeneratedDirectory!))
+                identity.Append(Path.GetRelativePath(request.GeneratedDirectory!, path).Replace('\\', '/')).Append(':')
                     .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
-            }
         }
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
         return Path.Combine(directory, hash + ".o");
+    }
+
+    private static IEnumerable<string> GeneratedHeaderClosure(string source, string generatedDirectory)
+    {
+        var root = Path.GetFullPath(generatedDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var pending = new Queue<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Enqueue(Path.GetFullPath(source));
+        while (pending.Count != 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var line in File.ReadLines(current))
+            {
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("#include \"", StringComparison.Ordinal))
+                    continue;
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.IndexOf('"', start);
+                if (end <= start)
+                    continue;
+                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, trimmed[start..end]));
+                if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate) || !visited.Add(candidate))
+                    continue;
+                pending.Enqueue(candidate);
+            }
+        }
+        return visited.Order(StringComparer.Ordinal);
     }
 
     private static CosmopolitanObjcopy ResolveObjcopy(CosmopolitanCompiler compiler)

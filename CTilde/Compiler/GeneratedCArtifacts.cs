@@ -12,6 +12,7 @@ public enum GeneratedCArtifactKind
 {
     RuntimeHeader,
     InternalHeader,
+    DependencyHeader,
     RuntimeSource,
     NamespaceSource,
     EntrySource,

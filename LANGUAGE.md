@@ -1,14 +1,14 @@
 # C~ language specification
 
-Specification version: draft 0.43
+Specification version: draft 0.44
 
 ## Status
 
-This document is the normative specification for C~ draft 0.43.
+This document is the normative specification for C~ draft 0.44.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.43 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.44 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.43 adds typed runtime-service providers and makes the standard-library console, time, math, file, directory, stream, collection, and managed-concurrency surfaces available to freestanding and ESP-IDF programs. Draft 0.42 remains the historical invariant-parsing and hosted-I/O revision. Runtime ABI 17 records the expanded provider boundary; debug metadata remains version 3.
+Draft 0.44 adds verified native stack contracts and reports plus dependency-oriented modular C emission. Draft 0.43 remains the typed runtime-service-provider revision. Runtime ABI 17 and debug metadata version 3 are unchanged.
 
 `CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.42 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
@@ -772,7 +772,7 @@ Hosted Windows startup changes attached console input and output code pages to U
 
 Every target provides synchronous `System.IO`. Hosted Windows/Linux and Cosmopolitan use native adapters, ESP-IDF uses VFS defaults unless overridden, and freestanding requires the matching runtime-provider groups. The move-only `FileHandle` operations include 64-bit seek, position, length, truncation, and flush. Managed `FileStream`, `StreamReader`, and `StreamWriter` own or borrow explicit resources and require idempotent `Dispose`; use after disposal raises `ObjectDisposedException` on exception-capable targets and panics on freestanding. UTF-8 readers strip one leading BOM, reject malformed or truncated UTF-8, recognize LF and CRLF, and preserve embedded NUL bytes. Writers use a 4096-byte buffer, deterministic LF line endings, and emit the UTF-8 BOM once only for `UTF8WithBom` at the beginning of an empty seekable stream.
 
-`File`, `Directory`, and `Path` provide synchronous byte/text helpers, copying, moving, deletion, recursive creation and deletion, current-directory access, platform separators, and deterministic ordinally sorted full-path enumeration. Recursive deletion inspects links and reparse points and never traverses them. `FileMetadata` reports kind, attributes, length, and explicitly available Unix-second/nanosecond timestamps; metadata inspection itself does not follow symbolic links. Missing-path `Exists` calls return false. Native-adapter failures throw `IOException` with a platform error code and operation. Freestanding and explicit ESP-IDF provider status failures instead route status plus native code to `Runtime.Panic`. Async I/O, watchers, globbing, lazy enumeration, and per-stream concurrency are not part of Draft 0.43.
+`File`, `Directory`, and `Path` provide synchronous byte/text helpers, copying, moving, deletion, recursive creation and deletion, current-directory access, platform separators, and deterministic ordinally sorted full-path enumeration. Recursive deletion inspects links and reparse points and never traverses them. `FileMetadata` reports kind, attributes, length, and explicitly available Unix-second/nanosecond timestamps; metadata inspection itself does not follow symbolic links. Missing-path `Exists` calls return false. Native-adapter failures throw `IOException` with a platform error code and operation. Freestanding and explicit ESP-IDF provider status failures instead route status plus native code to `Runtime.Panic`. Async I/O, watchers, globbing, lazy enumeration, and per-stream concurrency are not part of Draft 0.44.
 
 `Vec2`, `Vec3`, and `Vec4` remain scalar geometry structures. `System.Simd` defines fixed 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with constant lane access, shuffle, comparisons, selection, and arithmetic. Scalar lowering is the default. `CpuFeature.Simd128`, `Target.HasFeature`, manifest `cpuFeatures`, and CLI `--cpu-feature simd128` enable architecture-validated x86 or Arm intrinsic lowering explicitly.
 
@@ -1083,15 +1083,17 @@ The `cosmopolitan` target requires `architecture: "x64"`; automatic or other arc
 
 `[Align(n)]` requests a minimum native alignment on structs, unions, newtypes, owned static fields, value-aggregate instance fields, and non-durable locals. `n` is a compile-time power of two from 1 through 8192. It contributes to aggregate layout, `sizeof`, `alignof`, static and stack storage, generated headers, and native layout assertions. Packed members retain their pack; a field request cannot exceed the active pack, and an explicit offset must be divisible by its requested alignment. It does not control managed heap allocation or final linker placement. Invalid arguments and targets report `CT1293`.
 
-`[NoRecursion]` applies to body-bearing methods, constructors, operators, and property accessors. It validates the complete transitive call closure after `static if` pruning and closed generic construction. The `noRecursion` project property and CLI `--no-recursion` apply the same rule to every method reachable from entry, export, task-entry, and `[Used]` roots. Virtual and interface calls expand to their finite closed target set; delegates, function pointers, and other unprovable dispatch are rejected. A deterministic cycle witness or unknown call reports `CT2206`; invalid attribute targets report `CT1294`. Stack-usage estimation is not part of this draft.
+`[NoRecursion]` applies to body-bearing methods, constructors, operators, and property accessors. It validates the complete transitive call closure after `static if` pruning and closed generic construction. The `noRecursion` project property and CLI `--no-recursion` apply the same rule to every method reachable from entry, export, task-entry, and `[Used]` roots. Virtual and interface calls expand to their finite closed target set; delegates, function pointers, and other unprovable dispatch are rejected. A deterministic cycle witness or unknown call reports `CT2206`; invalid attribute targets report `CT1294`.
+
+`[StackUsage(N)]` accepts one positive byte count. On a body-bearing method it is a verified maximum for transitive native stack use; on an extern, native import, or assembly-only method it is a trusted terminal upper bound. Invalid forms and targets report `CT1323`. Static analysis is explicitly enabled by `--stack-report <path>` or project `build.stackReport` and requires a native GCC-family build. MSVC and Clang requests are rejected before compilation. GCC emits frame and callgraph sidecars; LTO analysis consumes final `.ltrans` sidecars. Recursion, unbounded dynamic frames, unresolved indirect calls, and unannotated native boundaries make a path incomplete. An exceeded or unverifiable method contract reports `CT2226`. The schema-v1 report is written atomically even when a contract fails.
 
 `System.Runtime.Cpu` provides allocation-free full ordinary-memory barriers, spin-loop pause hints, 16/32/64-bit byte swaps, 32/64-bit population counts, and 32/64-bit leading-zero counts. Leading-zero count of zero equals the operand width. The compiler lowers target barriers and hints for x86/x64, ARM32/ARM64, Xtensa, and RISC-V, and otherwise uses deterministic baseline-safe C operations. `MemoryBarrier` is distinct from the MMIO I/O barrier. Unsupported target-dependent use reports `CT4110`; malformed intrinsic calls report `CT2207`. Privileged interrupt control, halt, atomics, and target-specific intrinsic namespaces remain deferred.
 
-On ESP-IDF, `[TaskEntry(StackSize = N)]` combines with `[Export("symbol")]` on a public static non-generic `void(void*)` method body. `N` is a positive `uint` divisible by four. The exported wrapper attaches fresh C~ task state, installs the export exception barrier, calls the implementation, detaches on normal completion, calls `vTaskDelete(NULL)`, and never returns. The public header defines `CTILDE_TASK_STACK_<EXPORT>` with the configured value. Invalid metadata reports `CT1291`; invalid targets or signatures report `CT1292`.
+On ESP-IDF, `[TaskEntry(StackSize = N)]` combines with `[Export("symbol")]` on a public static non-generic `void(void*)` method body. `N` is a positive `uint` divisible by four and is measured in bytes. The exported wrapper attaches fresh C~ task state, installs the export exception barrier, calls the implementation, detaches on normal completion, calls `vTaskDelete(NULL)`, and never returns. The public header defines `CTILDE_TASK_STACK_<EXPORT>` with the configured value. A complete stack report records verified headroom and reports `CT2226` when the bound exceeds `N`; an incomplete graph is reported as unverified. Invalid metadata reports `CT1291`; invalid targets or signatures report `CT1292`.
 
 ESP-IDF projects select `panicPolicy` as `abort`, `restart`, or `halt`; CLI `--panic-policy` overrides the manifest. The default is `abort`. Every policy invokes the native panic callback and prints and flushes the diagnostic first. Restart calls `esp_restart`; halt enters `esp_system_abort` and requires `CONFIG_ESP_SYSTEM_PANIC_PRINT_HALT=y` in the effective `sdkconfig`, which the native driver validates. Hosted restart or halt policy requests report `CT4113`.
 
-Modular output assigns every reachable definition and generated export wrapper to `source_<stable-hash>.c` using its normalized source identity. `CompilationOptions.SourceIdentityRoot` defines path normalization; project builds use the manifest root. Bundled files use stable virtual paths, and pathless trees use content identities. Duplicate or unstable identities report `CT4112`. Runtime and entry/lifecycle units remain separate, and the broad internal header remains shared.
+Modular output assigns every reachable definition and generated export wrapper to `source_<stable-hash>.c` using its normalized source identity. `CompilationOptions.SourceIdentityRoot` defines path normalization; project builds use the manifest root. Bundled files use stable virtual paths, and pathless trees use content identities. Duplicate or unstable identities report `CT4112`. `ctilde_types.h`, `ctilde_runtime_internal.h`, and one declaration-owning `source_<stable-hash>.h` per source provide narrow dependencies. Implementations include only their direct owner dependencies; `ctilde_internal.h` remains a compatibility umbrella. Native object-cache identities hash each source and the transitive contents of the generated headers it actually includes.
 
 ## Diagnostics
 
@@ -1108,7 +1110,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.43 when:
+A compiler conforms to draft 0.44 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1116,7 +1118,7 @@ A compiler conforms to draft 0.43 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.43 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.44 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1127,4 +1129,4 @@ The canonical backend is GNU C23. Draft 0.43 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.43 defers Unicode escape syntax, locale-aware parsing and formatting, Unicode normalization and collation, UTF-16 encodings, asynchronous I/O, file watchers and mapping, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned shared-library mapping, macOS loader support, dynamic C~ runtime module registration, and flattened or SAH BVH construction.
+Draft 0.44 defers Unicode escape syntax, locale-aware parsing and formatting, Unicode normalization and collation, UTF-16 encodings, asynchronous I/O, file watchers and mapping, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned shared-library mapping, macOS loader support, dynamic C~ runtime module registration, `[NoStackProbe]`, and `[StackAlign(n)]`.

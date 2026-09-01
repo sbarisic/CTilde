@@ -121,7 +121,7 @@ internal static partial class ConformanceTests
             var bundle = Compile(arithmetic).EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
-            var header = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var header = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             Assert(runtime.Contains("static CT_INLINE int32_t ct_i32_add(", StringComparison.Ordinal) && !runtime.Contains("ct_i64_add(", StringComparison.Ordinal), "Modular runtime pruning diverged from unity output.");
             Assert(System.Text.RegularExpressions.Regex.Matches(runtime, @"(?m)^static CT_INLINE int32_t ct_i32_add\(").Count == 1, "A retained modular inline helper was not emitted exactly once in the runtime unit.");
             Assert(header.Contains("static CT_INLINE int32_t ct_i32_add(", StringComparison.Ordinal) && !header.Contains("extern int32_t ct_i32_add(", StringComparison.Ordinal), "The modular internal header omitted the translation-unit-local arithmetic helper body.");
@@ -160,7 +160,7 @@ internal static partial class ConformanceTests
 
             var bundle = first.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
-            var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var internalHeader = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             Assert(internalHeader.Contains("extern const ct_type_descriptor ct_desc_string;", StringComparison.Ordinal), "The modular string descriptor declaration lost const.");
             Assert(System.Text.RegularExpressions.Regex.IsMatch(internalHeader, @"extern const ct_type_descriptor ct_d_[0-9a-f]{24};"), "A modular descriptor declaration lost const.");
@@ -373,7 +373,7 @@ internal static partial class ConformanceTests
                 Assert(!System.Text.RegularExpressions.Regex.IsMatch(instrumented, @"if \([^\r\n]+\)\r?\n\s+(?:#line|ct_debug_)", System.Text.RegularExpressions.RegexOptions.CultureInvariant), "A structural block probe separated a generated if statement from its body.");
                 var instrumentedBundle = instrumentedCompilation.EmitCBundle();
                 Assert(instrumentedBundle.Success, "Instrumented modular C emission failed.");
-                var instrumentedHeader = instrumentedBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+                var instrumentedHeader = string.Join('\n', instrumentedBundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
                 var instrumentedRuntime = instrumentedBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
                 var instrumentedNamespaces = instrumentedBundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content).ToArray();
                 Assert(instrumentedHeader.Contains("extern ct_debug_control_block ct_debug_control;", StringComparison.Ordinal), "The modular debug header defined the shared control block instead of declaring it.");

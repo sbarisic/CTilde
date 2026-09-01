@@ -318,34 +318,36 @@ internal sealed partial class CEmitter : ILoweringServices
         if (IsFreestanding && !Model.FreestandingRuntimeRequired)
             return EmitNakedOnly(program, definitions, runtimeHeader);
         var moduleLifecycle = RenderModuleLifecycle(program.ModuleInitializers);
-        var prefix = new CWriter();
-        EmitPreamble(prefix);
-        EmitSectionSupport(prefix);
-        EmitStringLiterals(prefix);
-        EmitForwardDeclarations(prefix);
-        EmitTypeLayouts(prefix);
-        EmitArrayLayouts(prefix);
-        EmitBoxLayouts(prefix);
-        EmitCompileTimeAssertions(prefix);
-        EmitGlobals(prefix);
-        EmitOwnershipHelpers(prefix);
-        EmitPrototypes(prefix);
-        EmitRuntimeImplementationBridges(prefix);
-        EmitUsedAnchors(prefix);
-        EmitObjectMetadata(prefix);
-        EmitRuntimeFaultSupport(prefix);
-        EmitNativeImportSupport(prefix);
-        EmitStandardUtilitySupport(prefix);
-        EmitScalarAtomicSupport(prefix);
-        EmitManagedThreadingSupport(prefix);
-        EmitMathSupport(prefix);
-        EmitHostedIoSupport(prefix);
-        EmitDelegateSupport(prefix);
-        EmitSynchronousDelegateAdapters(prefix);
-        EmitFunctionPointerTrampolines(prefix);
-        EmitDirectDeferSupport(prefix);
-        EmitMemoryLayoutProbe(prefix);
-        prefix.WriteLine();
+        var typePrefix = new CWriter();
+        EmitPreamble(typePrefix);
+        EmitSectionSupport(typePrefix);
+        EmitStringLiterals(typePrefix);
+        EmitForwardDeclarations(typePrefix);
+        EmitTypeLayouts(typePrefix);
+        EmitArrayLayouts(typePrefix);
+        EmitBoxLayouts(typePrefix);
+        EmitCompileTimeAssertions(typePrefix);
+
+        var runtimePrefix = new CWriter();
+        EmitGlobals(runtimePrefix);
+        EmitOwnershipHelpers(runtimePrefix);
+        EmitPrototypes(runtimePrefix);
+        EmitRuntimeImplementationBridges(runtimePrefix);
+        EmitUsedAnchors(runtimePrefix);
+        EmitObjectMetadata(runtimePrefix);
+        EmitRuntimeFaultSupport(runtimePrefix);
+        EmitNativeImportSupport(runtimePrefix);
+        EmitStandardUtilitySupport(runtimePrefix);
+        EmitScalarAtomicSupport(runtimePrefix);
+        EmitManagedThreadingSupport(runtimePrefix);
+        EmitMathSupport(runtimePrefix);
+        EmitHostedIoSupport(runtimePrefix);
+        EmitDelegateSupport(runtimePrefix);
+        EmitSynchronousDelegateAdapters(runtimePrefix);
+        EmitFunctionPointerTrampolines(runtimePrefix);
+        EmitDirectDeferSupport(runtimePrefix);
+        EmitMemoryLayoutProbe(runtimePrefix);
+        runtimePrefix.WriteLine();
 
         var suffix = new CWriter();
         suffix.WriteBlock(moduleLifecycle.TrimEnd().Split('\n'));
@@ -363,7 +365,15 @@ internal sealed partial class CEmitter : ILoweringServices
         var externalRoots = new StringBuilder(suffix.ToString());
         foreach (var definition in definitions)
             externalRoots.Append('\n').Append(definition.Text);
-        var prunedPrefix = MarkUnusedGeneratedFields(PruneRuntimeHelpers(prefix.ToString(), externalRoots.ToString()));
+        const string prefixSplit = "/* CTILDE_TYPES_RUNTIME_SPLIT */";
+        var prunedCombined = MarkUnusedGeneratedFields(PruneRuntimeHelpers(
+            typePrefix.ToString().TrimEnd() + "\n" + prefixSplit + "\n" + runtimePrefix, externalRoots.ToString()));
+        var splitOffset = prunedCombined.IndexOf(prefixSplit, StringComparison.Ordinal);
+        if (splitOffset < 0)
+            throw new InvalidOperationException("Generated C prefix split marker was removed during runtime pruning.");
+        var prunedTypes = prunedCombined[..splitOffset].TrimEnd() + "\n";
+        var prunedRuntime = prunedCombined[(splitOffset + prefixSplit.Length)..].TrimStart('\r', '\n');
+        var prunedPrefix = prunedTypes.TrimEnd() + "\n\n" + prunedRuntime;
 
         var writer = new CWriter();
         writer.WriteBlock(prunedPrefix.TrimEnd().Split('\n'));
@@ -377,7 +387,7 @@ internal sealed partial class CEmitter : ILoweringServices
         var unity = writer.ToString();
         var symbolMap = EmitSymbolMapJson(program);
         var debugMap = EmitDebugInformation ? EmitDebugMapJson(program) : string.Empty;
-        var artifacts = BuildModularArtifacts(prunedPrefix, modularEntry.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
+        var artifacts = BuildModularArtifacts(prunedTypes, prunedRuntime, modularEntry.ToString(), definitions, runtimeHeader, symbolMap, debugMap);
         return new CEmitterOutput(unity, artifacts, symbolMap, debugMap);
     }
 
@@ -409,7 +419,7 @@ internal sealed partial class CEmitter : ILoweringServices
             writer.WriteLine();
         }
         var symbolMap = EmitSymbolMapJson(program);
-        var artifacts = BuildModularArtifacts(prunedPrefix, string.Empty, nakedDefinitions, runtimeHeader, symbolMap, string.Empty);
+        var artifacts = BuildModularArtifacts(prunedPrefix, string.Empty, string.Empty, nakedDefinitions, runtimeHeader, symbolMap, string.Empty);
         return new CEmitterOutput(writer.ToString(), artifacts, symbolMap, string.Empty);
     }
 
@@ -471,7 +481,8 @@ internal sealed partial class CEmitter : ILoweringServices
     }
 
     private ImmutableArray<GeneratedCArtifact> BuildModularArtifacts(
-        string prefix,
+        string typePrefix,
+        string runtimePrefix,
         string suffix,
         ImmutableArray<(IrFunction Function, string Text)> definitions,
         string runtimeHeader,
@@ -479,17 +490,50 @@ internal sealed partial class CEmitter : ILoweringServices
         string debugMap)
     {
         var artifacts = ImmutableArray.CreateBuilder<GeneratedCArtifact>();
-        var internalHeader = BuildInternalHeader(prefix);
+        var typesHeader = BuildInternalHeader(typePrefix, "TYPES");
+        var runtimeHeaderInternal = BuildInternalHeader(runtimePrefix, "RUNTIME_INTERNAL", "ctilde_types.h");
+        var runtimeDependencyRegion = ExtractHeaderRegion(ref typesHeader,
+            "/* CTILDE_RUNTIME_DEPENDENCY_HEADER_BEGIN */", "/* CTILDE_RUNTIME_DEPENDENCY_HEADER_END */");
+        if (runtimeDependencyRegion.Length != 0)
+            runtimeHeaderInternal = runtimeHeaderInternal.Replace("#include \"ctilde_types.h\"\n\n", "#include \"ctilde_types.h\"\n\n" + runtimeDependencyRegion + "\n", StringComparison.Ordinal);
+        var declarationsByOwner = ExtractSourceDeclarations(ref runtimeHeaderInternal);
+        var ownerHeaders = _reachableMethods.Select(method => SourceIdentity(method)).Distinct(StringComparer.Ordinal)
+            .OrderBy(identity => identity, StringComparer.Ordinal)
+            .ToDictionary(identity => identity, identity => "source_" + Hash96(identity) + ".h", StringComparer.Ordinal);
+
         artifacts.Add(new GeneratedCArtifact("ctilde_runtime.h", runtimeHeader, GeneratedCArtifactKind.RuntimeHeader));
-        artifacts.Add(new GeneratedCArtifact("ctilde_internal.h", internalHeader, GeneratedCArtifactKind.InternalHeader));
-        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", ExternalizeDefinitions(prefix, runtimeUnit: true), GeneratedCArtifactKind.RuntimeSource));
+        artifacts.Add(new GeneratedCArtifact("ctilde_types.h", typesHeader, GeneratedCArtifactKind.DependencyHeader));
+        artifacts.Add(new GeneratedCArtifact("ctilde_runtime_internal.h", runtimeHeaderInternal, GeneratedCArtifactKind.DependencyHeader));
+        foreach (var owner in ownerHeaders)
+        {
+            declarationsByOwner.TryGetValue(owner.Key, out var declarations);
+            var guard = "CTILDE_SOURCE_" + Hash96(owner.Key).ToUpperInvariant() + "_H";
+            var header = new StringBuilder($"#ifndef {guard}\n#define {guard}\n\n#include \"ctilde_types.h\"\n\n");
+            if (declarations is not null)
+                foreach (var declaration in declarations.Order(StringComparer.Ordinal))
+                    header.Append(declaration).Append('\n');
+            header.Append("\n#endif\n");
+            artifacts.Add(new GeneratedCArtifact(owner.Value, header.ToString(), GeneratedCArtifactKind.DependencyHeader));
+        }
+        var umbrella = new StringBuilder($"#ifndef CTILDE_INTERNAL_DRAFT_{CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0')}_H\n#define CTILDE_INTERNAL_DRAFT_{CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0')}_H\n\n");
+        umbrella.Append("#include \"ctilde_types.h\"\n#include \"ctilde_runtime_internal.h\"\n");
+        foreach (var header in ownerHeaders.Values.Order(StringComparer.Ordinal))
+            umbrella.Append("#include \"").Append(header).Append("\"\n");
+        umbrella.Append("\n#endif\n");
+        artifacts.Add(new GeneratedCArtifact("ctilde_internal.h", umbrella.ToString(), GeneratedCArtifactKind.InternalHeader));
+
+        var runtimeText = ExternalizeDefinitions(typePrefix + "\n" + runtimePrefix, runtimeUnit: true);
+        artifacts.Add(new GeneratedCArtifact("ctilde_runtime.c", runtimeText, GeneratedCArtifactKind.RuntimeSource));
 
         foreach (var group in definitions.GroupBy(definition => SourceIdentity(definition.Function.Method), StringComparer.Ordinal)
                      .OrderBy(group => group.Key, StringComparer.Ordinal))
         {
             var name = "source_" + Hash96(group.Key) + ".c";
             var contents = new StringBuilder();
-            contents.Append($"/* Generated by C~ draft {CompilerContract.DraftVersion}. Do not edit. */\n#include \"ctilde_internal.h\"\n\n");
+            var rendered = string.Join("\n", group.Select(item => item.Text));
+            var includes = RequiredOwnerHeaders(rendered, ownerHeaders).Append(ownerHeaders[group.Key])
+                .Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal);
+            contents.Append(SourcePreamble(includes));
             foreach (var definition in group.OrderBy(item => item.Function.Method.CName, StringComparer.Ordinal))
                 contents.Append(ExternalizeDefinitions(MarkUnusedDefinitions(definition.Text), runtimeUnit: false)).Append('\n');
             foreach (var export in _reachableMethods.Where(method => method.ExportName is not null && SourceIdentity(method) == group.Key)
@@ -502,7 +546,7 @@ internal sealed partial class CEmitter : ILoweringServices
             artifacts.Add(new GeneratedCArtifact(name, contents.ToString(), GeneratedCArtifactKind.NamespaceSource));
         }
 
-        var entry = $"/* Generated by C~ draft {CompilerContract.DraftVersion}. Do not edit. */\n#include \"ctilde_internal.h\"\n\n" +
+        var entry = SourcePreamble(RequiredOwnerHeaders(suffix, ownerHeaders)) +
             ExternalizeDefinitions(MarkUnusedDefinitions(suffix), runtimeUnit: false);
         artifacts.Add(new GeneratedCArtifact("ctilde_entry.c", entry, GeneratedCArtifactKind.EntrySource));
         artifacts.Add(new GeneratedCArtifact("ctilde_symbols.json", symbolMap, GeneratedCArtifactKind.SymbolMap));
@@ -521,10 +565,71 @@ internal sealed partial class CEmitter : ILoweringServices
         return artifacts.OrderBy(artifact => artifact.RelativePath, StringComparer.Ordinal).ToImmutableArray();
     }
 
-    private static string BuildInternalHeader(string prefix)
+    private string SourcePreamble(IEnumerable<string> ownerHeaders)
     {
-        var guard = "CTILDE_INTERNAL_DRAFT_" + CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0') + "_H";
+        var writer = new StringBuilder($"/* Generated by C~ draft {CompilerContract.DraftVersion}. Do not edit. */\n#include \"ctilde_runtime_internal.h\"\n");
+        foreach (var header in ownerHeaders.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal))
+            writer.Append("#include \"").Append(header).Append("\"\n");
+        return writer.Append('\n').ToString();
+    }
+
+    private IEnumerable<string> RequiredOwnerHeaders(string text, IReadOnlyDictionary<string, string> ownerHeaders)
+    {
+        foreach (var method in _reachableMethods.OrderBy(method => method.CName, StringComparer.Ordinal))
+            if (text.Contains(method.CName + "(", StringComparison.Ordinal))
+                yield return ownerHeaders[SourceIdentity(method)];
+    }
+
+    private Dictionary<string, List<string>> ExtractSourceDeclarations(ref string header)
+    {
+        var result = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var retained = new StringBuilder();
+        foreach (var line in header.Split('\n'))
+        {
+            MethodSymbol? owner = null;
+            foreach (var method in _reachableMethods)
+            {
+                if (line.Contains(method.CName + "(", StringComparison.Ordinal))
+                {
+                    owner = method;
+                    break;
+                }
+            }
+            if (owner is null)
+            {
+                retained.Append(line).Append('\n');
+                continue;
+            }
+            var identity = SourceIdentity(owner);
+            if (!result.TryGetValue(identity, out var declarations))
+                result[identity] = declarations = [];
+            declarations.Add(line);
+        }
+        header = retained.ToString();
+        return result;
+    }
+
+    private static string ExtractHeaderRegion(ref string header, string beginMarker, string endMarker)
+    {
+        var begin = header.IndexOf(beginMarker, StringComparison.Ordinal);
+        var end = header.IndexOf(endMarker, StringComparison.Ordinal);
+        if (begin < 0 || end < begin)
+            return string.Empty;
+        var contentStart = begin + beginMarker.Length;
+        var region = header[contentStart..end].Trim('\r', '\n') + "\n";
+        var removeEnd = end + endMarker.Length;
+        while (removeEnd < header.Length && header[removeEnd] is '\r' or '\n')
+            removeEnd++;
+        header = header.Remove(begin, removeEnd - begin);
+        return region;
+    }
+
+    private static string BuildInternalHeader(string prefix, string guardName = "INTERNAL", string? include = null)
+    {
+        var guard = "CTILDE_" + guardName + "_DRAFT_" + CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0') + "_H";
         var writer = new StringBuilder($"#ifndef {guard}\n#define {guard}\n\n");
+        if (include is not null)
+            writer.Append("#include \"").Append(include).Append("\"\n\n");
         var skipInitializer = false;
         var skipFunction = false;
         var skipFunctionDepth = 0;
@@ -875,10 +980,23 @@ internal sealed partial class CEmitter : ILoweringServices
             entry["interrupt"] = method.IsInterrupt;
             entry["interruptSafe"] = method.IsInterruptSafe;
             entry["codeResidency"] = method.IsInterruptCode ? "iram" : null;
+            entry["entryPoint"] = method.IsEntryPoint;
+            entry["export"] = method.ExportName;
+            entry["taskStackBytes"] = method.TaskStackSize;
+            entry["stackUsageBytes"] = method.StackUsage;
             entry["declaredEffects"] = EffectFacts.IndividualContracts(method.DeclaredEffects)
                 .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             entry["inferredEffects"] = EffectAnalyzer.IndividualEffects(Model.Effects.GetEffects(method))
                 .Select(EffectFacts.EffectName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+            symbols.Add(entry);
+        }
+        foreach (var method in _externUses.Select(use => use.Method).DistinctBy(method => method.CName)
+                     .OrderBy(method => method.CName, StringComparer.Ordinal))
+        {
+            var entry = SymbolMapEntry(method.ExternName!, NameMangler.MethodIdentity(method), "extern",
+                NameMangler.CanonicalType(method.ReturnType), method.Syntax);
+            entry["nativeSymbol"] = method.ExternName;
+            entry["stackUsageBytes"] = method.StackUsage;
             symbols.Add(entry);
         }
         foreach (var import in _nativeImportUses.OrderBy(item => item.Key, StringComparer.Ordinal))
@@ -888,6 +1006,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 NameMangler.CanonicalType(method.ReturnType), method.Syntax);
             entry["library"] = method.NativeImportLibrary;
             entry["nativeSymbol"] = method.NativeImportSymbol;
+            entry["stackUsageBytes"] = method.StackUsage;
             entry["declaredEffects"] = EffectFacts.IndividualContracts(method.DeclaredEffects)
                 .Select(EffectFacts.ContractName).OrderBy(name => name, StringComparer.Ordinal).ToArray();
             symbols.Add(entry);

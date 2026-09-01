@@ -87,7 +87,7 @@ internal static partial class ConformanceTests
             Assert(generated.Contains("ct_thread_attach();", StringComparison.Ordinal) && generated.Contains("ct_thread_detach();", StringComparison.Ordinal) && generated.Contains("vTaskDelete(NULL);", StringComparison.Ordinal), "Task entry lifecycle wrapper was incomplete.");
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
-            var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var internalHeader = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             Assert(internalHeader.Contains("static inline void ct_mmio_barrier(void)", StringComparison.Ordinal) &&
                 !internalHeader.Contains("extern inline void ct_mmio_barrier(void)", StringComparison.Ordinal), "Modular MMIO barrier lost its inline definition.");
 

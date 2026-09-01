@@ -4,7 +4,8 @@ using CTilde;
 
 namespace CTilde.Cli;
 
-internal sealed record NativeBuildOutcome(int ExitCode, string Backend, string? CompilerCommand, string? WslCompiler = null);
+internal sealed record NativeBuildOutcome(int ExitCode, string Backend, string? CompilerCommand, string? WslCompiler = null,
+    IReadOnlyList<string>? StackUsageFiles = null);
 
 internal static class NativeBuildDriver
 {
@@ -28,6 +29,14 @@ internal static class HostedBuildDriver
     {
         Directory.CreateDirectory(Path.GetDirectoryName(request.ExecutablePath!)!);
         var compiler = await ResolveCompilerAsync(request.Compiler, request.RootDirectory, cancellationToken);
+        if (request.StackReportPath is not null)
+        {
+            if (compiler.Kind == HostedCompilerKind.Msvc)
+                throw new NativeBuildException("Static stack reporting requires GCC; MSVC does not emit the required stack and callgraph artifacts.");
+            var identity = await ReadCompilerIdentityAsync(compiler, request.RootDirectory, cancellationToken);
+            if (identity.Contains("clang", StringComparison.OrdinalIgnoreCase))
+                throw new NativeBuildException("Static stack reporting requires GCC; Clang does not emit GCC callgraph-info artifacts.");
+        }
         var compilerIdentity = request.PgoMode == NativePgoMode.Off
             ? string.Empty
             : await ReadCompilerIdentityAsync(compiler, request.RootDirectory, cancellationToken);
@@ -43,9 +52,16 @@ internal static class HostedBuildDriver
             : HostedRuntimeFileStager.Select(request, operatingSystem.Value);
         if (request.Trace)
             Console.Error.WriteLine($"trace: native compiler {compiler.Command}");
-        var result = compiler.Kind == HostedCompilerKind.Msvc
-            ? await CompileMsvcAsync(compiler, request, pgo, cancellationToken)
-            : await CompileGnuAsync(compiler, request, runtimeFiles.Count != 0, pgo, cancellationToken);
+        var stackUsageFiles = Array.Empty<string>();
+        int result;
+        if (compiler.Kind == HostedCompilerKind.Msvc)
+            result = await CompileMsvcAsync(compiler, request, pgo, cancellationToken);
+        else
+        {
+            var gnu = await CompileGnuAsync(compiler, request, runtimeFiles.Count != 0, pgo, cancellationToken);
+            result = gnu.ExitCode;
+            stackUsageFiles = gnu.StackUsageFiles;
+        }
         if (result == 0 && compiler.Kind == HostedCompilerKind.Msvc && request.PgoMode == NativePgoMode.Generate)
         {
             var runtime = Path.Combine(Path.GetDirectoryName(compiler.Command)!, "pgort140.dll");
@@ -60,8 +76,8 @@ internal static class HostedBuildDriver
             HostedRuntimeFileStager.Stage(request, runtimeFiles);
         if (result == 0 && request.Trace)
             Console.Error.WriteLine($"trace: wrote native executable {request.ExecutablePath}");
-        return new NativeBuildOutcome(result, compiler.Kind == HostedCompilerKind.Msvc ? "msvc" : "gdb",
-            compiler.Command, compiler.WslCompiler);
+        return new NativeBuildOutcome(result, compiler.Kind == HostedCompilerKind.Msvc ? "msvc" : "gcc",
+            compiler.Command, compiler.WslCompiler, stackUsageFiles);
     }
 
     private static async Task<HostedCompiler> ResolveCompilerAsync(string configured, string workingDirectory, CancellationToken cancellationToken)
@@ -228,7 +244,7 @@ internal static class HostedBuildDriver
         return linked.ExitCode;
     }
 
-    private static async Task<int> CompileGnuAsync(
+    private static async Task<GnuCompileResult> CompileGnuAsync(
         HostedCompiler compiler,
         BuildRequest request,
         bool useExecutableRuntimePath,
@@ -255,6 +271,8 @@ internal static class HostedBuildDriver
             common.Add("-pthread");
         if (request.Lto)
             common.Add("-flto");
+        if (request.StackReportPath is not null)
+            common.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         common.AddRange(pgo.CompileFlags);
         common.AddRange(["-Wall", "-Wextra", "-Werror"]);
         if (request.Trace)
@@ -268,7 +286,9 @@ internal static class HostedBuildDriver
         {
             var objectPath = pgo.Enabled ? PgoObjectPath(pgo, originalSource, ".o") : CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
             objects.Add(objectPath);
-            if (!pgo.Enabled && File.Exists(objectPath))
+            var hasStackSidecars = request.StackReportPath is null ||
+                (File.Exists(Path.ChangeExtension(objectPath, ".su")) && (request.Lto || File.Exists(Path.ChangeExtension(objectPath, ".ci"))));
+            if (!pgo.Enabled && File.Exists(objectPath) && hasStackSidecars)
             {
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: reused native object {Path.GetFileName(objectPath)}");
@@ -298,7 +318,7 @@ internal static class HostedBuildDriver
             {
                 Console.Out.Write(first.StandardOutput);
                 Console.Error.Write(first.StandardError);
-                return first.ExitCode;
+                return new GnuCompileResult(first.ExitCode, []);
             }
         }
 
@@ -311,6 +331,8 @@ internal static class HostedBuildDriver
         link.AddRange(["-o", executable]);
         link.AddRange(NativeOptimizationSettings.GnuLink(request));
         link.AddRange(pgo.LinkFlags);
+        if (request.StackReportPath is not null)
+            link.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         if (request.Configuration == CTildeNativeBuildConfiguration.Release)
             link.Add("-Wl,--gc-sections");
         if (usesPthreads)
@@ -325,8 +347,28 @@ internal static class HostedBuildDriver
             Console.Error.WriteLine($"trace: native link flags {string.Join(' ', link)}");
         var linked = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, link,
             Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
-        return linked.ExitCode;
+        var stackFiles = new List<string>();
+        if (request.StackReportPath is not null)
+        {
+            foreach (var objectPath in objects)
+                foreach (var extension in new[] { ".su", ".ci" })
+                {
+                    var sidecar = Path.ChangeExtension(objectPath, extension);
+                    if (File.Exists(sidecar))
+                        stackFiles.Add(sidecar);
+                }
+            var outputDirectory = Path.GetDirectoryName(request.ExecutablePath!)!;
+            var ltransFiles = Directory.EnumerateFiles(outputDirectory, "*.ltrans*.su", SearchOption.TopDirectoryOnly)
+                .Concat(Directory.EnumerateFiles(outputDirectory, "*.ltrans*.ci", SearchOption.TopDirectoryOnly)).ToArray();
+            if (request.Lto && ltransFiles.Length != 0)
+                stackFiles = [.. ltransFiles];
+            else
+                stackFiles.AddRange(ltransFiles);
+        }
+        return new GnuCompileResult(linked.ExitCode, stackFiles.Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray());
     }
+
+    private sealed record GnuCompileResult(int ExitCode, string[] StackUsageFiles);
 
     private static string CachedObjectPath(BuildRequest request, HostedCompiler compiler, string source, string flags, string extension)
     {
@@ -343,14 +385,39 @@ internal static class HostedBuildDriver
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)
         {
-            foreach (var header in new[] { "ctilde_internal.h", "ctilde_runtime.h" })
-            {
-                var path = Path.Combine(request.GeneratedDirectory!, header);
-                identity.Append(header).Append(':').Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
-            }
+            foreach (var path in GeneratedHeaderClosure(source, request.GeneratedDirectory!))
+                identity.Append(Path.GetRelativePath(request.GeneratedDirectory!, path).Replace('\\', '/')).Append(':')
+                    .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
         }
         var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
         return Path.Combine(cache, key + extension);
+    }
+
+    private static IEnumerable<string> GeneratedHeaderClosure(string source, string generatedDirectory)
+    {
+        var root = Path.GetFullPath(generatedDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var pending = new Queue<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Enqueue(Path.GetFullPath(source));
+        while (pending.Count != 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var line in File.ReadLines(current))
+            {
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("#include \"", StringComparison.Ordinal))
+                    continue;
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.IndexOf('"', start);
+                if (end <= start)
+                    continue;
+                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, trimmed[start..end]));
+                if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate) || !visited.Add(candidate))
+                    continue;
+                pending.Enqueue(candidate);
+            }
+        }
+        return visited.Order(StringComparer.Ordinal);
     }
 
     private static string PgoObjectPath(PgoContext pgo, string source, string extension)
@@ -591,7 +658,9 @@ internal static class FreestandingBuildDriver
         var image = request.ExecutablePath ?? throw new NativeBuildException("Freestanding image output is missing.");
         var compiler = ResolveCompiler(request.Compiler);
         Directory.CreateDirectory(Path.GetDirectoryName(image)!);
-        await ValidateCompilerAsync(compiler, request, cancellationToken);
+        var compilerIdentity = await ValidateCompilerAsync(compiler, request, cancellationToken);
+        if (request.StackReportPath is not null && compilerIdentity.Contains("clang", StringComparison.OrdinalIgnoreCase))
+            throw new NativeBuildException("Static stack reporting requires GCC; Clang does not emit GCC callgraph-info artifacts.");
 
         var configuration = NativeOptimizationSettings.GnuCompile(request, includeSections: false);
         var common = new List<string>
@@ -603,6 +672,8 @@ internal static class FreestandingBuildDriver
         common.AddRange(ArchitectureFlags(request.Architecture));
         if (request.Lto)
             common.Add("-flto");
+        if (request.StackReportPath is not null)
+            common.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         common.AddRange(settings.CompileOptions);
         if (request.Trace)
         {
@@ -623,7 +694,9 @@ internal static class FreestandingBuildDriver
                         flags[index] = "-std=gnu2x";
             var objectPath = CachedObjectPath(request, compiler, source, flags);
             objects.Add(objectPath);
-            if (File.Exists(objectPath))
+            var hasStackSidecars = request.StackReportPath is null ||
+                (File.Exists(Path.ChangeExtension(objectPath, ".su")) && (request.Lto || File.Exists(Path.ChangeExtension(objectPath, ".ci"))));
+            if (File.Exists(objectPath) && hasStackSidecars)
             {
                 if (request.Trace)
                     Console.Error.WriteLine($"trace: reused freestanding object {Path.GetFileName(objectPath)}");
@@ -661,6 +734,8 @@ internal static class FreestandingBuildDriver
         link.AddRange(["-nostdlib", "-nostartfiles", "-no-pie", "-Wl,--gc-sections"]);
         link.AddRange(ArchitectureFlags(request.Architecture));
         link.AddRange(NativeOptimizationSettings.GnuLink(request));
+        if (request.StackReportPath is not null)
+            link.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         link.Add("-T");
         link.Add(await ToolPathAsync(compiler, settings.LinkerScriptPath!, request.RootDirectory, cancellationToken));
         link.Add($"-Wl,-e,{settings.EntrySymbol}");
@@ -673,7 +748,12 @@ internal static class FreestandingBuildDriver
             request.RootDirectory, ForwardOutput: true), cancellationToken);
         if (linked.ExitCode == 0 && request.Trace)
             Console.Error.WriteLine($"trace: wrote freestanding image {image}");
-        return new NativeBuildOutcome(linked.ExitCode, "freestanding", compiler.Command, compiler.WslCompiler);
+        var objectStackFiles = objects.SelectMany(path => new[] { Path.ChangeExtension(path, ".su"), Path.ChangeExtension(path, ".ci") }).Where(File.Exists);
+        var ltransStackFiles = Directory.EnumerateFiles(Path.GetDirectoryName(image)!, "*.ltrans*.su", SearchOption.TopDirectoryOnly)
+            .Concat(Directory.EnumerateFiles(Path.GetDirectoryName(image)!, "*.ltrans*.ci", SearchOption.TopDirectoryOnly)).ToArray();
+        var stackFiles = request.StackReportPath is null ? [] : (request.Lto && ltransStackFiles.Length != 0 ? ltransStackFiles : objectStackFiles.Concat(ltransStackFiles))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray();
+        return new NativeBuildOutcome(linked.ExitCode, "freestanding-gcc", compiler.Command, compiler.WslCompiler, stackFiles);
     }
 
     private static FreestandingCompiler ResolveCompiler(string configured)
@@ -709,7 +789,7 @@ internal static class FreestandingBuildDriver
         return new FreestandingCompiler(resolved, [], null);
     }
 
-    private static async Task ValidateCompilerAsync(FreestandingCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
+    private static async Task<string> ValidateCompilerAsync(FreestandingCompiler compiler, BuildRequest request, CancellationToken cancellationToken)
     {
         var versionArgs = new List<string>(compiler.Prefix) { "--version" };
         var version = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, versionArgs,
@@ -731,6 +811,7 @@ internal static class FreestandingBuildDriver
             throw new NativeBuildException($"Could not inspect freestanding compiler target macros: {macros.StandardError.Trim()}");
         if (!MatchesArchitecture(macros.StandardOutput, request.Architecture))
             throw new NativeBuildException($"Freestanding compiler target does not match declared architecture '{request.Architecture}'.");
+        return versionText;
     }
 
     private static bool MatchesArchitecture(string macros, CompilationArchitecture architecture) => architecture switch
@@ -773,15 +854,39 @@ internal static class FreestandingBuildDriver
             .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
         if (request.CLayout == GeneratedCLayout.Modules)
         {
-            foreach (var header in new[] { "ctilde_internal.h", "ctilde_runtime.h" })
-            {
-                var path = Path.Combine(request.GeneratedDirectory!, header);
-                identity.Append(header).Append(':')
+            foreach (var path in GeneratedHeaderClosure(source, request.GeneratedDirectory!))
+                identity.Append(Path.GetRelativePath(request.GeneratedDirectory!, path).Replace('\\', '/')).Append(':')
                     .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
-            }
         }
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
         return Path.Combine(directory, hash + ".o");
+    }
+
+    private static IEnumerable<string> GeneratedHeaderClosure(string source, string generatedDirectory)
+    {
+        var root = Path.GetFullPath(generatedDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var pending = new Queue<string>();
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        pending.Enqueue(Path.GetFullPath(source));
+        while (pending.Count != 0)
+        {
+            var current = pending.Dequeue();
+            foreach (var line in File.ReadLines(current))
+            {
+                var trimmed = line.TrimStart();
+                if (!trimmed.StartsWith("#include \"", StringComparison.Ordinal))
+                    continue;
+                var start = trimmed.IndexOf('"') + 1;
+                var end = trimmed.IndexOf('"', start);
+                if (end <= start)
+                    continue;
+                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, trimmed[start..end]));
+                if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate) || !visited.Add(candidate))
+                    continue;
+                pending.Enqueue(candidate);
+            }
+        }
+        return visited.Order(StringComparer.Ordinal);
     }
 
     private static async Task<string> ToolPathAsync(FreestandingCompiler compiler, string path, string workingDirectory, CancellationToken cancellationToken)
@@ -843,11 +948,43 @@ internal static class EspIdfBuildDriver
                 throw new NativeBuildException($"ESP-IDF main/CMakeLists.txt must include generated binding fragment '{bindingFragment}' and register CTILDE_BINDING_SOURCES and CTILDE_BINDING_REQUIRES.");
         }
 
-        var process = CreateIdfRequest(request, ["build"]);
+        var buildArguments = new List<string>();
+        AddStackInstrumentationCMakeArguments(request, buildArguments);
+        buildArguments.Add("build");
+        var process = CreateIdfRequest(request, buildArguments);
         if (request.Trace)
             Console.Error.WriteLine($"trace: running ESP-IDF build in {project}");
         var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
-        return new NativeBuildOutcome(result.ExitCode, "gdb", null);
+        var stackFiles = request.StackReportPath is null || result.ExitCode != 0 ? [] :
+            Directory.EnumerateFiles(request.EspIdfBuildDirectory, "*.*", SearchOption.AllDirectories)
+                .Where(path => path.EndsWith(".su", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".ci", StringComparison.OrdinalIgnoreCase))
+                .Order(StringComparer.Ordinal).ToArray();
+        return new NativeBuildOutcome(result.ExitCode, "esp-idf-gcc", "ESP-IDF GCC", null, stackFiles);
+    }
+
+    private static void AddStackInstrumentationCMakeArguments(BuildRequest request, List<string> arguments)
+    {
+        foreach (var variable in new[] { "CMAKE_C_FLAGS", "CMAKE_CXX_FLAGS" })
+        {
+            var value = ReadCMakeCacheValue(request.EspIdfBuildDirectory, variable)
+                .Replace("-fstack-usage", string.Empty, StringComparison.Ordinal)
+                .Replace("-fcallgraph-info=su", string.Empty, StringComparison.Ordinal)
+                .Trim();
+            if (request.StackReportPath is not null)
+                value = (value + " -fstack-usage -fcallgraph-info=su").Trim();
+            arguments.Add("-D");
+            arguments.Add(variable + "=" + value);
+        }
+    }
+
+    private static string ReadCMakeCacheValue(string buildDirectory, string variable)
+    {
+        var cache = Path.Combine(buildDirectory, "CMakeCache.txt");
+        if (!File.Exists(cache))
+            return string.Empty;
+        var prefix = variable + ":STRING=";
+        var line = File.ReadLines(cache).FirstOrDefault(candidate => candidate.StartsWith(prefix, StringComparison.Ordinal));
+        return line is null ? string.Empty : line[prefix.Length..];
     }
 
     public static async Task PrepareDebugLaunchAsync(BuildRequest request, CancellationToken cancellationToken)

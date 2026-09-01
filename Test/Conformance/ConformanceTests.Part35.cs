@@ -343,7 +343,8 @@ internal static partial class ConformanceTests
                     """);
                 var run = RunNativeProfileCli(root, Path.Combine(root, "ctilde.json"), "--run");
                 Assert(run.ExitCode == 0 && Normalize(run.StandardOutput).Contains("124\n", StringComparison.Ordinal), run.StandardOutput + run.StandardError);
-                var header = File.ReadAllText(Path.Combine(root, "build", "generated", "ctilde_internal.h"));
+                var header = string.Join('\n', Directory.EnumerateFiles(Path.Combine(root, "build", "generated"), "*.h")
+                    .Order(StringComparer.Ordinal).Select(File.ReadAllText));
                 var runtime = File.ReadAllText(Path.Combine(root, "build", "generated", "ctilde_runtime.c"));
                 Assert(header.Contains("static CT_INLINE int64_t ct_i64_add(", StringComparison.Ordinal) &&
                     header.Contains("static CT_INLINE int64_t ct_i64_mul(", StringComparison.Ordinal) &&

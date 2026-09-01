@@ -79,6 +79,8 @@ internal static class NativeOptimizationSettings
         if (request.Optimization is not null)
             flags.Add(request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
         flags.AddRange(GnuCpuAndFloatingPoint(request));
+        if (request.StackReportPath is not null)
+            flags.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
         return flags;
     }
 

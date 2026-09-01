@@ -392,6 +392,7 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsInterruptSafe { get; init; }
     public bool IsInterruptCode { get; set; }
     public uint? TaskStackSize { get; init; }
+    public uint? StackUsage { get; init; }
     public bool IsTrustedExtern { get; init; }
     public bool IsVirtual { get; init; }
     public bool IsAbstract { get; init; }

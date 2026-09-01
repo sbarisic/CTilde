@@ -1,12 +1,10 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.42 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.44 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
 Draft 0.42 adds invariant scalar and enum parsing, attached-console UTF-8 handling, strict UTF-8 encoding objects, and synchronous hosted/Cosmopolitan streams, directories, paths, and metadata. Remaining follow-ups are:
-
-- [ ] Add a flattened, cache-oriented SAH BVH and compare it as a new benchmark accelerator against `object-midpoint-bvh`.
 
 - [ ] Add Unicode escape forms without changing byte-based `char` and string indexing. The UTF-8 rune helpers are implemented; escape syntax is not.
 - [ ] Add checked numeric-to-numeric conversions, culture-aware parsing/formatting, Unicode casing, normalization, collation and grapheme segmentation, and regular expressions only after their portability and allocation contracts are specified.
@@ -31,14 +29,12 @@ Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte
 
 The first typed-IR size tranche removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. The following low-risk generated-C tranche moves reachable atomic, wrapping-arithmetic, ARC, null, bounds, and stack-size common paths into the modular internal header, assigns default object hashes lazily, and devirtualizes sealed receivers and sealed overrides. Public ABI 16 layouts and native ownership entry points remain unchanged. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
 
-- [ ] Split the broad generated internal header into narrow dependency headers without duplicating declarations or changing public ABI output.
 - [ ] Add an optional readable-C mode with source-oriented names and annotations while preserving compact deterministic Release output by default.
 - [ ] Investigate aggregating compatible `defer` capture records when it reduces durable state without changing immediate capture, LIFO order, or exception replacement.
 
 ## Compiler analysis and low-level code generation
 
-- [ ] Add explicit stack controls such as `[NoStackProbe]` and `[StackAlign(n)]`; support `[StackUsage(n)]` when the compiler can calculate or verify the bound.
-- [ ] Add compile-time stack-usage analysis with per-call-path costs and a worst-case static stack report, especially for MCU builds.
+- [ ] Add explicit stack controls such as `[NoStackProbe]` and `[StackAlign(n)]`; verified `[StackUsage(n)]` contracts are implemented.
 
 ## Editor tooling
 

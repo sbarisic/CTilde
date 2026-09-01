@@ -435,6 +435,82 @@ internal static partial class ConformanceTests
                 "True\nTrue\nTrue\nTrue\nTrue",
                 $"Packet traversal or inactive-lane handling failed: {traversal.StandardOutput}{traversal.StandardError}");
         });
+
+        suite.Run("draft 0.44 flattened SAH BVH construction and equivalence", () =>
+        {
+            const string harness = """
+                using System;
+                namespace HostedIoExample;
+                public static class SahBvhTestProgram
+                {
+                    private static bool Close(float left, float right)
+                    {
+                        return Math.Abs(left - right) < 0.0001f;
+                    }
+
+                    [EntryPoint] public static unsafe void Main()
+                    {
+                        Ray forward = new Ray(Vec3.Zero, new Vec3(0.0f, 0.0f, -1.0f));
+                        Interval interval = new Interval(0.001f, 1000.0f);
+                        HittableList empty = new HittableList();
+                        HitRecord emptyHit;
+                        Console.WriteLine(!empty.BuildSahBvh().Hit(forward, interval, out emptyHit));
+
+                        Material material = new Lambertian(Vec3.One);
+                        HittableList singletonList = new HittableList();
+                        singletonList.Add(new Sphere(new Vec3(0.0f, 0.0f, -2.0f), 0.5f, material));
+                        FlattenedSahBvh singleton = (FlattenedSahBvh)singletonList.BuildSahBvh();
+                        Console.WriteLine(singleton.NodeCount == 1 && singleton.LeafCount == 1
+                            && singleton.MaximumDepth == 0 && singleton.PrimitiveCount == 1);
+
+                        HittableList equalCentroids = new HittableList();
+                        int index = 0;
+                        while (index < 17)
+                        {
+                            equalCentroids.Add(new Sphere(new Vec3(0.0f, 0.0f, -4.0f),
+                                0.1f + (float)index * 0.01f, material));
+                            index++;
+                        }
+                        FlattenedSahBvh equalSah = (FlattenedSahBvh)equalCentroids.BuildSahBvh();
+                        Hittable equalMidpoint = equalCentroids.BuildMidpointBvh();
+                        HitRecord listHit;
+                        HitRecord sahHit;
+                        HitRecord midpointHit;
+                        bool listFound = equalCentroids.Hit(forward, interval, out listHit);
+                        bool sahFound = equalSah.Hit(forward, interval, out sahHit);
+                        bool midpointFound = equalMidpoint.Hit(forward, interval, out midpointHit);
+                        Console.WriteLine(listFound && sahFound && midpointFound
+                            && Close(listHit.Distance, sahHit.Distance)
+                            && Close(listHit.Distance, midpointHit.Distance)
+                            && equalSah.NodeCount == equalSah.LeafCount * 2 - 1
+                            && equalSah.MaximumDepth <= 32);
+
+                        HittableList degenerateAxis = new HittableList();
+                        index = 0;
+                        while (index < 64)
+                        {
+                            degenerateAxis.Add(new Sphere(new Vec3(0.0f, 0.0f,
+                                -2.0f - (float)index), 0.2f, material));
+                            index++;
+                        }
+                        FlattenedSahBvh first = (FlattenedSahBvh)degenerateAxis.BuildSahBvh();
+                        FlattenedSahBvh second = (FlattenedSahBvh)degenerateAxis.BuildSahBvh();
+                        HitRecord firstHit;
+                        HitRecord secondHit;
+                        bool firstFound = first.Hit(forward, interval, out firstHit);
+                        bool secondFound = second.Hit(forward, interval, out secondHit);
+                        Console.WriteLine(first.NodeCount == second.NodeCount
+                            && first.LeafCount == second.LeafCount
+                            && first.MaximumDepth == second.MaximumDepth
+                            && first.PrimitiveCount == 64 && first.MaximumDepth <= 32
+                            && firstFound == secondFound && Close(firstHit.Distance, secondHit.Distance));
+                    }
+                }
+                """;
+            var result = CompileAndRun(HostedIoSources(harness));
+            Assert(result.ExitCode == 0 && Normalize(result.StandardOutput).Trim() == "True\nTrue\nTrue\nTrue",
+                $"Flattened SAH construction or traversal diverged: {result.StandardOutput}{result.StandardError}");
+        });
     }
 
     private static void AssertThrowsProject(string manifestPath, string fragment)

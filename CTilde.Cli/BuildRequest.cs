@@ -24,6 +24,7 @@ internal sealed record BuildRequest(
     GeneratedCLayout CLayout,
     string? GeneratedDirectory,
     string? SymbolMapPath,
+    string? StackReportPath,
     bool Lto,
     DebugInformationMode DebugInformation = DebugInformationMode.None,
     DebugMemoryMode DebugMemory = DebugMemoryMode.Off,
@@ -108,7 +109,13 @@ internal static class BuildRequestResolver
         var generatedC = checkOnly || layout == GeneratedCLayout.Modules ? null : Path.GetFullPath(options.Output ?? build.GeneratedCPath);
         var generatedDirectory = checkOnly || layout == GeneratedCLayout.Unity ? null : Path.GetFullPath(options.OutputDirectory ?? build.GeneratedDirectory);
         var generatedHeader = options.CheckOnly ? null : Path.GetFullPath(options.HeaderOutput ?? build.GeneratedHeaderPath);
+        var stackReportRequested = options.StackReport is not null || build.StackReportPath is not null;
+        if (stackReportRequested && (options.CheckOnly || !buildNative))
+            throw new CommandLineException("build.stackReport and --stack-report require --build or --run.");
+        var stackReport = options.StackReport is not null ? Path.GetFullPath(options.StackReport) : build.StackReportPath;
         var symbolMap = options.CheckOnly ? null : options.SymbolMap is not null ? Path.GetFullPath(options.SymbolMap) : build.SymbolMapPath;
+        if (stackReport is not null && symbolMap is null)
+            symbolMap = layout == GeneratedCLayout.Modules ? Path.Combine(generatedDirectory!, "ctilde_symbols.json") : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_symbols.json");
         var debugMap = debugInformation != DebugInformationMode.None
             ? Path.GetFullPath(options.DebugMap ?? (layout == GeneratedCLayout.Modules
                 ? Path.Combine(generatedDirectory!, "ctilde_debug.json")
@@ -132,7 +139,7 @@ internal static class BuildRequestResolver
                 : Path.Combine(EspBuildDirectory(idfProject!, project.Configuration.Environment, project.Configuration.EspIdfChip), ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable,
             project.Configuration.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
-            symbolMap, debugMap, debugTarget);
+            symbolMap, debugMap, debugTarget, stackReport);
         var architecture = ResolveArchitecture(options.ArchitectureSpecified ? options.Architecture : project.Configuration.Architecture,
             project.Configuration.Target, options.Compiler ?? build.Compiler, idfProject, project.Configuration.Environment, project.Configuration.EspIdfChip);
         if (project.Configuration.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
@@ -152,7 +159,7 @@ internal static class BuildRequestResolver
         return new BuildRequest(project.SourceFiles, project.Configuration.Target, architecture, project.ManifestPath,
             project.RootDirectory, ResolveSourceRoot(options), generatedC, generatedHeader, checkOnly, options.Trace, buildNative && !preparingAttach,
             options.Run, configuration, options.Compiler ?? build.Compiler, executable,
-            idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, lto, debugInformation, debugMemory, debugMap,
+            idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, stackReport, lto, debugInformation, debugMemory, debugMap,
             options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate, project.Configuration.BindingManifests,
             build.GeneratedDirectory, options.GenerateBindings, options.VerifyBindings, options.EspClangPath,
             options.NoRecursion || project.Configuration.NoRecursion,
@@ -189,7 +196,15 @@ internal static class BuildRequestResolver
             : buildNative
                 ? Path.Combine(layout == GeneratedCLayout.Unity ? Path.GetDirectoryName(generatedC)! : generatedDirectory!, "ctilde_exports.h")
                 : null;
+        if (options.StackReport is not null && (options.CheckOnly || !buildNative))
+            throw new CommandLineException("--stack-report requires --build or --run.");
+        var stackReport = options.StackReport is null ? null : Path.GetFullPath(options.StackReport);
+        if (stackReport is not null && options.Inputs.Select(Path.GetFullPath).Any(input => input.Equals(stackReport,
+            OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)))
+            throw new CommandLineException("--stack-report must not overwrite an input source file.");
         var symbolMap = options.CheckOnly ? null : options.SymbolMap is null ? null : Path.GetFullPath(options.SymbolMap);
+        if (stackReport is not null && symbolMap is null)
+            symbolMap = layout == GeneratedCLayout.Modules ? Path.Combine(generatedDirectory!, "ctilde_symbols.json") : Path.Combine(Path.GetDirectoryName(generatedC!)!, "ctilde_symbols.json");
         var executable = options.Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan && (buildNative || preparingAttach)
             ? Path.GetFullPath(options.NativeOutput ?? Path.Combine(root, "build", options.Target == CompilationTarget.Cosmopolitan
                 ? "program.com"
@@ -220,7 +235,7 @@ internal static class BuildRequestResolver
                 : Path.Combine(EspBuildDirectory(idfProject!, options.Environment, options.EspIdfChip), ".ctilde", "ctilde-debug-target.json")));
         ValidateDistinctOutputs(generatedC, generatedHeader, executable,
             options.Target == CompilationTarget.Cosmopolitan && executable is not null ? executable + ".dbg" : null,
-            symbolMap, debugMap, debugTarget);
+            symbolMap, debugMap, debugTarget, stackReport);
         var architecture = ResolveArchitecture(options.Architecture, options.Target, options.Compiler ?? "auto", idfProject, options.Environment, options.EspIdfChip);
         if (options.Target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
             throw new CommandLineException("Draft 0.25 Cosmopolitan builds require --architecture x64.");
@@ -234,7 +249,7 @@ internal static class BuildRequestResolver
             ResolveSourceRoot(options),
             generatedC, generatedHeader, options.CheckOnly, options.Trace, buildNative && !preparingAttach, false,
             configuration, options.Compiler ?? "auto",
-            executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, options.Lto,
+            executable, idfProject, options.EspIdfPath, layout, generatedDirectory, symbolMap, stackReport, options.Lto,
             debugInformation, debugMemory, debugMap, options.PrepareDebug, debugTarget, options.SerialPort, options.BaudRate,
             null, null, false, false, null, options.NoRecursion, options.PanicPolicy, freestanding, options.CosmopolitanMode, options.CpuFeatures,
             false, null, null, options.Environment, options.EspIdfChip, null, options.Optimization, options.CpuTarget,
@@ -243,7 +258,7 @@ internal static class BuildRequestResolver
 
     private static void ValidateCommon(CommandLineOptions options)
     {
-        var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.CosmopolitanModeSpecified || options.Lto ||
+        var hasNativeOptions = options.Configuration is not null || options.Compiler is not null || options.CosmopolitanModeSpecified || options.Lto || options.StackReport is not null ||
             options.Optimization is not null || options.CpuTarget is not null || options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
             options.NativeOutput is not null || options.EspIdfProject is not null ||
             options.LinkerScript is not null || options.EntrySymbol is not null || options.NativeSources.Count != 0 ||

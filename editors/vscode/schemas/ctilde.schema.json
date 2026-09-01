@@ -203,6 +203,11 @@
           "minLength": 1,
           "description": "Optional generated JSON symbol-map path relative to the project directory."
         },
+        "stackReport": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional schema-v1 static native stack report path. Requires a GCC-family native build."
+        },
         "lto": {
           "type": "boolean",
           "default": false,

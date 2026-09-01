@@ -141,13 +141,14 @@ internal static partial class ConformanceTests
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var internalHeader = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var dependencyHeaders = string.Join("\n", bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             var runtimeSource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             var namespaceSources = string.Join("\n", bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content));
             var entrySource = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.EntrySource).Content;
             var draftGuard = "CTILDE_INTERNAL_DRAFT_" + CompilerContract.DraftVersion.Replace(".", string.Empty, StringComparison.Ordinal).PadLeft(3, '0') + "_H";
             Assert(internalHeader.Contains(draftGuard, StringComparison.Ordinal), "The modular internal-header guard was not derived from the current draft version.");
-            Assert(internalHeader.Contains(codeMacro, StringComparison.Ordinal), "The internal code prototype lost its section annotation.");
-            Assert(!internalHeader.Split('\n').Any(line => line.Contains("extern", StringComparison.Ordinal) && line.Contains(dataMacro, StringComparison.Ordinal)), "An extern data declaration retained a definition-only placement annotation.");
+            Assert(dependencyHeaders.Contains(codeMacro, StringComparison.Ordinal), "The source-owner code prototype lost its section annotation.");
+            Assert(!dependencyHeaders.Split('\n').Any(line => line.Contains("extern", StringComparison.Ordinal) && line.Contains(dataMacro, StringComparison.Ordinal)), "An extern data declaration retained a definition-only placement annotation.");
             Assert(runtimeSource.Contains(dataMacro, StringComparison.Ordinal), "The modular data definition lost its section annotation.");
             Assert(namespaceSources.Contains(codeMacro, StringComparison.Ordinal), "A modular method definition lost its section annotation.");
             Assert(namespaceSources.Contains(exportMacro, StringComparison.Ordinal) && !entrySource.Contains(exportMacro, StringComparison.Ordinal),

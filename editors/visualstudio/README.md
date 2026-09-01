@@ -77,6 +77,28 @@ Visual Studio project Check and Build explicitly request normal compiler verbosi
 
 The repository solution contains 13 ready-to-load C~ projects under **C~**: the physical standard library and 12 example/target entries. Select the intended project before running a command. This is required for the three T-CAN wrappers because they share one directory but reference different manifests. The entries deliberately omit `Build.0`, so **Build Solution** continues to build only the .NET solution projects.
 
+## Build and silent deployment
+
+Build the current Release VSIX and its inventory and SHA-256 metadata:
+
+```powershell
+.\Build-Vsix.ps1
+```
+
+Install the newest built VSIX silently for the current user in every supported Visual Studio instance:
+
+```powershell
+.\Install-Vsix.ps1
+```
+
+Uninstall it silently. The extension ID is read from the VSIX manifest:
+
+```powershell
+.\Uninstall-Vsix.ps1
+```
+
+Pass `-VsixPath <path>` to either script to select a specific package, `-InstanceId <id>` to target one Visual Studio instance, `-WhatIf` to preview the operation, and `-ShutdownProcesses` only when the installer is allowed to close processes that lock extension files. Installer logs are written under `%TEMP%\CTilde-VsixInstaller` by default.
+
 ## Running and debugging
 
 Use **Start Without Debugging** (`Ctrl+F5`) or **Tools > Run C~ Project** to build and run a runnable manifest in a new external console. Both entry points share path resolution, missing-runtime reporting, and one-running-process-per-project protection.

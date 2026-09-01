@@ -13,6 +13,13 @@ method ct_m_b5aeaf95652a3e62a68409db method:Examples.Point::Sum()->int -> int
 method ct_m_c6a0a677cdfaef93d1ef8fc5 method:Examples.Counter::Increment()->void -> void
 method ct_m_c7ae14bd949d06dbca728549 method:Examples.Program::ShowDeferredCleanup()->void -> void
 method ct_m_d570ebcf544a7dd5c4ef686f method:Examples.Counter::Add(:int)->int -> int
+extern ct_native_buffer_sum method:Examples.Program::NativeBufferSum(:readonly-native-buffer<byte>)->uint -> uint
+extern ct_native_call_export method:Examples.NativeInterop::CallExport(:int,:int)->int -> int
+extern ct_native_invoke_delegate method:Examples.NativeInterop::Invoke(:Examples.IntTransformer,:int)->int -> int
+extern ct_native_resource_create method:Examples.NativeInterop::Create(out:Examples.NativeResource)->int -> int
+extern ct_native_resource_release method:Examples.NativeInterop::Release(:Examples.NativeResource)->void -> void
+extern ct_native_resource_value method:Examples.NativeInterop::Read(:Examples.NativeResource)->int -> int
+extern ct_native_utf8_length method:Examples.NativeInterop::Utf8Length(:native-utf8)->uint -> uint
 setter ct_s_215f270e70cd8133b84de410 setter:Examples.Counter::Value:int -> void
 type ct_t_01679443df45d0d3a977d592 type:Examples.Counter -> Examples.Counter
 type ct_t_0ffa27a15bb455db28f4783d type:Examples.Program -> Examples.Program

@@ -422,6 +422,7 @@ internal sealed partial class CompilationModel
             IsInterruptSafe = method.IsInterruptSafe,
             IsInterruptCode = method.IsInterruptCode,
             TaskStackSize = method.TaskStackSize,
+            StackUsage = method.StackUsage,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -678,6 +679,7 @@ internal sealed partial class CompilationModel
             IsInterruptSafe = method.IsInterruptSafe,
             IsInterruptCode = method.IsInterruptCode,
             TaskStackSize = method.TaskStackSize,
+            StackUsage = method.StackUsage,
             IsTrustedExtern = method.IsTrustedExtern,
             IsVirtual = method.IsVirtual,
             IsOverride = method.IsOverride,
@@ -1689,7 +1691,7 @@ internal sealed partial class CompilationModel
                     var hasBody = method.Body is not null || method.AssemblyBody is not null;
                     var isAssemblyFunction = method.AssemblyBody is not null;
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NativeImport", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NativeImport", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "StackUsage", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var nativeImport = FindAttribute(method.Attributes, "NativeImport");
@@ -1703,12 +1705,14 @@ internal sealed partial class CompilationModel
                     var sectionAttribute = FindAttribute(method.Attributes, "Section");
                     var usedAttribute = FindAttribute(method.Attributes, "Used");
                     var taskEntryAttribute = FindAttribute(method.Attributes, "TaskEntry");
+                    var stackUsageAttribute = FindAttribute(method.Attributes, "StackUsage");
                     var runtimeImplAttribute = FindAttribute(method.Attributes, "RuntimeImpl");
                     var nakedAttribute = FindAttribute(method.Attributes, "Naked");
                     var interruptAttribute = FindAttribute(method.Attributes, "Interrupt");
                     var interruptSafeAttribute = FindAttribute(method.Attributes, "InterruptSafe");
                     var runtimeImplementation = ParseRuntimeImplementation(runtimeImplAttribute);
                     uint? taskStackSize = null;
+                    uint? stackUsage = null;
                     if (taskEntryAttribute is not null)
                     {
                         if (taskEntryAttribute.Arguments is [AssignmentExpressionSyntax
@@ -1720,6 +1724,16 @@ internal sealed partial class CompilationModel
                             taskStackSize = (uint)stack.Integer;
                         else
                             Diagnostics.Add("CT1291", "TaskEntry requires one StackSize assignment using a positive uint value divisible by four.", taskEntryAttribute.Source, taskEntryAttribute.Span);
+                    }
+                    if (stackUsageAttribute is not null)
+                    {
+                        if (stackUsageAttribute.Arguments is [LiteralExpressionSyntax
+                            {
+                                Value: NumericLiteralValue usage
+                            }] && usage.FloatingPoint is null && usage.Integer > 0 && usage.Integer <= uint.MaxValue)
+                            stackUsage = (uint)usage.Integer;
+                        else
+                            Diagnostics.Add("CT1323", "StackUsage requires one positive uint byte count.", stackUsageAttribute.Source, stackUsageAttribute.Span);
                     }
                     var sectionName = ParseSectionName(sectionAttribute);
                     var previousTypeParameters = _activeTypeParameters;
@@ -1759,6 +1773,8 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1294", "NoRecursion does not accept arguments.", noRecursion.Source, noRecursion.Span);
                     if (noRecursion is not null && (!hasBody || isAbstractMethod || external is not null || nativeImport is not null))
                         Diagnostics.Add("CT1294", "NoRecursion requires a body-bearing non-extern method.", noRecursion.Source, noRecursion.Span);
+                    if (stackUsageAttribute is not null && isAbstractMethod)
+                        Diagnostics.Add("CT1323", "StackUsage requires a body-bearing, extern, native-import, or assembly-only method.", stackUsageAttribute.Source, stackUsageAttribute.Span);
                     if (usedAttribute is not null && usedAttribute.Arguments.Length != 0)
                         Diagnostics.Add("CT1288", "Used does not accept arguments.", usedAttribute.Source, usedAttribute.Span);
                     if (usedAttribute is not null && (!isStatic || !hasBody || isAbstractMethod || external is not null || nativeImport is not null))
@@ -1891,6 +1907,7 @@ internal sealed partial class CompilationModel
                         IsInterrupt = interruptAttribute is not null,
                         IsInterruptSafe = interruptSafeAttribute is not null,
                         TaskStackSize = taskStackSize,
+                        StackUsage = stackUsage,
                         IsTrustedExtern = !UserSyntaxTrees.Contains(tree) || tree.Origin == SyntaxTreeOrigin.EspIdfBinding,
                         IsVirtual = isAbstractMethod || method.Modifiers.Contains("virtual", StringComparer.Ordinal) || method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsAbstract = isAbstractMethod,

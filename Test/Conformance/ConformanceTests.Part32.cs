@@ -74,7 +74,7 @@ internal static partial class ConformanceTests
                 "Native-import libraries were not emitted in deterministic ordinal order.");
             var bundle = compatibleCompilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
-            var header = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var header = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             var runtime = bundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.RuntimeSource).Content;
             var modules = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.NamespaceSource).Select(artifact => artifact.Content));
             Assert(header.Contains("extern int32_t (*ct_ni_", StringComparison.Ordinal) && runtime.Contains("int32_t (*ct_ni_", StringComparison.Ordinal) &&

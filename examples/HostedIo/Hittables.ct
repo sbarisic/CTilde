@@ -1,4 +1,5 @@
 using System;
+using System.Runtime;
 using System.Simd;
 
 namespace HostedIoExample;
@@ -29,6 +30,13 @@ public struct Aabb
         if (extent.Y >= extent.Z)
             return 1;
         return 2;
+    }
+
+    [NoAlloc]
+    public float SurfaceArea()
+    {
+        Vec3 extent = Max - Min;
+        return 2.0f * (extent.X * extent.Y + extent.Y * extent.Z + extent.Z * extent.X);
     }
 
     [NoAlloc]
@@ -323,9 +331,21 @@ public sealed class HittableList : Hittable
 
     public Hittable BuildBvh()
     {
+        return BuildSahBvh();
+    }
+
+    public Hittable BuildMidpointBvh()
+    {
         if (count == 0)
             return this;
         return BvhNode.Build(objects, 0, count);
+    }
+
+    public Hittable BuildSahBvh()
+    {
+        if (count == 0)
+            return this;
+        return new FlattenedSahBvh(objects, count);
     }
 
     [NoAlloc]
@@ -389,6 +409,519 @@ public sealed class HittableList : Hittable
             index++;
         }
         return bounds;
+    }
+}
+
+public struct FlattenedBvhNode
+{
+    public Aabb Bounds;
+    public int RightChild;
+    public int FirstPrimitive;
+    public int PrimitiveCount;
+}
+
+public sealed class FlattenedSahBvh : Hittable
+{
+    private const int BinCount = 16;
+    private const int LeafSize = 4;
+    private const int MaximumBuildDepth = 32;
+    private const float InfiniteRank = 1000000000000000000000000000000.0f;
+    private FlattenedBvhNode[] nodes;
+    private Hittable[] primitives;
+    private Aabb[] primitiveBounds;
+    private Vec3[] centroids;
+    private Hittable[] scratchPrimitives;
+    private Aabb[] scratchBounds;
+    private Vec3[] scratchCentroids;
+    private int[] binCounts;
+    private Aabb[] binBounds;
+    private bool[] binHasBounds;
+    private int nodeCount;
+    private int leafCount;
+    private int maximumDepth;
+
+    public FlattenedSahBvh(Hittable[] source, int count)
+    {
+        nodes = new FlattenedBvhNode[count * 2];
+        primitives = new Hittable[count];
+        primitiveBounds = new Aabb[count];
+        centroids = new Vec3[count];
+        scratchPrimitives = new Hittable[count];
+        scratchBounds = new Aabb[count];
+        scratchCentroids = new Vec3[count];
+        binCounts = new int[BinCount * 3];
+        binBounds = new Aabb[BinCount * 3];
+        binHasBounds = new bool[BinCount * 3];
+        nodeCount = 0;
+        leafCount = 0;
+        maximumDepth = 0;
+        int index = 0;
+        while (index < count)
+        {
+            Hittable primitive = source[index];
+            Aabb bounds = primitive.BoundingBox();
+            primitives[index] = primitive;
+            primitiveBounds[index] = bounds;
+            centroids[index] = bounds.Centroid();
+            index++;
+        }
+        BuildNode(0, count, 0);
+    }
+
+    [NoAlloc]
+    public int NodeCount
+    {
+        get
+        {
+            return nodeCount;
+        }
+    }
+
+    [NoAlloc]
+    public int LeafCount
+    {
+        get
+        {
+            return leafCount;
+        }
+    }
+
+    [NoAlloc]
+    public int MaximumDepth
+    {
+        get
+        {
+            return maximumDepth;
+        }
+    }
+
+    [NoAlloc]
+    public int PrimitiveCount
+    {
+        get
+        {
+            return primitives.Length;
+        }
+    }
+
+    private int BuildNode(int start, int end, int depth)
+    {
+        int nodeIndex = nodeCount;
+        nodeCount++;
+        int length = end - start;
+        Aabb bounds = primitiveBounds[start];
+        Aabb centroidBounds = new Aabb(centroids[start], centroids[start]);
+        int index = start + 1;
+        while (index < end)
+        {
+            bounds = Aabb.Union(bounds, primitiveBounds[index]);
+            centroidBounds = Aabb.Union(centroidBounds, new Aabb(centroids[index],
+                centroids[index]));
+            index++;
+        }
+        if (depth > maximumDepth)
+            maximumDepth = depth;
+        if (length <= LeafSize || depth >= MaximumBuildDepth)
+        {
+            WriteLeaf(nodeIndex, bounds, start, length);
+            return nodeIndex;
+        }
+        int bestAxis = -1;
+        int bestSplit = -1;
+        float bestCost = InfiniteRank;
+        int axis = 0;
+        while (axis < 3)
+        {
+            float minimum = Axis(centroidBounds.Min, axis);
+            float maximum = Axis(centroidBounds.Max, axis);
+            float extent = maximum - minimum;
+            if (extent > 0.000000000001f)
+            {
+                ClearBins(axis);
+                index = start;
+                while (index < end)
+                {
+                    int bin = BinIndex(Axis(centroids[index], axis), minimum, extent);
+                    AddBin(axis, bin, primitiveBounds[index]);
+                    index++;
+                }
+                int split = 0;
+                while (split < BinCount - 1)
+                {
+                    int leftCount = 0;
+                    int rightCount = 0;
+                    bool hasLeft = false;
+                    bool hasRight = false;
+                    Aabb leftBounds = new Aabb(Vec3.Zero, Vec3.Zero);
+                    Aabb rightBounds = new Aabb(Vec3.Zero, Vec3.Zero);
+                    int bin = 0;
+                    while (bin <= split)
+                    {
+                        int offset = axis * BinCount + bin;
+                        leftCount += binCounts[offset];
+                        if (binHasBounds[offset])
+                        {
+                            if (hasLeft)
+                                leftBounds = Aabb.Union(leftBounds, binBounds[offset]);
+                            else
+                            {
+                                leftBounds = binBounds[offset];
+                                hasLeft = true;
+                            }
+                        }
+                        bin++;
+                    }
+                    bin = split + 1;
+                    while (bin < BinCount)
+                    {
+                        int offset = axis * BinCount + bin;
+                        rightCount += binCounts[offset];
+                        if (binHasBounds[offset])
+                        {
+                            if (hasRight)
+                                rightBounds = Aabb.Union(rightBounds, binBounds[offset]);
+                            else
+                            {
+                                rightBounds = binBounds[offset];
+                                hasRight = true;
+                            }
+                        }
+                        bin++;
+                    }
+                    if (leftCount > 0 && rightCount > 0)
+                    {
+                        float parentArea = bounds.SurfaceArea();
+                        float cost = 1.0f;
+                        if (parentArea > 0.0f)
+                            cost += (leftBounds.SurfaceArea() * (float)leftCount
+                            + rightBounds.SurfaceArea() * (float)rightCount) / parentArea;
+                        else
+                            cost += (float)(leftCount + rightCount);
+                        if (cost < bestCost)
+                        {
+                            bestCost = cost;
+                            bestAxis = axis;
+                            bestSplit = split;
+                        }
+                    }
+                    split++;
+                }
+            }
+            axis++;
+        }
+        int midpoint;
+        if (bestAxis >= 0)
+            midpoint = StablePartition(start, end, bestAxis, bestSplit, centroidBounds);
+        else
+            midpoint = start;
+        if (midpoint <= start || midpoint >= end)
+        {
+            int fallbackAxis = centroidBounds.LongestAxis();
+            StableSort(start, end, fallbackAxis);
+            midpoint = start + length / 2;
+        }
+        BuildNode(start, midpoint, depth + 1);
+        int rightChild = BuildNode(midpoint, end, depth + 1);
+        FlattenedBvhNode node = new FlattenedBvhNode();
+        node.Bounds = bounds;
+        node.RightChild = rightChild;
+        node.FirstPrimitive = 0;
+        node.PrimitiveCount = 0;
+        nodes[nodeIndex] = node;
+        return nodeIndex;
+    }
+
+    private void WriteLeaf(int nodeIndex, Aabb bounds, int first, int count)
+    {
+        FlattenedBvhNode node = new FlattenedBvhNode();
+        node.Bounds = bounds;
+        node.RightChild = -1;
+        node.FirstPrimitive = first;
+        node.PrimitiveCount = count;
+        nodes[nodeIndex] = node;
+        leafCount++;
+    }
+
+    private void ClearBins(int axis)
+    {
+        int index = axis * BinCount;
+        int end = index + BinCount;
+        while (index < end)
+        {
+            binCounts[index] = 0;
+            binHasBounds[index] = false;
+            index++;
+        }
+    }
+
+    private void AddBin(int axis, int bin, Aabb bounds)
+    {
+        int offset = axis * BinCount + bin;
+        binCounts[offset]++;
+        if (binHasBounds[offset])
+            binBounds[offset] = Aabb.Union(binBounds[offset], bounds);
+        else
+        {
+            binBounds[offset] = bounds;
+            binHasBounds[offset] = true;
+        }
+    }
+
+    [NoAlloc]
+    private static int BinIndex(float value, float minimum, float extent)
+    {
+        int result = (int)(((value - minimum) / extent) * (float)BinCount);
+        if (result < 0)
+            return 0;
+        if (result >= BinCount)
+            return BinCount - 1;
+        return result;
+    }
+
+    private int StablePartition(int start, int end, int axis, int split, Aabb centroidBounds)
+    {
+        float minimum = Axis(centroidBounds.Min, axis);
+        float extent = Axis(centroidBounds.Max, axis) - minimum;
+        int destination = start;
+        int index = start;
+        while (index < end)
+        {
+            int bin = BinIndex(Axis(centroids[index], axis), minimum, extent);
+            if (bin <= split)
+            {
+                scratchPrimitives[destination] = primitives[index];
+                scratchBounds[destination] = primitiveBounds[index];
+                scratchCentroids[destination] = centroids[index];
+                destination++;
+            }
+            index++;
+        }
+        int midpoint = destination;
+        index = start;
+        while (index < end)
+        {
+            int bin = BinIndex(Axis(centroids[index], axis), minimum, extent);
+            if (bin > split)
+            {
+                scratchPrimitives[destination] = primitives[index];
+                scratchBounds[destination] = primitiveBounds[index];
+                scratchCentroids[destination] = centroids[index];
+                destination++;
+            }
+            index++;
+        }
+        index = start;
+        while (index < end)
+        {
+            primitives[index] = scratchPrimitives[index];
+            primitiveBounds[index] = scratchBounds[index];
+            centroids[index] = scratchCentroids[index];
+            index++;
+        }
+        return midpoint;
+    }
+
+    private void StableSort(int start, int end, int axis)
+    {
+        int index = start + 1;
+        while (index < end)
+        {
+            Hittable primitive = primitives[index];
+            Aabb bounds = primitiveBounds[index];
+            Vec3 centroidValue = centroids[index];
+            float centroid = Axis(centroidValue, axis);
+            int insertion = index;
+            while (insertion > start && Axis(centroids[insertion - 1], axis) > centroid)
+            {
+                primitives[insertion] = primitives[insertion - 1];
+                primitiveBounds[insertion] = primitiveBounds[insertion - 1];
+                centroids[insertion] = centroids[insertion - 1];
+                insertion--;
+            }
+            primitives[insertion] = primitive;
+            primitiveBounds[insertion] = bounds;
+            centroids[insertion] = centroidValue;
+            index++;
+        }
+    }
+
+    [NoAlloc]
+    private static float Axis(Vec3 value, int axis)
+    {
+        if (axis == 0)
+            return value.X;
+        if (axis == 1)
+            return value.Y;
+        return value.Z;
+    }
+
+    [NoAlloc]
+    public override Aabb BoundingBox()
+    {
+        return nodes[0].Bounds;
+    }
+
+    [NoAlloc]
+    public override unsafe bool Hit(Ray ray, Interval interval, out HitRecord hit)
+    {
+        NativeBuffer<int> stack = stackalloc int[64];
+        int stackCount = 1;
+        stack[(nuint)0] = 0;
+        bool hitAnything = false;
+        float closest = interval.Max;
+        HitRecord result = new HitRecord();
+        while (stackCount > 0)
+        {
+            stackCount--;
+            int nodeIndex = stack[(nuint)stackCount];
+            FlattenedBvhNode node = nodes[nodeIndex];
+            if (!node.Bounds.Hit(ray, new Interval(interval.Min, closest)))
+                continue;
+            if (node.PrimitiveCount > 0)
+            {
+                int primitive = node.FirstPrimitive;
+                int end = primitive + node.PrimitiveCount;
+                while (primitive < end)
+                {
+                    HitRecord candidate;
+                    Hittable item = primitives[primitive];
+                    bool didHit = item.Hit(ray, new Interval(interval.Min, closest),
+                        out candidate);
+                    if (didHit)
+                    {
+                        hitAnything = true;
+                        closest = candidate.Distance;
+                        result = candidate;
+                    }
+                    primitive++;
+                }
+                continue;
+            }
+            int leftChild = nodeIndex + 1;
+            int rightChild = node.RightChild;
+            float leftEntry;
+            float rightEntry;
+            Interval childInterval = new Interval(interval.Min, closest);
+            bool canHitLeft = nodes[leftChild].Bounds.Hit(ray, childInterval, out leftEntry);
+            bool canHitRight = nodes[rightChild].Bounds.Hit(ray, childInterval, out rightEntry);
+            if (canHitLeft && canHitRight)
+            {
+                if (rightEntry < leftEntry)
+                {
+                    stack[(nuint)stackCount] = leftChild;
+                    stackCount++;
+                    stack[(nuint)stackCount] = rightChild;
+                    stackCount++;
+                }
+                else
+                {
+                    stack[(nuint)stackCount] = rightChild;
+                    stackCount++;
+                    stack[(nuint)stackCount] = leftChild;
+                    stackCount++;
+                }
+            }
+            else if (canHitLeft)
+            {
+                stack[(nuint)stackCount] = leftChild;
+                stackCount++;
+            }
+            else if (canHitRight)
+            {
+                stack[(nuint)stackCount] = rightChild;
+                stackCount++;
+            }
+        }
+        hit = result;
+        return hitAnything;
+    }
+
+    [NoAlloc]
+    public override unsafe bool Hit4(ref RayPacket rays, ref RayInterval4 interval,
+        Mask32x4 active, out HitPacket hits)
+    {
+        NativeBuffer<int> stack = stackalloc int[64];
+        int stackCount = 1;
+        stack[(nuint)0] = 0;
+        HitPacket result = HitPacket.Empty(interval.Max);
+        F32x4 closest = interval.Max;
+        while (stackCount > 0)
+        {
+            stackCount--;
+            int nodeIndex = stack[(nuint)stackCount];
+            FlattenedBvhNode node = nodes[nodeIndex];
+            RayInterval4 nodeInterval = new RayInterval4(interval.Min, closest);
+            F32x4 nodeEntry;
+            Mask32x4 bounded = node.Bounds.Hit4(ref rays, ref nodeInterval, active,
+                out nodeEntry);
+            if (!bounded.Any())
+                continue;
+            if (node.PrimitiveCount > 0)
+            {
+                int primitive = node.FirstPrimitive;
+                int end = primitive + node.PrimitiveCount;
+                while (primitive < end)
+                {
+                    HitPacket candidate;
+                    RayInterval4 primitiveInterval = new RayInterval4(interval.Min,
+                        closest);
+                    Hittable item = primitives[primitive];
+                    bool didHit = item.Hit4(ref rays, ref primitiveInterval, bounded,
+                        out candidate);
+                    if (didHit)
+                    {
+                        result.Merge(candidate.HitMask, ref candidate);
+                        closest = F32x4.Select(candidate.HitMask, candidate.Distances,
+                            closest);
+                    }
+                    primitive++;
+                }
+                continue;
+            }
+            int leftChild = nodeIndex + 1;
+            int rightChild = node.RightChild;
+            F32x4 leftEntry;
+            F32x4 rightEntry;
+            RayInterval4 childInterval = new RayInterval4(interval.Min, closest);
+            Mask32x4 canHitLeft = nodes[leftChild].Bounds.Hit4(ref rays, ref childInterval,
+                bounded, out leftEntry);
+            Mask32x4 canHitRight = nodes[rightChild].Bounds.Hit4(ref rays, ref childInterval,
+                bounded, out rightEntry);
+            bool hasLeft = canHitLeft.Any();
+            bool hasRight = canHitRight.Any();
+            if (hasLeft && hasRight)
+            {
+                float leftRank = PacketMasks.FirstValue(leftEntry, canHitLeft, InfiniteRank);
+                float rightRank = PacketMasks.FirstValue(rightEntry, canHitRight,
+                    InfiniteRank);
+                if (rightRank < leftRank)
+                {
+                    stack[(nuint)stackCount] = leftChild;
+                    stackCount++;
+                    stack[(nuint)stackCount] = rightChild;
+                    stackCount++;
+                }
+                else
+                {
+                    stack[(nuint)stackCount] = rightChild;
+                    stackCount++;
+                    stack[(nuint)stackCount] = leftChild;
+                    stackCount++;
+                }
+            }
+            else if (hasLeft)
+            {
+                stack[(nuint)stackCount] = leftChild;
+                stackCount++;
+            }
+            else if (hasRight)
+            {
+                stack[(nuint)stackCount] = rightChild;
+                stackCount++;
+            }
+        }
+        hits = result;
+        return result.HitMask.Any();
     }
 }
 

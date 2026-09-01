@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.43 makes the standard library available to freestanding and ESP-IDF programs through typed runtime-service providers for allocation, panic, console, time, math, files, directories, threads, mutexes, and runtime TLS. ESP-IDF retains its built-in platform adapters unless a complete service group is overridden. Draft 0.42 remains the historical UTF-8 parsing and hosted-I/O revision. The language also includes automatic reference counting (ARC), deterministic cleanup, exceptions, closed generics, managed threads, native interop, freestanding images, Cosmopolitan APEs, and explicit SIMD128 packet geometry.
+Draft 0.44 adds narrow generated-C dependency headers, dependency-closure object caching, opt-in GCC static stack reports and verified `[StackUsage(n)]` contracts. HostedIo now uses a flattened 16-bin SAH BVH while retaining its midpoint tree as a benchmark baseline. Runtime ABI 17 and debug metadata v3 are unchanged. Draft 0.43 remains the runtime-service-provider revision.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -188,6 +188,7 @@ A `ctilde.json` file defines a source set, target, build outputs, and run comman
     "optimization": "speed",
     "cpuTarget": "baseline",
     "floatingPoint": "precise",
+    "stackReport": "build/stack-usage.json",
     "pgo": { "mode": "off", "directory": "build/pgo" }
   },
   "run": {
@@ -212,6 +213,8 @@ Project Build and Run commands use concise `normal` output by default: manifest,
 Builds that share an output directory wait for its owner for up to 30 seconds. The lock records the owner process, operation, manifest, and start time; a timeout is reported as `CT6002`. Each project Check, Build, or Run atomically refreshes `.ctilde/build-diagnostics.json`. Successful compilation clears its diagnostics, failed compilation replaces them, and cancellation preserves the previous valid receipt.
 
 Release builds can select `speed` or `aggressive` optimization, `baseline` or x64-only `avx2`, and `precise` or `fast` floating-point behavior. The matching CLI overrides are `--optimization`, `--cpu-target`, and `--floating-point`. Hosted project builds can run explicit `--pgo generate` training and `--pgo use` phases; PGO also requires Release and LTO. Omit these settings to preserve the target's historical toolchain behavior.
+
+`build.stackReport` or `--stack-report <path>` explicitly enables schema-v1 native stack analysis for a GCC-family native build. `[StackUsage(n)]` verifies a body-bearing method's complete transitive byte bound and supplies a trusted terminal bound for extern, native-import, and assembly-only methods. Incomplete recursion, dynamic frames, indirect calls, and unannotated native boundaries remain visible as unknown rather than being guessed. MSVC and Clang stack-report requests fail before native compilation.
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
@@ -282,7 +285,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.43 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.44 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, ABI 17, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

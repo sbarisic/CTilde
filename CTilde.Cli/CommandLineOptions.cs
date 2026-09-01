@@ -35,6 +35,7 @@ internal sealed record CommandLineOptions(
     GeneratedCLayout? CLayout,
     string? OutputDirectory,
     string? SymbolMap,
+    string? StackReport,
     bool Lto,
     bool DebugInfo,
     DebugMemoryMode? DebugMemory,
@@ -89,6 +90,7 @@ internal sealed record CommandLineOptions(
         string? idfPath = null;
         string? outputDirectory = null;
         string? symbolMap = null;
+        string? stackReport = null;
         string? debugMap = null;
         string? prepareDebug = null;
         string? debugTarget = null;
@@ -199,6 +201,7 @@ internal sealed record CommandLineOptions(
                     break;
                 case "--output-directory": outputDirectory = RequireValue(); break;
                 case "--symbol-map": symbolMap = RequireValue(); break;
+                case "--stack-report": stackReport = RequireValue(); break;
                 case "--debug-map": debugMap = RequireValue(); break;
                 case "--debug-target": debugTarget = RequireValue(); break;
                 case "--serial-port": serialPort = RequireValue(); break;
@@ -392,7 +395,7 @@ internal sealed record CommandLineOptions(
         }
 
         options = new CommandLineOptions(inputs, output, header, directory, project, sourceRoot, check, trace, target,
-            targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, lto,
+            targetSpecified, architecture, architectureSpecified, build, run, configuration, compiler, cosmopolitanMode, cosmopolitanModeSpecified, nativeOutput, idfProject, idfPath, cLayout, outputDirectory, symbolMap, stackReport, lto,
             debugInfo, debugMemory, debugMap, prepareDebug, debugTarget, serialPort, baudRate, generateBindings, verifyBindings, espClangPath, noRecursion,
             panicPolicy, panicPolicySpecified, linkerScript, entrySymbol, nativeSources, objectFiles, libraries, compileOptions, linkOptions, cpuFeatures,
             environment, espIdfChip, optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory,

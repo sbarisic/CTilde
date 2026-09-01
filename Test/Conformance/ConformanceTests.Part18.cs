@@ -59,7 +59,7 @@ internal static partial class ConformanceTests
             var retainedExportImplementation = FindSymbol(retainedSymbols, "method", "Retained::Exported");
             var retentionBundle = retentionCompilation.EmitCBundle();
             Assert(retentionBundle.Success, string.Join(Environment.NewLine, retentionBundle.Diagnostics));
-            var retentionHeader = retentionBundle.Artifacts.Single(artifact => artifact.Kind == GeneratedCArtifactKind.InternalHeader).Content;
+            var retentionHeader = string.Join('\n', retentionBundle.Artifacts.Where(artifact => artifact.Kind is GeneratedCArtifactKind.InternalHeader or GeneratedCArtifactKind.DependencyHeader).Select(artifact => artifact.Content));
             Assert(!retentionHeader.Contains("extern CT_FORCE_INCLUDE", StringComparison.Ordinal),
                 "A [Used] retention macro invocation was misclassified as a function declaration.");
             Assert(!retentionHeader.Contains("extern static_assert", StringComparison.Ordinal),
@@ -155,6 +155,13 @@ internal static partial class ConformanceTests
             Assert(sources.Length >= 2 && sources.All(artifact => artifact.RelativePath.StartsWith("source_", StringComparison.Ordinal)) &&
                 sources.Count(artifact => artifact.Content.Contains("ct_m_", StringComparison.Ordinal)) >= 2,
                 "Reachable source files were not assigned stable source-owned modules.\n" + string.Join("\n", bundle.Artifacts.Select(artifact => artifact.RelativePath + ":" + artifact.Kind)));
+            Assert(sources.All(artifact => artifact.Content.Contains("#include \"ctilde_runtime_internal.h\"", StringComparison.Ordinal) &&
+                !artifact.Content.Contains("#include \"ctilde_internal.h\"", StringComparison.Ordinal)),
+                "A modular implementation still included the compatibility umbrella.");
+            Assert(bundle.Artifacts.Any(artifact => artifact is { Kind: GeneratedCArtifactKind.DependencyHeader, RelativePath: "ctilde_types.h" }) &&
+                bundle.Artifacts.Any(artifact => artifact is { Kind: GeneratedCArtifactKind.DependencyHeader, RelativePath: "ctilde_runtime_internal.h" }) &&
+                bundle.Artifacts.Count(artifact => artifact.Kind == GeneratedCArtifactKind.DependencyHeader && artifact.RelativePath.StartsWith("source_", StringComparison.Ordinal)) >= 2,
+                "The modular bundle omitted narrow type, runtime, or source-owner dependency headers.");
 
             var editedFirst = SyntaxTree.ParseText("namespace Shared; public static class A { public static int Value() { return 2; } }", Path.Combine(root, "a.ct"));
             var editedBundle = Compile([editedFirst, second], new CompilationOptions(SourceIdentityRoot: root)).EmitCBundle();
@@ -168,6 +175,23 @@ internal static partial class ConformanceTests
             Assert(originalSources.Keys.SequenceEqual(editedSources.Keys, StringComparer.Ordinal) &&
                 originalSources.Count(pair => pair.Value != editedSources[pair.Key]) == 1,
                 "A body-only edit did not change exactly one stable source-owned module.");
+            var originalHeaders = bundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.DependencyHeader)
+                .ToDictionary(artifact => artifact.RelativePath, artifact => artifact.Content, StringComparer.Ordinal);
+            var editedHeaders = editedBundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.DependencyHeader)
+                .ToDictionary(artifact => artifact.RelativePath, artifact => artifact.Content, StringComparer.Ordinal);
+            Assert(originalHeaders.Keys.SequenceEqual(editedHeaders.Keys, StringComparer.Ordinal) &&
+                originalHeaders.All(pair => pair.Value == editedHeaders[pair.Key]),
+                "A body-only edit changed a generated dependency header and would invalidate dependent objects.");
+
+            var signatureFirst = SyntaxTree.ParseText("namespace Shared; public static class A { public static int Value(int input) { return input; } }", Path.Combine(root, "a.ct"));
+            var signatureSecond = SyntaxTree.ParseText("using Shared; namespace Shared; public static class Program { [EntryPoint] public static void Main() { A.Value(0); } }", Path.Combine(root, "b.ct"));
+            var signatureBundle = Compile([signatureFirst, signatureSecond], new CompilationOptions(SourceIdentityRoot: root)).EmitCBundle();
+            Assert(signatureBundle.Success, string.Join(Environment.NewLine, signatureBundle.Diagnostics));
+            var signatureHeaders = signatureBundle.Artifacts.Where(artifact => artifact.Kind == GeneratedCArtifactKind.DependencyHeader)
+                .ToDictionary(artifact => artifact.RelativePath, artifact => artifact.Content, StringComparer.Ordinal);
+            var changedHeaders = originalHeaders.Where(pair => pair.Value != signatureHeaders[pair.Key]).Select(pair => pair.Key).ToArray();
+            Assert(changedHeaders.Length == 1 && changedHeaders[0].StartsWith("source_", StringComparison.Ordinal),
+                "A source signature edit did not change exactly its source-owner dependency header: " + string.Join(", ", changedHeaders));
 
             var memoryA = SyntaxTree.ParseText("namespace MemoryA; public static class A { public static int Value() { return 1; } }", string.Empty);
             var memoryB = SyntaxTree.ParseText("using MemoryA; public static class Program { [EntryPoint] public static void Main() { A.Value(); } }", string.Empty);

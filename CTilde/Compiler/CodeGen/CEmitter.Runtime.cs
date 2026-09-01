@@ -454,6 +454,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("static CT_INLINE void ct_native_bounds(size_t index, size_t length, const char* file, int line) { if (CT_UNLIKELY(index >= length)) ct_native_bounds_fail(file, line); }");
             writer.WriteLine("static CT_INLINE size_t ct_stack_bytes(size_t count, size_t element_size, const char* file, int line) { if (CT_UNLIKELY(element_size != 0u && count > SIZE_MAX / element_size)) ct_stack_bytes_fail(file, line); return count * element_size; }");
         }
+        writer.WriteLine("/* CTILDE_RUNTIME_DEPENDENCY_HEADER_BEGIN */");
         writer.WriteLine("static CT_INLINE int32_t ct_i32_bits(uint32_t value) { int32_t result; (void)memcpy(&result, &value, sizeof(result)); return result; }");
         writer.WriteLine("static ct_atomic_u32 ct_next_identity = CT_ATOMIC_U32_INIT(1u);");
         writer.WriteLine("static int32_t ct_object_identity_hash(ct_object* object) { uint32_t identity = ct_atomic_load_relaxed(&object->IdentityHash); if (identity == 0u) { uint32_t candidate; do { candidate = ct_atomic_fetch_add_relaxed(&ct_next_identity, 1u); } while (candidate == 0u); uint32_t expected = 0u; if (!ct_atomic_compare_exchange_relaxed(&object->IdentityHash, &expected, candidate)) candidate = expected; identity = candidate; } return ct_i32_bits(identity); }");
@@ -656,6 +657,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_environment_exit(int32_t code) { ct_runtime_exit(code); }");
         else if (!IsEspIdf)
             writer.WriteLine("void ct_environment_exit(int32_t code) { exit((int)code); }");
+        writer.WriteLine("/* CTILDE_RUNTIME_DEPENDENCY_HEADER_END */");
         writer.WriteLine();
     }
 

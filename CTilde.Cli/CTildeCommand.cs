@@ -118,10 +118,26 @@ internal static class CTildeCommand
                     Console.Error.WriteLine($"trace: native build phase {nativeElapsed.ElapsedMilliseconds} ms");
                 if (nativeResult.ExitCode != 0)
                 {
-                    var diagnostic = reporter.InfrastructureDiagnostic(request.ManifestPath!, "CT6003", "The native compiler or linker failed. See the preceding native diagnostic output.");
+                    RemoveStaleGeneratedOutput(request.StackReportPath);
+                    var diagnostic = reporter.InfrastructureDiagnostic(request.ManifestPath ?? request.Inputs.First(), "CT6003", "The native compiler or linker failed. See the preceding native diagnostic output.");
                     WriteReceipt(request, operation, "failed", [diagnostic]);
                     reporter.Complete(nativeResult.ExitCode);
                     return nativeResult.ExitCode;
+                }
+                if (request.StackReportPath is not null)
+                {
+                    var stack = StackUsageReporter.Analyze(request, nativeResult);
+                    reporter.Phase($"Stack report: {request.StackReportPath}");
+                    if (stack.ContractFailure)
+                    {
+                        foreach (var message in stack.Messages)
+                            Console.Error.WriteLine(message);
+                        var diagnostic = reporter.InfrastructureDiagnostic(request.ManifestPath ?? request.Inputs.First(),
+                            "CT2226", "One or more static stack-usage contracts could not be verified or were exceeded. See the stack report.");
+                        WriteReceipt(request, operation, "failed", [diagnostic]);
+                        reporter.Complete(1);
+                        return 1;
+                    }
                 }
                 if (request.PrepareDebug == "launch")
                 {
@@ -149,6 +165,7 @@ internal static class CTildeCommand
         }
         catch (NativeBuildException exception)
         {
+            RemoveStaleGeneratedOutput(activeRequest?.StackReportPath);
             var manifest = activeRequest?.ManifestPath ?? options.ProjectManifest;
             if (manifest is not null)
             {
@@ -162,6 +179,7 @@ internal static class CTildeCommand
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
         {
+            RemoveStaleGeneratedOutput(activeRequest?.StackReportPath);
             var manifest = activeRequest?.ManifestPath ?? options.ProjectManifest;
             if (manifest is not null)
                 reporter.InfrastructureDiagnostic(manifest, "CT6003", exception.Message);
@@ -172,6 +190,7 @@ internal static class CTildeCommand
         }
         catch (OperationCanceledException)
         {
+            RemoveStaleGeneratedOutput(activeRequest?.StackReportPath);
             Console.Error.WriteLine("ctilde: Build canceled.");
             return 130;
         }
@@ -190,7 +209,7 @@ internal static class CTildeCommand
             return UsageError("A standard-library project requires --check or --build.");
         if (options.Inputs.Count != 0 || options.InputDirectory is not null || options.TargetSpecified ||
             options.Output is not null || options.OutputDirectory is not null || options.HeaderOutput is not null ||
-            options.SymbolMap is not null || options.NativeOutput is not null || options.Configuration is not null ||
+            options.SymbolMap is not null || options.StackReport is not null || options.NativeOutput is not null || options.Configuration is not null ||
             options.Compiler is not null || options.Lto || options.Optimization is not null || options.CpuTarget is not null ||
             options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
             options.DebugInfo || options.DebugMemory is not null)
@@ -281,7 +300,7 @@ internal static class CTildeCommand
             {
                 if (request.BuildNative)
                     RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
-                        request.DebugMapPath, request.DebugTargetPath);
+                        request.DebugMapPath, request.DebugTargetPath, request.StackReportPath);
                 return new CompilationOutcome(1, compilation.UsesInlineAssembly, diagnostics);
             }
 
@@ -341,7 +360,7 @@ internal static class CTildeCommand
         {
             if (request.BuildNative)
                 RemoveStaleGeneratedOutput(request.GeneratedCPath, request.GeneratedHeaderPath, request.SymbolMapPath,
-                    request.DebugMapPath, request.DebugTargetPath);
+                    request.DebugMapPath, request.DebugTargetPath, request.StackReportPath);
             var diagnostics = request.ManifestPath is null
                 ? []
                 : new[] { (reporter ?? BuildReporter.Current)!.InfrastructureDiagnostic(request.ManifestPath, "CT6003", exception.Message) };
@@ -358,7 +377,7 @@ internal static class CTildeCommand
         if (options.Inputs.Count != 0 || options.Output is not null || options.HeaderOutput is not null ||
             options.CheckOnly || options.ProjectManifest is not null || options.Build || options.Run || options.Configuration is not null ||
             options.Compiler is not null || options.NativeOutput is not null || options.EspIdfProject is not null || options.EspIdfPath is not null ||
-            options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.Lto ||
+            options.CLayout is not null || options.OutputDirectory is not null || options.SymbolMap is not null || options.StackReport is not null || options.Lto ||
             options.Optimization is not null || options.CpuTarget is not null || options.FloatingPoint is not null || options.PgoMode is not null || options.PgoDirectory is not null ||
             options.DebugInfo || options.DebugMemory is not null || options.DebugMap is not null || options.PrepareDebug is not null || options.DebugTarget is not null || options.SerialPort is not null ||
             options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null || options.LinkerScript is not null || options.EntrySymbol is not null ||
@@ -379,7 +398,7 @@ internal static class CTildeCommand
                 var sourceRoot = options.SourceRoot is null ? null : Path.GetFullPath(options.SourceRoot, Directory.GetCurrentDirectory());
                 var request = new BuildRequest([input], options.Target, options.Architecture, null, directory, sourceRoot, Path.ChangeExtension(input, ".c"),
                     null, false, options.Trace, false, false, CTildeNativeBuildConfiguration.Debug, "auto", null, null, null,
-                    GeneratedCLayout.Unity, null, null, false);
+                    GeneratedCLayout.Unity, null, null, null, false);
                 if (Compile(request).ExitCode != 0)
                 {
                     RemoveStaleGeneratedOutput(request.GeneratedCPath);
@@ -525,7 +544,7 @@ internal static class CTildeCommand
         Console.Error.WriteLine("       ctilde restore|update|vendor --project <ctilde.json>");
         Console.Error.WriteLine("       ctilde clean --project <ctilde.json> [--trace]");
         Console.Error.WriteLine("       ctilde format [--check] <file-or-directory>...");
-        Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto]");
+        Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto] [--stack-report <report.json>]");
         Console.Error.WriteLine("                      --optimization speed|aggressive --cpu-target baseline|avx2 --floating-point precise|fast");
         Console.Error.WriteLine("                      --pgo off|generate|use [--pgo-directory <project-relative-directory>]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");

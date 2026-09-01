@@ -202,7 +202,7 @@ function New-Variant([hashtable]$Definition) {
     return [ordered]@{
         name = $Definition.Name; renderMode = $Definition.Mode; optimization = 'speed'; cpuTarget = $Definition.Cpu
         floatingPoint = $Definition.Fp; pgo = $(if ($Definition.Pgo) { 'use' } else { 'off' })
-        workerCount = $(if ($Definition.Mode -eq 'parallel') { 12 } else { 1 }); accelerator = 'object-midpoint-bvh'
+        workerCount = $(if ($Definition.Mode -eq 'parallel') { 12 } else { 1 }); accelerator = 'flattened-sah-bvh'
         root = $root; executable = $executable; tracedPathSegments = $tracedSegments; samples = [Collections.Generic.List[object]]::new()
         pixelChecksum = $null; executableBytes = (Get-Item $executable).Length; generatedCBytes = ($generated | Measure-Object Length -Sum).Sum
         resolvedCompileFlags = @([regex]::Matches($buildTrace, 'trace: native compile flags (.+)') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Last 1)
@@ -300,11 +300,11 @@ try {
         $cl = Get-MsvcTool 'cl'; if ($null -eq $cl) { "MSVC selected through CTilde discovery ($Compiler)" } else { "MSVC cl.exe $($cl.VersionInfo.FileVersion)" }
     }
     $report = [ordered]@{
-        schemaVersion = 2; timestampUtc = [DateTime]::UtcNow.ToString('O'); draft = '0.41'; machine = $env:COMPUTERNAME
+        schemaVersion = 2; timestampUtc = [DateTime]::UtcNow.ToString('O'); draft = '0.44'; machine = $env:COMPUTERNAME
         compiler = $Compiler; compilerVersion = $toolVersion; logicalProcessors = $logicalProcessors; iterations = $Iterations
         imageWidth = $ImageWidth; imageHeight = $imageHeight; samplesPerPixel = $SamplesPerPixel; maxDepth = $MaxDepth
-        warmupCount = $WarmupCount; pgoTrainingRuns = $PgoTrainingRuns; accelerator = 'object-midpoint-bvh'
-        futureAccelerators = @('flattened-sah-bvh'); variants = $variants
+        warmupCount = $WarmupCount; pgoTrainingRuns = $PgoTrainingRuns; accelerator = 'flattened-sah-bvh'
+        comparisonAccelerators = @('object-midpoint-bvh'); variants = $variants
         speedups = [ordered]@{
             packetOverScalar = $byName['scalar-baseline-precise'].medianWallMilliseconds / $byName['packet-baseline-precise'].medianWallMilliseconds
             parallelOverPacket = $byName['packet-baseline-precise'].medianWallMilliseconds / $byName['parallel-baseline-precise'].medianWallMilliseconds

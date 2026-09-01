@@ -46,6 +46,8 @@ internal static class CleanCommand
 
         if (build.SymbolMapPath is not null)
             files.Add(build.SymbolMapPath);
+        if (build.StackReportPath is not null)
+            files.Add(build.StackReportPath);
 
         var debugMapDirectory = build.CLayout == GeneratedCLayout.Modules
             ? build.GeneratedDirectory

@@ -208,6 +208,20 @@ orleans.codegen.cs
 /examples/TCan485/sdkconfig.old
 /examples/TCan485/main/generated/
 
+# Managed shell firmware and managed-module build output
+/examples/ManagedShell/build/
+/examples/ManagedShell/managed_components/
+/examples/ManagedShell/sdkconfig
+/examples/ManagedShell/sdkconfig.old
+/examples/ManagedShell/main/generated/
+/examples/ManagedShell/storage/modules/*.ctm
+/examples/ManagedShell/storage/modules/*.ctmeta.json
+/examples/ManagedShell/Modules/*/build/
+/examples/ManagedShell/Modules/*/managed_components/
+/examples/ManagedShell/Modules/*/sdkconfig
+/examples/ManagedShell/Modules/*/sdkconfig.old
+/examples/ManagedShell/Modules/*/main/generated/
+
 # Hosted I/O example output
 /examples/Hello/build/
 /examples/Exceptions/build/

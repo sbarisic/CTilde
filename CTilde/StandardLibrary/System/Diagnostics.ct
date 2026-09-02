@@ -140,3 +140,194 @@ public struct Stopwatch
         return accumulatedNanoseconds;
     }
 }
+
+public enum ProcessState
+{
+    Starting, Running, Cancelling, Exited, Failed, Terminated
+}
+
+internal static class ProcessRuntime
+{
+    [Extern("ct_managed_process_start")]
+    internal static nuint Start(string path, string[] args);
+
+    [Extern("ct_managed_process_id")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static uint Id(nuint handle);
+
+    [Extern("ct_managed_process_get_state")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static ProcessState State(nuint handle);
+
+    [Extern("ct_managed_process_has_exited")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static bool HasExited(nuint handle);
+
+    [Extern("ct_managed_process_exit_code")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static int ExitCode(nuint handle);
+
+    [Extern("ct_managed_process_cancel")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static void Cancel(nuint handle);
+
+    [Extern("ct_managed_process_terminate")]
+    internal static void Terminate(nuint handle, uint graceMilliseconds);
+
+    [Extern("ct_managed_process_wait")]
+    internal static int Wait(nuint handle);
+
+    [Extern("ct_managed_process_try_wait")]
+    internal static bool TryWait(nuint handle, uint timeoutMilliseconds, out int exitCode);
+
+    [Extern("ct_managed_process_send")]
+    internal static void Send(nuint handle, byte[] payload);
+
+    [Extern("ct_managed_process_receive")]
+    internal static byte[] Receive(nuint handle, byte[] typeTemplate);
+
+    [Extern("ct_managed_process_try_receive")]
+    internal static bool TryReceive(nuint handle, uint timeoutMilliseconds, byte[] typeTemplate,
+        out byte[] payload);
+
+    [Extern("ct_managed_process_cancellation_requested")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static bool CancellationRequested();
+}
+
+public sealed class Process
+{
+    private nuint handle;
+
+    private Process(nuint handle)
+    {
+        this.handle = handle;
+    }
+
+    public static Process Start(string path, string[] args)
+    {
+        if (path == null)
+            throw new ArgumentNullException();
+        if (args == null)
+            throw new ArgumentNullException();
+        return new Process(ProcessRuntime.Start(path, args));
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public uint Id
+    {
+        get
+        {
+            return ProcessRuntime.Id(handle);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public ProcessState State
+    {
+        get
+        {
+            return ProcessRuntime.State(handle);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public bool HasExited
+    {
+        get
+        {
+            return ProcessRuntime.HasExited(handle);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public int ExitCode
+    {
+        get
+        {
+            return ProcessRuntime.ExitCode(handle);
+        }
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public void Cancel()
+    {
+        ProcessRuntime.Cancel(handle);
+    }
+
+    public void Terminate(uint graceMilliseconds)
+    {
+        ProcessRuntime.Terminate(handle, graceMilliseconds);
+    }
+
+    public void Terminate(TimeSpan gracePeriod)
+    {
+        double milliseconds = gracePeriod.TotalMilliseconds;
+        if (milliseconds < 0.0 || milliseconds > 4294967295.0)
+            throw new ArgumentOutOfRangeException();
+        ProcessRuntime.Terminate(handle, (uint)milliseconds);
+    }
+
+    public int Wait()
+    {
+        return ProcessRuntime.Wait(handle);
+    }
+
+    public bool Wait(uint timeoutMilliseconds, out int exitCode)
+    {
+        exitCode = 0;
+        return ProcessRuntime.TryWait(handle, timeoutMilliseconds, out exitCode);
+    }
+
+    public void Send(byte[] payload)
+    {
+        if (payload == null)
+            throw new ArgumentNullException();
+        ProcessRuntime.Send(handle, payload);
+    }
+
+    public byte[] Receive()
+    {
+        return ProcessRuntime.Receive(handle, new byte[0]);
+    }
+
+    public bool TryReceive(uint timeoutMilliseconds, out byte[] payload)
+    {
+        payload = new byte[0];
+        return ProcessRuntime.TryReceive(handle, timeoutMilliseconds, new byte[0],
+            out payload);
+    }
+
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    public static bool IsCancellationRequested
+    {
+        get
+        {
+            return ProcessRuntime.CancellationRequested();
+        }
+    }
+}

@@ -1,0 +1,20 @@
+using System;
+using System.Diagnostics;
+
+public static class Program
+{
+    private static int invocationCount;
+
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        invocationCount++;
+        Console.Write("hello from managed process #");
+        Console.WriteLine(invocationCount);
+        Console.Write("arguments: ");
+        Console.WriteLine(args.Length);
+        if (Process.IsCancellationRequested)
+            return -1;
+        return args.Length;
+    }
+}

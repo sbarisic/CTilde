@@ -1,0 +1,20 @@
+menu "C~ managed runtime"
+
+config CTILDE_MANAGED_TLS_INDEX
+    int "FreeRTOS TLS index"
+    range 0 7
+    default 2
+    help
+        TLS slot reserved for the C~ process and module execution context.
+
+config CTILDE_MANAGED_MAX_MODULES
+    int "Maximum loaded managed modules"
+    range 4 64
+    default 16
+
+config CTILDE_MANAGED_MAX_PROCESSES
+    int "Maximum retained process records"
+    range 16 256
+    default 128
+
+endmenu

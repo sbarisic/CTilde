@@ -282,7 +282,8 @@ internal static class CTildeCommand
             }).ToArray();
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
                 request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
-                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment, request.SimdOptimizations));
+                sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment, request.SimdOptimizations,
+                request.ManagedModule?.Kind, request.ManagedModule));
             using var generated = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             using var generatedHeader = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
             CBundleEmitResult? bundle = null;
@@ -337,6 +338,12 @@ internal static class CTildeCommand
                 compilation.EmitDebugMap(debugMap);
                 changedOutputs += AtomicFile.WriteTextIfChanged(request.DebugMapPath, debugMap.ToString()) ? 1 : 0;
             }
+            if (request.ManagedModule is not null)
+            {
+                using var metadata = new StringWriter(System.Globalization.CultureInfo.InvariantCulture);
+                compilation.EmitManagedModuleMetadata(metadata, request.ManagedModule);
+                changedOutputs += AtomicFile.WriteTextIfChanged(request.ManagedModuleMetadataPath!, metadata.ToString()) ? 1 : 0;
+            }
             if (request.Trace)
             {
                 Console.Error.WriteLine("trace: semantic analysis and GNU C23 lowering complete");
@@ -344,6 +351,8 @@ internal static class CTildeCommand
                 Console.Error.WriteLine($"trace: emitted {(request.CLayout == GeneratedCLayout.Unity ? request.GeneratedCPath : request.GeneratedDirectory)}");
                 if (request.GeneratedHeaderPath is not null)
                     Console.Error.WriteLine($"trace: emitted {request.GeneratedHeaderPath}");
+                if (request.ManagedModuleMetadataPath is not null)
+                    Console.Error.WriteLine($"trace: emitted {request.ManagedModuleMetadataPath}");
             }
             reporter?.Detail($"Generated artifacts changed: {changedOutputs}");
             reporter?.Phase($"Generated C: {request.GeneratedCPath ?? request.GeneratedDirectory}");

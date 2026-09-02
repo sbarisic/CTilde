@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.44 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.45 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -48,6 +48,20 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 - [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
 
+## Managed modules
+
+Draft 0.45 establishes Runtime ABI 18 and Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, and hidden module-local definitions. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules. The ManagedShell hardware acceptance completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
+
+- [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
+- [ ] Implement canonical type fingerprints, descriptor registration, and runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.
+- [ ] Compile `.ctmeta.json` references as semantic dependencies without adding provider source, enforce binary-module-local `internal`, and generate checked managed import slots and concrete cross-module calls.
+- [ ] Complete managed library loading and exercise concrete classes, structures, interfaces, arrays, and delegates across a module boundary. Public managed APIs remain non-generic.
+- [ ] Make source-created child threads inherit process ownership, finish the native-resource ledger, and translate an unhandled managed exception into process failure instead of firmware panic.
+- [ ] Complete cooperative cancellation and forced termination for non-returning tasks, including reaper-task cleanup from the FreeRTOS TLS deletion callback and documented unsafe escape behavior.
+- [ ] Replace the fixed lifetime process-handle table with reclaimable generation-checked handles so repeated starts are not bounded by one boot-time slot count.
+- [ ] Audit every dynamic symbol and relocation against the loader allowlist, then prove modules contain no private runtime or standard-library implementation.
+- [ ] Add corrupt, wrong-architecture, stale-ABI, dependency-cycle, version-conflict, signature-mismatch, heap-quota, child-thread, exception, cancellation, forced-termination, and cross-process reference rejection tests.
+
 ## Cosmopolitan target
 
 The staged target contract and rejected shortcuts are documented in [COSMOPOLITAN.md](COSMOPOLITAN.md). Implement it in this order:
@@ -70,6 +84,5 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 
 ## Deferred research
 
-- [ ] Design dynamic C~-module descriptor registration, dependency ordering, and module-lifetime tracking as a future runtime ABI revision. Draft 0.39 native imports load ordinary C ABI libraries only.
 - [ ] Record a comparable pre-optimization renderer timing only if a representative historical build can be reconstructed; current elapsed-time measurements remain non-gating.
 - [ ] Add architecture-specific inline-assembly validation only if C~ gains a native backend. The GNU C backend intentionally delegates instruction validation to the assembler.

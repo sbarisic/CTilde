@@ -150,7 +150,7 @@ internal static partial class ConformanceTests
             var generated = Emit(source);
             Assert(generated.Contains("struct ct_interface_entry", StringComparison.Ordinal) &&
                 generated.Contains("static const ct_interface_entry ct_i_", StringComparison.Ordinal) &&
-                generated.Contains("current->Interfaces[index].Type == target", StringComparison.Ordinal),
+                generated.Contains("ct_type_same(current->Interfaces[index].Type, target)", StringComparison.Ordinal),
                 "Concrete interface dispatch metadata was not emitted.");
 
             const string invalid = "public sealed class Item { public Item(int value) { } } public static class Program { private static T Create<T>() where T : class, new() { return new T(); } [EntryPoint] public static void Main() { Item item = Create<Item>(); } }";
@@ -266,8 +266,8 @@ internal static partial class ConformanceTests
             using var header = new StringWriter();
             Assert(compilation.EmitC(c).Success && compilation.EmitDebugMap(map).Success && compilation.EmitCHeader(header).Success, "Draft 0.15 artifact emission failed.");
             using var document = JsonDocument.Parse(map.ToString());
-            Assert(document.RootElement.GetProperty("version").GetInt32() == 3 && document.RootElement.GetProperty("runtimeAbi").GetInt32() == 17, "Debug metadata did not use v3/ABI 17.");
-            Assert(header.ToString().Contains("CTILDE_RUNTIME_ABI_VERSION UINT32_C(17)", StringComparison.Ordinal), "The native header did not declare ABI 17.");
+            Assert(document.RootElement.GetProperty("version").GetInt32() == 3 && document.RootElement.GetProperty("runtimeAbi").GetInt32() == CompilerContract.RuntimeAbiVersion, "Debug metadata did not use v3 and the current runtime ABI.");
+            Assert(header.ToString().Contains($"CTILDE_RUNTIME_ABI_VERSION UINT32_C({CompilerContract.RuntimeAbiVersion})", StringComparison.Ordinal), "The native header did not declare the current runtime ABI.");
         });
     }
 }

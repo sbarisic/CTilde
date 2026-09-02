@@ -34,6 +34,18 @@ public enum EspIdfChip
     Esp32C3,
 }
 
+public enum EspIdfArtifact
+{
+    Firmware,
+    ManagedModule,
+}
+
+public enum ManagedModuleKind
+{
+    Application,
+    Library,
+}
+
 public enum DebugInformationMode
 {
     None,
@@ -71,7 +83,9 @@ public sealed record CompilationOptions(
     EspIdfPanicPolicy PanicPolicy = EspIdfPanicPolicy.Abort,
     ImmutableArray<CpuFeature> CpuFeatures = default,
     TargetEnvironment Environment = TargetEnvironment.Native,
-    bool SimdOptimizations = false)
+    bool SimdOptimizations = false,
+    ManagedModuleKind? ManagedModuleKind = null,
+    ManagedModuleConfiguration? ManagedModule = null)
 {
     public ImmutableArray<CpuFeature> EffectiveCpuFeatures
     {

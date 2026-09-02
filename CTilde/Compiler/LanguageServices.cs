@@ -109,7 +109,7 @@ public sealed partial class LanguageServiceSnapshot
             }
             : options.Architecture;
         _model = new CompilationModel(_allTrees, _userTrees, declarationDiagnostics, options.Target, architecture, options.EffectiveCpuFeatures,
-            options.Environment, options.SimdOptimizations, requireEntryPoint, requireRuntimeImplementations: false);
+            options.Environment, options.SimdOptimizations, requireEntryPoint, requireRuntimeImplementations: false, options.ManagedModuleKind);
         _boundProgram = BoundProgramBuilder.Build(_model, options.Target, architecture, sourceRoot);
         _diagnostics = declarationDiagnostics.ToImmutable();
         _treesByPath = new Dictionary<string, SyntaxTree>(_pathComparer);

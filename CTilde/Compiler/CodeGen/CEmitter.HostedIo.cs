@@ -97,10 +97,15 @@ internal sealed partial class CEmitter
 
         writer.WriteLine("int32_t ct_console_read(void)");
         writer.WriteLine("{");
-        writer.WriteLine("    errno = 0; int value = fgetc(stdin);");
-        writer.WriteLine("    if (value != EOF) return (int32_t)(uint8_t)value;");
-        writer.WriteLine("    if (ferror(stdin)) ct_host_io_throw(\"Console.Read\", errno == 0 ? -1 : errno);");
-        writer.WriteLine("    return -1;");
+        writer.WriteLine("    for (;;) {");
+        writer.WriteLine("        errno = 0; int value = fgetc(stdin);");
+        writer.WriteLine("        if (value != EOF) return (int32_t)(uint8_t)value;");
+        writer.WriteLine("#if defined(ESP_PLATFORM)");
+        writer.WriteLine("        if (errno == EAGAIN || errno == EWOULDBLOCK) { clearerr(stdin); vTaskDelay(1); continue; }");
+        writer.WriteLine("#endif");
+        writer.WriteLine("        if (ferror(stdin)) ct_host_io_throw(\"Console.Read\", errno == 0 ? -1 : errno);");
+        writer.WriteLine("        return -1;");
+        writer.WriteLine("    }");
         writer.WriteLine("}");
         writer.WriteLine("ct_string* ct_console_read_line(void)");
         writer.WriteLine("{");
@@ -112,6 +117,9 @@ internal sealed partial class CEmitter
         writer.WriteLine("        errno = 0; int value = fgetc(stdin);");
         writer.WriteLine("        if (value == EOF)");
         writer.WriteLine("        {");
+        writer.WriteLine("#if defined(ESP_PLATFORM)");
+        writer.WriteLine("            if (errno == EAGAIN || errno == EWOULDBLOCK) { clearerr(stdin); vTaskDelay(1); continue; }");
+        writer.WriteLine("#endif");
         writer.WriteLine("            if (ferror(stdin)) { int error = errno == 0 ? -1 : errno; free(data); ct_host_io_throw(\"Console.ReadLine\", error); }");
         writer.WriteLine("            if (length == 0u) { free(data); return NULL; }");
         writer.WriteLine("            break;");

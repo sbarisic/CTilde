@@ -69,6 +69,13 @@ internal static class TargetValidator
                 foreach (var use in emitter.ExternUses.Where(use => use.Method.ExternName == "ct_environment_exit"))
                     model.Diagnostics.Add("CT4105", "System.Environment.Exit on ESP-IDF requires RuntimeImpl(Runtime.Exit); use Esp.Idf.EspSystem.Restart when a reset is intended.", use.Syntax.Source, use.Syntax.Span);
         }
+        else
+        {
+            foreach (var use in emitter.ExternUses.Where(use =>
+                         use.Method.ContainingType.FullName == "System.Diagnostics.ProcessRuntime" &&
+                         use.Method.ExternName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true))
+                model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 18.", use.Syntax.Source, use.Syntax.Span);
+        }
 
         var complete = new HashSet<TypeSymbol>();
         var active = new HashSet<TypeSymbol>();

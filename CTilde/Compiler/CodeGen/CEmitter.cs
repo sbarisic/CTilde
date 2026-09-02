@@ -62,6 +62,8 @@ internal sealed partial class CEmitter : ILoweringServices
     private readonly EspIdfPanicPolicy _panicPolicy;
     private readonly DebugInformationMode _debugInformation;
     private readonly DebugMemoryMode _debugMemory;
+    private readonly ManagedModuleConfiguration? _managedModule;
+    private readonly ManagedModuleMetadata? _managedModuleMetadata;
     private readonly List<DebugLocalEntry> _debugLocals = [];
     private readonly Dictionary<MethodSymbol, HashSet<(string File, int Line, int Column, int Start, int Length)>> _debugExecutable = [];
     private readonly List<DebugSiteEntry> _debugSites = [];
@@ -85,7 +87,9 @@ internal sealed partial class CEmitter : ILoweringServices
         DebugMemoryMode debugMemory = DebugMemoryMode.Off,
         string? sourceIdentityRoot = null,
         EspIdfPanicPolicy panicPolicy = EspIdfPanicPolicy.Abort,
-        TargetEnvironment environment = TargetEnvironment.Native)
+        TargetEnvironment environment = TargetEnvironment.Native,
+        ManagedModuleConfiguration? managedModule = null,
+        ManagedModuleMetadata? managedModuleMetadata = null)
     {
         Model = model;
         Diagnostics = model.Diagnostics;
@@ -97,6 +101,8 @@ internal sealed partial class CEmitter : ILoweringServices
         _panicPolicy = panicPolicy;
         _debugInformation = debugInformation;
         _debugMemory = debugMemory;
+        _managedModule = managedModule;
+        _managedModuleMetadata = managedModuleMetadata;
         _usesExceptions = target != CompilationTarget.Freestanding;
         foreach (var type in model.Types.Values)
         {
@@ -146,12 +152,13 @@ internal sealed partial class CEmitter : ILoweringServices
     private bool EmitDebugObjects => EmitDebugInstrumentation && _debugMemory != DebugMemoryMode.Off;
     private bool EmitDebugGuards => EmitDebugInstrumentation && _debugMemory == DebugMemoryMode.Guarded;
     private bool IsEspIdf => _target == CompilationTarget.EspIdf;
+    private bool IsManagedModule => _managedModule is not null;
     private bool IsQemu => IsEspIdf && _environment == TargetEnvironment.Qemu;
     private bool IsFreestanding => _target == CompilationTarget.Freestanding;
     private bool HasRuntimeImplementation(RuntimeImplementationRole role) => Model.RuntimeImplementations.ContainsKey(role);
     private bool UsesEspRuntimeIo => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role == RuntimeImplementationRole.PathSeparator || role is >= RuntimeImplementationRole.FileOpen and <= RuntimeImplementationRole.CurrentDirectorySet);
     private bool UsesEspRuntimeThreads => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role is >= RuntimeImplementationRole.ThreadCreate and <= RuntimeImplementationRole.MutexClose);
-    private bool UsesEspRuntimeConsole => IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role is RuntimeImplementationRole.ConsoleWrite or RuntimeImplementationRole.ConsoleRead or RuntimeImplementationRole.ConsoleFlush);
+    private bool UsesEspRuntimeConsole => IsManagedModule || IsEspIdf && Model.RuntimeImplementations.Keys.Any(role => role is RuntimeImplementationRole.ConsoleWrite or RuntimeImplementationRole.ConsoleRead or RuntimeImplementationRole.ConsoleFlush);
 
     private string SourceIdentity(MethodSymbol method)
     {
@@ -889,7 +896,7 @@ internal sealed partial class CEmitter : ILoweringServices
         return open > 0 && line.AsSpan(0, open).ContainsAny(' ', '\t') && !line.EndsWith(';');
     }
 
-    private static string ExternalizeDefinitions(string source, bool runtimeUnit)
+    private string ExternalizeDefinitions(string source, bool runtimeUnit)
     {
         var writer = new StringBuilder();
         var preserveInternalLinkage = false;
@@ -923,9 +930,25 @@ internal sealed partial class CEmitter : ILoweringServices
                 line = line["static CT_UNUSED ".Length..];
             else if (line.StartsWith("static ", StringComparison.Ordinal))
                 line = line["static ".Length..];
+            if (IsManagedModule && IsManagedDefinition(line))
+                line = "CT_GENERATED_LOCAL " + line;
             writer.Append(line).Append('\n');
         }
         return writer.ToString();
+    }
+
+    private static bool IsManagedDefinition(string line)
+    {
+        if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] is '#' or '}' ||
+            line.StartsWith("extern ", StringComparison.Ordinal) ||
+            line.StartsWith("typedef ", StringComparison.Ordinal) ||
+            line.StartsWith("struct ", StringComparison.Ordinal) ||
+            line.StartsWith("enum ", StringComparison.Ordinal) ||
+            line.StartsWith("CT_GENERATED_LOCAL ", StringComparison.Ordinal) ||
+            line.StartsWith("CT_MANAGED_", StringComparison.Ordinal))
+            return false;
+        return LooksLikePublicFunction(line) || FindTopLevelInitializer(line) >= 0 ||
+            line.EndsWith(';') && !line.Contains('(') && line.ContainsAny(' ', '\t');
     }
 
     private string EmitSymbolMapJson(TypedIrProgram program)
@@ -1395,11 +1418,17 @@ internal sealed partial class CEmitter : ILoweringServices
     private string RenderModuleLifecycle(ImmutableArray<IrStaticInitializer> initializers)
     {
         var writer = new CWriter();
-        writer.WriteLine("static uint32_t ct_module_phase = 0u;");
+        if (!IsManagedModule)
+            writer.WriteLine("static uint32_t ct_module_phase = 0u;");
         writer.WriteLine("static void ct_module_init(void)");
         writer.WriteLine("{");
         writer.WriteLine("    if (ct_module_phase != 0u) ct_fail(\"CTT0003\", \"<module-init>\", 0);");
         writer.WriteLine("    ct_module_phase = 1u;");
+        if (IsManagedModule)
+        {
+            foreach (var type in Model.ProjectTypes.Where(type => type.Kind is DeclaredTypeKind.Class or DeclaredTypeKind.Interface or DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
+                writer.WriteLine($"    (void)ct_runtime_api->RegisterType(&{DescriptorName(type)});");
+        }
         var initializerIndex = 0;
         foreach (var initializer in initializers)
         {
@@ -1427,10 +1456,85 @@ internal sealed partial class CEmitter : ILoweringServices
                      .Where(field => field.IsStatic && field.Name != "<underlying>" && field.Type.ContainsManagedReferences)
                      .Reverse())
             writer.WriteLine($"    {DropValueStatement(field.Type, $"&{field.CName}")}");
+        if (IsManagedModule)
+            writer.WriteLine("    ct_runtime_api->UnregisterTypes(&ct_managed_module_v1);");
         writer.WriteLine("    ct_module_phase = 3u;");
         writer.WriteLine("}");
-        writer.WriteLine("static ct_module_descriptor ct_program_module = { CTILDE_RUNTIME_ABI_VERSION, \"program\", ct_module_init, ct_module_fini };");
+        if (!IsManagedModule)
+            writer.WriteLine("static ct_module_descriptor ct_program_module = { CTILDE_RUNTIME_ABI_VERSION, \"program\", ct_module_init, ct_module_fini };");
+        else
+            EmitManagedModuleDescriptor(writer);
         return writer.ToString();
+    }
+
+    private void EmitManagedModuleDescriptor(CWriter writer)
+    {
+        var configuration = _managedModule ?? throw new InvalidOperationException("Managed module configuration is unavailable.");
+        var metadata = _managedModuleMetadata ?? throw new InvalidOperationException("Managed module metadata is unavailable.");
+        writer.WriteLine("typedef struct ct_managed_dependency_v1 { const char* Name; const char* Version; const char* BuildIdentity; const char* ApiHash; } ct_managed_dependency_v1;");
+        writer.WriteLine("struct ct_managed_module_descriptor_v1 { uint32_t Size; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Kind; const char* Name; const char* Version; const char* BuildIdentity; const char* ApiHash; uint32_t DependencyCount; const ct_managed_dependency_v1* Dependencies; size_t StaticStateSize; size_t StaticStateAlignment; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; void (*Initialize)(void); void (*Finalize)(void); int32_t (*Main)(void*); void* (*CreateArguments)(int32_t, const char* const*, const size_t*); void* (*CreateBytes)(const uint8_t*, size_t); };");
+        if (metadata.Dependencies.Length != 0)
+        {
+            writer.WriteLine("static const ct_managed_dependency_v1 ct_managed_dependencies[] = {");
+            foreach (var dependency in metadata.Dependencies)
+                writer.WriteLine($"    {{ \"{EscapeCString(dependency.Name)}\", \"{EscapeCString(dependency.Version)}\", \"{EscapeCString(dependency.BuildIdentity)}\", \"{EscapeCString(dependency.ApiHash)}\" }},");
+            writer.WriteLine("};");
+        }
+        if (Model.EntryPoint is { } entry)
+        {
+            var argumentType = CTypeName(entry.Parameters[0].Type);
+            writer.WriteLine($"static int32_t ct_managed_main(void* arguments) {{ return {entry.CName}(({argumentType})arguments); }}");
+            var arrayName = NameMangler.Array(CType.String);
+            writer.WriteLine($"static void* ct_managed_create_arguments(int32_t count, const char* const* values, const size_t* lengths) {{ {arrayName}* result = ct_new_{arrayName}(count, \"<process-args>\", 0); for (int32_t index = 0; index < count; ++index) result->Data[index] = ct_string_from_bytes((const uint8_t*)values[index], (int32_t)lengths[index], \"<process-args>\", 0); return result; }}");
+        }
+        var bytesName = NameMangler.Array(CType.Byte);
+        writer.WriteLine($"static void* ct_managed_create_bytes(const uint8_t* data, size_t length) {{ if (length > (size_t)INT32_MAX) ct_fail(\"CTM0001\", \"<process-message>\", 0); {bytesName}* result = ct_new_{bytesName}((int32_t)length, \"<process-message>\", 0); if (length != 0u) (void)memcpy(result->Data, data, length); return result; }}");
+        writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
+        writer.WriteLine("#define CT_MANAGED_EXPORT __attribute__((visibility(\"default\"), used))");
+        writer.WriteLine("#define CT_MANAGED_LOCAL __attribute__((visibility(\"hidden\"), used))");
+        // Default visibility keeps the otherwise unreferenced preflight blob
+        // alive through project_so's section garbage collection.  Runtime
+        // binding still uses only the function entry points below.
+        writer.WriteLine("#define CT_MANAGED_MANIFEST __attribute__((section(\".ctilde.manifest\"), visibility(\"default\"), used, aligned(4)))");
+        writer.WriteLine("#else");
+        writer.WriteLine("#define CT_MANAGED_EXPORT");
+        writer.WriteLine("#define CT_MANAGED_LOCAL");
+        writer.WriteLine("#define CT_MANAGED_MANIFEST");
+        writer.WriteLine("#endif");
+        var dependenciesPointer = metadata.Dependencies.Length == 0 ? "NULL" : "ct_managed_dependencies";
+        var mainPointer = Model.EntryPoint is null ? "NULL" : "ct_managed_main";
+        var argumentsFactory = Model.EntryPoint is null ? "NULL" : "ct_managed_create_arguments";
+        writer.WriteLine($"CT_MANAGED_LOCAL const ct_managed_module_descriptor_v1 ct_managed_module_v1 = {{ sizeof(ct_managed_module_descriptor_v1), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), \"{EscapeCString(configuration.Name)}\", \"{EscapeCString(configuration.Version)}\", \"{metadata.BuildIdentity}\", \"{metadata.ApiHash}\", UINT32_C({metadata.Dependencies.Length}), {dependenciesPointer}, sizeof(ct_managed_module_static_state), _Alignof(ct_managed_module_static_state), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}), ct_module_init, ct_module_fini, {mainPointer}, {argumentsFactory}, ct_managed_create_bytes }};");
+        writer.WriteLine("CT_MANAGED_EXPORT const ct_managed_module_descriptor_v1* ct_managed_module_descriptor(void) { return &ct_managed_module_v1; }");
+        writer.WriteLine($"CT_MANAGED_EXPORT int32_t ct_managed_module_bind_runtime(const ct_runtime_api_v18* runtime) {{ if (runtime == NULL || runtime->Size < sizeof(ct_runtime_api_v18) || runtime->AbiVersion != UINT32_C({CompilerContract.RuntimeAbiVersion})) return -1; ct_runtime_api = runtime; return 0; }}");
+        EmitManagedBinaryManifest(writer, configuration, metadata);
+    }
+
+    private void EmitManagedBinaryManifest(CWriter writer, ManagedModuleConfiguration configuration, ManagedModuleMetadata metadata)
+    {
+        var count = Math.Max(1, metadata.Dependencies.Length);
+        writer.WriteLine("typedef struct ct_binary_dependency_v1 { char Name[64]; char Version[32]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; } ct_binary_dependency_v1;");
+        writer.WriteLine($"typedef struct ct_binary_manifest_v1 {{ uint8_t Magic[8]; uint32_t HeaderSize; uint32_t TotalSize; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Architecture; uint32_t Kind; uint32_t DependencyCount; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; char Name[64]; char Version[32]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; ct_binary_dependency_v1 Dependencies[{count}]; }} ct_binary_manifest_v1;");
+        writer.WriteLine("CT_MANAGED_MANIFEST const ct_binary_manifest_v1 ct_managed_binary_manifest_v1 = {");
+        writer.WriteLine("    { UINT8_C(0x43), UINT8_C(0x54), UINT8_C(0x4D), UINT8_C(0x4F), UINT8_C(0x44), UINT8_C(1), UINT8_C(0), UINT8_C(0) },");
+        writer.WriteLine($"    (uint32_t)offsetof(ct_binary_manifest_v1, Dependencies), (uint32_t)(offsetof(ct_binary_manifest_v1, Dependencies) + sizeof(ct_binary_dependency_v1) * {metadata.Dependencies.Length}), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({ArchitectureCode()}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), UINT32_C({metadata.Dependencies.Length}), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}),");
+        writer.WriteLine($"    \"{EscapeCString(configuration.Name)}\", \"{EscapeCString(configuration.Version)}\", {{ {HashBytes(metadata.BuildIdentity)} }}, {{ {HashBytes(metadata.ApiHash)} }},");
+        writer.WriteLine("    {");
+        foreach (var dependency in metadata.Dependencies)
+            writer.WriteLine($"        {{ \"{EscapeCString(dependency.Name)}\", \"{EscapeCString(dependency.Version)}\", {{ {HashBytes(dependency.BuildIdentity)} }}, {{ {HashBytes(dependency.ApiHash)} }} }},");
+        if (metadata.Dependencies.Length == 0)
+            writer.WriteLine("        { {0}, {0}, {0}, {0} },");
+        writer.WriteLine("    }");
+        writer.WriteLine("};");
+        writer.WriteLine("static_assert(offsetof(ct_binary_manifest_v1, Dependencies) % 4u == 0u, \"managed manifest alignment mismatch\");");
+
+        int ArchitectureCode() => Architecture switch
+        {
+            CompilationArchitecture.Xtensa => 1,
+            CompilationArchitecture.RiscV32 => 2,
+            _ => 0,
+        };
+        static string HashBytes(string hash) => string.Join(", ", Convert.FromHexString(hash).Select(value => $"UINT8_C(0x{value:X2})"));
     }
 
     public string CTypeName(CType type) => type.Kind switch

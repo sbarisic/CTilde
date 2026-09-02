@@ -24,7 +24,8 @@ internal enum StandardFoundationTypes
     TimeSpan = 1,
     Random = 2,
     Stopwatch = 4,
-    All = TimeSpan | Random | Stopwatch,
+    Process = 8,
+    All = TimeSpan | Random | Stopwatch | Process,
 }
 
 internal static class StandardLibrary
@@ -69,11 +70,11 @@ internal static class StandardLibrary
         var files = new List<string> { "Object.ct", "Exception.ct", "String.ct", "StringBuilder.ct", "Globalization.ct", "Parsing.ct", "Enum.ct", "Encoding.ct", "Console.ct", "Environment.ct", "Math.ct", target == CompilationTarget.Freestanding ? "MemoryFreestanding.ct" : "Memory.ct", "Endian.ct", "Target.ct", "Threading.ct" };
         if (target == CompilationTarget.Freestanding)
             files.Add("FreestandingFault.ct");
-        if ((foundations & (StandardFoundationTypes.TimeSpan | StandardFoundationTypes.Stopwatch)) != 0)
+        if ((foundations & (StandardFoundationTypes.TimeSpan | StandardFoundationTypes.Stopwatch | StandardFoundationTypes.Process)) != 0)
             files.Add("TimeSpan.ct");
         if ((foundations & StandardFoundationTypes.Random) != 0)
             files.Add("Random.ct");
-        if ((foundations & StandardFoundationTypes.Stopwatch) != 0)
+        if ((foundations & (StandardFoundationTypes.Stopwatch | StandardFoundationTypes.Process)) != 0)
             files.Add("Diagnostics.ct");
         files.Add("Generics.ct");
         files.Add("ArrayAlgorithms.ct");
@@ -137,6 +138,7 @@ internal static class StandardLibrary
                 "TimeSpan" => StandardFoundationTypes.TimeSpan,
                 "Random" => StandardFoundationTypes.Random,
                 "Stopwatch" => StandardFoundationTypes.Stopwatch | StandardFoundationTypes.TimeSpan,
+                "Process" or "ProcessState" => StandardFoundationTypes.Process | StandardFoundationTypes.TimeSpan,
                 _ => StandardFoundationTypes.None,
             };
         }

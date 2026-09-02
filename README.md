@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.44 adds narrow generated-C dependency headers, dependency-closure object caching, opt-in GCC static stack reports and verified `[StackUsage(n)]` contracts. HostedIo now uses a flattened 16-bin SAH BVH while retaining its midpoint tree as a benchmark baseline. Runtime ABI 17 and debug metadata v3 are unchanged. Draft 0.43 remains the runtime-service-provider revision.
+Draft 0.45 introduces Runtime ABI 18 and Managed Module ABI 1 for trusted ESP-IDF ELF applications. Managed applications share the firmware runtime, receive per-process mutable static state and heap accounting, run as FreeRTOS tasks, and unload with their unused module graph. Draft 0.44 remains the dependency-oriented C-emission and verified-stack-contract revision. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -218,6 +218,8 @@ Release builds can select `speed` or `aggressive` optimization, `baseline` or x6
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
+An ESP-IDF managed application selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Build emits a deterministic `.ctmeta.json` reference and an ELF `.ctm` containing the Module ABI 1 preflight manifest. The firmware-side runtime and the [ManagedShell example](examples/ManagedShell/README.md) load modules only below `/storage/modules`; managed module code is trusted and has accounting but no memory protection.
+
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
 ```powershell
@@ -233,7 +235,7 @@ Commit `ctilde.lock.json`. Keep the machine-local `ctilde.local.json` file untra
 | Target | Purpose | Details |
 | --- | --- | --- |
 | `hosted` | Windows, Linux, and macOS programs | [LANGUAGE.md](LANGUAGE.md) |
-| `esp-idf` | ESP32-family firmware and generated bindings | [T-CAN485 guide](examples/TCan485/README.md) |
+| `esp-idf` | ESP32-family firmware, managed modules, and generated bindings | [T-CAN485 guide](examples/TCan485/README.md), [ManagedShell](examples/ManagedShell/README.md) |
 | `esp32_qemu` | Classic ESP32 firmware built for ESP-IDF QEMU | [T-CAN485 guide](examples/TCan485/README.md) |
 | `esp32c3_qemu` | ESP32-C3 firmware built for ESP-IDF QEMU | [T-CAN485 guide](examples/TCan485/README.md) |
 | `freestanding` | Explicit-runtime ELF images | [Freestanding guide](examples/Freestanding/README.md) |
@@ -245,7 +247,7 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path.
 
-The generated header exposes exported methods and runtime ABI 17 lifecycle functions. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
+The generated header exposes exported methods and Runtime ABI 18 lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 1 descriptor and bind to the firmware-owned `ct_runtime_api_v18` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
 Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, and managed allocation failure are catchable exceptions on exception-capable targets. Freestanding routes these faults to its panic provider. ABI, runtime lifecycle, thread attachment, ARC corruption, and native-boundary failures are always panics.
 
@@ -285,9 +287,9 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.44 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.45 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
-- [C_ABI.md](C_ABI.md): generated C, ABI 17, and native interop.
+- [C_ABI.md](C_ABI.md): generated C, Runtime ABI 18, Managed Module ABI 1, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): measured implementation and validation status.
 - [TODO.md](TODO.md): outstanding work only.

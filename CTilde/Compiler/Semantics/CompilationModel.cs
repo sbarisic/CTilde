@@ -23,15 +23,17 @@ internal sealed partial class CompilationModel
     private readonly CompilationTarget _target;
     private readonly CompilationArchitecture _architecture;
     private readonly TargetEnvironment _environment;
+    private readonly ManagedModuleKind? _managedModuleKind;
 
     public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture,
         ImmutableArray<CpuFeature> cpuFeatures = default, TargetEnvironment environment = TargetEnvironment.Native,
         bool simdOptimizations = false,
-        bool requireEntryPoint = true, bool requireRuntimeImplementations = true)
+        bool requireEntryPoint = true, bool requireRuntimeImplementations = true, ManagedModuleKind? managedModuleKind = null)
     {
         _target = target;
         _architecture = architecture;
         _environment = environment;
+        _managedModuleKind = managedModuleKind;
         RequireRuntimeImplementations = requireRuntimeImplementations;
         CpuFeatures = (cpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : cpuFeatures).ToImmutableHashSet();
         SimdOptimizations = simdOptimizations;
@@ -52,6 +54,8 @@ internal sealed partial class CompilationModel
         ValidateNativeSections();
         if (requireEntryPoint)
             ValidateEntryPoint();
+        if (managedModuleKind is not null)
+            ValidateManagedModuleSurface();
         ValidateRuntimeImplementations();
     }
 
@@ -60,6 +64,7 @@ internal sealed partial class CompilationModel
     public CompilationTarget Target => _target;
     public CompilationArchitecture Architecture => _architecture;
     public TargetEnvironment Environment => _environment;
+    public ManagedModuleKind? ManagedModuleKind => _managedModuleKind;
     internal bool RequireRuntimeImplementations { get; }
     public ImmutableHashSet<CpuFeature> CpuFeatures { get; }
     public bool SimdOptimizations { get; }
@@ -72,6 +77,9 @@ internal sealed partial class CompilationModel
     public Dictionary<LambdaExpressionSyntax, TypeSymbol> LambdaEnvironments { get; } = [];
     public DocumentationIndex Documentation { get; }
     public IEnumerable<TypeSymbol> UserTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && !type.IsGenericDefinition && !type.IsOpenConstructed).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
+    public IEnumerable<TypeSymbol> ProjectTypes => UserTypes.Where(type => type.Syntax is not null && UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, type.Syntax.Source)));
+    public IEnumerable<TypeSymbol> ProjectDeclaredTypes => Types.Values.Where(type => type.Syntax is not null && type.Kind != DeclaredTypeKind.TypeParameter && type.GenericDefinition is null &&
+        UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, type.Syntax.Source))).Distinct().OrderBy(type => type.FullName, StringComparer.Ordinal);
     public MethodSymbol? EntryPoint { get; private set; }
     public IReadOnlyDictionary<RuntimeImplementationRole, MethodSymbol> RuntimeImplementations { get; private set; } =
         ImmutableDictionary<RuntimeImplementationRole, MethodSymbol>.Empty;
@@ -1851,10 +1859,11 @@ internal sealed partial class CompilationModel
                     if (returnType.ContainsAtomic)
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be returned by value.", method.ReturnType.Source, method.ReturnType.Span);
                     var enumIntrinsic = type.FullName == "System.Enum" && externalName?.StartsWith("ct_enum_", StringComparison.Ordinal) == true;
-                    var methodParameters = DeclareParameters(method.Parameters, tree, (external is not null || nativeImport is not null || export is not null) && !enumIntrinsic);
+                    var managedProcessIntrinsic = type.FullName == "System.Diagnostics.ProcessRuntime" && externalName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true;
+                    var methodParameters = DeclareParameters(method.Parameters, tree, (external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic);
                     foreach (var parameter in methodParameters.Where(parameter => parameter.Type.ContainsAtomic && parameter.PassingKind == ParameterPassingKind.Value))
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be passed by value.", parameter.Syntax!.Source, parameter.Syntax.Span);
-                    if ((external is not null || nativeImport is not null || export is not null) && !enumIntrinsic)
+                    if ((external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic)
                     {
                         if (!method.TypeParameters.IsDefaultOrEmpty || ForbiddenNativeBoundaryType(returnType))
                             Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", method.ReturnType.Source, method.ReturnType.Span);
@@ -1923,8 +1932,13 @@ internal sealed partial class CompilationModel
                          runtimeImplAttribute is not null || interruptAttribute is not null ||
                          !IsInlineAssemblyValueType(returnType, allowVoid: true) || methodParameters.Any(parameter => !IsInlineAssemblyValueType(parameter.Type, allowVoid: false))))
                         Diagnostics.Add("CT1307", "An asm function must be a static unsafe non-generic non-virtual method with only scalar assembly-compatible parameters and result.", method.Source, method.Span);
-                    if (entry is not null && (!isStatic || symbol.ReturnType != CType.Void || symbol.Parameters.Length != 0 || !hasBody))
-                        Diagnostics.Add("CT1207", "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
+                    var validManagedEntry = _managedModuleKind == CTilde.ManagedModuleKind.Application && isStatic && symbol.ReturnType == CType.Int && hasBody &&
+                        symbol.Parameters is [{ PassingKind: ParameterPassingKind.Value, Type: { Kind: CTypeKind.Array, ElementType.Kind: CTypeKind.String } }];
+                    var validOrdinaryEntry = _managedModuleKind is null && isStatic && symbol.ReturnType == CType.Void && symbol.Parameters.Length == 0 && hasBody;
+                    if (entry is not null && !validManagedEntry && !validOrdinaryEntry)
+                        Diagnostics.Add("CT1207", _managedModuleKind == CTilde.ManagedModuleKind.Application
+                            ? "A managed application EntryPoint must be a body-bearing static int method with one string[] parameter."
+                            : "EntryPoint must mark a body-bearing static void method with no parameters.", entry.Source, entry.Span);
                     if (taskEntryAttribute is not null &&
                         (_target != CompilationTarget.EspIdf || accessibility != Accessibility.Public || !isStatic || !hasBody || isAbstractMethod ||
                          external is not null || exportName is null || entry is not null || !method.TypeParameters.IsDefaultOrEmpty || returnType != CType.Void ||
@@ -2245,6 +2259,12 @@ internal sealed partial class CompilationModel
     private void ValidateEntryPoint()
     {
         var entries = UserTypes.SelectMany(type => type.Methods).Where(method => method.IsEntryPoint).ToArray();
+        if (_managedModuleKind == CTilde.ManagedModuleKind.Library)
+        {
+            foreach (var entry in entries)
+                Diagnostics.Add("CT6203", "A managed library cannot declare an EntryPoint.", entry.Syntax!.Source, entry.Syntax.Span);
+            return;
+        }
         if (_target == CompilationTarget.Freestanding)
         {
             foreach (var entry in entries)
@@ -2265,6 +2285,33 @@ internal sealed partial class CompilationModel
             EntryPoint = entries[0];
         }
     }
+
+    private void ValidateManagedModuleSurface()
+    {
+        foreach (var method in ProjectDeclaredTypes.SelectMany(type => type.Methods).Where(method => method.RuntimeImplementation is not null))
+            Diagnostics.Add("CT6204", "Managed modules use the firmware runtime and cannot define RuntimeImpl methods.", method.Syntax!.Source, method.Syntax.Span);
+
+        foreach (var type in ProjectDeclaredTypes.Where(type => type.Accessibility == Accessibility.Public))
+        {
+            if (type.IsGenericDefinition || !type.TypeArguments.IsDefaultOrEmpty)
+                Diagnostics.Add("CT6205", $"Public managed-module type '{type.FullName}' cannot be generic.", type.Syntax!.Source, type.Syntax.Span);
+            foreach (var method in type.Methods.Where(method => method.Accessibility == Accessibility.Public))
+            {
+                if (method.IsGenericDefinition || ContainsManagedModuleGeneric(method.ReturnType) || method.Parameters.Any(parameter => ContainsManagedModuleGeneric(parameter.Type)))
+                    Diagnostics.Add("CT6205", $"Public managed-module method '{type.FullName}.{method.Name}' cannot expose generic types.", method.Syntax!.Source, method.Syntax.Span);
+            }
+            foreach (var field in type.Fields.Where(field => field.Accessibility == Accessibility.Public && ContainsManagedModuleGeneric(field.Type)))
+                Diagnostics.Add("CT6205", $"Public managed-module field '{type.FullName}.{field.Name}' cannot expose a generic type.", field.Syntax!.Source, field.Syntax.Span);
+            foreach (var property in type.Properties.Where(property => property.Accessibility == Accessibility.Public && ContainsManagedModuleGeneric(property.Type)))
+                Diagnostics.Add("CT6205", $"Public managed-module property '{type.FullName}.{property.Name}' cannot expose a generic type.", property.Syntax!.Source, property.Syntax.Span);
+        }
+    }
+
+    private static bool ContainsManagedModuleGeneric(CType type) =>
+        type.Kind == CTypeKind.TypeParameter ||
+        type.Symbol is { } symbol && (symbol.IsGenericDefinition || !symbol.TypeArguments.IsDefaultOrEmpty) ||
+        type.ElementType is not null && ContainsManagedModuleGeneric(type.ElementType) ||
+        type.FunctionPointer is { } function && (ContainsManagedModuleGeneric(function.ReturnType) || function.ParameterTypes.Any(ContainsManagedModuleGeneric));
 
     private void ValidateAggregateLayouts()
     {

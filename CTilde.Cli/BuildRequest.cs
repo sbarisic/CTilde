@@ -54,7 +54,9 @@ internal sealed record BuildRequest(
     NativeFloatingPointMode? FloatingPoint = null,
     NativePgoMode PgoMode = NativePgoMode.Off,
     string? PgoDirectory = null,
-    BuildVerbosity Verbosity = BuildVerbosity.Minimal)
+    BuildVerbosity Verbosity = BuildVerbosity.Minimal,
+    EspIdfArtifact EspIdfArtifact = EspIdfArtifact.Firmware,
+    ManagedModuleConfiguration? ManagedModule = null)
 {
     public string EspIdfBuildDirectory => Environment == TargetEnvironment.Qemu
         ? Path.Combine(EspIdfProjectDirectory!, "build", EspIdfChip == CTilde.EspIdfChip.Esp32 ? "esp32_qemu" : "esp32c3_qemu")
@@ -63,6 +65,10 @@ internal sealed record BuildRequest(
     public string LockDirectory => Target is CompilationTarget.Hosted or CompilationTarget.Freestanding or CompilationTarget.Cosmopolitan
         ? Path.GetDirectoryName(ExecutablePath!)!
         : EspIdfBuildDirectory;
+
+    public string? ManagedModuleOutputDirectory => ManagedModule is null ? null : Path.Combine(RootDirectory, "build", "managed-modules");
+    public string? ManagedModuleMetadataPath => ManagedModule is null ? null : Path.Combine(ManagedModuleOutputDirectory!, ManagedModule.Name + ".ctmeta.json");
+    public string? ManagedModuleArtifactPath => ManagedModule is null ? null : Path.Combine(ManagedModuleOutputDirectory!, ManagedModule.Name + ".ctm");
 
     public IReadOnlyList<string> GeneratedSourcePaths => CLayout == GeneratedCLayout.Unity
         ? [GeneratedCPath!]
@@ -168,7 +174,8 @@ internal static class BuildRequestResolver
             options.CpuFeatures.Count == 0 ? project.Configuration.CpuFeatures : options.CpuFeatures,
             project.Configuration.SimdOptimizations,
             project.SourceOwners, project.Configuration.Run, project.Configuration.Environment, project.Configuration.EspIdfChip, project.Configuration.Hosted,
-            optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory, options.Verbosity);
+            optimization, cpuTarget, floatingPoint, pgoMode, pgoDirectory, options.Verbosity,
+            project.Configuration.EspIdfArtifact, project.Configuration.ManagedModule);
     }
 
     private static BuildRequest ResolveDirect(CommandLineOptions options)

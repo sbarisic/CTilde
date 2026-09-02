@@ -1,0 +1,14 @@
+{
+  "target": "esp-idf",
+  "sources": [
+    "Program.ct"
+  ],
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

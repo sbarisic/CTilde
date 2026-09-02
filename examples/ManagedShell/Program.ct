@@ -1,0 +1,215 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+namespace Examples.ManagedShell;
+
+internal static class ShellPlatform
+{
+    [Extern("ct_managed_shell_initialize")]
+    internal static int Initialize();
+
+    [Extern("ct_managed_shell_print_modules")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static void PrintModules();
+
+    [Extern("ct_managed_shell_print_processes")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static void PrintProcesses();
+
+    [Extern("ct_managed_shell_print_free_heap")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static void PrintFreeHeap();
+}
+
+public static class Program
+{
+    private static Process[] processes = new Process[16];
+    private static int processCount;
+
+    private static void Help()
+    {
+        Console.WriteLine("commands: ls, modules, ps, exec <file> [args], kill <id>, wait <id>, send <id> <text>, free, help");
+    }
+
+    private static Process FindProcess(uint id)
+    {
+        int index = 0;
+        while (index < processCount)
+        {
+            Process process = processes[index];
+            if (process != null && process.Id == id)
+                return process;
+            index++;
+        }
+        return null;
+    }
+
+    private static void ListFiles()
+    {
+        string[] entries = Directory.GetFileSystemEntries("/storage/modules");
+        int index = 0;
+        while (index < entries.Length)
+        {
+            Console.WriteLine(entries[index]);
+            index++;
+        }
+    }
+
+    private static string[] Arguments(string[] words, int start)
+    {
+        string[] result = new string[words.Length - start];
+        int index = start;
+        while (index < words.Length)
+        {
+            result[index - start] = words[index];
+            index++;
+        }
+        return result;
+    }
+
+    private static bool TryId(string text, out uint id)
+    {
+        id = 0u;
+        return uint.TryParse(text, out id);
+    }
+
+    private static void Execute(string[] words)
+    {
+        if (words.Length < 2)
+        {
+            Console.WriteLine("usage: exec <file> [args]");
+            return;
+        }
+        int slot = processCount;
+        if (slot == processes.Length)
+        {
+            slot = 0;
+            while (slot < processCount && !processes[slot].HasExited)
+                slot++;
+            if (slot == processCount)
+            {
+                Console.WriteLine("process handle table is full");
+                return;
+            }
+        }
+        string path = words[1];
+        if (!path.StartsWith("/"))
+            path = Path.Combine("/storage/modules", path);
+        Process process = Process.Start(path, Arguments(words, 2));
+        if (process.Id == 0u)
+        {
+            Console.WriteLine("module load failed");
+            return;
+        }
+        processes[slot] = process;
+        if (processCount < processes.Length)
+            processCount++;
+        Console.Write("started process ");
+        Console.WriteLine(process.Id);
+    }
+
+    private static void Kill(string[] words)
+    {
+        uint id;
+        if (words.Length != 2 || !TryId(words[1], out id))
+        {
+            Console.WriteLine("usage: kill <id>");
+            return;
+        }
+        Process process = FindProcess(id);
+        if (process == null)
+        {
+            Console.WriteLine("process not found");
+            return;
+        }
+        process.Terminate(1000u);
+    }
+
+    private static void Wait(string[] words)
+    {
+        uint id;
+        if (words.Length != 2 || !TryId(words[1], out id))
+        {
+            Console.WriteLine("usage: wait <id>");
+            return;
+        }
+        Process process = FindProcess(id);
+        if (process == null)
+        {
+            Console.WriteLine("process not found");
+            return;
+        }
+        Console.Write("exit code: ");
+        Console.WriteLine(process.Wait());
+    }
+
+    private static void Send(string[] words)
+    {
+        uint id;
+        if (words.Length < 3 || !TryId(words[1], out id))
+        {
+            Console.WriteLine("usage: send <id> <text>");
+            return;
+        }
+        Process process = FindProcess(id);
+        if (process == null)
+        {
+            Console.WriteLine("process not found");
+            return;
+        }
+        process.Send(Encoding.UTF8.GetBytes(words[2]));
+    }
+
+    private static void Dispatch(string line)
+    {
+        string[] words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+            return;
+        string command = words[0];
+        if (command == "help")
+            Help();
+        else if (command == "ls")
+            ListFiles();
+        else if (command == "modules")
+            ShellPlatform.PrintModules();
+        else if (command == "ps")
+            ShellPlatform.PrintProcesses();
+        else if (command == "exec")
+            Execute(words);
+        else if (command == "kill")
+            Kill(words);
+        else if (command == "wait")
+            Wait(words);
+        else if (command == "send")
+            Send(words);
+        else if (command == "free")
+            ShellPlatform.PrintFreeHeap();
+        else
+            Console.WriteLine("unknown command");
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        if (ShellPlatform.Initialize() != 0)
+            return;
+        Console.WriteLine("CTilde managed shell - Runtime ABI 18 / Module ABI 1");
+        Help();
+        while (true)
+        {
+            Console.Write("ct> ");
+            string line = Console.ReadLine();
+            if (line == null)
+                return;
+            Dispatch(line);
+        }
+    }
+}

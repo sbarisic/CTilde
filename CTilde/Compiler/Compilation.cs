@@ -74,6 +74,7 @@ public sealed class Compilation
             if (_analyzed)
                 return;
             var diagnostics = new DiagnosticBag();
+            var managedModuleKind = Options.ManagedModule?.Kind ?? Options.ManagedModuleKind;
             var target = Enum.IsDefined(Options.Target) ? Options.Target : CompilationTarget.Hosted;
             var environment = Enum.IsDefined(Options.Environment) ? Options.Environment : TargetEnvironment.Native;
             var architecture = ResolveArchitecture(target, Options.Architecture);
@@ -91,6 +92,10 @@ public sealed class Compilation
                 diagnostics.Add("CT4113", "Restart and halt panic policies are valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (environment == TargetEnvironment.Qemu && target != CompilationTarget.EspIdf)
                 diagnostics.Add("CT4121", "The QEMU target environment is valid only for ESP-IDF compilations.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (managedModuleKind is not null && target != CompilationTarget.EspIdf)
+                diagnostics.Add("CT6202", "Managed-module compilation is valid only for ESP-IDF targets.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
+            if (Options.ManagedModule is not null && Options.ManagedModuleKind is not null && Options.ManagedModule.Kind != Options.ManagedModuleKind)
+                diagnostics.Add("CT6202", "Managed-module identity and compilation kind disagree.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Freestanding && architecture == CompilationArchitecture.Auto)
                 diagnostics.Add("CT4108", "Freestanding compilations require an explicit target architecture.", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             if (target == CompilationTarget.Cosmopolitan && architecture != CompilationArchitecture.X64)
@@ -103,7 +108,7 @@ public sealed class Compilation
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
             var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.EffectiveCpuFeatures, environment,
                 Options.SimdOptimizations,
-                _requireEntryPoint, _requireEntryPoint);
+                _requireEntryPoint, _requireEntryPoint && managedModuleKind is null, managedModuleKind);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
@@ -163,6 +168,17 @@ public sealed class Compilation
         return new EmitResult(success, _diagnostics);
     }
 
+    public EmitResult EmitManagedModuleMetadata(TextWriter writer, ManagedModuleConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentNullException.ThrowIfNull(configuration);
+        EnsureAnalyzed();
+        var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
+        if (success)
+            writer.Write(ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, configuration).ToDeterministicJson());
+        return new EmitResult(success, _diagnostics);
+    }
+
     private string GenerateC()
     {
         EnsureGeneratedOutput();
@@ -173,8 +189,9 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
+        var managedMetadata = Options.ManagedModule is null ? null : ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, Options.ManagedModule);
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory,
-            Options.SourceIdentityRoot, Options.PanicPolicy, Options.Environment);
+            Options.SourceIdentityRoot, Options.PanicPolicy, Options.Environment, Options.ManagedModule, managedMetadata);
         var ir = new TypedIrLowerer(_boundProgram).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);

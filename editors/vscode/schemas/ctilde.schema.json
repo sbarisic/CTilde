@@ -126,8 +126,13 @@
       "type": "object",
       "additionalProperties": false,
       "description": "ESP-IDF-specific project inputs.",
-      "required": ["bindings"],
       "properties": {
+        "artifact": {
+          "type": "string",
+          "enum": ["firmware", "managed-module"],
+          "default": "firmware",
+          "description": "Build ordinary firmware or an ABI 1 managed ELF module."
+        },
         "bindings": {
           "type": "array",
           "minItems": 1,
@@ -135,6 +140,24 @@
           "items": { "type": "string", "minLength": 1 },
           "description": "Project-relative ESP-IDF binding manifest paths."
         }
+      }
+    },
+    "managedModule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "name", "version"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["application", "library"] },
+        "name": { "type": "string", "pattern": "^[A-Za-z][A-Za-z0-9]*(\\.[A-Za-z][A-Za-z0-9]*)*$" },
+        "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.(0|[1-9][0-9]*)){2}(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$" },
+        "references": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.ctmeta\\.json$" },
+          "default": [],
+          "description": "Exact project-relative compiled metadata references; referenced source is not added to this compilation."
+        },
+        "mainTaskStackBytes": { "type": "integer", "minimum": 2048, "multipleOf": 16, "default": 8192 },
+        "heapLimitBytes": { "type": "integer", "minimum": 0, "description": "Per-process heap quota in bytes; zero or omission means unlimited." }
       }
     },
     "freestanding": {
@@ -359,9 +382,30 @@
             { "required": ["run"] },
             { "required": ["hosted"] },
             { "required": ["espIdf"] },
+            { "required": ["managedModule"] },
             { "required": ["freestanding"] },
             { "required": ["cosmopolitan"] }
           ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "espIdf": {
+            "properties": { "artifact": { "const": "managed-module" } },
+            "required": ["artifact"]
+          }
+        },
+        "required": ["espIdf"]
+      },
+      "then": {
+        "required": ["managedModule"],
+        "properties": {
+          "target": { "enum": ["esp-idf", "esp32_qemu", "esp32c3_qemu"] },
+          "build": {
+            "properties": { "cLayout": { "const": "modules" } }
+          }
         }
       }
     },

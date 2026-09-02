@@ -63,6 +63,8 @@ internal sealed partial class CEmitter
         foreach (var function in functions)
         {
             AddMethod(function.Method);
+            foreach (var use in function.Body.ExternUses)
+                AddMethod(use.Method);
             if (function.Property is not null)
             {
                 AddType(function.Property.ContainingType);

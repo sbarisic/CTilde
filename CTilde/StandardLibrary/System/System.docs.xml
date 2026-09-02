@@ -294,6 +294,22 @@
   <member id="M:System.Diagnostics.Stopwatch.Stop()"><summary>Stops measurement. Calling this on a stopped stopwatch has no effect.</summary></member>
   <member id="M:System.Diagnostics.Stopwatch.Reset()"><summary>Stops measurement and clears elapsed time.</summary></member>
   <member id="M:System.Diagnostics.Stopwatch.Restart()"><summary>Clears elapsed time and starts measurement.</summary></member>
+  <member id="T:System.Diagnostics.ProcessState"><summary>Identifies the lifecycle state of one ESP-IDF managed process.</summary></member>
+  <member id="T:System.Diagnostics.Process"><summary>Controls a trusted managed application running as an ESP-IDF logical process.</summary><remarks>Processes have independent mutable statics, heaps, cancellation state, arguments, and copied-message mailboxes. They do not provide memory protection.</remarks></member>
+  <member id="M:System.Diagnostics.Process.Start(string,string[])"><summary>Loads and starts a managed application beneath the configured module root.</summary><param name="path">The module path beneath <c>/storage/modules</c>.</param><param name="args">The arguments to copy into the new process.</param><returns>A handle for the started process.</returns></member>
+  <member id="P:System.Diagnostics.Process.Id"><summary>Gets the runtime process identifier.</summary></member>
+  <member id="P:System.Diagnostics.Process.State"><summary>Gets the current lifecycle state.</summary></member>
+  <member id="P:System.Diagnostics.Process.HasExited"><summary>Gets whether process cleanup and module-graph release have completed.</summary></member>
+  <member id="P:System.Diagnostics.Process.ExitCode"><summary>Gets the exit code after the process has completed.</summary></member>
+  <member id="M:System.Diagnostics.Process.Cancel()"><summary>Requests cooperative cancellation.</summary></member>
+  <member id="M:System.Diagnostics.Process.Terminate(uint)"><summary>Requests cancellation and forcibly reclaims runtime-tracked state after a grace period.</summary><param name="graceMilliseconds">The cooperative grace period in milliseconds.</param></member>
+  <member id="M:System.Diagnostics.Process.Terminate(System.TimeSpan)"><summary>Requests cancellation and forcibly reclaims runtime-tracked state after a grace period.</summary><param name="gracePeriod">The cooperative grace period.</param></member>
+  <member id="M:System.Diagnostics.Process.Wait()"><summary>Waits until cleanup is complete.</summary><returns>The process exit code.</returns></member>
+  <member id="M:System.Diagnostics.Process.Wait(uint,out int)"><summary>Waits up to a bounded interval for cleanup.</summary><param name="timeoutMilliseconds">The timeout in milliseconds.</param><param name="exitCode">Receives the exit code when the process completes.</param><returns>True when the process completed before the timeout.</returns></member>
+  <member id="M:System.Diagnostics.Process.Send(byte[])"><summary>Copies a byte message into the process mailbox.</summary><param name="payload">The bytes to copy.</param></member>
+  <member id="M:System.Diagnostics.Process.Receive()"><summary>Waits for and removes one copied byte message.</summary><returns>The copied payload.</returns></member>
+  <member id="M:System.Diagnostics.Process.TryReceive(uint,out byte[])"><summary>Waits up to a bounded interval for a copied byte message.</summary><param name="timeoutMilliseconds">The timeout in milliseconds.</param><param name="payload">Receives the copied payload.</param><returns>True when a message was received.</returns></member>
+  <member id="P:System.Diagnostics.Process.IsCancellationRequested"><summary>Gets whether cancellation was requested for the current managed process.</summary></member>
 
   <member id="T:System.be16"><summary>Stores an unsigned 16-bit value in big-endian byte order.</summary></member>
   <member id="T:System.be32"><summary>Stores an unsigned 32-bit value in big-endian byte order.</summary></member>

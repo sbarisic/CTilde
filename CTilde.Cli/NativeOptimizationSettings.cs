@@ -76,6 +76,13 @@ internal static class NativeOptimizationSettings
     public static IReadOnlyList<string> EspGeneratedCompile(BuildRequest request)
     {
         var flags = new List<string>();
+        // Managed modules publish a deliberately tiny dynamic surface.  In
+        // particular, module-owned data must not become GLOB_DAT imports:
+        // Espressif's ELF loader resolves callable exports but does not bind
+        // arbitrary module object symbols.  Hidden definitions are lowered to
+        // module-relative relocations instead.
+        if (request.ManagedModule is not null)
+            flags.Add("-fvisibility=hidden");
         if (request.Optimization is not null)
             flags.Add(request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
         flags.AddRange(GnuCpuAndFloatingPoint(request));

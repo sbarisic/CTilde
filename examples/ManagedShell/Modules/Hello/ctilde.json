@@ -1,0 +1,25 @@
+{
+  "target": "esp-idf",
+  "sources": [
+    "Program.ct"
+  ],
+  "espIdf": {
+    "artifact": "managed-module"
+  },
+  "managedModule": {
+    "kind": "application",
+    "name": "examples.hello",
+    "version": "1.0.0",
+    "references": [],
+    "mainTaskStackBytes": 8192,
+    "heapLimitBytes": 65536
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

@@ -927,6 +927,13 @@ internal static class EspIdfBuildDriver
         if (request.PanicPolicy == EspIdfPanicPolicy.Halt)
             ValidateHaltPanicConfiguration(project);
         var componentContents = File.ReadAllText(componentFile);
+        if (request.ManagedModule is not null)
+        {
+            var projectCmake = File.ReadAllText(Path.Combine(project, "CMakeLists.txt"));
+            if (!projectCmake.Contains("include(elf_loader)", StringComparison.Ordinal) ||
+                !projectCmake.Contains("project_so(", StringComparison.Ordinal))
+                throw new NativeBuildException("ESP-IDF managed-module projects must include elf_loader and call project_so(...) in CMakeLists.txt.");
+        }
         if (request.CLayout == GeneratedCLayout.Modules)
         {
             var fragment = Path.GetRelativePath(componentDirectory, Path.Combine(request.GeneratedDirectory!, "ctilde_sources.cmake")).Replace('\\', '/');
@@ -950,11 +957,13 @@ internal static class EspIdfBuildDriver
 
         var buildArguments = new List<string>();
         AddStackInstrumentationCMakeArguments(request, buildArguments);
-        buildArguments.Add("build");
+        buildArguments.Add(request.ManagedModule is null ? "build" : "so");
         var process = CreateIdfRequest(request, buildArguments);
         if (request.Trace)
             Console.Error.WriteLine($"trace: running ESP-IDF build in {project}");
         var result = await NativeProcessRunner.RunAsync(process, cancellationToken);
+        if (result.ExitCode == 0 && request.ManagedModule is not null)
+            PublishManagedModule(request);
         var stackFiles = request.StackReportPath is null || result.ExitCode != 0 ? [] :
             Directory.EnumerateFiles(request.EspIdfBuildDirectory, "*.*", SearchOption.AllDirectories)
                 .Where(path => path.EndsWith(".su", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".ci", StringComparison.OrdinalIgnoreCase))
@@ -962,16 +971,66 @@ internal static class EspIdfBuildDriver
         return new NativeBuildOutcome(result.ExitCode, "esp-idf-gcc", "ESP-IDF GCC", null, stackFiles);
     }
 
+    private static void PublishManagedModule(BuildRequest request)
+    {
+        var expected = Path.Combine(request.EspIdfBuildDirectory, request.ManagedModule!.Name + ".so");
+        var candidates = File.Exists(expected)
+            ? new[] { expected }
+            : Directory.EnumerateFiles(request.EspIdfBuildDirectory, "*.so", SearchOption.TopDirectoryOnly).Order(StringComparer.Ordinal).ToArray();
+        if (candidates.Length != 1)
+            throw new NativeBuildException($"Managed-module build did not produce the unique shared object '{expected}'.");
+        ValidateManagedElf(candidates[0], request.Architecture);
+        Directory.CreateDirectory(request.ManagedModuleOutputDirectory!);
+        var temporary = request.ManagedModuleArtifactPath + ".tmp-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            File.Copy(candidates[0], temporary, overwrite: false);
+            File.Move(temporary, request.ManagedModuleArtifactPath!, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary))
+                File.Delete(temporary);
+        }
+    }
+
+    private static void ValidateManagedElf(string path, CompilationArchitecture architecture)
+    {
+        var bytes = File.ReadAllBytes(path);
+        if (bytes.Length < 52 || bytes[0] != 0x7f || bytes[1] != (byte)'E' || bytes[2] != (byte)'L' || bytes[3] != (byte)'F' ||
+            bytes[4] != 1 || bytes[5] != 1)
+            throw new NativeBuildException($"Managed-module output '{path}' is not a 32-bit little-endian ELF file.");
+        var type = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(16, 2));
+        var machine = System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(bytes.AsSpan(18, 2));
+        var expectedMachine = architecture switch
+        {
+            CompilationArchitecture.Xtensa => (ushort)94,
+            CompilationArchitecture.RiscV32 => (ushort)243,
+            _ => (ushort)0,
+        };
+        if (type != 3 || expectedMachine == 0 || machine != expectedMachine)
+            throw new NativeBuildException($"Managed-module output '{path}' has ELF type {type} and machine {machine}; expected ET_DYN for {architecture}.");
+        ReadOnlySpan<byte> magic = [(byte)'C', (byte)'T', (byte)'M', (byte)'O', (byte)'D', 1, 0, 0];
+        if (bytes.AsSpan().IndexOf(magic) < 0)
+            throw new NativeBuildException($"Managed-module output '{path}' does not contain the Module ABI 1 preflight manifest.");
+    }
+
     private static void AddStackInstrumentationCMakeArguments(BuildRequest request, List<string> arguments)
     {
+        var cacheExists = File.Exists(Path.Combine(request.EspIdfBuildDirectory, "CMakeCache.txt"));
+        if (!cacheExists && request.StackReportPath is null)
+            return;
         foreach (var variable in new[] { "CMAKE_C_FLAGS", "CMAKE_CXX_FLAGS" })
         {
-            var value = ReadCMakeCacheValue(request.EspIdfBuildDirectory, variable)
+            var existing = ReadCMakeCacheValue(request.EspIdfBuildDirectory, variable);
+            var value = existing
                 .Replace("-fstack-usage", string.Empty, StringComparison.Ordinal)
                 .Replace("-fcallgraph-info=su", string.Empty, StringComparison.Ordinal)
                 .Trim();
             if (request.StackReportPath is not null)
                 value = (value + " -fstack-usage -fcallgraph-info=su").Trim();
+            else if (existing == value)
+                continue;
             arguments.Add("-D");
             arguments.Add(variable + "=" + value);
         }

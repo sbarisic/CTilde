@@ -67,7 +67,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#include <windows.h>\n#endif");
         if (!IsFreestanding && !IsEspIdf)
             writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#endif");
-        if (!IsFreestanding && _usesManagedThreading)
+        if (!IsFreestanding && (_usesManagedThreading || IsEspIdf && _usesHostedIo))
         {
             writer.WriteLine("#if defined(_MSC_VER)");
             writer.WriteLine("#include <process.h>");
@@ -91,14 +91,19 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <signal.h>");
         if (IsEspIdf)
         {
+            if (!IsManagedModule)
+                writer.WriteLine("#include <esp_err.h>");
             if (Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.IsInterruptCode) ||
                 Model.UserTypes.SelectMany(type => type.Fields).Any(field => field.IsInterruptData))
             {
                 writer.WriteLine("#include <esp_attr.h>");
             }
-            writer.WriteLine("#include \"ctilde_esp_shim.h\"");
-            writer.WriteLine("extern void esp_restart(void) __attribute__((noreturn));");
-            writer.WriteLine("extern void esp_system_abort(const char* details) __attribute__((noreturn));");
+            if (!IsManagedModule)
+            {
+                writer.WriteLine("#include \"ctilde_esp_shim.h\"");
+                writer.WriteLine("extern void esp_restart(void) __attribute__((noreturn));");
+                writer.WriteLine("extern void esp_system_abort(const char* details) __attribute__((noreturn));");
+            }
         }
         if (IsEspIdf && Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.TaskStackSize is not null) && !_usesManagedThreading)
         {
@@ -107,6 +112,8 @@ internal sealed partial class CEmitter
         }
         if (EmitDebugInstrumentation && IsEspIdf && !IsQemu)
             writer.WriteLine("#include <esp_cpu.h>");
+        if (IsManagedModule)
+            writer.WriteLine("#define CT_GENERATED_LOCAL __attribute__((visibility(\"hidden\")))");
         if (IsFreestanding)
         {
             writer.WriteLine("static void* ct_memset(void* destination, int value, size_t count) { uint8_t* bytes = (uint8_t*)destination; for (size_t index = 0u; index < count; ++index) bytes[index] = (uint8_t)value; return destination; }");
@@ -183,6 +190,19 @@ internal sealed partial class CEmitter
         writer.WriteLine("typedef struct ct_vtable ct_vtable;");
         writer.WriteLine("typedef struct ct_type_descriptor ct_type_descriptor;");
         writer.WriteLine("typedef struct ct_interface_entry ct_interface_entry;");
+        if (IsManagedModule)
+        {
+            writer.WriteLine("typedef struct ct_runtime_api_v18 ct_runtime_api_v18;");
+            writer.WriteLine("typedef struct ct_managed_module_descriptor_v1 ct_managed_module_descriptor_v1;");
+            writer.WriteLine("typedef struct ct_process_context ct_process_context;");
+            writer.WriteLine("struct ct_runtime_api_v18 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v1*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v1*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v1*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); void (*EnterCall)(const ct_managed_module_descriptor_v1*); void (*LeaveCall)(const ct_managed_module_descriptor_v1*); int32_t (*Service)(uint32_t, void*, size_t); };");
+            writer.WriteLine("const ct_runtime_api_v18* ct_runtime_api = NULL;");
+            writer.WriteLine("extern const ct_managed_module_descriptor_v1 ct_managed_module_v1;");
+            writer.WriteLine("typedef struct ct_runtime_console_transfer_v18 { uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_console_transfer_v18;");
+            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length);");
+            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof);");
+            writer.WriteLine("static void ct_runtime_console_flush(void);");
+        }
         if (!IsFreestanding)
         {
             writer.WriteLine("typedef struct ct_panic_info { const char* Code; const char* File; int32_t Line; } ct_panic_info;");
@@ -223,10 +243,13 @@ internal sealed partial class CEmitter
                 writer.WriteLine("static void ct_runtime_thread_state_set(void* value);");
             }
         }
-        writer.WriteLine("typedef struct ct_module_descriptor { uint32_t AbiVersion; const char* Name; void (*Initialize)(void); void (*Finalize)(void); } ct_module_descriptor;");
-        writer.WriteLine("static void ct_module_init(void);");
-        writer.WriteLine("static void ct_module_fini(void);");
-        writer.WriteLine("static ct_module_descriptor ct_program_module;");
+        if (!IsManagedModule)
+        {
+            writer.WriteLine("typedef struct ct_module_descriptor { uint32_t AbiVersion; const char* Name; void (*Initialize)(void); void (*Finalize)(void); } ct_module_descriptor;");
+            writer.WriteLine("static void ct_module_init(void);");
+            writer.WriteLine("static void ct_module_fini(void);");
+            writer.WriteLine("static ct_module_descriptor ct_program_module;");
+        }
         writer.WriteLine("typedef struct ct_object { const ct_type_descriptor* Type; ct_atomic_u32 IdentityHash; ct_atomic_u32 RefCount; struct ct_object* ReleaseNext; } ct_object;");
         if (EmitDebugInformation)
         {
@@ -314,7 +337,7 @@ internal sealed partial class CEmitter
         }
         writer.WriteLine("} ct_thread_state;");
         EmitThreadStorage(writer);
-        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; const ct_interface_entry* Interfaces; uint32_t InterfaceCount; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); };");
+        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; const ct_interface_entry* Interfaces; uint32_t InterfaceCount; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); uint64_t FingerprintHigh; uint64_t FingerprintLow; };");
         writer.WriteLine("extern const ct_type_descriptor ct_desc_string;");
         writer.WriteLine("typedef struct ct_string { ct_object Object; int32_t Length; uint8_t Data[CT_FLEXIBLE_ARRAY]; } ct_string;");
         if (_usesNativeUtf8)
@@ -332,7 +355,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         if (EmitDebugInformation)
             writer.WriteLine("    ct_debug_fatal_hook(code, file, line);");
-        if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Panic))
+        if (IsManagedModule)
+        {
+            writer.WriteLine("    ct_runtime_api->RuntimeFault(code, file, (int32_t)line);");
+            writer.WriteLine("    for (;;) { __asm__ volatile (\"\" ::: \"memory\"); }");
+        }
+        else if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Panic))
         {
             writer.WriteLine("    ct_runtime_panic_bridge(code, file, (int32_t)line, UINT8_C(11), 0);");
             writer.WriteLine("    for (;;) { __asm__ volatile (\"\" ::: \"memory\"); }");
@@ -954,6 +982,12 @@ internal sealed partial class CEmitter
 
     private void EmitPlatformAllocation(CWriter writer)
     {
+        if (IsManagedModule)
+        {
+            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_runtime_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v1); if (value == NULL) ct_runtime_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
+            writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_runtime_api->Free(value); }");
+            return;
+        }
         if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Allocate))
         {
             writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) {");
@@ -1078,7 +1112,12 @@ internal sealed partial class CEmitter
 
     private void EmitThreadStorage(CWriter writer)
     {
-        if (IsFreestanding || UsesEspRuntimeThreads)
+        if (IsManagedModule)
+        {
+            writer.WriteLine("static ct_thread_state* ct_thread_current(void) { return (ct_thread_state*)ct_runtime_api->CurrentThreadState(); }");
+            writer.WriteLine("static void ct_thread_set_current(ct_thread_state* state) { ct_runtime_api->SetThreadState(state); }");
+        }
+        else if (IsFreestanding || UsesEspRuntimeThreads)
         {
             if (_usesManagedThreading || UsesEspRuntimeThreads)
             {
@@ -1112,6 +1151,14 @@ internal sealed partial class CEmitter
 
     private void EmitThreadRuntime(CWriter writer)
     {
+        if (IsManagedModule)
+        {
+            writer.WriteLine("static ct_thread_state* ct_thread_require_attached(void) { ct_thread_state* state = ct_thread_current(); if (state == NULL) ct_fail(\"CTT0001\", \"<managed-entry>\", 0); return state; }");
+            writer.WriteLine("static void ct_runtime_require_ready(void) { (void)ct_thread_require_attached(); if (ct_runtime_api->CurrentProcess() == NULL) ct_fail(\"CTT0002\", \"<managed-entry>\", 0); }");
+            writer.WriteLine("void ct_thread_attach(void) { if (ct_runtime_api->Service(UINT32_C(1), NULL, 0u) != 0) ct_fail(\"CTT0002\", \"<thread-attach>\", 0); }");
+            writer.WriteLine("void ct_thread_detach(void) { if (ct_runtime_api->Service(UINT32_C(2), NULL, 0u) != 0) ct_fail(\"CTT0002\", \"<thread-detach>\", 0); }");
+            return;
+        }
         if (IsFreestanding)
         {
             writer.WriteLine("enum { CT_RUNTIME_UNINITIALIZED = 0u, CT_RUNTIME_INITIALIZING = 1u, CT_RUNTIME_READY = 2u, CT_RUNTIME_SHUTTING_DOWN = 3u, CT_RUNTIME_STOPPED = 4u };");
@@ -1344,7 +1391,22 @@ internal sealed partial class CEmitter
 
     private void EmitGlobals(CWriter writer)
     {
-        foreach (var field in EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>").OrderBy(field => field.CName, StringComparer.Ordinal))
+        var fields = EmittedTypes.SelectMany(type => type.Fields).Where(field => field.IsStatic && field.Name != "<underlying>").OrderBy(field => field.CName, StringComparer.Ordinal).ToArray();
+        if (IsManagedModule)
+        {
+            var mutable = fields.Where(field => field.ExternName is null && field.LinkerSymbolName is null && !field.IsRegister && field.EmbeddedData is null && !field.IsConstInit).ToArray();
+            writer.WriteLine("typedef struct ct_managed_module_static_state {");
+            writer.WriteLine("    uint32_t Phase;");
+            foreach (var field in mutable)
+                writer.WriteLine($"    {CDeclaration(field.Type, field.CName)};");
+            writer.WriteLine("} ct_managed_module_static_state;");
+            writer.WriteLine("static CT_INLINE ct_managed_module_static_state* ct_module_state(void) { return (ct_managed_module_static_state*)ct_runtime_api->CurrentModuleState(&ct_managed_module_v1); }");
+            writer.WriteLine("#define ct_module_phase (ct_module_state()->Phase)");
+            foreach (var field in mutable)
+                writer.WriteLine($"#define {field.CName} (ct_module_state()->{field.CName})");
+            writer.WriteLine();
+        }
+        foreach (var field in fields)
         {
             if (field.LinkerSymbolName is not null || field.IsRegister)
                 continue;
@@ -1354,6 +1416,8 @@ internal sealed partial class CEmitter
                 writer.WriteLine($"extern {qualifiers}{CDeclaration(field.Type, field.CName)};");
                 continue;
             }
+            if (IsManagedModule && !field.IsConstInit && field.EmbeddedData is null)
+                continue;
             if (field.EmbeddedData is { } embedded)
             {
                 var dataName = NameMangler.Artifact("ct_embed_", NameMangler.MemberIdentity(field));
@@ -1409,6 +1473,8 @@ internal sealed partial class CEmitter
                     continue;
                 if (IsEspIdf && method.ExternName == "ct_environment_exit")
                     continue;
+                if (IsManagedModule && method.ExternName is not null && !_reachableMethods.Contains(method))
+                    continue;
                 if (method.ExternName is not null && !emittedExternalSymbols.Add(method.ExternName))
                     continue;
                 if (method.ExternName is null && !_reachableMethods.Contains(method))
@@ -1440,6 +1506,12 @@ internal sealed partial class CEmitter
                     writer.WriteLine("static " + CFunctionDeclaration(CType.Void, NameMangler.Setter(property), parameters) + ";");
                 }
             }
+        }
+        foreach (var method in _externUses.Select(use => use.Method).DistinctBy(method => method.ExternName, StringComparer.Ordinal)
+                     .OrderBy(method => method.ExternName, StringComparer.Ordinal))
+        {
+            if (method.ExternName is not null && emittedExternalSymbols.Add(method.ExternName))
+                writer.WriteLine(MethodSignature(method, prototype: true));
         }
     }
 
@@ -1521,6 +1593,14 @@ internal sealed partial class CEmitter
 
     private void EmitEspRuntimeImplementationBridges(CWriter writer)
     {
+        if (IsManagedModule)
+        {
+            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length) { ct_runtime_console_transfer_v18 transfer = { (uint8_t*)(uintptr_t)(const void*)data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count != length) ct_fail(\"CTC0001\", \"<runtime-service>\", 0); }");
+            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) { ct_runtime_console_transfer_v18 transfer = { data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(17), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count > length) ct_fail(\"CTC0004\", \"<runtime-service>\", 0); *eof = transfer.Eof; return transfer.Count; }");
+            writer.WriteLine("static void ct_runtime_console_flush(void) { if (ct_runtime_api->Service(UINT32_C(18), NULL, 0u) != 0) ct_fail(\"CTC0007\", \"<runtime-service>\", 0); }");
+            writer.WriteLine();
+            return;
+        }
         if (Model.RuntimeImplementations.Count == 0)
             return;
         var runtimeResult = Model.Types["System.Runtime.RuntimeResult"];

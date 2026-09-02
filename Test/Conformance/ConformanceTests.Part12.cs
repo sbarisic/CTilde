@@ -114,7 +114,7 @@ internal static partial class ConformanceTests
             var mapResult = first.EmitSymbolMap(mapWriter);
             Assert(mapResult.Success, string.Join(Environment.NewLine, mapResult.Diagnostics));
             var map = mapWriter.ToString();
-            Assert(map.Contains("\"runtimeAbi\": 17", StringComparison.Ordinal) && map.Contains("method:Alpha.A::Value", StringComparison.Ordinal), "The symbol map omitted ABI or canonical identity data.");
+            Assert(map.Contains($"\"runtimeAbi\": {CompilerContract.RuntimeAbiVersion}", StringComparison.Ordinal) && map.Contains("method:Alpha.A::Value", StringComparison.Ordinal), "The symbol map omitted ABI or canonical identity data.");
             var compactNames = System.Text.RegularExpressions.Regex.Matches(map, "ct_[a-z]_([0-9a-f]{24})")
                 .Select(match => match.Value)
                 .ToArray();

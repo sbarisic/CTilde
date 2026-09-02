@@ -27,9 +27,26 @@ public sealed record CTildeProjectConfiguration(
     CTildeProjectRunConfiguration? Run,
     bool NoRecursion,
     EspIdfPanicPolicy PanicPolicy,
+    EspIdfArtifact EspIdfArtifact,
+    ManagedModuleConfiguration? ManagedModule,
     HostedProjectConfiguration? Hosted,
     FreestandingProjectConfiguration? Freestanding,
     CosmopolitanProjectConfiguration? Cosmopolitan);
+
+public sealed record ManagedModuleReference(
+    string MetadataPath,
+    string Name,
+    string Version,
+    string BuildIdentity,
+    string ApiHash);
+
+public sealed record ManagedModuleConfiguration(
+    ManagedModuleKind Kind,
+    string Name,
+    string Version,
+    ImmutableArray<ManagedModuleReference> References,
+    uint MainTaskStackBytes,
+    ulong? HeapLimitBytes);
 
 public enum CTildeRunExecutor
 {
@@ -303,12 +320,15 @@ public static class CTildeProjectFile
         {
             return new CTildeProject(fullManifestPath, root,
                 new CTildeProjectConfiguration(kind, CompilationTarget.Hosted, CompilationArchitecture.Auto, TargetEnvironment.Native, null,
-                    sources, excludes, null, [], [], false, [], null, false, EspIdfPanicPolicy.Abort, null, null, null),
+                    sources, excludes, null, [], [], false, [], null, false, EspIdfPanicPolicy.Abort,
+                    EspIdfArtifact.Firmware, null, null, null, null),
                 files, ImmutableDictionary<string, SourceOwnerIdentity>.Empty);
         }
 
         if (target != CompilationTarget.EspIdf && document.EspIdf is not null)
             throw new CTildeProjectException($"Property 'espIdf' in '{fullManifestPath}' is valid only for ESP-IDF projects.");
+        if (target != CompilationTarget.EspIdf && document.ManagedModule is not null)
+            throw new CTildeProjectException($"Property 'managedModule' in '{fullManifestPath}' is valid only for ESP-IDF managed-module projects.");
         if (target != CompilationTarget.Hosted && document.Hosted is not null)
             throw new CTildeProjectException($"Property 'hosted' in '{fullManifestPath}' is valid only for hosted projects.");
         if (target != CompilationTarget.Freestanding && document.Freestanding is not null)
@@ -330,6 +350,10 @@ public static class CTildeProjectFile
         var restoredModules = RepositoryModules.LoadLocked(root, modules);
         files = files.Concat(restoredModules.SourceFiles).Distinct(comparer).OrderBy(path => path, comparer).ToImmutableArray();
         var build = CreateBuildConfiguration(document.Build, target, root, fullManifestPath, files);
+        var espIdfArtifact = ParseEspIdfArtifact(document.EspIdf?.Artifact, target, fullManifestPath);
+        var managedModule = CreateManagedModuleConfiguration(document.ManagedModule, espIdfArtifact, target, root, fullManifestPath);
+        if (espIdfArtifact == EspIdfArtifact.ManagedModule && build.CLayout != GeneratedCLayout.Modules)
+            throw new CTildeProjectException($"ESP-IDF managed-module project '{fullManifestPath}' requires build.cLayout 'modules'.", "CT6202");
         var run = CreateRunConfiguration(document.Run, build, root, fullManifestPath);
         foreach (var output in bindingManifests.SelectMany(binding => new[] { binding.DeclarationsPath, binding.AdapterSourcePath }))
             if (PathsEqual(output, build.GeneratedCPath) || PathsEqual(output, build.GeneratedHeaderPath) || IsInsideDirectory(output, build.GeneratedDirectory))
@@ -345,7 +369,7 @@ public static class CTildeProjectFile
             ? CreateCosmopolitanConfiguration(document.Cosmopolitan, fullManifestPath)
             : null;
         return new CTildeProject(fullManifestPath, root, new CTildeProjectConfiguration(kind, target, architecture, environment, espIdfChip, sources, excludes, build, bindingManifests, cpuFeatures, simdOptimizations, modules, run,
-            document.NoRecursion ?? false, panicPolicy, hosted, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
+            document.NoRecursion ?? false, panicPolicy, espIdfArtifact, managedModule, hosted, freestanding, cosmopolitan), files, restoredModules.SourceOwners);
     }
 
     private static SourceLocation JsonFailureLocation(SourceText source, JsonException exception)
@@ -477,6 +501,7 @@ public static class CTildeProjectFile
         if (document.Run is not null) unsupported.Add("run");
         if (document.Hosted is not null) unsupported.Add("hosted");
         if (document.EspIdf is not null) unsupported.Add("espIdf");
+        if (document.ManagedModule is not null) unsupported.Add("managedModule");
         if (document.Freestanding is not null) unsupported.Add("freestanding");
         if (document.Cosmopolitan is not null) unsupported.Add("cosmopolitan");
         if (unsupported.Count != 0)
@@ -575,6 +600,106 @@ public static class CTildeProjectFile
             "halt" => EspIdfPanicPolicy.Halt,
             _ => throw new CTildeProjectException($"Unknown panic policy '{value}' in '{manifestPath}'; expected abort, restart, or halt."),
         };
+    }
+
+    private static EspIdfArtifact ParseEspIdfArtifact(string? value, CompilationTarget target, string manifestPath)
+    {
+        if (target != CompilationTarget.EspIdf && value is not null)
+            throw new CTildeProjectException($"Property 'espIdf.artifact' in '{manifestPath}' is valid only for ESP-IDF projects.", "CT6202");
+        return value switch
+        {
+            null or "firmware" => EspIdfArtifact.Firmware,
+            "managed-module" when target == CompilationTarget.EspIdf => EspIdfArtifact.ManagedModule,
+            "managed-module" => throw new CTildeProjectException($"ESP-IDF managed modules require target 'esp-idf' in '{manifestPath}'.", "CT6202"),
+            _ => throw new CTildeProjectException($"Unknown ESP-IDF artifact '{value}' in '{manifestPath}'; expected firmware or managed-module.", "CT6202"),
+        };
+    }
+
+    private static ManagedModuleConfiguration? CreateManagedModuleConfiguration(
+        ManagedModuleDocument? document,
+        EspIdfArtifact artifact,
+        CompilationTarget target,
+        string root,
+        string manifestPath)
+    {
+        if (artifact != EspIdfArtifact.ManagedModule)
+        {
+            if (document is not null)
+                throw new CTildeProjectException($"Property 'managedModule' in '{manifestPath}' requires espIdf.artifact 'managed-module'.", "CT6202");
+            return null;
+        }
+        if (target != CompilationTarget.EspIdf || document is null)
+            throw new CTildeProjectException($"ESP-IDF managed-module project '{manifestPath}' requires a 'managedModule' block.", "CT6202");
+
+        var kind = document.Kind switch
+        {
+            "application" => ManagedModuleKind.Application,
+            "library" => ManagedModuleKind.Library,
+            _ => throw new CTildeProjectException($"Managed module in '{manifestPath}' requires kind application or library.", "CT6202"),
+        };
+        if (string.IsNullOrWhiteSpace(document.Name) ||
+            !Regex.IsMatch(document.Name, "^[A-Za-z][A-Za-z0-9]*(?:[.][A-Za-z][A-Za-z0-9]*)*$", RegexOptions.CultureInvariant))
+            throw new CTildeProjectException($"Managed-module name '{document.Name}' in '{manifestPath}' is not canonical.", "CT6202");
+        if (string.IsNullOrWhiteSpace(document.Version) ||
+            !Regex.IsMatch(document.Version, "^(0|[1-9][0-9]*)(?:[.](0|[1-9][0-9]*)){2}(?:-[0-9A-Za-z.-]+)?(?:[+][0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant))
+            throw new CTildeProjectException($"Managed-module version '{document.Version}' in '{manifestPath}' must be an exact semantic version.", "CT6202");
+        var stack = document.MainTaskStackBytes ?? 8192;
+        if (stack < 2048 || stack % 16 != 0)
+            throw new CTildeProjectException($"managedModule.mainTaskStackBytes in '{manifestPath}' must be at least 2048 and divisible by 16.", "CT6202");
+        if (document.HeapLimitBytes is > 0 and < 1024)
+            throw new CTildeProjectException($"managedModule.heapLimitBytes in '{manifestPath}' must be zero/unlimited or at least 1024.", "CT6202");
+
+        var references = ImmutableArray.CreateBuilder<ManagedModuleReference>();
+        var referenceMetadata = ImmutableArray.CreateBuilder<ManagedModuleMetadata>();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var value in document.References ?? [])
+        {
+            var path = ResolveProjectPath(value, "managedModule.references", root, manifestPath, isDirectory: false);
+            if (!path.EndsWith(".ctmeta.json", StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
+                throw new CTildeProjectException($"Managed-module reference '{path}' in '{manifestPath}' must be an existing .ctmeta.json file.", "CT6200");
+            var metadata = ManagedModuleMetadata.Load(path);
+            if (!names.Add(metadata.Name))
+                throw new CTildeProjectException($"Managed-module references in '{manifestPath}' contain module '{metadata.Name}' more than once.", "CT6202");
+            if (metadata.Name == document.Name)
+                throw new CTildeProjectException($"Managed module '{document.Name}' cannot reference itself.", "CT6202");
+            references.Add(new ManagedModuleReference(path, metadata.Name, metadata.Version, metadata.BuildIdentity, metadata.ApiHash));
+            referenceMetadata.Add(metadata);
+        }
+        ValidateManagedReferenceGraph(document.Name, referenceMetadata.ToImmutable(), manifestPath);
+        return new ManagedModuleConfiguration(kind, document.Name, document.Version, references.ToImmutable(), stack,
+            document.HeapLimitBytes is null or 0 ? null : document.HeapLimitBytes);
+    }
+
+    private static void ValidateManagedReferenceGraph(string rootName, ImmutableArray<ManagedModuleMetadata> references, string manifestPath)
+    {
+        var byName = references.ToDictionary(item => item.Name, StringComparer.Ordinal);
+        foreach (var module in references)
+        {
+            foreach (var dependency in module.Dependencies)
+            {
+                if (dependency.Name == rootName)
+                    throw new CTildeProjectException($"Managed-module references in '{manifestPath}' contain a dependency cycle through '{rootName}'.", "CT6202");
+                if (byName.TryGetValue(dependency.Name, out var resolved) &&
+                    (resolved.Version != dependency.Version || resolved.BuildIdentity != dependency.BuildIdentity || resolved.ApiHash != dependency.ApiHash))
+                    throw new CTildeProjectException($"Managed-module dependency '{module.Name}' -> '{dependency.Name}' in '{manifestPath}' does not match the referenced module's exact identity.", "CT6202");
+            }
+        }
+
+        var visiting = new HashSet<string>(StringComparer.Ordinal);
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        bool Visit(ManagedModuleMetadata module)
+        {
+            if (!visiting.Add(module.Name)) return false;
+            foreach (var dependency in module.Dependencies)
+                if (byName.TryGetValue(dependency.Name, out var next) && !visited.Contains(next.Name) && !Visit(next)) return false;
+            visiting.Remove(module.Name);
+            visited.Add(module.Name);
+            return true;
+        }
+
+        foreach (var module in references)
+            if (!visited.Contains(module.Name) && !Visit(module))
+                throw new CTildeProjectException($"Managed-module references in '{manifestPath}' contain a dependency cycle involving '{module.Name}'.", "CT6202");
     }
 
     private static bool IsInsideDirectory(string path, string directory)
@@ -1025,6 +1150,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("run")] RunDocument? Run,
         [property: JsonPropertyName("hosted")] HostedDocument? Hosted,
         [property: JsonPropertyName("espIdf")] EspIdfDocument? EspIdf,
+        [property: JsonPropertyName("managedModule")] ManagedModuleDocument? ManagedModule,
         [property: JsonPropertyName("freestanding")] FreestandingDocument? Freestanding,
         [property: JsonPropertyName("cosmopolitan")] CosmopolitanDocument? Cosmopolitan);
 
@@ -1037,7 +1163,17 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("vendor")] string? Vendor,
         [property: JsonPropertyName("updatePolicy")] string? UpdatePolicy);
 
-    private sealed record EspIdfDocument([property: JsonPropertyName("bindings")] string[]? Bindings);
+    private sealed record EspIdfDocument(
+        [property: JsonPropertyName("artifact")] string? Artifact,
+        [property: JsonPropertyName("bindings")] string[]? Bindings);
+
+    private sealed record ManagedModuleDocument(
+        [property: JsonPropertyName("kind")] string? Kind,
+        [property: JsonPropertyName("name")] string? Name,
+        [property: JsonPropertyName("version")] string? Version,
+        [property: JsonPropertyName("references")] string[]? References,
+        [property: JsonPropertyName("mainTaskStackBytes")] uint? MainTaskStackBytes,
+        [property: JsonPropertyName("heapLimitBytes")] ulong? HeapLimitBytes);
 
     private sealed record HostedDocument(
         [property: JsonPropertyName("nativeSources")] string[]? NativeSources,

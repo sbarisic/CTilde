@@ -1,14 +1,14 @@
 # C~ language specification
 
-Specification version: draft 0.44
+Specification version: draft 0.45
 
 ## Status
 
-This document is the normative specification for C~ draft 0.44.
+This document is the normative specification for C~ draft 0.45.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.44 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.45 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.44 adds verified native stack contracts and reports plus dependency-oriented modular C emission. Draft 0.43 remains the typed runtime-service-provider revision. Runtime ABI 17 and debug metadata version 3 are unchanged.
+Draft 0.45 introduces Runtime ABI 18 and Managed Module ABI 1 for trusted ESP-IDF ELF applications that share the firmware runtime. Draft 0.44 remains the verified native stack-contract and dependency-oriented modular-C revision. Debug metadata remains version 3.
 
 `CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.42 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
@@ -662,11 +662,23 @@ Statements after an unconditional return, break, continue, or throw are unreacha
 
 ### EntryPoint
 
-Exactly one method has `[EntryPoint]`. It must be a body-bearing `static void` method with no parameters.
+An ordinary hosted or ESP-IDF firmware application has exactly one `[EntryPoint]`, which is a body-bearing `static void` method with no parameters. An ESP-IDF managed application instead requires exactly one body-bearing `static int Main(string[] args)` entry point. A managed library has no entry point.
 
 The C backend generates `int main(void)`, initializes static storage, calls the entry method, and returns `EXIT_SUCCESS`.
 
 `[EntryPoint]` is invalid for the freestanding target. Freestanding compilation emits no `main`, `app_main`, automatic runtime initialization, or automatic shutdown. Public `[Export]` methods are native-callable roots and require explicit runtime initialization before invocation unless the program contains only naked exports.
+
+### ESP-IDF managed modules
+
+An ESP-IDF project selects `espIdf.artifact: "managed-module"` and `build.cLayout: "modules"`. Its `managedModule` block contains `kind` (`application` or `library`), a canonical name, an exact version, exact `.ctmeta.json` references, the application task stack size, and an optional heap limit. Build emits `<name>.ctm`, a 32-bit target ELF shared object, and deterministic `<name>.ctmeta.json` public metadata. The ELF contains a fixed binary preflight manifest for Runtime ABI 18 and Managed Module ABI 1. It emits neither `app_main` nor a private firmware runtime.
+
+Every public type and member of a managed library is part of its managed ABI. Public signatures may use scalars, enums, strings, arrays, concrete classes and structures, interfaces, and delegates. Public generic definitions and constructed generic types are rejected. `internal` is binary-module-local. Managed references can cross module boundaries only inside one logical process; process messages are copied byte arrays and never transfer managed identity.
+
+The firmware owns one versioned `ct_runtime_api_v18` table, canonical type registration, process registry, and module registry. A module binds the table through its fixed entry function. Mutable statics are stored in per-process module instances; code and immutable metadata are shared. Applications run as logical processes backed by FreeRTOS tasks. Arguments are copied before entry. Unhandled managed failures terminate the process boundary rather than defining a protected address space.
+
+Module paths resolve below `/storage/modules`. Empty segments, `.` or `..` segments, backslashes, and absolute paths outside that root are rejected. Dependencies name an exact canonical name, version, build identity, and API hash. Only one version of a canonical name may be loaded globally, and dependency cycles are rejected. A provider remains pinned while a process, dependent module, active call, registered type, live managed allocation, delegate, callback, or function lease can reference its code. When the final reference disappears, exports and types are removed and the newly unused reverse dependency graph unloads.
+
+Processes have independent module instances, mutable statics, managed allocation lists, heap accounting, cancellation state, task counts, resource ledgers, and copied-message mailboxes. `Cancel` is cooperative. `Terminate` requests cancellation and may delete remaining FreeRTOS tasks after its grace period; a dedicated reaper performs blocking cleanup outside the task-deletion callback. Forced reclamation covers runtime-owned allocations and resources only. Because modules are trusted native code and ESP32 provides no process memory protection, raw pointers, locks, callbacks, interrupts, MMIO, or untracked native resources that escape accounting make forced termination behavior undefined.
 
 ### Runtime service implementations
 
@@ -772,7 +784,7 @@ Hosted Windows startup changes attached console input and output code pages to U
 
 Every target provides synchronous `System.IO`. Hosted Windows/Linux and Cosmopolitan use native adapters, ESP-IDF uses VFS defaults unless overridden, and freestanding requires the matching runtime-provider groups. The move-only `FileHandle` operations include 64-bit seek, position, length, truncation, and flush. Managed `FileStream`, `StreamReader`, and `StreamWriter` own or borrow explicit resources and require idempotent `Dispose`; use after disposal raises `ObjectDisposedException` on exception-capable targets and panics on freestanding. UTF-8 readers strip one leading BOM, reject malformed or truncated UTF-8, recognize LF and CRLF, and preserve embedded NUL bytes. Writers use a 4096-byte buffer, deterministic LF line endings, and emit the UTF-8 BOM once only for `UTF8WithBom` at the beginning of an empty seekable stream.
 
-`File`, `Directory`, and `Path` provide synchronous byte/text helpers, copying, moving, deletion, recursive creation and deletion, current-directory access, platform separators, and deterministic ordinally sorted full-path enumeration. Recursive deletion inspects links and reparse points and never traverses them. `FileMetadata` reports kind, attributes, length, and explicitly available Unix-second/nanosecond timestamps; metadata inspection itself does not follow symbolic links. Missing-path `Exists` calls return false. Native-adapter failures throw `IOException` with a platform error code and operation. Freestanding and explicit ESP-IDF provider status failures instead route status plus native code to `Runtime.Panic`. Async I/O, watchers, globbing, lazy enumeration, and per-stream concurrency are not part of Draft 0.44.
+`File`, `Directory`, and `Path` provide synchronous byte/text helpers, copying, moving, deletion, recursive creation and deletion, current-directory access, platform separators, and deterministic ordinally sorted full-path enumeration. Recursive deletion inspects links and reparse points and never traverses them. `FileMetadata` reports kind, attributes, length, and explicitly available Unix-second/nanosecond timestamps; metadata inspection itself does not follow symbolic links. Missing-path `Exists` calls return false. Native-adapter failures throw `IOException` with a platform error code and operation. Freestanding and explicit ESP-IDF provider status failures instead route status plus native code to `Runtime.Panic`. Async I/O, watchers, globbing, lazy enumeration, and per-stream concurrency are not part of Draft 0.45.
 
 `Vec2`, `Vec3`, and `Vec4` remain scalar geometry structures. `System.Simd` defines fixed 16-byte `F32x4`, `I32x4`, `U32x4`, and `Mask32x4` values with constant lane access, shuffle, comparisons, selection, and arithmetic. Scalar lowering is the default. `CpuFeature.Simd128`, `Target.HasFeature`, manifest `cpuFeatures`, and CLI `--cpu-feature simd128` enable architecture-validated x86 or Arm intrinsic lowering explicitly.
 
@@ -1045,7 +1057,9 @@ Parameters and `this` are borrowed. Managed-reference and reference-containing s
 
 Draft 0.40 uses a data-race-free memory model for hosted, Cosmopolitan, ESP-IDF, and provider-backed freestanding programs. Concurrent reads are allowed. Conflicting accesses to an ordinary location, when at least one access writes and no synchronization orders them, have undefined behavior. ARC atomics protect lifetime only: they neither publish object contents nor make reference slots, fields, array elements, or static fields atomic. A reference transferred between threads requires an owned count plus synchronization. Thread start, join, mutex operations, volatile fields, atomics, and `SpinLock` establish the documented happens-before edges. Correctly synchronized programs behave sequentially consistently; relaxed atomics provide atomicity without publication, and sequentially consistent atomics participate in one total order. A freestanding backend that does not expose threads can omit the thread and mutex groups.
 
-One C~ runtime exists per process. `ct_runtime_initialize(config)` attaches the calling primary thread, initializes immortal runtime-fault objects and the ABI-versioned module descriptor, then publishes the ready phase. `ct_runtime_shutdown()` requires all secondary threads detached, finalizes modules, drains ARC work, and detaches the primary thread. `main` and `app_main` perform this lifecycle automatically. A native-created thread uses `ct_thread_attach()` and `ct_thread_detach()` between those calls and must detach with no active C~ calls, cleanup records, exception frames, pending exception, or release drain. Export wrappers, callback trampolines, `ct_retain`, and `ct_release` require attachment. Runtime-phase misuse and unattached entry are panics. Modules cannot unload while their descriptors, vtables, delegates, objects, or generated function pointers remain live. Independent DLL loading and runtime registration are deferred.
+An ordinary hosted, freestanding, Cosmopolitan, or ESP-IDF program owns one C~ runtime. `ct_runtime_initialize(config)` attaches the calling primary thread, initializes immortal runtime-fault objects and the ABI-versioned module descriptor, then publishes the ready phase. `ct_runtime_shutdown()` requires all secondary threads detached, finalizes modules, drains ARC work, and detaches the primary thread. `main` and `app_main` perform this lifecycle automatically. A native-created thread uses `ct_thread_attach()` and `ct_thread_detach()` between those calls and must detach with no active C~ calls, cleanup records, exception frames, pending exception, or release drain. Export wrappers, callback trampolines, `ct_retain`, and `ct_release` require attachment. Runtime-phase misuse and unattached entry are panics.
+
+An ESP-IDF managed-module host instead owns one firmware runtime shared by all logical processes. Each process has independent mutable module instances, allocation accounting, task state, cancellation, arguments, and mailboxes. A module cannot unload while a process, dependent module, active call, descriptor, vtable, delegate, object, callback, or registered resource can still refer to its code or metadata. The loader removes exports and type registrations before releasing an unused dependency graph in reverse order.
 
 `System.Runtime.Memory.Retain` and `Release` manipulate an additional untracked ownership count. `null` is a no-op. They are unsafe APIs: unbalanced use can leak, dangle, or double-release a value. Calling any unsafe method requires an unsafe method or block and otherwise reports `CT2139`.
 
@@ -1110,7 +1124,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to draft 0.44 when:
+A compiler conforms to Draft 0.45 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1118,7 +1132,7 @@ A compiler conforms to draft 0.44 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.44 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.45 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 
@@ -1129,4 +1143,4 @@ The canonical backend is GNU C23. Draft 0.44 has no second backend. Unity and mo
 - Managed ownership uses deterministic ARC; cycles leak, and `[NoAlloc]` is the compile-time allocation boundary.
 - The core library is intentionally small.
 
-Draft 0.44 defers Unicode escape syntax, locale-aware parsing and formatting, Unicode normalization and collation, UTF-16 encodings, asynchronous I/O, file watchers and mapping, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned shared-library mapping, macOS loader support, dynamic C~ runtime module registration, `[NoStackProbe]`, and `[StackAlign(n)]`.
+Draft 0.45 defers Unicode escape syntax, locale-aware parsing and formatting, Unicode normalization and collation, UTF-16 encodings, asynchronous I/O, file watchers and mapping, Arm64 and fat Cosmopolitan output, project-wide effect switches, cleanup-aware iterator suspension, effect-polymorphic generics, effect-qualified delegates and function pointers, declaration-level conditional compilation, weak imports and definitions, write-only registers, atomic MMIO read-modify-write, general naked functions and generalized interrupt signatures, default interface implementations, generic variance, user-defined conversions, managed-reference and floating-point atomics, weak references, cycle collection, retained callbacks, owned resource fields, multidimensional arrays, string interpolation, general native-boundary unwinding, versioned hosted shared-library mapping, macOS loader support, `[NoStackProbe]`, and `[StackAlign(n)]`.

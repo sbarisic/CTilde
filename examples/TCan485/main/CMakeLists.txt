@@ -20,7 +20,8 @@ set(CTILDE_PRIVATE_REQUIRES
     esp_system
     esp_timer
     freertos
-    led_strip)
+    led_strip
+    ctilde_managed_runtime)
 if(NOT DEFINED ENV{CTILDE_FATAL_RUNTIME_BUILD} AND NOT "$ENV{CTILDE_TARGET_ENVIRONMENT}" STREQUAL "qemu")
     list(APPEND CTILDE_PRIVATE_REQUIRES esp_gdbstub)
 endif()

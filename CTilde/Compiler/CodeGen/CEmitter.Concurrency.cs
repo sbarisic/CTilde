@@ -201,7 +201,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    Sleep(milliseconds);");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
-        writer.WriteLine("    vTaskDelay(pdMS_TO_TICKS(milliseconds));");
+        writer.WriteLine("    TickType_t ticks = pdMS_TO_TICKS(milliseconds); if (milliseconds != 0u && ticks == 0u) ticks = 1u; vTaskDelay(ticks);");
         writer.WriteLine("#else");
         writer.WriteLine("    struct timespec duration = { (time_t)(milliseconds / 1000u), (long)(milliseconds % 1000u) * 1000000L }; while (nanosleep(&duration, &duration) != 0 && errno == EINTR) { }");
         writer.WriteLine("#endif");

@@ -52,7 +52,7 @@ internal sealed partial class CompilationModel
             "ct_math_sqrt_double", "ct_math_abs_double", "ct_math_tan_double", "ct_math_min_double", "ct_math_max_double", "ct_math_sin_double", "ct_math_cos_double", "ct_math_acos_double", "ct_math_floor_double", "ct_math_ceiling_double",
             "ct_math_asin_double", "ct_math_atan_double", "ct_math_atan2_double", "ct_math_exp_double", "ct_math_log_double", "ct_math_log2_double", "ct_math_log10_double", "ct_math_pow_double", "ct_math_round_double", "ct_math_truncate_double",
             "ct_monotonic_nanoseconds", "ct_random_argument_out_of_range", "ct_spin_pause",
-            "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close",
+            "ct_console_read", "ct_console_read_line", "ct_console_read_line_prompt", "ct_host_file_open", "ct_host_file_read", "ct_host_file_write_buffer", "ct_host_file_write_string", "ct_host_file_close",
             "ct_host_io_throw", "ct_host_utf8_valid", "ct_host_file", "ct_host_file_require", "ct_host_write_all",
             "ct_to_string_nint", "ct_to_string_nuint", "ct_write_nint", "ct_write_nuint", "ct_native_bounds", "ct_native_bounds_fail", "ct_stack_bytes", "ct_stack_bytes_fail",
             "ct_module_init", "ct_string", "ct_object", "ct_type_descriptor", "ct_vtable",

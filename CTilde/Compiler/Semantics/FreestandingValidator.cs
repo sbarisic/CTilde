@@ -136,6 +136,13 @@ internal static class FreestandingValidator
             yield break;
         }
         if (name is "ct_console_read" or "ct_console_read_line") { yield return RuntimeImplementationRole.ConsoleRead; yield break; }
+        if (name == "ct_console_read_line_prompt")
+        {
+            yield return RuntimeImplementationRole.ConsoleWrite;
+            yield return RuntimeImplementationRole.ConsoleRead;
+            yield return RuntimeImplementationRole.ConsoleFlush;
+            yield break;
+        }
         if (name == "ct_environment_exit") { yield return RuntimeImplementationRole.Exit; yield break; }
         if (name == "ct_monotonic_nanoseconds") { yield return RuntimeImplementationRole.MonotonicNanoseconds; yield break; }
         if (name == "ct_host_path_separator") { yield return RuntimeImplementationRole.PathSeparator; yield break; }

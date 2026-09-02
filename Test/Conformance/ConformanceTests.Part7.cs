@@ -391,6 +391,42 @@ internal static partial class ConformanceTests
             var invalidResult = CompileAndRun(invalid, standardInputBytes: [0xf0, 0x28, 0x8c, 0x28, 0x0a]);
             Assert(invalidResult.ExitCode == 0, invalidResult.StandardError);
             Assert(Normalize(invalidResult.StandardOutput) == "True\n", invalidResult.StandardOutput);
+
+            const string prompted = """
+                using System;
+                public static class Program
+                {
+                    [EntryPoint] public static void Main()
+                    {
+                        Console.WriteLine(Console.ReadLine("prompt> "));
+                    }
+                }
+                """;
+            var promptedResult = CompileAndRun(prompted, standardInput: "answer\n");
+            Assert(promptedResult.ExitCode == 0, promptedResult.StandardError);
+            Assert(Normalize(promptedResult.StandardOutput) == "prompt> answer\n", promptedResult.StandardOutput);
+        });
+
+        suite.Run("ESP console line input echoes and edits", () =>
+        {
+            const string source = "using System; public static class Program { [EntryPoint] public static void Main() { Console.ReadLine(\"ct> \" ); } }";
+            var esp = Emit(source, new CompilationOptions(CompilationTarget.EspIdf));
+            Assert(esp.Contains("#include <linenoise/linenoise.h>", StringComparison.Ordinal), "ESP Console.ReadLine did not emit optional line-editor support.");
+            Assert(esp.Contains("linenoiseSetReadFunction(ct_esp_linenoise_read)", StringComparison.Ordinal), "ESP line editing did not install its blocking read adapter.");
+            Assert(esp.Contains("errno == EAGAIN || errno == EWOULDBLOCK", StringComparison.Ordinal), "ESP line editing did not retry an empty nonblocking UART read.");
+            Assert(esp.Contains("#if defined(CTILDE_CONSOLE_INPUT_ACTIVITY)", StringComparison.Ordinal), "ESP console input did not emit its optional activity hook guard.");
+            Assert(esp.Contains("extern void CTILDE_CONSOLE_INPUT_ACTIVITY(void);", StringComparison.Ordinal), "ESP console input did not declare the configured activity callback.");
+            Assert(esp.Contains("if (value != EOF) { ct_esp_console_input_activity();", StringComparison.Ordinal), "ESP console input did not notify activity after receiving a byte.");
+            Assert(esp.Contains("char* line = linenoise(prompt);", StringComparison.Ordinal), "ESP line editing did not give the prompt to linenoise for cursor positioning.");
+            Assert(esp.Contains("ct_esp_console_read_line((const char*)prompt->Data)", StringComparison.Ordinal), "ESP prompted input did not preserve the prompt through the line editor.");
+            Assert(esp.Contains("linenoiseHistoryAdd(line)", StringComparison.Ordinal), "ESP Console.ReadLine did not retain line-editor history.");
+            Assert(esp.Contains("ct_esp_console_echo", StringComparison.Ordinal), "ESP Console.ReadLine did not emit UART echo support.");
+            Assert(esp.Contains("ct_esp_console_previous_utf8", StringComparison.Ordinal), "ESP Console.ReadLine did not emit UTF-8-aware backspace support.");
+            Assert(esp.Contains("value == '\\b' || value == 0x7f", StringComparison.Ordinal), "ESP Console.ReadLine did not recognize terminal backspace keys.");
+
+            var hosted = Emit(source);
+            Assert(!hosted.Contains("ct_esp_console_echo", StringComparison.Ordinal), "Hosted Console.ReadLine unexpectedly emitted ESP UART echo support.");
+            Assert(!hosted.Contains("CTILDE_CONSOLE_INPUT_ACTIVITY", StringComparison.Ordinal), "Hosted Console.ReadLine unexpectedly emitted the ESP activity-hook contract.");
         });
 
         suite.Run("hosted file mode and buffer writes", () =>
@@ -463,7 +499,7 @@ internal static partial class ConformanceTests
             const string source = "using System; public static class Program { [EntryPoint] public static void Main() { Console.WriteLine(42); } }";
             var hosted = Emit(source);
             var esp = Emit(source, new CompilationOptions(CompilationTarget.EspIdf));
-            foreach (var symbol in new[] { "ct_console_read", "ct_console_read_line", "ct_host_file_open", "ct_host_file_read" })
+            foreach (var symbol in new[] { "ct_console_read", "ct_console_read_line", "ct_console_read_line_prompt", "ct_host_file_open", "ct_host_file_read" })
             {
                 Assert(!hosted.Contains(symbol, StringComparison.Ordinal), $"Unused hosted I/O symbol '{symbol}' changed hosted output.");
                 Assert(!esp.Contains(symbol, StringComparison.Ordinal), $"Hosted I/O symbol '{symbol}' changed ESP output.");

@@ -151,6 +151,8 @@ internal static partial class ConformanceTests
             Assert(generated.Contains("QueryPerformanceCounter", StringComparison.Ordinal) &&
                 generated.Contains("clock_gettime(CLOCK_MONOTONIC", StringComparison.Ordinal) &&
                 generated.Contains("esp_timer_get_time", StringComparison.Ordinal), "The platform monotonic-clock branches were not emitted.");
+            Assert(generated.Contains("if (milliseconds != 0u && ticks == 0u) ticks = 1u", StringComparison.Ordinal),
+                "ESP Thread.Sleep did not preserve a nonzero delay shorter than one FreeRTOS tick.");
             var unused = Emit("public static class Program { [EntryPoint] public static void Main() { } }");
             Assert(!unused.Contains("ct_monotonic_nanoseconds", StringComparison.Ordinal), "Unused monotonic-clock support was emitted.");
             var result = CompileAndRun(source, threads: true);

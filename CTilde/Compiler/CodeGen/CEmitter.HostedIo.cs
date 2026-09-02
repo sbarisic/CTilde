@@ -2,7 +2,7 @@ namespace CTilde;
 
 internal sealed partial class CEmitter
 {
-    private static bool IsHostedIoSymbol(string name) => name is "ct_console_read" or "ct_console_read_line" ||
+    private static bool IsHostedIoSymbol(string name) => name is "ct_console_read" or "ct_console_read_line" or "ct_console_read_line_prompt" ||
         name == "ct_host_path_separator" ||
         name.StartsWith("ct_host_file_", StringComparison.Ordinal) ||
         name.StartsWith("ct_host_stream_", StringComparison.Ordinal) ||
@@ -93,13 +93,78 @@ internal sealed partial class CEmitter
         writer.WriteLine("        if (count == 0u || ferror(file->Stream)) ct_host_io_throw(\"File.Write\", errno == 0 ? -1 : errno);");
         writer.WriteLine("    }");
         writer.WriteLine("}");
+        if (IsEspIdf)
+        {
+            writer.WriteLine("static void ct_esp_console_input_activity(void)");
+            writer.WriteLine("{");
+            writer.WriteLine("#if defined(CTILDE_CONSOLE_INPUT_ACTIVITY)");
+            writer.WriteLine("    extern void CTILDE_CONSOLE_INPUT_ACTIVITY(void);");
+            writer.WriteLine("    CTILDE_CONSOLE_INPUT_ACTIVITY();");
+            writer.WriteLine("#endif");
+            writer.WriteLine("}");
+            writer.WriteLine("#if defined(CTILDE_USE_LINENOISE)");
+            writer.WriteLine("static ssize_t ct_esp_linenoise_read(int file, void* destination, size_t length)");
+            writer.WriteLine("{");
+            writer.WriteLine("    (void)file;");
+            writer.WriteLine("    if (length == 0u) return 0;");
+            writer.WriteLine("    for (;;)");
+            writer.WriteLine("    {");
+            writer.WriteLine("        errno = 0;");
+            writer.WriteLine("        int value = fgetc(stdin);");
+            writer.WriteLine("        if (value != EOF) { ct_esp_console_input_activity(); ((uint8_t*)destination)[0] = (uint8_t)value; return 1; }");
+            writer.WriteLine("        if (errno == EAGAIN || errno == EWOULDBLOCK) { clearerr(stdin); vTaskDelay(1); continue; }");
+            writer.WriteLine("        if (ferror(stdin)) return -1;");
+            writer.WriteLine("        clearerr(stdin);");
+            writer.WriteLine("        vTaskDelay(1);");
+            writer.WriteLine("    }");
+            writer.WriteLine("}");
+            writer.WriteLine("static ct_string* ct_esp_console_read_line(const char* prompt)");
+            writer.WriteLine("{");
+            writer.WriteLine("    static bool line_editor_initialized = false;");
+            writer.WriteLine("    if (!line_editor_initialized) { linenoiseSetReadFunction(ct_esp_linenoise_read); (void)linenoiseHistorySetMaxLen(32); line_editor_initialized = true; }");
+            writer.WriteLine("    char* line = linenoise(prompt);");
+            writer.WriteLine("    if (line == NULL) return NULL;");
+            writer.WriteLine("    size_t line_length = strlen(line);");
+            writer.WriteLine("    if (line_length > (size_t)INT32_MAX) { linenoiseFree(line); ct_host_io_throw(\"Console.ReadLine\", ERANGE); }");
+            writer.WriteLine("    if (!ct_host_utf8_valid((const uint8_t*)line, line_length)) { linenoiseFree(line); ct_host_io_throw(\"Console.ReadLine\", EILSEQ); }");
+            writer.WriteLine("    ct_string* result = ct_string_from_bytes((const uint8_t*)line, (int32_t)line_length, \"<console>\", 0);");
+            writer.WriteLine("    if (line_length != 0u) (void)linenoiseHistoryAdd(line);");
+            writer.WriteLine("    linenoiseFree(line);");
+            writer.WriteLine("    return result;");
+            writer.WriteLine("}");
+            writer.WriteLine("#else");
+            writer.WriteLine("static void ct_esp_console_echo(const uint8_t* data, size_t length)");
+            writer.WriteLine("{");
+            writer.WriteLine("    size_t offset = 0u;");
+            writer.WriteLine("    while (offset < length)");
+            writer.WriteLine("    {");
+            writer.WriteLine("        errno = 0;");
+            writer.WriteLine("        size_t count = fwrite(data + offset, 1u, length - offset, stdout);");
+            writer.WriteLine("        if (count == 0u || ferror(stdout)) ct_host_io_throw(\"Console.ReadLine\", errno == 0 ? -1 : errno);");
+            writer.WriteLine("        offset += count;");
+            writer.WriteLine("    }");
+            writer.WriteLine("    errno = 0;");
+            writer.WriteLine("    if (fflush(stdout) == EOF) ct_host_io_throw(\"Console.ReadLine\", errno == 0 ? -1 : errno);");
+            writer.WriteLine("}");
+            writer.WriteLine("static size_t ct_esp_console_previous_utf8(const uint8_t* data, size_t length)");
+            writer.WriteLine("{");
+            writer.WriteLine("    if (length == 0u) return 0u;");
+            writer.WriteLine("    --length;");
+            writer.WriteLine("    while (length > 0u && (data[length] & UINT8_C(0xc0)) == UINT8_C(0x80)) --length;");
+            writer.WriteLine("    return length;");
+            writer.WriteLine("}");
+            writer.WriteLine("#endif");
+        }
         writer.WriteLine();
 
         writer.WriteLine("int32_t ct_console_read(void)");
         writer.WriteLine("{");
         writer.WriteLine("    for (;;) {");
         writer.WriteLine("        errno = 0; int value = fgetc(stdin);");
-        writer.WriteLine("        if (value != EOF) return (int32_t)(uint8_t)value;");
+        if (IsEspIdf)
+            writer.WriteLine("        if (value != EOF) { ct_esp_console_input_activity(); return (int32_t)(uint8_t)value; }");
+        else
+            writer.WriteLine("        if (value != EOF) return (int32_t)(uint8_t)value;");
         writer.WriteLine("#if defined(ESP_PLATFORM)");
         writer.WriteLine("        if (errno == EAGAIN || errno == EWOULDBLOCK) { clearerr(stdin); vTaskDelay(1); continue; }");
         writer.WriteLine("#endif");
@@ -109,6 +174,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("}");
         writer.WriteLine("ct_string* ct_console_read_line(void)");
         writer.WriteLine("{");
+        if (IsEspIdf)
+        {
+            writer.WriteLine("#if defined(CTILDE_USE_LINENOISE)");
+            writer.WriteLine("    return ct_esp_console_read_line(\"\");");
+            writer.WriteLine("#else");
+        }
         writer.WriteLine("    errno = 0;");
         writer.WriteLine("    if (fflush(stdout) == EOF) ct_host_io_throw(\"Console.ReadLine\", errno == 0 ? -1 : errno);");
         writer.WriteLine("    uint8_t* data = NULL; size_t length = 0u; size_t capacity = 0u; bool terminated = false;");
@@ -124,7 +195,23 @@ internal sealed partial class CEmitter
         writer.WriteLine("            if (length == 0u) { free(data); return NULL; }");
         writer.WriteLine("            break;");
         writer.WriteLine("        }");
-        writer.WriteLine("        if (value == '\\n') { terminated = true; break; }");
+        if (IsEspIdf)
+        {
+            writer.WriteLine("        ct_esp_console_input_activity();");
+            writer.WriteLine("        if (value == '\\n') { static const uint8_t newline = (uint8_t)'\\n'; ct_esp_console_echo(&newline, 1u); terminated = true; break; }");
+            writer.WriteLine("        if (value == '\\b' || value == 0x7f)");
+            writer.WriteLine("        {");
+            writer.WriteLine("            if (length > 0u)");
+            writer.WriteLine("            {");
+            writer.WriteLine("                static const uint8_t erase[] = { (uint8_t)'\\b', (uint8_t)' ', (uint8_t)'\\b' };");
+            writer.WriteLine("                length = ct_esp_console_previous_utf8(data, length);");
+            writer.WriteLine("                ct_esp_console_echo(erase, sizeof(erase));");
+            writer.WriteLine("            }");
+            writer.WriteLine("            continue;");
+            writer.WriteLine("        }");
+        }
+        else
+            writer.WriteLine("        if (value == '\\n') { terminated = true; break; }");
         writer.WriteLine("        if (length == (size_t)INT32_MAX) { free(data); ct_host_io_throw(\"Console.ReadLine\", ERANGE); }");
         writer.WriteLine("        if (length == capacity)");
         writer.WriteLine("        {");
@@ -135,11 +222,30 @@ internal sealed partial class CEmitter
         writer.WriteLine("            data = resized; capacity = next;");
         writer.WriteLine("        }");
         writer.WriteLine("        data[length++] = (uint8_t)value;");
+        if (IsEspIdf)
+            writer.WriteLine("        if (value != '\\r') { uint8_t echoed = (uint8_t)value; ct_esp_console_echo(&echoed, 1u); }");
         writer.WriteLine("    }");
         writer.WriteLine("    if (terminated && length > 0u && data[length - 1u] == (uint8_t)'\\r') length--;");
         writer.WriteLine("    if (!ct_host_utf8_valid(data, length)) { free(data); ct_host_io_throw(\"Console.ReadLine\", EILSEQ); }");
         writer.WriteLine("    ct_string* result = ct_string_from_bytes(data, (int32_t)length, \"<console>\", 0);");
         writer.WriteLine("    free(data); return result;");
+        if (IsEspIdf)
+            writer.WriteLine("#endif");
+        writer.WriteLine("}");
+        writer.WriteLine("ct_string* ct_console_read_line_prompt(ct_string* prompt)");
+        writer.WriteLine("{");
+        writer.WriteLine("    (void)ct_require_nonnull(prompt, \"<console>\", 0);");
+        if (IsEspIdf)
+        {
+            writer.WriteLine("#if defined(CTILDE_USE_LINENOISE)");
+            writer.WriteLine("    if (memchr(prompt->Data, 0, (size_t)prompt->Length) != NULL) ct_host_io_throw(\"Console.ReadLine\", EINVAL);");
+            writer.WriteLine("    return ct_esp_console_read_line((const char*)prompt->Data);");
+            writer.WriteLine("#else");
+        }
+        writer.WriteLine("    ct_write_string(prompt);");
+        writer.WriteLine("    return ct_console_read_line();");
+        if (IsEspIdf)
+            writer.WriteLine("#endif");
         writer.WriteLine("}");
 
         writer.WriteLine($"{handle} ct_host_file_open(ct_string* path, {mode} mode, {access} access)");

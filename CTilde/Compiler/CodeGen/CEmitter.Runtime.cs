@@ -91,6 +91,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("#include <signal.h>");
         if (IsEspIdf)
         {
+            if (_usesHostedIo && !UsesEspRuntimeIo)
+                writer.WriteLine("#if defined(CTILDE_USE_LINENOISE)\n#include <linenoise/linenoise.h>\n#endif");
             if (!IsManagedModule)
                 writer.WriteLine("#include <esp_err.h>");
             if (Model.UserTypes.SelectMany(type => type.Methods).Any(method => method.IsInterruptCode) ||
@@ -637,6 +639,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("void ct_write_line(void) { static const uint8_t newline = (uint8_t)'\\n'; ct_runtime_console_write(&newline, 1u); ct_runtime_console_flush(); }");
             writer.WriteLine("int32_t ct_console_read(void) { uint8_t value = 0u; bool eof = false; size_t count = ct_runtime_console_read(&value, 1u, &eof); return eof || count == 0u ? -1 : (int32_t)value; }");
             writer.WriteLine("ct_string* ct_console_read_line(void) { size_t capacity = 64u, length = 0u; uint8_t* data = (uint8_t*)ct_alloc(capacity, \"<console>\", 0); for (;;) { uint8_t value = 0u; bool eof = false; size_t count = ct_runtime_console_read(&value, 1u, &eof); if (eof || count == 0u || value == (uint8_t)'\\n') break; if (length == capacity) { size_t next = capacity * 2u; uint8_t* replacement = (uint8_t*)ct_alloc(next, \"<console>\", 0); (void)memcpy(replacement, data, length); ct_dealloc(data); data = replacement; capacity = next; } data[length++] = value; } if (length != 0u && data[length - 1u] == (uint8_t)'\\r') --length; ct_string* result = ct_string_from_bytes(data, (int32_t)length, \"<console>\", 0); ct_dealloc(data); return result; }");
+            writer.WriteLine("ct_string* ct_console_read_line_prompt(ct_string* prompt) { (void)ct_require_nonnull(prompt, \"<console>\", 0); ct_write_string(prompt); ct_runtime_console_flush(); return ct_console_read_line(); }");
         }
         else if (IsEspIdf && EmitDebugInstrumentation && !IsQemu)
         {

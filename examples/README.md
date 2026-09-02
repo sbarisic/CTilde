@@ -29,7 +29,7 @@
 
 | Project | What it demonstrates | Requirements |
 | --- | --- | --- |
-| [Managed Shell Firmware](ManagedShell/README.md) | LittleFS shell, shared Runtime ABI 18, process/module registry, load/run/wait/message commands, and final application unload | ESP-IDF 6 and ESP32 |
+| [Managed Shell Firmware](ManagedShell/README.md) | LittleFS shell, shared Runtime ABI 18, process/module registry, load/run/wait/message commands, status LED, and final application unload | ESP-IDF 6 and ESP32 |
 | [Managed Hello Module](ManagedShell/Modules/Hello/Program.ct) | A `.ctm` application with arguments, process-local mutable statics, copied-message receive, cooperative cancellation, and managed exit code | ESP-IDF 6 Xtensa toolchain |
 | [T-CAN Hardware](TCan485/README.md) | Physical ESP32 peripherals, generated bindings, runtime services, debugger acceptance, and Wi-Fi opt-in | ESP-IDF 6 and T-CAN485 |
 | [T-CAN QEMU ESP32](TCan485/README.md) | Xtensa ESP-IDF runtime and language fixture under QEMU | ESP-IDF 6 QEMU |

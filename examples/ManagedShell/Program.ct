@@ -2,6 +2,8 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
+using Esp.Idf;
 
 namespace Examples.ManagedShell;
 
@@ -24,6 +26,216 @@ internal static class ShellPlatform
     [NoAlloc]
     [NoThrow]
     internal static void PrintFreeHeap();
+}
+
+internal enum ShellLedColor
+{
+    Orange, Blue, Green, Red, White,
+}
+
+public static class ShellLed
+{
+    private const int Ws2812Pin = 4;
+    private const int MaximumProcesses = 16;
+    private const long InputPulseNanoseconds = 100000000L;
+    private const uint PollMilliseconds = 5u;
+    private static Atomic<int> enabled = new Atomic<int>(0);
+    private static Atomic<int> started = new Atomic<int>(0);
+    private static Atomic<int> initializationComplete = new Atomic<int>(0);
+    private static Atomic<int> baseColor = new Atomic<int>((int)ShellLedColor.Orange);
+    private static Atomic<int> inputGeneration = new Atomic<int>(0);
+    private static Atomic<int> updateFailureCode = new Atomic<int>(0);
+    private static Mutex processGate;
+    private static Process[] trackedProcesses;
+    private static Thread worker;
+    private static EspError initializationResult;
+    private static int activeProcesses;
+    private static bool batchFailed;
+
+    public static EspError InitializeOrange()
+    {
+        processGate = new Mutex();
+        trackedProcesses = new Process[MaximumProcesses];
+        activeProcesses = 0;
+        batchFailed = false;
+        worker = new Thread(UpdateLoop, 4096u, ThreadPriority.BelowNormal);
+        worker.Start();
+        while (initializationComplete.Load(MemoryOrder.Acquire) == 0)
+            Thread.Yield();
+        return initializationResult;
+    }
+
+    public static void PromptStarted()
+    {
+        if (started.Load(MemoryOrder.Acquire) == 0)
+            return;
+        lock (processGate)
+        {
+            UpdateBaseColor();
+        }
+    }
+
+    public static void ProcessStarting()
+    {
+        if (started.Load(MemoryOrder.Acquire) == 0)
+            return;
+        lock (processGate)
+        {
+            if (activeProcesses == 0)
+                batchFailed = false;
+            activeProcesses++;
+            baseColor.Store((int)ShellLedColor.Green, MemoryOrder.Release);
+        }
+    }
+
+    public static void ProcessStarted(Process process)
+    {
+        if (started.Load(MemoryOrder.Acquire) == 0)
+            return;
+        lock (processGate)
+        {
+            int index = 0;
+            while (index < trackedProcesses.Length)
+            {
+                Process tracked = trackedProcesses[index];
+                if (tracked != null && tracked.HasExited)
+                    CompleteProcess(index, tracked.ExitCode);
+                if (trackedProcesses[index] == null)
+                {
+                    trackedProcesses[index] = process;
+                    return;
+                }
+                index++;
+            }
+            batchFailed = true;
+            activeProcesses--;
+            UpdateBaseColor();
+        }
+    }
+
+    public static void ProcessStartFailed()
+    {
+        if (started.Load(MemoryOrder.Acquire) == 0)
+            return;
+        lock (processGate)
+        {
+            if (activeProcesses > 0)
+                activeProcesses--;
+            batchFailed = true;
+            UpdateBaseColor();
+        }
+    }
+
+    [Export("ct_managed_shell_input_activity")]
+    [NoAlloc]
+    public static void InputActivity()
+    {
+        inputGeneration.FetchAdd(1, MemoryOrder.Release);
+    }
+
+    [NoAlloc]
+    public static int TakeUpdateFailureCode()
+    {
+        return updateFailureCode.Exchange(0, MemoryOrder.AcquireRelease);
+    }
+
+    private static void CompleteProcess(int index, int exitCode)
+    {
+        trackedProcesses[index] = null;
+        if (activeProcesses > 0)
+            activeProcesses--;
+        if (exitCode != 0)
+            batchFailed = true;
+    }
+
+    private static void PollProcesses()
+    {
+        lock (processGate)
+        {
+            int index = 0;
+            while (index < trackedProcesses.Length)
+            {
+                Process process = trackedProcesses[index];
+                if (process != null && process.HasExited)
+                    CompleteProcess(index, process.ExitCode);
+                index++;
+            }
+            UpdateBaseColor();
+        }
+    }
+
+    private static void UpdateBaseColor()
+    {
+        if (activeProcesses > 0)
+            baseColor.Store((int)ShellLedColor.Green, MemoryOrder.Release);
+        else if (batchFailed)
+            baseColor.Store((int)ShellLedColor.Red, MemoryOrder.Release);
+        else
+            baseColor.Store((int)ShellLedColor.Blue, MemoryOrder.Release);
+    }
+
+    private static EspError Display(int color)
+    {
+        EspError result;
+        if (color == (int)ShellLedColor.Orange)
+            result = Ws2812.SetPixel(0u, 16u, 8u, 0u);
+        else if (color == (int)ShellLedColor.Blue)
+            result = Ws2812.SetPixel(0u, 0u, 0u, 16u);
+        else if (color == (int)ShellLedColor.Green)
+            result = Ws2812.SetPixel(0u, 0u, 16u, 0u);
+        else if (color == (int)ShellLedColor.Red)
+            result = Ws2812.SetPixel(0u, 16u, 0u, 0u);
+        else
+            result = Ws2812.SetPixel(0u, 16u, 16u, 16u);
+        if (!result.IsSuccess)
+            return result;
+        return Ws2812.Refresh();
+    }
+
+    private static void UpdateLoop()
+    {
+        EspError result = Ws2812.Configure(Ws2812Pin, 1u);
+        if (result.IsSuccess)
+            result = Display((int)ShellLedColor.Orange);
+        initializationResult = result;
+        if (!result.IsSuccess)
+        {
+            initializationComplete.Store(1, MemoryOrder.Release);
+            return;
+        }
+        enabled.Store(1, MemoryOrder.Release);
+        started.Store(1, MemoryOrder.Release);
+        initializationComplete.Store(1, MemoryOrder.Release);
+        int observedInput = inputGeneration.Load(MemoryOrder.Acquire);
+        int displayedColor = (int)ShellLedColor.Orange;
+        long whiteUntil = 0L;
+        while (enabled.Load(MemoryOrder.Acquire) != 0)
+        {
+            PollProcesses();
+            long now = Stopwatch.GetTimestampNanoseconds();
+            int currentInput = inputGeneration.Load(MemoryOrder.Acquire);
+            if (currentInput != observedInput)
+            {
+                observedInput = currentInput;
+                whiteUntil = now + InputPulseNanoseconds;
+            }
+            int desiredColor = baseColor.Load(MemoryOrder.Acquire);
+            if (now < whiteUntil)
+                desiredColor = (int)ShellLedColor.White;
+            if (desiredColor != displayedColor)
+            {
+                EspError updateResult = Display(desiredColor);
+                if (!updateResult.IsSuccess)
+                {
+                    updateFailureCode.Store(updateResult.Code, MemoryOrder.Release);
+                    enabled.Store(0, MemoryOrder.Release);
+                    return;
+                }
+                displayedColor = desiredColor;
+            }
+            Thread.Sleep(PollMilliseconds);
+        }
+    }
 }
 
 public static class Program
@@ -100,12 +312,15 @@ public static class Program
         string path = words[1];
         if (!path.StartsWith("/"))
             path = Path.Combine("/storage/modules", path);
+        ShellLed.ProcessStarting();
         Process process = Process.Start(path, Arguments(words, 2));
         if (process.Id == 0u)
         {
+            ShellLed.ProcessStartFailed();
             Console.WriteLine("module load failed");
             return;
         }
+        ShellLed.ProcessStarted(process);
         processes[slot] = process;
         if (processCount < processes.Length)
             processCount++;
@@ -203,14 +418,26 @@ public static class Program
     [EntryPoint]
     public static void Main()
     {
+        EspError ledResult = ShellLed.InitializeOrange();
         if (ShellPlatform.Initialize() != 0)
             return;
+        if (!ledResult.IsSuccess)
+        {
+            Console.Write("LED initialization failed: ");
+            Console.WriteLine(ledResult.GetName());
+        }
         Console.WriteLine("CTilde managed shell - Runtime ABI 18 / Module ABI 1");
         Help();
         while (true)
         {
-            Console.Write("ct> ");
-            string line = Console.ReadLine();
+            ShellLed.PromptStarted();
+            int ledFailure = ShellLed.TakeUpdateFailureCode();
+            if (ledFailure != 0)
+            {
+                Console.Write("LED update failed: ");
+                Console.WriteLine(ledFailure);
+            }
+            string line = Console.ReadLine("ct> ");
             if (line == null)
                 return;
             Dispatch(line);

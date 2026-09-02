@@ -298,6 +298,9 @@ internal static class StandardLibrary
 
         [Extern("ct_console_read_line")]
         public static string ReadLine();
+
+        [Extern("ct_console_read_line_prompt")]
+        public static string ReadLine(string prompt);
     """;
 
     private const string NativeUtf8Declaration = """

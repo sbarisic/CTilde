@@ -1,5 +1,6 @@
 # Changelog
 
+- Added the Draft 0.45 ManagedShell firmware and managed-application project wrappers to the categorized 18-project example solution, aligned project-contract tests with the fixed Module ABI 1 identities, and retained extension version 0.15.0. No VSIX was produced or installed by this source revision.
 - Added Draft 0.39 `[NativeImport]` diagnostics, semantic metadata, and schema support for platform-selected `hosted.runtimeFiles` while retaining hosted x64 SIMD, `Vec3x4` debug presentation, and extension version 0.15.0.
 
 ## 0.15.0 - Preview

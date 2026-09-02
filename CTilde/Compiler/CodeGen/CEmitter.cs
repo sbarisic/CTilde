@@ -1513,8 +1513,10 @@ internal sealed partial class CEmitter : ILoweringServices
     private void EmitManagedBinaryManifest(CWriter writer, ManagedModuleConfiguration configuration, ManagedModuleMetadata metadata)
     {
         var count = Math.Max(1, metadata.Dependencies.Length);
-        writer.WriteLine("typedef struct ct_binary_dependency_v1 { char Name[64]; char Version[32]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; } ct_binary_dependency_v1;");
-        writer.WriteLine($"typedef struct ct_binary_manifest_v1 {{ uint8_t Magic[8]; uint32_t HeaderSize; uint32_t TotalSize; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Architecture; uint32_t Kind; uint32_t DependencyCount; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; char Name[64]; char Version[32]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; ct_binary_dependency_v1 Dependencies[{count}]; }} ct_binary_manifest_v1;");
+        var nameCapacity = ManagedModuleMetadata.MaximumNameAsciiBytes + 1;
+        var versionCapacity = ManagedModuleMetadata.MaximumVersionAsciiBytes + 1;
+        writer.WriteLine($"typedef struct ct_binary_dependency_v1 {{ char Name[{nameCapacity}]; char Version[{versionCapacity}]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; }} ct_binary_dependency_v1;");
+        writer.WriteLine($"typedef struct ct_binary_manifest_v1 {{ uint8_t Magic[8]; uint32_t HeaderSize; uint32_t TotalSize; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Architecture; uint32_t Kind; uint32_t DependencyCount; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; char Name[{nameCapacity}]; char Version[{versionCapacity}]; uint8_t BuildIdentity[32]; uint8_t ApiHash[32]; ct_binary_dependency_v1 Dependencies[{count}]; }} ct_binary_manifest_v1;");
         writer.WriteLine("CT_MANAGED_MANIFEST const ct_binary_manifest_v1 ct_managed_binary_manifest_v1 = {");
         writer.WriteLine("    { UINT8_C(0x43), UINT8_C(0x54), UINT8_C(0x4D), UINT8_C(0x4F), UINT8_C(0x44), UINT8_C(1), UINT8_C(0), UINT8_C(0) },");
         writer.WriteLine($"    (uint32_t)offsetof(ct_binary_manifest_v1, Dependencies), (uint32_t)(offsetof(ct_binary_manifest_v1, Dependencies) + sizeof(ct_binary_dependency_v1) * {metadata.Dependencies.Length}), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({ArchitectureCode()}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), UINT32_C({metadata.Dependencies.Length}), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}),");

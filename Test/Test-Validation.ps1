@@ -95,6 +95,10 @@ Invoke-Phase 'Visual Studio core tests' {
 Invoke-Phase 'VS Code prepared tests' { Invoke-Checked 'npm' @('run', 'test:no-build') $vscodeRoot }
 
 if ($Tier -eq 'Release') {
+    Invoke-Phase 'Example catalog smoke' {
+        & (Join-Path $PSScriptRoot 'Test-ExampleCatalog.ps1') -CompilerDll $compilerDll
+        if ($LASTEXITCODE -ne 0) { throw 'The example catalog smoke failed.' }
+    }
     Invoke-Phase 'Native-import release matrix' {
         & (Join-Path $PSScriptRoot 'Test-NativeImportMatrix.ps1') -CompilerDll $compilerDll
         if ($LASTEXITCODE -ne 0) { throw 'The native-import release matrix failed.' }

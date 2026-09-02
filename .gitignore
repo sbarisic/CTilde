@@ -229,7 +229,10 @@ orleans.codegen.cs
 /examples/InlineAssemblyWindows/build/
 /examples/ObjectModel/build/
 /examples/HostedIo/build/
+/examples/HostedNativeImport/build/
+/examples/LanguageTour/build/
 /examples/StandardLibrary/build/
+/examples/CollectionsAndGeometry/build/
 /examples/HostedIo/program.c
 /examples/HostedIo/program
 /examples/HostedIo/program.exe

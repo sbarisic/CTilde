@@ -1,6 +1,6 @@
 # C~ for Visual Studio
 
-Version 0.15.0 of this preview extension supports C~ Draft 0.39 hosted native imports, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.15.0 of this preview extension supports the current C~ Draft 0.45 compiler, hosted native imports, ESP-IDF managed-module project manifests, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 
@@ -75,7 +75,7 @@ The common imports and item schemas are required by CPS for the project hierarch
 
 Visual Studio project Check and Build explicitly request normal compiler verbosity. Canonical C~ diagnostics populate the Error List directly, without a generic `MSB3073` duplicate. The compiler writes `.ctilde/build-diagnostics.json` atomically after project compilation. The extension uses matching saved-source hashes for temporary source squiggles, asks the language server for a fresh project analysis, and uses LSP results as the source authority. Manifest diagnostics are owned by the extension and underline the exact invalid JSON value. Unmapped native compiler and linker failures remain in the Error List rather than being attached to an unrelated C~ span.
 
-The repository solution contains 13 ready-to-load C~ projects under **C~**: the physical standard library and 12 example/target entries. Select the intended project before running a command. This is required for the three T-CAN wrappers because they share one directory but reference different manifests. The entries deliberately omit `Build.0`, so **Build Solution** continues to build only the .NET solution projects.
+The repository exposes 19 ready-to-load C~ projects: the physical standard library in `CTilde.StandardLibrary.sln` and 18 categorized entries in `Examples.sln`. The example solution includes separate ManagedShell firmware and managed Hello application projects plus three T-CAN wrappers that share one directory but reference different manifests. Select the intended project before running a command. Every entry deliberately omits `Build.0`, so **Build Solution** never attempts every optional native toolchain or hardware target at once.
 
 ## Build and silent deployment
 

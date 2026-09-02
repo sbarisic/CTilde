@@ -205,20 +205,25 @@ Run("repository C~ project contracts", () =>
         "examples/Hello/Hello.ctproj",
         "examples/Exceptions/Exceptions.ctproj",
         "examples/Features/Features.ctproj",
+        "examples/LanguageTour/LanguageTour.ctproj",
+        "examples/CollectionsAndGeometry/CollectionsAndGeometry.ctproj",
         "examples/InlineAssemblyWindows/InlineAssemblyWindows.ctproj",
         "examples/ObjectModel/ObjectModel.ctproj",
         "examples/StandardLibrary/StandardLibrary.ctproj",
         "examples/Cosmopolitan/Cosmopolitan.ctproj",
         "examples/Freestanding/Freestanding.ctproj",
         "examples/HostedIo/HostedIo.ctproj",
+        "examples/HostedNativeImport/HostedNativeImport.ctproj",
+        "examples/ManagedShell/ManagedShell.ctproj",
+        "examples/ManagedShell/Modules/Hello/ManagedHello.ctproj",
         "examples/QemuFreestanding/QemuFreestanding.ctproj",
         "examples/TCan485/TCan485.Hardware.ctproj",
         "examples/TCan485/TCan485.QemuEsp32.ctproj",
         "examples/TCan485/TCan485.QemuEsp32C3.ctproj",
     };
     var contracts = relativeProjects.Select(path => CTildeProjectContract.Load(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)))).ToArray();
-    Equal(14, contracts.Length);
-    Equal(14, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
+    Equal(19, contracts.Length);
+    Equal(19, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
     True(contracts.All(contract => File.Exists(contract.ManifestPath)));
     foreach (var contract in contracts)
     {
@@ -267,6 +272,11 @@ Run("repository C~ project contracts", () =>
     True(examplesSolution.Contains("{4CD54149-3858-41D8-82BC-D49F144A6B90} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
     True(examplesSolution.Contains("{61011E83-E222-434D-9F4B-175DEAE2F1F3} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
     True(examplesSolution.Contains("{6CFF1E49-AC3D-43B9-A008-35A85FC530DB} = {4E0784B2-C9B9-4420-889F-14B231242281}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{6431CA54-1B56-4FB9-892F-43FA94A4FD3F} = {4014AE7B-6E58-4921-8CB6-0B22158D36F8}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{4EA90EA7-4314-4B95-9E0D-FBF649E92983} = {4014AE7B-6E58-4921-8CB6-0B22158D36F8}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{B49EB28F-9E95-4FD4-8601-3EFED6D02CE5} = {4014AE7B-6E58-4921-8CB6-0B22158D36F8}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{F9801B95-758B-4164-8381-66449BAE71BE} = {10BCEBBC-9F01-4275-96BE-C4139066B201}", StringComparison.Ordinal));
+    True(examplesSolution.Contains("{966E6BDF-DF2F-4D3F-B5B4-194708C47D31} = {10BCEBBC-9F01-4275-96BE-C4139066B201}", StringComparison.Ordinal));
 });
 Run("cancellation and nonzero CLI outcomes", () =>
 {

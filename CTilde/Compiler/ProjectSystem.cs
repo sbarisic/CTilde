@@ -637,11 +637,13 @@ public static class CTildeProjectFile
             "library" => ManagedModuleKind.Library,
             _ => throw new CTildeProjectException($"Managed module in '{manifestPath}' requires kind application or library.", "CT6202"),
         };
-        if (string.IsNullOrWhiteSpace(document.Name) ||
-            !Regex.IsMatch(document.Name, "^[A-Za-z][A-Za-z0-9]*(?:[.][A-Za-z][A-Za-z0-9]*)*$", RegexOptions.CultureInvariant))
+        if (document.Name is { Length: > ManagedModuleMetadata.MaximumNameAsciiBytes })
+            throw new CTildeProjectException($"Managed-module name in '{manifestPath}' exceeds the Managed Module ABI 1 limit of {ManagedModuleMetadata.MaximumNameAsciiBytes} ASCII bytes.", "CT6202");
+        if (string.IsNullOrWhiteSpace(document.Name) || !ManagedModuleMetadata.IsCanonicalName(document.Name))
             throw new CTildeProjectException($"Managed-module name '{document.Name}' in '{manifestPath}' is not canonical.", "CT6202");
-        if (string.IsNullOrWhiteSpace(document.Version) ||
-            !Regex.IsMatch(document.Version, "^(0|[1-9][0-9]*)(?:[.](0|[1-9][0-9]*)){2}(?:-[0-9A-Za-z.-]+)?(?:[+][0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant))
+        if (document.Version is { Length: > ManagedModuleMetadata.MaximumVersionAsciiBytes })
+            throw new CTildeProjectException($"Managed-module version in '{manifestPath}' exceeds the Managed Module ABI 1 limit of {ManagedModuleMetadata.MaximumVersionAsciiBytes} ASCII bytes.", "CT6202");
+        if (string.IsNullOrWhiteSpace(document.Version) || !ManagedModuleMetadata.IsExactVersion(document.Version))
             throw new CTildeProjectException($"Managed-module version '{document.Version}' in '{manifestPath}' must be an exact semantic version.", "CT6202");
         var stack = document.MainTaskStackBytes ?? 8192;
         if (stack < 2048 || stack % 16 != 0)

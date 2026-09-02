@@ -1,0 +1,158 @@
+using System;
+using System.Collections;
+
+namespace Examples.CollectionsAndGeometry;
+
+public static class Program
+{
+    private static bool Equal(int left, int right)
+    {
+        return left == right;
+    }
+
+    private static int Hash(int value)
+    {
+        return value;
+    }
+
+    private static bool IsEven(int value)
+    {
+        return value % 2 == 0;
+    }
+
+    private static bool IsPositive(int value)
+    {
+        return value > 0;
+    }
+
+    private static int Compare(int left, int right)
+    {
+        if (left < right)
+            return -1;
+        if (left > right)
+            return 1;
+        return 0;
+    }
+
+    private static int Double(int value)
+    {
+        return value * 2;
+    }
+
+    private static int Sum(int total, int value)
+    {
+        return total + value;
+    }
+
+    private static string Label(int value)
+    {
+        return "value=" + value.ToString();
+    }
+
+    private static bool GenericValuesWork()
+    {
+        Pair<int, string> pair = new Pair<int, string>(7, "seven");
+        Option<int> optional = Option<int>.Some(pair.First);
+        Option<int> none = Option<int>.None;
+        Option<string> mappedOption = optional.Map<string>(Label);
+        Result<int, string> result = Result<int, string>.Ok(optional.Or(0));
+        Result<string, string> mappedResult = result.MapOk<string>(Label);
+        Result<int, string> error = Result<int, string>.Err("expected");
+        return pair.Second == "seven" && !none.HasValue && none.Or(9) == 9 && mappedOption.Or("missing")
+            == "value=7" && mappedResult.OkOr("missing") == "value=7" && error.IsErr
+            && error.ErrOr("missing") == "expected";
+    }
+
+    private static bool ArrayAlgorithmsWork()
+    {
+        int[] values = new int[4];
+        values[0] = 3;
+        values[1] = 1;
+        values[2] = 4;
+        values[3] = 2;
+        int[] evens = ArrayAlgorithms.Filter<int>(values, IsEven);
+        int[] doubled = ArrayAlgorithms.Map<int, int>(values, Double);
+        int[] sorted = ArrayAlgorithms.Sorted<int>(values, Compare);
+        int total = ArrayAlgorithms.Fold<int, int>(values, 0, Sum);
+        return evens.Length == 2 && evens[0] == 4 && doubled[3] == 4 && sorted[0]
+            == 1 && sorted[3] == 4 && total == 10 && ArrayAlgorithms.Any<int>(values,
+            IsEven) && ArrayAlgorithms.All<int>(values, IsPositive);
+    }
+
+    private static bool CollectionsWork(out bool mutationWasRejected)
+    {
+        List<int> list = new List<int>();
+        list.Add(2);
+        list.Insert(0, 1);
+        ListEnumerator<int> enumerator = list.GetEnumerator();
+        bool began = enumerator.MoveNext() && enumerator.Current == 1;
+        list.Add(3);
+        mutationWasRejected = false;
+        try
+        {
+            enumerator.MoveNext();
+        }
+        catch (InvalidOperationException)
+        {
+            mutationWasRejected = true;
+        }
+        enumerator.Dispose();
+        Stack<int> stack = new Stack<int>();
+        stack.Push(10);
+        stack.Push(20);
+        int stackValue = stack.Pop();
+        Queue<int> queue = new Queue<int>();
+        queue.Enqueue(30);
+        queue.Enqueue(40);
+        int queueValue = queue.Dequeue();
+        Map<int, string> map = new Map<int, string>(Hash, Equal);
+        map.Add(5, "five");
+        map[5] = "FIVE";
+        string mapValue;
+        bool found = map.TryGetValue(5, out mapValue);
+        Set<int> setValue = new Set<int>(Hash, Equal);
+        bool firstAdd = setValue.Add(8);
+        bool duplicateAdd = setValue.Add(8);
+        return began && list.Count == 3 && stackValue == 20 && stack.Peek() == 10
+            && queueValue == 30 && queue.Peek() == 40 && found && mapValue == "FIVE"
+            && firstAdd && !duplicateAdd && setValue.Contains(8);
+    }
+
+    private static bool Near(float left, float right)
+    {
+        return Math.Abs(left - right) < 0.0001f;
+    }
+
+    private static bool GeometryWorks()
+    {
+        Vec2 source2 = new Vec2(1.0f, 2.0f);
+        Matrix3x2 affine = Matrix3x2.CreateScale(2.0f, 3.0f) * Matrix3x2.CreateTranslation(5.0f,
+            7.0f);
+        Vec2 point2 = affine.TransformPoint(source2);
+        Matrix4x4 world = Matrix4x4.CreateScale(2.0f) * Matrix4x4.CreateTranslation(5.0f,
+            6.0f, 7.0f);
+        Vec4 point4 = world.Transform(new Vec4(1.0f, 2.0f, 3.0f, 1.0f));
+        Quaternion rotation = Quaternion.CreateFromAxisAngle(Vec3.UnitZ, Math.Pi
+            * 0.5f);
+        Vec3 rotated = rotation.Transform(Vec3.UnitX);
+        return Near(point2.X, 7.0f) && Near(point2.Y, 13.0f) && Near(point4.X, 7.0f)
+            && Near(point4.Y, 10.0f) && Near(point4.Z, 13.0f) && Near(point4.W, 1.0f)
+            && Near(rotated.X, 0.0f) && Near(rotated.Y, 1.0f);
+    }
+
+    [EntryPoint]
+    public static void Main()
+    {
+        bool mutationWasRejected;
+        Console.Write("generic values: ");
+        Console.WriteLine(GenericValuesWork());
+        Console.Write("array algorithms: ");
+        Console.WriteLine(ArrayAlgorithmsWork());
+        Console.Write("collections: ");
+        Console.WriteLine(CollectionsWork(out mutationWasRejected));
+        Console.Write("version guard: ");
+        Console.WriteLine(mutationWasRejected);
+        Console.Write("geometry: ");
+        Console.WriteLine(GeometryWorks());
+    }
+}

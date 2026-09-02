@@ -50,17 +50,26 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 
 ## Managed modules
 
-Draft 0.45 establishes Runtime ABI 18 and Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, and hidden module-local definitions. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules. The ManagedShell hardware acceptance completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
+Draft 0.45 establishes Runtime ABI 18 and Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, and hidden module-local definitions. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules. A manual ManagedShell serial session completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
 
 - [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
 - [ ] Implement canonical type fingerprints, descriptor registration, and runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.
 - [ ] Compile `.ctmeta.json` references as semantic dependencies without adding provider source, enforce binary-module-local `internal`, and generate checked managed import slots and concrete cross-module calls.
-- [ ] Complete managed library loading and exercise concrete classes, structures, interfaces, arrays, and delegates across a module boundary. Public managed APIs remain non-generic.
+- [ ] Turn the structural dependency loader into a supported managed-library surface, then exercise concrete classes, structures, interfaces, arrays, and delegates across a module boundary. Public managed APIs remain non-generic.
 - [ ] Make source-created child threads inherit process ownership, finish the native-resource ledger, and translate an unhandled managed exception into process failure instead of firmware panic.
-- [ ] Complete cooperative cancellation and forced termination for non-returning tasks, including reaper-task cleanup from the FreeRTOS TLS deletion callback and documented unsafe escape behavior.
+- [ ] Extend the implemented main-task cancellation/forced-termination and reaper cleanup to source-created child tasks and the complete native-resource ledger; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
+- [ ] Make managed console input cancellable without deleting a task inside a blocking VFS/newlib read, and define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
 - [ ] Replace the fixed lifetime process-handle table with reclaimable generation-checked handles so repeated starts are not bounded by one boot-time slot count.
 - [ ] Audit every dynamic symbol and relocation against the loader allowlist, then prove modules contain no private runtime or standard-library implementation.
 - [ ] Add corrupt, wrong-architecture, stale-ABI, dependency-cycle, version-conflict, signature-mismatch, heap-quota, child-thread, exception, cancellation, forced-termination, and cross-process reference rejection tests.
+- [ ] Extend the ManagedShell hardware runner to execute the lifecycle loop and persist a machine-readable report so the manual 2026-09-02 measurements become a replayable acceptance gate.
+- [ ] Design a separate hosted Managed Module ABI host only if desktop shared-runtime modules are required. The current [HostedNativeImport example](examples/HostedNativeImport/README.md) intentionally exercises native C ABI loading and cannot substitute for managed descriptors, canonical types, process instances, or `.ctmeta.json` references.
+
+## Example coverage
+
+- [ ] Add a full-service freestanding backend that demonstrates file, directory, clock, math, thread, mutex, and runtime-TLS provider groups. The current freestanding examples intentionally implement only the services reached by their kernels.
+- [ ] Add `[Register]` and `[LinkerSymbol]` to a runnable target example after selecting hardware addresses and linker symbols that are safe to read or write on that target.
+- [ ] Add an offline repository-source-module example only when its exact Git object store can be checked in or generated locally without making `Examples.sln` access the network.
 
 ## Cosmopolitan target
 

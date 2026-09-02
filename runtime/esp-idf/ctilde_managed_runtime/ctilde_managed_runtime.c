@@ -12,6 +12,7 @@
 #include "esp_err.h"
 #include "esp_elf.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -38,15 +39,29 @@ extern uint64_t __umoddi3(uint64_t dividend, uint64_t divisor);
 
 static_assert(CONFIG_CTILDE_MANAGED_TLS_INDEX < CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS,
     "CONFIG_CTILDE_MANAGED_TLS_INDEX must select an allocated FreeRTOS TLS slot");
+static_assert(CTILDE_MANAGED_MODULE_NAME_CAPACITY == 64u,
+    "Managed Module ABI 1 requires 64-byte name fields");
+static_assert(CTILDE_MANAGED_MODULE_VERSION_CAPACITY == 32u,
+    "Managed Module ABI 1 requires 32-byte version fields");
 
 #define CT_MODULE_PATH_MAX 256
-#define CT_MODULE_NAME_MAX 64
-#define CT_MODULE_VERSION_MAX 32
+#define CT_MODULE_NAME_MAX CTILDE_MANAGED_MODULE_NAME_CAPACITY
+#define CT_MODULE_VERSION_MAX CTILDE_MANAGED_MODULE_VERSION_CAPACITY
 #define CT_MAX_DEPENDENCIES 16
 #define CT_MAX_PROCESS_MODULES 16
 #define CT_MAX_ARGUMENTS 32
 #define CT_MAILBOX_DEPTH 16
 #define CT_THREAD_STATE_BYTES 128
+#define CT_MAX_CALL_DEPTH CT_MAX_PROCESS_MODULES
+#define CT_RUNTIME_GATE_STOPPED UINT32_C(0x80000000)
+#define CT_RUNTIME_GATE_COUNT UINT32_C(0x7fffffff)
+#define CT_TERMINATION_NONE UINT32_C(0)
+#define CT_TERMINATION_PUBLISHING UINT32_C(1)
+#define CT_TERMINATION_QUEUED UINT32_C(2)
+#define CT_TERMINATION_POLL_MILLISECONDS UINT32_C(10)
+#define CT_INITIALIZATION_UNINITIALIZED UINT32_C(0)
+#define CT_INITIALIZATION_RUNNING UINT32_C(1)
+#define CT_INITIALIZATION_READY UINT32_C(2)
 
 static const char *TAG = "ctilde.modules";
 
@@ -85,8 +100,8 @@ struct ct_type_descriptor {
 };
 
 typedef struct ct_binary_dependency_v1 {
-    char Name[64];
-    char Version[32];
+    char Name[CT_MODULE_NAME_MAX];
+    char Version[CT_MODULE_VERSION_MAX];
     uint8_t BuildIdentity[32];
     uint8_t ApiHash[32];
 } ct_binary_dependency_v1;
@@ -102,8 +117,8 @@ typedef struct ct_binary_manifest_v1 {
     uint32_t DependencyCount;
     uint32_t MainTaskStackBytes;
     uint64_t HeapLimitBytes;
-    char Name[64];
-    char Version[32];
+    char Name[CT_MODULE_NAME_MAX];
+    char Version[CT_MODULE_VERSION_MAX];
     uint8_t BuildIdentity[32];
     uint8_t ApiHash[32];
     ct_binary_dependency_v1 Dependencies[];
@@ -125,6 +140,20 @@ typedef struct ct_message {
     size_t Length;
     uint8_t Data[];
 } ct_message;
+
+typedef struct ct_termination_request {
+    ct_process *Process;
+    uint32_t GraceMilliseconds;
+    int64_t RequestedAtMicroseconds;
+} ct_termination_request;
+
+typedef struct ct_pending_termination {
+    ct_process *Process;
+    int64_t DeadlineMicroseconds;
+    TaskHandle_t Task;
+    bool InfiniteGrace;
+    bool DrainingOperations;
+} ct_pending_termination;
 
 typedef struct ct_module_instance {
     ct_module *Module;
@@ -154,20 +183,29 @@ typedef struct ct_execution_context {
     ct_process *Process;
     ct_module *Module;
     void *ThreadState;
+    ct_module *PreviousModules[CT_MAX_CALL_DEPTH];
+    uint32_t CallDepth;
+    uint32_t RuntimeOperationDepth;
     uint8_t PrimaryThreadState[CT_THREAD_STATE_BYTES] __attribute__((aligned(8)));
 } ct_execution_context;
 
 struct ct_process {
     bool Used;
     bool Cleaned;
+    bool Completed;
     bool CleanupQueued;
+    uint32_t TerminationRequestState;
+    bool TerminationDispatched;
+    bool ForceDeleteIssued;
     uint32_t Id;
     volatile ct_managed_process_state State;
     volatile bool Cancellation;
     int32_t ExitCode;
     ct_module *Root;
+    char RootName[CT_MODULE_NAME_MAX];
     TaskHandle_t MainTask;
     uint32_t TaskCount;
+    uint32_t RuntimeGate;
     size_t HeapBytes;
     size_t HeapLimit;
     ct_allocation *Allocations;
@@ -194,14 +232,20 @@ typedef struct ct_type_registration {
 
 static ct_module s_modules[CONFIG_CTILDE_MANAGED_MAX_MODULES];
 static ct_process s_processes[CONFIG_CTILDE_MANAGED_MAX_PROCESSES];
+static uint32_t s_published_process_ids[CONFIG_CTILDE_MANAGED_MAX_PROCESSES];
 static ct_type_registration s_types[128];
 static uint32_t s_next_process_id = 1;
 static StaticSemaphore_t s_registry_storage;
 static SemaphoreHandle_t s_registry;
 static StaticQueue_t s_reaper_queue_storage;
-static uint8_t s_reaper_queue_buffer[16 * sizeof(ct_process *)];
+static uint8_t s_reaper_queue_buffer[CONFIG_CTILDE_MANAGED_MAX_PROCESSES * sizeof(ct_process *)];
 static QueueHandle_t s_reaper_queue;
+static StaticQueue_t s_termination_queue_storage;
+static uint8_t s_termination_queue_buffer[CONFIG_CTILDE_MANAGED_MAX_PROCESSES * sizeof(ct_termination_request)];
+static QueueHandle_t s_termination_queue;
+static ct_pending_termination s_pending_terminations[CONFIG_CTILDE_MANAGED_MAX_PROCESSES];
 static bool s_initialized;
+static uint32_t s_initialization_state;
 
 static void cleanup_process(ct_process *process, bool forced);
 static void release_module(ct_module *module);
@@ -219,6 +263,80 @@ static ct_process *current_process(void)
     return context == NULL ? NULL : context->Process;
 }
 
+static bool begin_runtime_operation(ct_execution_context *context)
+{
+    if (context == NULL || context->Process == NULL) return false;
+    ct_process *process = context->Process;
+    uint32_t gate = __atomic_load_n(&process->RuntimeGate, __ATOMIC_ACQUIRE);
+    for (;;) {
+        if (context->RuntimeOperationDepth == 0 && (gate & CT_RUNTIME_GATE_STOPPED) != 0) return false;
+        if ((gate & CT_RUNTIME_GATE_COUNT) == CT_RUNTIME_GATE_COUNT) abort();
+        if (__atomic_compare_exchange_n(&process->RuntimeGate, &gate, gate + 1u, false,
+                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            context->RuntimeOperationDepth++;
+            return true;
+        }
+    }
+}
+
+static void end_runtime_operation(ct_execution_context *context)
+{
+    if (context == NULL || context->Process == NULL || context->RuntimeOperationDepth == 0) abort();
+    context->RuntimeOperationDepth--;
+    const uint32_t gate = __atomic_fetch_sub(&context->Process->RuntimeGate, 1u, __ATOMIC_ACQ_REL);
+    if ((gate & CT_RUNTIME_GATE_COUNT) == 0) abort();
+}
+
+static void abandon_runtime_operations(ct_execution_context *context)
+{
+    if (context == NULL || context->Process == NULL || context->RuntimeOperationDepth == 0) return;
+    const uint32_t depth = context->RuntimeOperationDepth;
+    context->RuntimeOperationDepth = 0;
+    const uint32_t gate = __atomic_fetch_sub(&context->Process->RuntimeGate, depth, __ATOMIC_ACQ_REL);
+    if ((gate & CT_RUNTIME_GATE_COUNT) < depth) abort();
+}
+
+static void await_forced_task_deletion(void)
+{
+    for (;;) vTaskDelay(portMAX_DELAY);
+}
+
+static bool enter_context_call(ct_execution_context *context, ct_module *module)
+{
+    if (context == NULL || module == NULL || context->CallDepth >= CT_MAX_CALL_DEPTH) return false;
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
+    const uint32_t depth = context->CallDepth++;
+    context->PreviousModules[depth] = context->Module;
+    (void)__atomic_add_fetch(&module->ActiveCalls, 1u, __ATOMIC_ACQ_REL);
+    context->Module = module;
+    end_runtime_operation(context);
+    return true;
+}
+
+static bool leave_context_call(ct_execution_context *context, ct_module *module)
+{
+    if (context == NULL || context->CallDepth == 0 || context->Module != module) return false;
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
+    const uint32_t depth = --context->CallDepth;
+    if (__atomic_fetch_sub(&module->ActiveCalls, 1u, __ATOMIC_ACQ_REL) == 0) abort();
+    context->Module = context->PreviousModules[depth];
+    context->PreviousModules[depth] = NULL;
+    end_runtime_operation(context);
+    return true;
+}
+
+static void abandon_context_calls(ct_execution_context *context)
+{
+    if (context == NULL) return;
+    while (context->CallDepth != 0) {
+        const uint32_t depth = --context->CallDepth;
+        ct_module *module = context->Module;
+        if (module == NULL || __atomic_fetch_sub(&module->ActiveCalls, 1u, __ATOMIC_ACQ_REL) == 0) abort();
+        context->Module = context->PreviousModules[depth];
+        context->PreviousModules[depth] = NULL;
+    }
+}
+
 static void set_error(char *error, size_t capacity, const char *message)
 {
     if (error != NULL && capacity != 0) {
@@ -229,6 +347,72 @@ static void set_error(char *error, size_t capacity, const char *message)
 static bool contained_string(const char *value, size_t capacity)
 {
     return value != NULL && memchr(value, '\0', capacity) != NULL && value[0] != '\0';
+}
+
+static bool ascii_letter(char value)
+{
+    return (value >= 'A' && value <= 'Z') || (value >= 'a' && value <= 'z');
+}
+
+static bool ascii_digit(char value)
+{
+    return value >= '0' && value <= '9';
+}
+
+static bool ascii_alphanumeric(char value)
+{
+    return ascii_letter(value) || ascii_digit(value);
+}
+
+static bool canonical_module_name(const char *value, size_t capacity)
+{
+    if (!contained_string(value, capacity) || !ascii_letter(*value)) return false;
+    for (const char *cursor = value + 1; *cursor != '\0'; ++cursor) {
+        if (ascii_alphanumeric(*cursor)) continue;
+        if (*cursor != '.' || !ascii_letter(cursor[1])) return false;
+        ++cursor;
+    }
+    return true;
+}
+
+static bool exact_module_version(const char *value, size_t capacity)
+{
+    if (!contained_string(value, capacity)) return false;
+    const char *cursor = value;
+    for (uint32_t part = 0; part < 3; ++part) {
+        if (!ascii_digit(*cursor) || (*cursor == '0' && ascii_digit(cursor[1]))) return false;
+        do { ++cursor; } while (ascii_digit(*cursor));
+        if (part != 2) {
+            if (*cursor != '.') return false;
+            ++cursor;
+        }
+    }
+    if (*cursor == '-') {
+        const char *start = ++cursor;
+        while (ascii_alphanumeric(*cursor) || *cursor == '.' || *cursor == '-') ++cursor;
+        if (cursor == start) return false;
+    }
+    if (*cursor == '+') {
+        const char *start = ++cursor;
+        while (ascii_alphanumeric(*cursor) || *cursor == '.' || *cursor == '-') ++cursor;
+        if (cursor == start) return false;
+    }
+    return *cursor == '\0';
+}
+
+static uint16_t read_u16_le(const uint8_t *value)
+{
+    return (uint16_t)value[0] | (uint16_t)((uint16_t)value[1] << 8);
+}
+
+static uint32_t read_u32_le(const uint8_t *value)
+{
+    return (uint32_t)value[0] | ((uint32_t)value[1] << 8) | ((uint32_t)value[2] << 16) | ((uint32_t)value[3] << 24);
+}
+
+static bool byte_range(size_t offset, size_t size, size_t total)
+{
+    return offset <= total && size <= total - offset;
 }
 
 static int resolve_module_path_bytes(const uint8_t *data, size_t length, char output[CT_MODULE_PATH_MAX])
@@ -248,20 +432,13 @@ static int resolve_module_path_bytes(const uint8_t *data, size_t length, char ou
         }
         suffix = relative + root_length + 1;
     }
-    if (*suffix == '\0' || strstr(suffix, "\\") != NULL) {
+    /* Espressif's current dlopen registry keys modules by basename. Restrict
+       callers to one unambiguous loader namespace so preflight and relocation
+       can never select different files with the same leaf name. */
+    if (*suffix == '\0' || strchr(suffix, '/') != NULL || strchr(suffix, '\\') != NULL) {
         return -EINVAL;
     }
-    const char *segment = suffix;
-    while (*segment != '\0') {
-        const char *end = strchr(segment, '/');
-        const size_t segment_length = end == NULL ? strlen(segment) : (size_t)(end - segment);
-        if (segment_length == 0 || (segment_length == 1 && segment[0] == '.') ||
-            (segment_length == 2 && segment[0] == '.' && segment[1] == '.')) {
-            return -EPERM;
-        }
-        if (end == NULL) break;
-        segment = end + 1;
-    }
+    if (strcmp(suffix, ".") == 0 || strcmp(suffix, "..") == 0) return -EPERM;
     const int written = snprintf(output, CT_MODULE_PATH_MAX, "%s/%s", root, suffix);
     return written > 0 && written < CT_MODULE_PATH_MAX ? 0 : -ENAMETOOLONG;
 }
@@ -279,11 +456,12 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     if (bytes == NULL) { fclose(file); return -ENOMEM; }
     if (fread(bytes, 1, (size_t)length, file) != (size_t)length) { free(bytes); fclose(file); return -EIO; }
     fclose(file);
-    if (bytes[0] != 0x7f || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F' || bytes[4] != 1 || bytes[5] != 1) {
+    if (bytes[0] != 0x7f || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F' ||
+        bytes[4] != 1 || bytes[5] != 1 || bytes[6] != 1) {
         free(bytes); return -ENOEXEC;
     }
-    const uint16_t elf_type = (uint16_t)bytes[16] | (uint16_t)((uint16_t)bytes[17] << 8);
-    const uint16_t machine = (uint16_t)bytes[18] | (uint16_t)((uint16_t)bytes[19] << 8);
+    const uint16_t elf_type = read_u16_le(bytes + 16);
+    const uint16_t machine = read_u16_le(bytes + 18);
 #if CONFIG_IDF_TARGET_ARCH_XTENSA
     const uint16_t expected_machine = 94;
     const uint32_t expected_architecture = 1;
@@ -291,32 +469,81 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     const uint16_t expected_machine = 243;
     const uint32_t expected_architecture = 2;
 #endif
-    if (elf_type != 3 || machine != expected_machine) { free(bytes); return -ENOEXEC; }
-    static const uint8_t magic[8] = { 'C', 'T', 'M', 'O', 'D', 1, 0, 0 };
-    ct_binary_manifest_v1 *manifest = NULL;
-    for (size_t offset = 0; offset + sizeof(ct_binary_manifest_v1) <= (size_t)length; ++offset) {
-        if (memcmp(bytes + offset, magic, sizeof(magic)) == 0) {
-            manifest = (ct_binary_manifest_v1 *)(void *)(bytes + offset);
-            if (manifest->HeaderSize < offsetof(ct_binary_manifest_v1, Dependencies) || manifest->TotalSize < manifest->HeaderSize ||
-                manifest->TotalSize > (size_t)length - offset || manifest->DependencyCount > CT_MAX_DEPENDENCIES) {
-                free(bytes); return -ENOEXEC;
-            }
-            break;
-        }
-    }
-    if (manifest == NULL || manifest->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION ||
-        manifest->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION || manifest->Architecture != expected_architecture ||
-        !contained_string(manifest->Name, sizeof(manifest->Name)) || !contained_string(manifest->Version, sizeof(manifest->Version))) {
+    if (elf_type != 3 || machine != expected_machine || read_u16_le(bytes + 40) != 52) { free(bytes); return -ENOEXEC; }
+
+    const size_t section_table = read_u32_le(bytes + 32);
+    const uint16_t section_entry_size = read_u16_le(bytes + 46);
+    const uint16_t section_count = read_u16_le(bytes + 48);
+    const uint16_t section_names_index = read_u16_le(bytes + 50);
+    if (section_entry_size != 40 || section_count == 0 || section_names_index >= section_count ||
+        !byte_range(section_table, (size_t)section_entry_size * section_count, (size_t)length)) {
         free(bytes); return -ENOEXEC;
     }
+    const uint8_t *names_header = bytes + section_table + (size_t)section_entry_size * section_names_index;
+    const size_t names_offset = read_u32_le(names_header + 16);
+    const size_t names_size = read_u32_le(names_header + 20);
+    if (read_u32_le(names_header + 4) != 3 || !byte_range(names_offset, names_size, (size_t)length)) {
+        free(bytes); return -ENOEXEC;
+    }
+
+    const uint8_t *manifest_section = NULL;
+    size_t manifest_section_size = 0;
+    for (uint16_t index = 0; index < section_count; ++index) {
+        const uint8_t *section = bytes + section_table + (size_t)section_entry_size * index;
+        const size_t name_offset = read_u32_le(section);
+        if (name_offset >= names_size) { free(bytes); return -ENOEXEC; }
+        const char *name = (const char *)(const void *)(bytes + names_offset + name_offset);
+        if (memchr(name, '\0', names_size - name_offset) == NULL) { free(bytes); return -ENOEXEC; }
+        if (strcmp(name, ".ctilde.manifest") != 0) continue;
+        if (manifest_section != NULL || read_u32_le(section + 4) != 1) { free(bytes); return -ENOEXEC; }
+        const size_t offset = read_u32_le(section + 16);
+        const size_t size = read_u32_le(section + 20);
+        if (!byte_range(offset, size, (size_t)length)) { free(bytes); return -ENOEXEC; }
+        manifest_section = bytes + offset;
+        manifest_section_size = size;
+    }
+
+    const size_t fixed_size = offsetof(ct_binary_manifest_v1, Dependencies);
+    if (manifest_section == NULL || manifest_section_size < fixed_size) { free(bytes); return -ENOEXEC; }
+    ct_binary_manifest_v1 header;
+    (void)memset(&header, 0, sizeof(header));
+    (void)memcpy(&header, manifest_section, fixed_size);
+    static const uint8_t magic[8] = { 'C', 'T', 'M', 'O', 'D', 1, 0, 0 };
+    if (memcmp(header.Magic, magic, sizeof(magic)) != 0 || header.HeaderSize != fixed_size ||
+        header.DependencyCount > CT_MAX_DEPENDENCIES) {
+        free(bytes); return -ENOEXEC;
+    }
+    const size_t required_size = fixed_size + (size_t)header.DependencyCount * sizeof(ct_binary_dependency_v1);
+    if (header.TotalSize != required_size || required_size > manifest_section_size) { free(bytes); return -ENOEXEC; }
+    ct_binary_manifest_v1 *manifest = (ct_binary_manifest_v1 *)malloc(required_size);
+    if (manifest == NULL) { free(bytes); return -ENOMEM; }
+    (void)memcpy(manifest, manifest_section, required_size);
+    free(bytes);
+
+    if (manifest->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION ||
+        manifest->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION || manifest->Architecture != expected_architecture ||
+        (manifest->Kind != 1 && manifest->Kind != 2) ||
+        !canonical_module_name(manifest->Name, sizeof(manifest->Name)) ||
+        !exact_module_version(manifest->Version, sizeof(manifest->Version)) ||
+        manifest->MainTaskStackBytes < 2048 || manifest->MainTaskStackBytes % 16 != 0 ||
+        manifest->HeapLimitBytes > SIZE_MAX) {
+        free(manifest); return -ENOEXEC;
+    }
     for (uint32_t index = 0; index < manifest->DependencyCount; ++index) {
-        if (!contained_string(manifest->Dependencies[index].Name, sizeof(manifest->Dependencies[index].Name)) ||
-            !contained_string(manifest->Dependencies[index].Version, sizeof(manifest->Dependencies[index].Version))) {
-            free(bytes); return -ENOEXEC;
+        const ct_binary_dependency_v1 *dependency = &manifest->Dependencies[index];
+        if (!canonical_module_name(dependency->Name, sizeof(dependency->Name)) ||
+            !exact_module_version(dependency->Version, sizeof(dependency->Version)) ||
+            strcmp(dependency->Name, manifest->Name) == 0) {
+            free(manifest); return -ENOEXEC;
+        }
+        for (uint32_t previous = 0; previous < index; ++previous) {
+            if (strcmp(manifest->Dependencies[previous].Name, dependency->Name) == 0) {
+                free(manifest); return -ENOEXEC;
+            }
         }
     }
     *result = manifest;
-    *owned = bytes;
+    *owned = (uint8_t *)(void *)manifest;
     if (file_size != NULL) *file_size = (size_t)length;
     return 0;
 }
@@ -325,7 +552,10 @@ int ctilde_managed_preflight(const char *path, char *error, size_t error_capacit
 {
     char resolved[CT_MODULE_PATH_MAX];
     const int path_result = resolve_module_path_bytes((const uint8_t *)path, path == NULL ? 0 : strlen(path), resolved);
-    if (path_result != 0) { set_error(error, error_capacity, "module path escapes /storage/modules"); return path_result; }
+    if (path_result != 0) {
+        set_error(error, error_capacity, "module path must name a direct child of /storage/modules");
+        return path_result;
+    }
     ct_binary_manifest_v1 *manifest;
     uint8_t *bytes;
     const int result = read_manifest(resolved, &manifest, &bytes, NULL);
@@ -361,6 +591,44 @@ static bool exact_dependency(const ct_binary_dependency_v1 *expected, const ct_m
         memcmp(expected->BuildIdentity, actual->BuildIdentity, 32) == 0 && memcmp(expected->ApiHash, actual->ApiHash, 32) == 0;
 }
 
+static bool hash_matches_text(const uint8_t expected[32], const char *actual)
+{
+    static const char digits[] = "0123456789abcdef";
+    if (actual == NULL || strlen(actual) != 64) return false;
+    for (size_t index = 0; index < 32; ++index) {
+        if (actual[index * 2] != digits[expected[index] >> 4] || actual[index * 2 + 1] != digits[expected[index] & 15]) return false;
+    }
+    return true;
+}
+
+static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v1 *descriptor, const ct_binary_manifest_v1 *manifest)
+{
+    if (descriptor == NULL || descriptor->Size != sizeof(*descriptor) ||
+        descriptor->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION || descriptor->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION ||
+        descriptor->Kind != manifest->Kind || descriptor->Name == NULL || descriptor->Version == NULL ||
+        strcmp(descriptor->Name, manifest->Name) != 0 || strcmp(descriptor->Version, manifest->Version) != 0 ||
+        !hash_matches_text(manifest->BuildIdentity, descriptor->BuildIdentity) ||
+        !hash_matches_text(manifest->ApiHash, descriptor->ApiHash) ||
+        descriptor->DependencyCount != manifest->DependencyCount ||
+        (descriptor->DependencyCount != 0 && descriptor->Dependencies == NULL) ||
+        descriptor->MainTaskStackBytes != manifest->MainTaskStackBytes ||
+        descriptor->HeapLimitBytes != manifest->HeapLimitBytes ||
+        descriptor->StaticStateAlignment == 0 || descriptor->StaticStateAlignment > _Alignof(max_align_t) ||
+        (descriptor->StaticStateAlignment & (descriptor->StaticStateAlignment - 1)) != 0 ||
+        descriptor->Initialize == NULL || descriptor->Finalize == NULL || descriptor->CreateBytes == NULL ||
+        (descriptor->Kind == 1 && (descriptor->Main == NULL || descriptor->CreateArguments == NULL)) ||
+        (descriptor->Kind == 2 && (descriptor->Main != NULL || descriptor->CreateArguments != NULL))) return false;
+    for (uint32_t index = 0; index < manifest->DependencyCount; ++index) {
+        const ct_binary_dependency_v1 *expected = &manifest->Dependencies[index];
+        const ct_managed_dependency_v1 *actual = &descriptor->Dependencies[index];
+        if (actual->Name == NULL || actual->Version == NULL || strcmp(actual->Name, expected->Name) != 0 ||
+            strcmp(actual->Version, expected->Version) != 0 ||
+            !hash_matches_text(expected->BuildIdentity, actual->BuildIdentity) ||
+            !hash_matches_text(expected->ApiHash, actual->ApiHash)) return false;
+    }
+    return true;
+}
+
 static int load_module_recursive(const char *path, const char *const *chain, size_t depth, ct_module **output)
 {
     if (depth >= CT_MAX_PROCESS_MODULES) return -ELOOP;
@@ -376,10 +644,11 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     if (existing != NULL) {
         const bool exact = strcmp(existing->Version, manifest->Version) == 0 &&
             memcmp(existing->BuildIdentity, manifest->BuildIdentity, 32) == 0 && memcmp(existing->ApiHash, manifest->ApiHash, 32) == 0;
-        if (exact && !existing->Stopping && !existing->Loading) ++existing->References;
+        const bool available = exact && !existing->Stopping && !existing->Loading;
+        if (available) ++existing->References;
         xSemaphoreGive(s_registry);
         free(manifest_bytes);
-        if (!exact || existing->Stopping || existing->Loading) return -EEXIST;
+        if (!available) return -EEXIST;
         *output = existing;
         return 0;
     }
@@ -399,13 +668,11 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     for (uint32_t index = 0; index < manifest->DependencyCount; ++index) {
         char dependency_path[CT_MODULE_PATH_MAX];
         const int written = snprintf(dependency_path, sizeof(dependency_path), "%s/%s.ctm", CTILDE_MANAGED_MODULE_ROOT, manifest->Dependencies[index].Name);
-        if (written <= 0 || written >= (int)sizeof(dependency_path) ||
-            (result = load_module_recursive(dependency_path, next_chain, depth + 1, &module->Dependencies[index])) != 0 ||
-            !exact_dependency(&manifest->Dependencies[index], module->Dependencies[index])) {
-            if (result == 0) result = -ESTALE;
-            goto fail;
-        }
+        if (written <= 0 || written >= (int)sizeof(dependency_path)) { result = -ENAMETOOLONG; goto fail; }
+        result = load_module_recursive(dependency_path, next_chain, depth + 1, &module->Dependencies[index]);
+        if (result != 0) goto fail;
         ++module->DependencyCount;
+        if (!exact_dependency(&manifest->Dependencies[index], module->Dependencies[index])) { result = -ESTALE; goto fail; }
     }
 
     const char *loader_name = strrchr(path, '/');
@@ -422,10 +689,7 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         result = -ENOEXEC;
         goto fail;
     }
-    if (descriptor->Size != sizeof(*descriptor) || descriptor->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION ||
-        descriptor->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION || descriptor->Name == NULL || descriptor->Version == NULL ||
-        strcmp(descriptor->Name, manifest->Name) != 0 || strcmp(descriptor->Version, manifest->Version) != 0 ||
-        descriptor->DependencyCount != manifest->DependencyCount) {
+    if (!descriptor_matches_manifest(descriptor, manifest)) {
         ESP_LOGE(TAG, "Module descriptor mismatch: descriptor=%p size=%u/%u runtime=%u module=%u name=%p version=%p dependencies=%u/%u",
             (const void *)descriptor,
             (unsigned)descriptor->Size, (unsigned)sizeof(*descriptor), (unsigned)descriptor->RuntimeAbi,
@@ -440,8 +704,10 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         result = -ELIBBAD;
         goto fail;
     }
+    xSemaphoreTake(s_registry, portMAX_DELAY);
     module->Descriptor = descriptor;
     module->Loading = false;
+    xSemaphoreGive(s_registry);
     free(manifest_bytes);
     *output = module;
     return 0;
@@ -463,7 +729,11 @@ static void release_module(ct_module *module)
     if (module->References == 0) { xSemaphoreGive(s_registry); abort(); }
     if (--module->References != 0) { xSemaphoreGive(s_registry); return; }
     module->Stopping = true;
-    if (module->ActiveCalls != 0 || module->LiveAllocations != 0) { xSemaphoreGive(s_registry); abort(); }
+    if (__atomic_load_n(&module->ActiveCalls, __ATOMIC_ACQUIRE) != 0 ||
+        __atomic_load_n(&module->LiveAllocations, __ATOMIC_ACQUIRE) != 0) {
+        xSemaphoreGive(s_registry);
+        abort();
+    }
     ct_module *dependencies[CT_MAX_DEPENDENCIES];
     const uint32_t dependency_count = module->DependencyCount;
     for (uint32_t index = 0; index < dependency_count; ++index) dependencies[index] = module->Dependencies[index];
@@ -471,18 +741,25 @@ static void release_module(ct_module *module)
     for (size_t index = 0; index < sizeof(s_types) / sizeof(s_types[0]); ++index) {
         if (s_types[index].Used && s_types[index].Owner == module) (void)memset(&s_types[index], 0, sizeof(s_types[index]));
     }
-    (void)memset(module, 0, sizeof(*module));
     xSemaphoreGive(s_registry);
     if (handle != NULL && dlclose(handle) != 0) abort();
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    if (!module->Used || !module->Stopping || module->References != 0) {
+        xSemaphoreGive(s_registry);
+        abort();
+    }
+    (void)memset(module, 0, sizeof(*module));
+    xSemaphoreGive(s_registry);
     for (uint32_t index = dependency_count; index > 0; --index) release_module(dependencies[index - 1]);
 }
 
 static ct_process *process_from_handle(uintptr_t handle)
 {
     const uint32_t id = (uint32_t)handle;
-    if (id == 0) return NULL;
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || id == 0) return NULL;
     for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
-        if (s_processes[index].Used && s_processes[index].Id == id) return &s_processes[index];
+        if (__atomic_load_n(&s_published_process_ids[index], __ATOMIC_ACQUIRE) == id)
+            return &s_processes[index];
     }
     return NULL;
 }
@@ -506,47 +783,78 @@ static void *api_allocate(size_t size, const ct_managed_module_descriptor_v1 *de
 {
     ct_execution_context *context = current_context();
     if (context == NULL || context->Process == NULL || descriptor == NULL) return NULL;
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_process *process = context->Process;
     ct_module *module = NULL;
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
         if (process->Instances[index].Module->Descriptor == descriptor) { module = process->Instances[index].Module; break; }
     }
+    const size_t heap_bytes = __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE);
     if (module == NULL || module->Stopping || size > SIZE_MAX - sizeof(ct_allocation) ||
-        (process->HeapLimit != 0 && size > process->HeapLimit - process->HeapBytes)) return NULL;
+        (process->HeapLimit != 0 && (heap_bytes > process->HeapLimit ||
+            size > process->HeapLimit - heap_bytes))) {
+        end_runtime_operation(context);
+        return NULL;
+    }
     ct_allocation *allocation = (ct_allocation *)calloc(1, sizeof(ct_allocation) + size);
-    if (allocation == NULL) return NULL;
+    if (allocation == NULL) {
+        end_runtime_operation(context);
+        return NULL;
+    }
     allocation->Process = process;
     allocation->Module = module;
     allocation->Size = size;
     allocation->Next = process->Allocations;
     if (process->Allocations != NULL) process->Allocations->Previous = allocation;
     process->Allocations = allocation;
-    process->HeapBytes += size;
-    ++module->LiveAllocations;
+    (void)__atomic_add_fetch(&process->HeapBytes, size, __ATOMIC_ACQ_REL);
+    (void)__atomic_add_fetch(&module->LiveAllocations, 1u, __ATOMIC_ACQ_REL);
+    end_runtime_operation(context);
     return allocation + 1;
 }
 
 static void api_free(void *value)
 {
     if (value == NULL) return;
+    ct_execution_context *context = current_context();
+    if (context == NULL || context->Process == NULL) abort();
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_allocation *allocation = ((ct_allocation *)value) - 1;
     ct_process *process = allocation->Process;
-    if (process == NULL || allocation->Module == NULL || allocation->Size > process->HeapBytes || allocation->Module->LiveAllocations == 0) abort();
+    if (process == NULL || process != context->Process || allocation->Module == NULL ||
+        allocation->Size > __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE) ||
+        __atomic_load_n(&allocation->Module->LiveAllocations, __ATOMIC_ACQUIRE) == 0) abort();
     if (allocation->Previous != NULL) allocation->Previous->Next = allocation->Next; else process->Allocations = allocation->Next;
     if (allocation->Next != NULL) allocation->Next->Previous = allocation->Previous;
-    process->HeapBytes -= allocation->Size;
-    --allocation->Module->LiveAllocations;
+    if (__atomic_fetch_sub(&process->HeapBytes, allocation->Size, __ATOMIC_ACQ_REL) < allocation->Size ||
+        __atomic_fetch_sub(&allocation->Module->LiveAllocations, 1u, __ATOMIC_ACQ_REL) == 0) abort();
     (void)memset(allocation + 1, 0xDD, allocation->Size);
     free(allocation);
+    end_runtime_operation(context);
 }
 
 static void api_runtime_fault(const char *code, const char *file, int32_t line)
 {
-    ct_process *process = current_process();
+    ct_execution_context *context = current_context();
+    ct_process *process = context == NULL ? NULL : context->Process;
+    if (process == NULL || !begin_runtime_operation(context)) {
+        if (process != NULL) await_forced_task_deletion();
+        abort();
+    }
     ESP_LOGE(TAG, "process fault %s at %s:%" PRId32, code == NULL ? "?" : code, file == NULL ? "?" : file, line);
-    if (process == NULL) abort();
-    process->State = CT_PROCESS_FAILED;
-    process->ExitCode = -1;
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    TaskHandle_t expected = self;
+    const bool owns_deletion = __atomic_compare_exchange_n(&process->MainTask, &expected, NULL, false,
+        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    if (!owns_deletion && !__atomic_load_n(&process->Cleaned, __ATOMIC_ACQUIRE)) {
+        /* Terminate claimed the task first. Do not race its cross-core
+           vTaskDelete with a second deletion of the same TCB. */
+        abandon_runtime_operations(context);
+        await_forced_task_deletion();
+    }
+    __atomic_store_n(&process->ExitCode, -1, __ATOMIC_RELEASE);
+    __atomic_store_n(&process->State, CT_PROCESS_FAILED, __ATOMIC_RELEASE);
+    abandon_runtime_operations(context);
     vTaskDelete(NULL);
     abort();
 }
@@ -556,6 +864,7 @@ static const ct_type_descriptor *api_register_type(const void *value)
     const ct_type_descriptor *descriptor = (const ct_type_descriptor *)value;
     ct_execution_context *context = current_context();
     if (descriptor == NULL || context == NULL || context->Module == NULL) api_runtime_fault("CTT0010", "<type-register>", 0);
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
     xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_type_registration *free_slot = NULL;
     for (size_t index = 0; index < sizeof(s_types) / sizeof(s_types[0]); ++index) {
@@ -566,13 +875,19 @@ static const ct_type_descriptor *api_register_type(const void *value)
                 slot->Descriptor->IsValue == descriptor->IsValue && strcmp(slot->Descriptor->Name, descriptor->Name) == 0;
             const ct_type_descriptor *result = compatible ? slot->Descriptor : NULL;
             xSemaphoreGive(s_registry);
+            end_runtime_operation(context);
             if (!compatible) api_runtime_fault("CTT0011", "<type-register>", 0);
             return result;
         }
     }
-    if (free_slot == NULL) { xSemaphoreGive(s_registry); api_runtime_fault("CTT0012", "<type-register>", 0); }
+    if (free_slot == NULL) {
+        xSemaphoreGive(s_registry);
+        end_runtime_operation(context);
+        api_runtime_fault("CTT0012", "<type-register>", 0);
+    }
     *free_slot = (ct_type_registration){ true, descriptor->FingerprintHigh, descriptor->FingerprintLow, descriptor, context->Module };
     xSemaphoreGive(s_registry);
+    end_runtime_operation(context);
     return descriptor;
 }
 
@@ -581,11 +896,9 @@ static void api_unregister_types(const ct_managed_module_descriptor_v1 *descript
     ct_execution_context *context = current_context();
     ct_module *module = context == NULL ? NULL : context->Module;
     if (module == NULL || module->Descriptor != descriptor) api_runtime_fault("CTT0013", "<type-unregister>", 0);
-    xSemaphoreTake(s_registry, portMAX_DELAY);
-    for (size_t index = 0; index < sizeof(s_types) / sizeof(s_types[0]); ++index) {
-        if (s_types[index].Used && s_types[index].Owner == module) (void)memset(&s_types[index], 0, sizeof(s_types[index]));
-    }
-    xSemaphoreGive(s_registry);
+    /* Module finalizers run once per process instance. Canonical descriptors
+       remain globally valid while any process or dependent module keeps the
+       provider loaded; release_module removes them immediately before dlclose. */
 }
 
 static void *api_current_module_state(const ct_managed_module_descriptor_v1 *descriptor)
@@ -607,39 +920,63 @@ static void api_enter_call(const ct_managed_module_descriptor_v1 *descriptor)
 {
     ct_execution_context *context = current_context();
     if (context == NULL) api_runtime_fault("CTT0014", "<managed-call>", 0);
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
+    ct_module *target = NULL;
     for (uint32_t index = 0; index < context->Process->InstanceCount; ++index) {
         ct_module *module = context->Process->Instances[index].Module;
         if (module->Descriptor == descriptor) {
-            if (module->Stopping) api_runtime_fault("CTT0015", "<managed-call>", 0);
-            ++module->ActiveCalls;
-            context->Module = module;
-            return;
+            target = module;
+            break;
         }
     }
-    api_runtime_fault("CTT0016", "<managed-call>", 0);
+    const bool stopping = target != NULL && target->Stopping;
+    end_runtime_operation(context);
+    if (target == NULL) api_runtime_fault("CTT0016", "<managed-call>", 0);
+    if (stopping) api_runtime_fault("CTT0015", "<managed-call>", 0);
+    if (!enter_context_call(context, target)) api_runtime_fault("CTT0018", "<managed-call-depth>", 0);
 }
 
 static void api_leave_call(const ct_managed_module_descriptor_v1 *descriptor)
 {
     ct_execution_context *context = current_context();
-    if (context == NULL || context->Module == NULL || context->Module->Descriptor != descriptor || context->Module->ActiveCalls == 0) abort();
-    --context->Module->ActiveCalls;
-    context->Module = context->Process->Root;
+    if (context == NULL || context->Module == NULL || context->Module->Descriptor != descriptor ||
+        !leave_context_call(context, context->Module)) abort();
 }
 
 static int32_t api_service(uint32_t service, void *payload, size_t size)
 {
-    ct_process *process = current_process();
+    ct_execution_context *context = current_context();
+    ct_process *process = context == NULL ? NULL : context->Process;
     if (process == NULL) return -EINVAL;
-    if (service == CT_RUNTIME_SERVICE_THREAD_ATTACH) { ++process->TaskCount; return 0; }
-    if (service == CT_RUNTIME_SERVICE_THREAD_DETACH) { if (process->TaskCount <= 1) return -EINVAL; --process->TaskCount; return 0; }
+    if (service == CT_RUNTIME_SERVICE_THREAD_ATTACH) {
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
+        (void)__atomic_add_fetch(&process->TaskCount, 1u, __ATOMIC_ACQ_REL);
+        end_runtime_operation(context);
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_THREAD_DETACH) {
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
+        uint32_t count = __atomic_load_n(&process->TaskCount, __ATOMIC_ACQUIRE);
+        do {
+            if (count <= 1) {
+                end_runtime_operation(context);
+                return -EINVAL;
+            }
+        } while (!__atomic_compare_exchange_n(&process->TaskCount, &count, count - 1, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE));
+        end_runtime_operation(context);
+        return 0;
+    }
     if (service == CT_RUNTIME_SERVICE_CONSOLE_WRITE) {
         if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v18)) return -EINVAL;
         ct_runtime_console_transfer_v18 *transfer = (ct_runtime_console_transfer_v18 *)payload;
         if (transfer->Length != 0 && transfer->Data == NULL) return -EINVAL;
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
         transfer->Count = fwrite(transfer->Data, 1u, transfer->Length, stdout);
         transfer->Eof = false;
-        return transfer->Count == transfer->Length ? 0 : -(errno == 0 ? EIO : errno);
+        const int32_t result = transfer->Count == transfer->Length ? 0 : -(errno == 0 ? EIO : errno);
+        end_runtime_operation(context);
+        return result;
     }
     if (service == CT_RUNTIME_SERVICE_CONSOLE_READ) {
         if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v18)) return -EINVAL;
@@ -652,8 +989,12 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
         clearerr(stdin);
         return 0;
     }
-    if (service == CT_RUNTIME_SERVICE_CONSOLE_FLUSH)
-        return fflush(stdout) == 0 ? 0 : -(errno == 0 ? EIO : errno);
+    if (service == CT_RUNTIME_SERVICE_CONSOLE_FLUSH) {
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
+        const int32_t result = fflush(stdout) == 0 ? 0 : -(errno == 0 ? EIO : errno);
+        end_runtime_operation(context);
+        return result;
+    }
     return -ENOSYS;
 }
 
@@ -687,16 +1028,23 @@ static void release_arena(ct_process *process)
     while (process->Allocations != NULL) {
         ct_allocation *allocation = process->Allocations;
         process->Allocations = allocation->Next;
-        if (allocation->Module == NULL || allocation->Module->LiveAllocations == 0) abort();
-        --allocation->Module->LiveAllocations;
+        if (allocation->Module == NULL ||
+            __atomic_fetch_sub(&allocation->Module->LiveAllocations, 1u, __ATOMIC_ACQ_REL) == 0) abort();
         free(allocation);
     }
-    process->HeapBytes = 0;
+    __atomic_store_n(&process->HeapBytes, 0u, __ATOMIC_RELEASE);
 }
 
 static void cleanup_process(ct_process *process, bool forced)
 {
     if (__atomic_exchange_n(&process->Cleaned, true, __ATOMIC_ACQ_REL)) return;
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    const ct_managed_process_state state = __atomic_load_n(&process->State, __ATOMIC_ACQUIRE);
+    if (state < CT_PROCESS_EXITED) {
+        if (forced) __atomic_store_n(&process->ExitCode, -1, __ATOMIC_RELEASE);
+        __atomic_store_n(&process->State, forced ? CT_PROCESS_FAILED : CT_PROCESS_EXITED, __ATOMIC_RELEASE);
+    }
+    xSemaphoreGive(s_registry);
     ct_execution_context *previous_context = current_context();
     ct_execution_context cleanup_context = { .Process = process, .Module = process->Root };
     cleanup_context.ThreadState = cleanup_context.PrimaryThreadState;
@@ -705,10 +1053,9 @@ static void cleanup_process(ct_process *process, bool forced)
         for (uint32_t index = process->InstanceCount; index > 0; --index) {
             ct_module_instance *instance = &process->Instances[index - 1];
             if (instance->Initialized) {
-                cleanup_context.Module = instance->Module;
-                ++instance->Module->ActiveCalls;
+                if (!enter_context_call(&cleanup_context, instance->Module)) abort();
                 instance->Module->Descriptor->Finalize();
-                --instance->Module->ActiveCalls;
+                if (!leave_context_call(&cleanup_context, instance->Module)) abort();
                 instance->Initialized = false;
             }
         }
@@ -723,14 +1070,15 @@ static void cleanup_process(ct_process *process, bool forced)
     while (xQueueReceive(process->Mailbox, &message, 0) == pdTRUE) free(message);
     for (int32_t index = 0; index < process->ArgumentCount; ++index) { free(process->Arguments[index]); process->Arguments[index] = NULL; }
     process->ArgumentCount = 0;
+    xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_module *root = process->Root;
     process->Root = NULL;
-    process->MainTask = NULL;
-    process->TaskCount = 0;
+    xSemaphoreGive(s_registry);
+    __atomic_store_n(&process->MainTask, NULL, __ATOMIC_RELEASE);
+    __atomic_store_n(&process->TaskCount, 0u, __ATOMIC_RELEASE);
     vTaskSetThreadLocalStoragePointer(NULL, CONFIG_CTILDE_MANAGED_TLS_INDEX, previous_context);
     release_module(root);
-    if (process->State < CT_PROCESS_EXITED)
-        process->State = forced ? CT_PROCESS_FAILED : CT_PROCESS_EXITED;
+    __atomic_store_n(&process->Completed, true, __ATOMIC_RELEASE);
     xSemaphoreGive(process->Completion);
 }
 
@@ -740,8 +1088,15 @@ static void tls_deleted(int index, void *value)
     ct_execution_context *context = (ct_execution_context *)value;
     if (context == NULL || context->Process == NULL) return;
     ct_process *process = context->Process;
-    process->CleanupQueued = true;
-    (void)xQueueSend(s_reaper_queue, &process, 0);
+    abandon_runtime_operations(context);
+    abandon_context_calls(context);
+    /* A fault in a module finalizer deletes the task that claimed cleanup. Let
+       the reaper finish the remaining non-managed reclamation without invoking
+       finalizers again. */
+    if (!__atomic_load_n(&process->Completed, __ATOMIC_ACQUIRE))
+        __atomic_store_n(&process->Cleaned, false, __ATOMIC_RELEASE);
+    if (__atomic_exchange_n(&process->CleanupQueued, true, __ATOMIC_ACQ_REL)) return;
+    if (xQueueSend(s_reaper_queue, &process, 0) != pdTRUE) abort();
 }
 
 static void reaper_main(void *argument)
@@ -759,21 +1114,35 @@ static void process_main(void *argument)
     process->Context = (ct_execution_context){ .Process = process, .Module = process->Root };
     process->Context.ThreadState = process->Context.PrimaryThreadState;
     vTaskSetThreadLocalStoragePointerAndDelCallback(NULL, CONFIG_CTILDE_MANAGED_TLS_INDEX, &process->Context, tls_deleted);
+    /* Start does not publish the process handle until deletion always has a
+       TLS callback that can queue blocking cleanup on the reaper. */
+    const size_t process_index = (size_t)(process - s_processes);
+    __atomic_store_n(&s_published_process_ids[process_index], process->Id, __ATOMIC_RELEASE);
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
         ct_module_instance *instance = &process->Instances[index];
-        process->Context.Module = instance->Module;
-        ++instance->Module->ActiveCalls;
+        if (!enter_context_call(&process->Context, instance->Module)) api_runtime_fault("CTT0018", "<module-initialize>", 0);
         instance->Module->Descriptor->Initialize();
-        --instance->Module->ActiveCalls;
+        if (!leave_context_call(&process->Context, instance->Module)) abort();
         instance->Initialized = true;
     }
     process->Context.Module = process->Root;
-    process->State = CT_PROCESS_RUNNING;
+    ct_managed_process_state expected_state = CT_PROCESS_STARTING;
+    (void)__atomic_compare_exchange_n(&process->State, &expected_state, CT_PROCESS_RUNNING, false,
+        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
     void *managed_arguments = process->Root->Descriptor->CreateArguments(process->ArgumentCount,
         (const char *const *)process->Arguments, process->ArgumentLengths);
-    ++process->Root->ActiveCalls;
-    process->ExitCode = process->Root->Descriptor->Main(managed_arguments);
-    --process->Root->ActiveCalls;
+    if (!enter_context_call(&process->Context, process->Root)) api_runtime_fault("CTT0018", "<module-main>", 0);
+    const int32_t exit_code = process->Root->Descriptor->Main(managed_arguments);
+    __atomic_store_n(&process->ExitCode, exit_code, __ATOMIC_RELEASE);
+    if (!leave_context_call(&process->Context, process->Root)) abort();
+    TaskHandle_t self = xTaskGetCurrentTaskHandle();
+    TaskHandle_t expected = self;
+    if (!__atomic_compare_exchange_n(&process->MainTask, &expected, NULL, false,
+            __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+        /* Terminate owns deletion now. Keep the TLS cleanup callback installed
+           and stop touching process or module state until that deletion runs. */
+        for (;;) vTaskDelay(portMAX_DELAY);
+    }
     vTaskSetThreadLocalStoragePointer(NULL, CONFIG_CTILDE_MANAGED_TLS_INDEX, NULL);
     cleanup_process(process, false);
     vTaskDelete(NULL);
@@ -789,65 +1158,135 @@ static ct_process *allocate_process(void)
             process->Id = s_next_process_id++;
             process->Completion = xSemaphoreCreateBinaryStatic(&process->CompletionStorage);
             process->Mailbox = xQueueCreateStatic(CT_MAILBOX_DEPTH, sizeof(ct_message *), process->MailboxBuffer, &process->MailboxStorage);
+            if (process->Completion == NULL || process->Mailbox == NULL) {
+                if (process->Completion != NULL) vSemaphoreDelete(process->Completion);
+                if (process->Mailbox != NULL) vQueueDelete(process->Mailbox);
+                (void)memset(process, 0, sizeof(*process));
+                return NULL;
+            }
             return process;
         }
     }
     return NULL;
 }
 
-uintptr_t ct_managed_process_start(const void *path_value, const void *arguments_value)
+static uintptr_t fail_unpublished_process_start(ct_process *process)
+{
+    __atomic_store_n(&process->State, CT_PROCESS_FAILED, __ATOMIC_RELEASE);
+    cleanup_process(process, true);
+    vSemaphoreDelete(process->Completion);
+    vQueueDelete(process->Mailbox);
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    (void)memset(process, 0, sizeof(*process));
+    xSemaphoreGive(s_registry);
+    return 0;
+}
+
+static uintptr_t start_process_core(const void *path_value, const void *arguments_value)
 {
     const ct_managed_string *path = (const ct_managed_string *)path_value;
     const ct_managed_array *arguments = (const ct_managed_array *)arguments_value;
-    if (!s_initialized || path == NULL || arguments == NULL || path->Length <= 0 || arguments->Length < 0 || arguments->Length > CT_MAX_ARGUMENTS) return 0;
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || path == NULL || arguments == NULL || path->Length <= 0 || arguments->Length < 0 || arguments->Length > CT_MAX_ARGUMENTS) return 0;
     char path_buffer[CT_MODULE_PATH_MAX];
     if (resolve_module_path_bytes(path->Data, (size_t)path->Length, path_buffer) != 0) return 0;
     ct_module *module = NULL;
     const char *chain[1] = { NULL };
-    if (load_module_recursive(path_buffer, chain, 0, &module) != 0 || module->Descriptor->Kind != 1 || module->Descriptor->Main == NULL || module->Descriptor->CreateArguments == NULL) return 0;
+    if (load_module_recursive(path_buffer, chain, 0, &module) != 0) return 0;
+    if (module->Descriptor->Kind != 1 || module->Descriptor->Main == NULL || module->Descriptor->CreateArguments == NULL) {
+        release_module(module);
+        return 0;
+    }
     xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_process *process = allocate_process();
     xSemaphoreGive(s_registry);
     if (process == NULL) { release_module(module); return 0; }
     process->Root = module;
+    (void)snprintf(process->RootName, sizeof(process->RootName), "%s", module->Name);
     process->State = CT_PROCESS_STARTING;
     process->HeapLimit = (size_t)module->Descriptor->HeapLimitBytes;
     process->ArgumentCount = arguments->Length;
     ct_managed_string *const *values = (ct_managed_string *const *)(const void *)arguments->Data;
     for (int32_t index = 0; index < arguments->Length; ++index) {
-        if (values[index] == NULL || values[index]->Length < 0) { process->State = CT_PROCESS_FAILED; cleanup_process(process, true); return 0; }
+        if (values[index] == NULL || values[index]->Length < 0) return fail_unpublished_process_start(process);
         const size_t length = (size_t)values[index]->Length;
         process->Arguments[index] = (char *)malloc(length + 1);
-        if (process->Arguments[index] == NULL) { process->State = CT_PROCESS_FAILED; cleanup_process(process, true); return 0; }
+        if (process->Arguments[index] == NULL) return fail_unpublished_process_start(process);
         (void)memcpy(process->Arguments[index], values[index]->Data, length);
         process->Arguments[index][length] = '\0';
         process->ArgumentLengths[index] = length;
     }
-    if (add_instance_graph(process, module) != 0) { process->State = CT_PROCESS_FAILED; cleanup_process(process, true); return 0; }
-    const uint32_t stack_words = (module->Descriptor->MainTaskStackBytes + sizeof(StackType_t) - 1) / sizeof(StackType_t);
+    if (add_instance_graph(process, module) != 0) return fail_unpublished_process_start(process);
     process->TaskCount = 1;
-    if (xTaskCreate(process_main, module->Name, stack_words, process, tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
+    if (xTaskCreate(process_main, module->Name, module->Descriptor->MainTaskStackBytes, process,
+            tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
         process->TaskCount = 0;
-        process->State = CT_PROCESS_FAILED; cleanup_process(process, true); return 0;
+        return fail_unpublished_process_start(process);
     }
+    const size_t process_index = (size_t)(process - s_processes);
+    while (__atomic_load_n(&s_published_process_ids[process_index], __ATOMIC_ACQUIRE) != process->Id) vTaskDelay(1);
     return (uintptr_t)process->Id;
 }
 
+uintptr_t ct_managed_process_start(const void *path_value, const void *arguments_value)
+{
+    ct_execution_context *context = current_context();
+    if (context != NULL && !begin_runtime_operation(context)) await_forced_task_deletion();
+    const uintptr_t result = start_process_core(path_value, arguments_value);
+    if (context != NULL) end_runtime_operation(context);
+    return result;
+}
+
+uintptr_t ct_managed_process_current(void)
+{
+    ct_process *process = current_process();
+    return process == NULL ? 0 : (uintptr_t)process->Id;
+}
+
 uint32_t ct_managed_process_id(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL ? 0 : process->Id; }
-ct_managed_process_state ct_managed_process_get_state(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL ? CT_PROCESS_FAILED : process->State; }
-bool ct_managed_process_has_exited(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL || process->State >= CT_PROCESS_EXITED; }
-int32_t ct_managed_process_exit_code(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL || process->State < CT_PROCESS_EXITED ? 0 : process->ExitCode; }
-void ct_managed_process_cancel(uintptr_t handle) { ct_process *process = process_from_handle(handle); if (process != NULL && process->State < CT_PROCESS_EXITED) { process->Cancellation = true; process->State = CT_PROCESS_CANCELLING; } }
-bool ct_managed_process_cancellation_requested(void) { ct_process *process = current_process(); return process != NULL && process->Cancellation; }
+ct_managed_process_state ct_managed_process_get_state(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL ? CT_PROCESS_FAILED : __atomic_load_n(&process->State, __ATOMIC_ACQUIRE); }
+bool ct_managed_process_has_exited(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL || __atomic_load_n(&process->Completed, __ATOMIC_ACQUIRE); }
+int32_t ct_managed_process_exit_code(uintptr_t handle) { ct_process *process = process_from_handle(handle); return process == NULL || !__atomic_load_n(&process->Completed, __ATOMIC_ACQUIRE) ? 0 : __atomic_load_n(&process->ExitCode, __ATOMIC_ACQUIRE); }
+void ct_managed_process_cancel(uintptr_t handle)
+{
+    ct_process *process = process_from_handle(handle);
+    if (process == NULL) return;
+    ct_managed_process_state state = __atomic_load_n(&process->State, __ATOMIC_ACQUIRE);
+    if (state >= CT_PROCESS_EXITED) return;
+    /* Publish the observable cancellation flag first. A caller can be forcibly
+       deleted after any instruction, so the state must never say CANCELLING
+       while the flag that cooperative code reads is still false. */
+    __atomic_store_n(&process->Cancellation, true, __ATOMIC_RELEASE);
+    while (state < CT_PROCESS_EXITED && state != CT_PROCESS_CANCELLING) {
+        if (__atomic_compare_exchange_n(&process->State, &state, CT_PROCESS_CANCELLING, false,
+                __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) break;
+    }
+}
+bool ct_managed_process_cancellation_requested(void) { ct_process *process = current_process(); return process != NULL && __atomic_load_n(&process->Cancellation, __ATOMIC_ACQUIRE); }
 
 bool ct_managed_process_try_wait(uintptr_t handle, uint32_t timeout_milliseconds, int32_t *exit_code)
 {
     ct_process *process = process_from_handle(handle);
     if (process == NULL) return false;
     const TickType_t ticks = timeout_milliseconds == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_milliseconds);
-    if (xSemaphoreTake(process->Completion, ticks) != pdTRUE) return false;
-    xSemaphoreGive(process->Completion);
-    if (exit_code != NULL) *exit_code = process->ExitCode;
+    ct_execution_context *context = current_context();
+    if (context != NULL && context->Process == process) return false;
+    if (context == NULL) {
+        if (xSemaphoreTake(process->Completion, ticks) != pdTRUE) return false;
+        xSemaphoreGive(process->Completion);
+    }
+    else {
+        const TickType_t started = xTaskGetTickCount();
+        for (;;) {
+            if (!begin_runtime_operation(context)) await_forced_task_deletion();
+            const BaseType_t completed = xSemaphoreTake(process->Completion, 0);
+            if (completed == pdTRUE) xSemaphoreGive(process->Completion);
+            end_runtime_operation(context);
+            if (completed == pdTRUE) break;
+            if (ticks != portMAX_DELAY && xTaskGetTickCount() - started >= ticks) return false;
+            vTaskDelay(1);
+        }
+    }
+    if (exit_code != NULL) *exit_code = __atomic_load_n(&process->ExitCode, __ATOMIC_ACQUIRE);
     return true;
 }
 
@@ -858,30 +1297,169 @@ int32_t ct_managed_process_wait(uintptr_t handle)
     return result;
 }
 
+static void complete_pending_termination(ct_pending_termination *pending, bool forced)
+{
+    __atomic_store_n(&pending->Process->ForceDeleteIssued, forced, __ATOMIC_RELEASE);
+    __atomic_store_n(&pending->Process->TerminationDispatched, true, __ATOMIC_RELEASE);
+    (void)memset(pending, 0, sizeof(*pending));
+}
+
+static void add_pending_termination(const ct_termination_request *request)
+{
+    for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
+        ct_pending_termination *pending = &s_pending_terminations[index];
+        if (pending->Process != NULL) continue;
+        pending->Process = request->Process;
+        pending->InfiniteGrace = request->GraceMilliseconds == UINT32_MAX;
+        pending->DeadlineMicroseconds = pending->InfiniteGrace ? 0 :
+            request->RequestedAtMicroseconds + (int64_t)request->GraceMilliseconds * INT64_C(1000);
+        return;
+    }
+    /* There can be at most one request per lifetime-stable process slot. */
+    abort();
+}
+
+static bool termination_grace_elapsed(const ct_pending_termination *pending, int64_t now_microseconds)
+{
+    return !pending->InfiniteGrace && now_microseconds >= pending->DeadlineMicroseconds;
+}
+
+static void advance_pending_terminations(void)
+{
+    const int64_t now_microseconds = esp_timer_get_time();
+    for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
+        ct_pending_termination *pending = &s_pending_terminations[index];
+        ct_process *process = pending->Process;
+        if (process == NULL) continue;
+        if (__atomic_load_n(&process->Completed, __ATOMIC_ACQUIRE)) {
+            complete_pending_termination(pending, false);
+            continue;
+        }
+        if (!pending->DrainingOperations) {
+            if (__atomic_load_n(&process->State, __ATOMIC_ACQUIRE) >= CT_PROCESS_EXITED) {
+                complete_pending_termination(pending, false);
+                continue;
+            }
+            if (!termination_grace_elapsed(pending, now_microseconds)) continue;
+            pending->Task = __atomic_exchange_n(&process->MainTask, NULL, __ATOMIC_ACQ_REL);
+            if (pending->Task == NULL) {
+                complete_pending_termination(pending, false);
+                continue;
+            }
+            (void)__atomic_fetch_or(&process->RuntimeGate, CT_RUNTIME_GATE_STOPPED, __ATOMIC_ACQ_REL);
+            ct_message *wake = NULL;
+            (void)xQueueSend(process->Mailbox, &wake, 0);
+            pending->DrainingOperations = true;
+        }
+        if ((__atomic_load_n(&process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_COUNT) != 0)
+            continue;
+        __atomic_store_n(&process->ExitCode, -2, __ATOMIC_RELEASE);
+        __atomic_store_n(&process->State, CT_PROCESS_TERMINATED, __ATOMIC_RELEASE);
+        vTaskDelete(pending->Task);
+        complete_pending_termination(pending, true);
+    }
+}
+
+static void terminator_main(void *argument)
+{
+    (void)argument;
+    for (;;) {
+        ct_termination_request request = { 0 };
+        bool has_pending = false;
+        for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
+            if (s_pending_terminations[index].Process != NULL) {
+                has_pending = true;
+                break;
+            }
+        }
+        TickType_t poll_ticks = pdMS_TO_TICKS(CT_TERMINATION_POLL_MILLISECONDS);
+        if (poll_ticks == 0) poll_ticks = 1;
+        const TickType_t wait = has_pending ? poll_ticks : portMAX_DELAY;
+        if (xQueueReceive(s_termination_queue, &request, wait) == pdTRUE && request.Process != NULL) {
+            add_pending_termination(&request);
+            while (xQueueReceive(s_termination_queue, &request, 0) == pdTRUE) {
+                if (request.Process != NULL) add_pending_termination(&request);
+            }
+        }
+        advance_pending_terminations();
+    }
+}
+
 void ct_managed_process_terminate(uintptr_t handle, uint32_t grace_milliseconds)
 {
     ct_process *process = process_from_handle(handle);
-    if (process == NULL || process->State >= CT_PROCESS_EXITED) return;
-    ct_managed_process_cancel(handle);
-    int32_t ignored;
-    if (ct_managed_process_try_wait(handle, grace_milliseconds, &ignored)) return;
-    process->State = CT_PROCESS_TERMINATED;
-    process->ExitCode = -2;
-    TaskHandle_t task = process->MainTask;
-    if (task != NULL) vTaskDelete(task);
+    if (process == NULL || __atomic_load_n(&process->Completed, __ATOMIC_ACQUIRE)) return;
+    ct_execution_context *context = current_context();
+    const bool terminates_self = context != NULL && context->Process == process;
+    for (;;) {
+        const uint32_t request_state = __atomic_load_n(&process->TerminationRequestState, __ATOMIC_ACQUIRE);
+        if (request_state == CT_TERMINATION_QUEUED) break;
+        if (request_state == CT_TERMINATION_PUBLISHING) {
+            vTaskDelay(1);
+            continue;
+        }
+        if (context != NULL && !begin_runtime_operation(context)) await_forced_task_deletion();
+        uint32_t expected = CT_TERMINATION_NONE;
+        const bool publishes = __atomic_compare_exchange_n(&process->TerminationRequestState, &expected,
+            CT_TERMINATION_PUBLISHING, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        if (!publishes) {
+            if (context != NULL) end_runtime_operation(context);
+            continue;
+        }
+        ct_managed_process_cancel(handle);
+        const ct_termination_request request = { process, grace_milliseconds, esp_timer_get_time() };
+        const bool queued = xQueueSend(s_termination_queue, &request, 0) == pdTRUE;
+        __atomic_store_n(&process->TerminationRequestState,
+            queued ? CT_TERMINATION_QUEUED : CT_TERMINATION_NONE, __ATOMIC_RELEASE);
+        if (context != NULL) end_runtime_operation(context);
+        if (!queued) return;
+        break;
+    }
+    if (terminates_self) await_forced_task_deletion();
+    while (!__atomic_load_n(&process->TerminationDispatched, __ATOMIC_ACQUIRE)) vTaskDelay(1);
+    if (__atomic_load_n(&process->ForceDeleteIssued, __ATOMIC_ACQUIRE)) {
+        int32_t ignored;
+        (void)ct_managed_process_try_wait(handle, UINT32_MAX, &ignored);
+    }
+}
+
+static bool send_process_message(uintptr_t handle, const void *payload_value, ct_execution_context *caller)
+{
+    ct_process *process = process_from_handle(handle);
+    const ct_managed_array *payload = (const ct_managed_array *)payload_value;
+    if (process == NULL || payload == NULL || payload->Length < 0 ||
+        __atomic_load_n(&process->State, __ATOMIC_ACQUIRE) >= CT_PROCESS_EXITED) return true;
+    const size_t length = (size_t)payload->Length;
+    ct_message *message = (ct_message *)malloc(sizeof(ct_message) + length);
+    if (message == NULL) return true;
+    message->Length = length;
+    if (length != 0) (void)memcpy(message->Data, payload->Data, length);
+    for (;;) {
+        xSemaphoreTake(s_registry, portMAX_DELAY);
+        const bool accepting = !__atomic_load_n(&process->Cleaned, __ATOMIC_ACQUIRE) &&
+            __atomic_load_n(&process->State, __ATOMIC_ACQUIRE) < CT_PROCESS_EXITED;
+        const BaseType_t sent = accepting ? xQueueSend(process->Mailbox, &message, 0) : pdFALSE;
+        xSemaphoreGive(s_registry);
+        if (sent == pdTRUE) return true;
+        if (!accepting) { free(message); return true; }
+        if (caller != NULL &&
+            (__atomic_load_n(&caller->Process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_STOPPED) != 0) {
+            free(message);
+            return false;
+        }
+        vTaskDelay(1);
+    }
 }
 
 void ct_managed_process_send(uintptr_t handle, const void *payload_value)
 {
-    ct_process *process = process_from_handle(handle);
-    const ct_managed_array *payload = (const ct_managed_array *)payload_value;
-    if (process == NULL || payload == NULL || payload->Length < 0 || process->State >= CT_PROCESS_EXITED) return;
-    const size_t length = (size_t)payload->Length;
-    ct_message *message = (ct_message *)malloc(sizeof(ct_message) + length);
-    if (message == NULL) return;
-    message->Length = length;
-    if (length != 0) (void)memcpy(message->Data, payload->Data, length);
-    if (xQueueSend(process->Mailbox, &message, portMAX_DELAY) != pdTRUE) free(message);
+    ct_execution_context *context = current_context();
+    if (context != NULL && !begin_runtime_operation(context)) await_forced_task_deletion();
+    const bool completed = send_process_message(handle, payload_value, context);
+    if (context != NULL) end_runtime_operation(context);
+    if (!completed || (context != NULL &&
+        (__atomic_load_n(&context->Process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_STOPPED) != 0))
+        await_forced_task_deletion();
 }
 
 bool ct_managed_process_try_receive(uintptr_t handle, uint32_t timeout_milliseconds, const void *type_template, void **payload)
@@ -889,17 +1467,29 @@ bool ct_managed_process_try_receive(uintptr_t handle, uint32_t timeout_milliseco
     (void)type_template;
     ct_process *process = process_from_handle(handle);
     ct_execution_context *context = current_context();
-    if (process == NULL || context == NULL || context->Module == NULL || payload == NULL) return false;
+    if (process == NULL || context == NULL || context->Process != process || context->Module == NULL || payload == NULL) return false;
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_message *message = NULL;
     const TickType_t ticks = timeout_milliseconds == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_milliseconds);
-    if (xQueueReceive(process->Mailbox, &message, ticks) != pdTRUE) return false;
+    if (xQueueReceive(process->Mailbox, &message, ticks) != pdTRUE) {
+        end_runtime_operation(context);
+        return false;
+    }
+    if (message == NULL) {
+        end_runtime_operation(context);
+        return false;
+    }
     *payload = context->Module->Descriptor->CreateBytes(message->Data, message->Length);
     free(message);
+    end_runtime_operation(context);
     return true;
 }
 
 void *ct_managed_process_receive(uintptr_t handle, const void *type_template)
 {
+    ct_process *process = process_from_handle(handle);
+    ct_execution_context *context = current_context();
+    if (process == NULL || context == NULL || context->Process != process || context->Module == NULL) return NULL;
     void *result = NULL;
     while (!ct_managed_process_try_receive(handle, UINT32_MAX, type_template, &result)) { }
     return result;
@@ -907,30 +1497,56 @@ void *ct_managed_process_receive(uintptr_t handle, const void *type_template)
 
 size_t ctilde_managed_processes(ct_managed_process_info *output, size_t capacity)
 {
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE)) return 0;
     size_t count = 0;
+    xSemaphoreTake(s_registry, portMAX_DELAY);
     for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
         ct_process *process = &s_processes[index];
-        if (!process->Used) continue;
-        if (output != NULL && count < capacity) output[count] = (ct_managed_process_info){ process->Id, process->State, process->ExitCode, process->HeapBytes, process->HeapLimit, process->TaskCount, process->Root == NULL ? NULL : process->Root->Name };
+        if (!process->Used || __atomic_load_n(&s_published_process_ids[index], __ATOMIC_ACQUIRE) != process->Id) continue;
+        if (output != NULL && count < capacity) {
+            ct_managed_process_info *info = &output[count];
+            (void)memset(info, 0, sizeof(*info));
+            info->Id = process->Id;
+            info->State = __atomic_load_n(&process->State, __ATOMIC_ACQUIRE);
+            info->ExitCode = __atomic_load_n(&process->ExitCode, __ATOMIC_ACQUIRE);
+            info->HeapBytes = __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE);
+            info->HeapLimit = process->HeapLimit;
+            info->TaskCount = __atomic_load_n(&process->TaskCount, __ATOMIC_ACQUIRE);
+            (void)snprintf(info->ModuleName, sizeof(info->ModuleName), "%s", process->RootName);
+        }
         ++count;
     }
+    xSemaphoreGive(s_registry);
     return count;
 }
 
 size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity)
 {
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE)) return 0;
     size_t count = 0;
+    xSemaphoreTake(s_registry, portMAX_DELAY);
     for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_MODULES; ++index) {
         ct_module *module = &s_modules[index];
         if (!module->Used) continue;
-        if (output != NULL && count < capacity) output[count] = (ct_managed_module_info){ module->Name, module->Version, module->References, module->ActiveCalls, module->LiveAllocations, module->Stopping };
+        if (output != NULL && count < capacity) {
+            ct_managed_module_info *info = &output[count];
+            (void)memset(info, 0, sizeof(*info));
+            (void)snprintf(info->Name, sizeof(info->Name), "%s", module->Name);
+            (void)snprintf(info->Version, sizeof(info->Version), "%s", module->Version);
+            info->LoadReferences = module->References;
+            info->ActiveCalls = __atomic_load_n(&module->ActiveCalls, __ATOMIC_ACQUIRE);
+            info->LiveAllocations = __atomic_load_n(&module->LiveAllocations, __ATOMIC_ACQUIRE);
+            info->Stopping = module->Stopping;
+        }
         ++count;
     }
+    xSemaphoreGive(s_registry);
     return count;
 }
 
 static const struct esp_elfsym s_symbols[] = {
-    ESP_ELFSYM_EXPORT(ct_managed_process_start), ESP_ELFSYM_EXPORT(ct_managed_process_id),
+    ESP_ELFSYM_EXPORT(ct_managed_process_start), ESP_ELFSYM_EXPORT(ct_managed_process_current),
+    ESP_ELFSYM_EXPORT(ct_managed_process_id),
     ESP_ELFSYM_EXPORT(ct_managed_process_get_state), ESP_ELFSYM_EXPORT(ct_managed_process_has_exited),
     ESP_ELFSYM_EXPORT(ct_managed_process_exit_code), ESP_ELFSYM_EXPORT(ct_managed_process_cancel),
     ESP_ELFSYM_EXPORT(ct_managed_process_terminate), ESP_ELFSYM_EXPORT(ct_managed_process_wait),
@@ -945,14 +1561,66 @@ static const struct esp_elfsym s_symbols[] = {
     ESP_ELFSYM_END
 };
 
+static void rollback_runtime_initialization(bool symbols_registered, TaskHandle_t reaper_task,
+    TaskHandle_t terminator_task)
+{
+    if (terminator_task != NULL) vTaskDelete(terminator_task);
+    if (reaper_task != NULL) vTaskDelete(reaper_task);
+    if (symbols_registered)
+        (void)esp_elf_unregister_symbol((esp_elf_symbol_table_t *)(uintptr_t)(const void *)s_symbols);
+    if (s_termination_queue != NULL) {
+        vQueueDelete(s_termination_queue);
+        s_termination_queue = NULL;
+    }
+    if (s_reaper_queue != NULL) {
+        vQueueDelete(s_reaper_queue);
+        s_reaper_queue = NULL;
+    }
+    if (s_registry != NULL) {
+        vSemaphoreDelete(s_registry);
+        s_registry = NULL;
+    }
+    __atomic_store_n(&s_initialized, false, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_initialization_state, CT_INITIALIZATION_UNINITIALIZED, __ATOMIC_RELEASE);
+}
+
 int ctilde_managed_runtime_initialize(void)
 {
-    if (s_initialized) return 0;
+    for (;;) {
+        const uint32_t state = __atomic_load_n(&s_initialization_state, __ATOMIC_ACQUIRE);
+        if (state == CT_INITIALIZATION_READY) return 0;
+        if (state == CT_INITIALIZATION_UNINITIALIZED) {
+            uint32_t expected = CT_INITIALIZATION_UNINITIALIZED;
+            if (__atomic_compare_exchange_n(&s_initialization_state, &expected, CT_INITIALIZATION_RUNNING,
+                false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) break;
+        }
+        vTaskDelay(1);
+    }
+
+    TaskHandle_t reaper_task = NULL;
+    TaskHandle_t terminator_task = NULL;
+    bool symbols_registered = false;
+    int result = -ENOMEM;
     s_registry = xSemaphoreCreateMutexStatic(&s_registry_storage);
-    s_reaper_queue = xQueueCreateStatic(16, sizeof(ct_process *), s_reaper_queue_buffer, &s_reaper_queue_storage);
-    if (s_registry == NULL || s_reaper_queue == NULL) return -ENOMEM;
-    if (esp_elf_register_symbol((esp_elf_symbol_table_t *)(uintptr_t)(const void *)s_symbols) != 0) return -EIO;
-    if (xTaskCreate(reaper_main, "ctilde_reaper", 4096 / sizeof(StackType_t), NULL, tskIDLE_PRIORITY + 1, NULL) != pdPASS) return -ENOMEM;
-    s_initialized = true;
+    s_reaper_queue = xQueueCreateStatic(CONFIG_CTILDE_MANAGED_MAX_PROCESSES, sizeof(ct_process *),
+        s_reaper_queue_buffer, &s_reaper_queue_storage);
+    s_termination_queue = xQueueCreateStatic(CONFIG_CTILDE_MANAGED_MAX_PROCESSES, sizeof(ct_termination_request),
+        s_termination_queue_buffer, &s_termination_queue_storage);
+    if (s_registry == NULL || s_reaper_queue == NULL || s_termination_queue == NULL) goto fail;
+    if (esp_elf_register_symbol((esp_elf_symbol_table_t *)(uintptr_t)(const void *)s_symbols) != 0) {
+        result = -EIO;
+        goto fail;
+    }
+    symbols_registered = true;
+    if (xTaskCreate(reaper_main, "ctilde_reaper", 4096, NULL, tskIDLE_PRIORITY + 1, &reaper_task) != pdPASS)
+        goto fail;
+    if (xTaskCreate(terminator_main, "ctilde_terminator", 4096, NULL, tskIDLE_PRIORITY + 1,
+        &terminator_task) != pdPASS) goto fail;
+    __atomic_store_n(&s_initialized, true, __ATOMIC_RELEASE);
+    __atomic_store_n(&s_initialization_state, CT_INITIALIZATION_READY, __ATOMIC_RELEASE);
     return 0;
+
+fail:
+    rollback_runtime_initialization(symbols_registered, reaper_task, terminator_task);
+    return result;
 }

@@ -1469,15 +1469,9 @@ internal sealed partial class CEmitter
             }
             foreach (var method in type.Methods)
             {
-                if (method.IsNaked)
-                    continue;
-                if (IsEspIdf && method.ExternName == "ct_environment_exit")
-                    continue;
-                if (IsManagedModule && method.ExternName is not null && !_reachableMethods.Contains(method))
+                if (!ShouldEmitMethodPrototype(method))
                     continue;
                 if (method.ExternName is not null && !emittedExternalSymbols.Add(method.ExternName))
-                    continue;
-                if (method.ExternName is null && !_reachableMethods.Contains(method))
                     continue;
                 writer.WriteLine(MethodSignature(method, prototype: true));
             }
@@ -1513,6 +1507,15 @@ internal sealed partial class CEmitter
             if (method.ExternName is not null && emittedExternalSymbols.Add(method.ExternName))
                 writer.WriteLine(MethodSignature(method, prototype: true));
         }
+    }
+
+    private bool ShouldEmitMethodPrototype(MethodSymbol method)
+    {
+        if (method.IsNaked || IsEspIdf && method.ExternName == "ct_environment_exit")
+            return false;
+        if (method.ExternName is null)
+            return _reachableMethods.Contains(method);
+        return !IsManagedModule || _reachableMethods.Contains(method);
     }
 
     private void EmitRuntimeImplementationBridges(CWriter writer)

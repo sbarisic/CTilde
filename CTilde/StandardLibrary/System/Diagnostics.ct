@@ -151,6 +151,12 @@ internal static class ProcessRuntime
     [Extern("ct_managed_process_start")]
     internal static nuint Start(string path, string[] args);
 
+    [Extern("ct_managed_process_current")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static nuint Current();
+
     [Extern("ct_managed_process_id")]
     [NoAlloc]
     [NoThrow]
@@ -223,6 +229,17 @@ public sealed class Process
         if (args == null)
             throw new ArgumentNullException();
         return new Process(ProcessRuntime.Start(path, args));
+    }
+
+    public static Process Current
+    {
+        get
+        {
+            nuint current = ProcessRuntime.Current();
+            if (current == 0U)
+                return null;
+            return new Process(current);
+        }
     }
 
     [NoAlloc]
@@ -310,6 +327,8 @@ public sealed class Process
 
     public byte[] Receive()
     {
+        if (handle == 0U || ProcessRuntime.Current() != handle)
+            throw new InvalidOperationException();
         return ProcessRuntime.Receive(handle, new byte[0]);
     }
 

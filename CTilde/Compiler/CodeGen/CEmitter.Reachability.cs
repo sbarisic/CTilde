@@ -115,6 +115,12 @@ internal sealed partial class CEmitter
                 AddType(contract);
             foreach (var field in type.Fields.Where(field => !field.IsStatic))
                 AddCType(field.Type);
+            // Ordinary images retain every native extern prototype declared on a
+            // reachable type. Keep the complete signatures of those prototypes in
+            // the type closure as well; otherwise a sibling overload can name an
+            // enum or aggregate that is referenced by generated C but never defined.
+            foreach (var method in type.Methods.Where(ShouldEmitMethodPrototype))
+                AddMethod(method);
             if (type.Kind == DeclaredTypeKind.Delegate)
             {
                 AddCType(type.DelegateReturnType);

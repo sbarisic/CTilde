@@ -71,10 +71,16 @@ internal static class TargetValidator
         }
         else
         {
-            foreach (var use in emitter.ExternUses.Where(use =>
-                         use.Method.ContainingType.FullName == "System.Diagnostics.ProcessRuntime" &&
-                         use.Method.ExternName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true))
-                model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 18.", use.Syntax.Source, use.Syntax.Span);
+            var userRoots = model.Effects.Operations.Keys.Where(method =>
+                method.Syntax is not null && model.UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, method.Syntax.Source)));
+            var reachableFromUser = model.Effects.ReachableMethods(userRoots);
+            foreach (var caller in reachableFromUser)
+            {
+                foreach (var operation in model.Effects.Operations.GetValueOrDefault(caller).Where(operation =>
+                             operation.Target?.ContainingType.FullName == "System.Diagnostics.ProcessRuntime" &&
+                             operation.Target.ExternName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true))
+                    model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 18.", operation.Syntax.Source, operation.Syntax.Span);
+            }
         }
 
         var complete = new HashSet<TypeSymbol>();

@@ -11,6 +11,8 @@ extern "C" {
 #define CTILDE_RUNTIME_ABI_VERSION 18u
 #define CTILDE_MANAGED_MODULE_ABI_VERSION 1u
 #define CTILDE_MANAGED_MODULE_ROOT "/storage/modules"
+#define CTILDE_MANAGED_MODULE_NAME_CAPACITY 64u
+#define CTILDE_MANAGED_MODULE_VERSION_CAPACITY 32u
 
 #define CT_RUNTIME_SERVICE_THREAD_ATTACH 1u
 #define CT_RUNTIME_SERVICE_THREAD_DETACH 2u
@@ -94,13 +96,13 @@ typedef struct ct_managed_process_info {
     size_t HeapBytes;
     size_t HeapLimit;
     uint32_t TaskCount;
-    const char *ModuleName;
+    char ModuleName[CTILDE_MANAGED_MODULE_NAME_CAPACITY];
 } ct_managed_process_info;
 
 typedef struct ct_managed_module_info {
-    const char *Name;
-    const char *Version;
-    uint32_t ProcessReferences;
+    char Name[CTILDE_MANAGED_MODULE_NAME_CAPACITY];
+    char Version[CTILDE_MANAGED_MODULE_VERSION_CAPACITY];
+    uint32_t LoadReferences;
     uint32_t ActiveCalls;
     uint32_t LiveAllocations;
     bool Stopping;
@@ -114,6 +116,7 @@ const ct_runtime_api_v18 *ctilde_runtime_api_v18(void);
 
 /* Managed standard-library entry points. The managed layouts are private to ABI 18. */
 uintptr_t ct_managed_process_start(const void *path, const void *arguments);
+uintptr_t ct_managed_process_current(void);
 uint32_t ct_managed_process_id(uintptr_t handle);
 ct_managed_process_state ct_managed_process_get_state(uintptr_t handle);
 bool ct_managed_process_has_exited(uintptr_t handle);

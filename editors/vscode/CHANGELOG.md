@@ -1,5 +1,6 @@
 # Changelog
 
+- Aligned the working tree with Draft 0.45 managed-module manifests, Runtime ABI 18 process documentation, fixed module-identity capacities, and the expanded 18-project example catalog. No extension package was produced by this source revision.
 - Added Draft 0.39 `[NativeImport]` diagnostics, navigation, semantic metadata, and schema support for platform-selected `hosted.runtimeFiles` while retaining the Draft 0.38 hosted x64 SIMD and `Vec3x4` support.
 
 ## 0.15.0 - 2026-08-30

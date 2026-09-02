@@ -60,8 +60,8 @@ void ct_managed_shell_print_modules(void)
     printf("modules: %u\n", (unsigned)count);
     for (size_t index = 0u; index < count && index < 16u; ++index) {
         const ct_managed_module_info *module = &modules[index];
-        printf("  %s %s processes=%" PRIu32 " calls=%" PRIu32 " objects=%" PRIu32 "%s\n",
-            module->Name, module->Version, module->ProcessReferences, module->ActiveCalls,
+        printf("  %s %s load-refs=%" PRIu32 " calls=%" PRIu32 " objects=%" PRIu32 "%s\n",
+            module->Name, module->Version, module->LoadReferences, module->ActiveCalls,
             module->LiveAllocations, module->Stopping ? " stopping" : "");
     }
 }

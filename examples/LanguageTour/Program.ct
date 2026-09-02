@@ -1,0 +1,206 @@
+using System;
+using System.Runtime;
+using System.Text;
+
+namespace Examples.LanguageTour;
+
+public delegate int Transform(int value);
+
+public newtype RequestId : uint;
+
+[Packed(2)]
+public struct PacketHeader
+{
+    public byte Kind;
+    public int Length;
+}
+
+public struct RegisterView
+{
+    [FieldOffset(0)]
+    public uint Value;
+    [FieldOffset(0)]
+    public ushort Low;
+    [FieldOffset(2)]
+    public ushort High;
+}
+
+public union NumberBits
+{
+    public uint Integer;
+    public float Float;
+}
+
+public struct Score
+{
+    public int Value;
+
+    public Score(int value)
+    {
+        Value = value;
+    }
+
+    public static Score operator +(Score left, Score right)
+    {
+        return new Score(left.Value + right.Value);
+    }
+
+    public static bool operator ==(Score left, Score right)
+    {
+        return left.Value == right.Value;
+    }
+
+    public static bool operator<(Score left, Score right)
+    {
+        return left.Value < right.Value;
+    }
+}
+
+public interface INamed
+{
+    string Name
+    {
+        get;
+    }
+}
+
+public abstract class Reading : object, INamed
+{
+    public abstract int Value();
+
+    public virtual string Name
+    {
+        get
+        {
+            return "reading";
+        }
+    }
+}
+
+public sealed class Temperature : Reading
+{
+    private int degrees;
+
+    public Temperature(int degrees)
+    {
+        this.degrees = degrees;
+    }
+
+    public override int Value()
+    {
+        return degrees;
+    }
+
+    public override string Name
+    {
+        get
+        {
+            return "temperature";
+        }
+    }
+}
+
+public static class Assets
+{
+    [Embed("assets/message.txt")]
+    public static unsafe readonly ReadOnlyNativeBuffer<byte> Message;
+}
+
+public static class Program
+{
+    static assert(sizeof(RegisterView) == 4u, "explicit layout must remain four bytes");
+    static assert(offsetof(RegisterView, High) == 2u);
+    [NoRecursion]
+    private static int AddOne(int value)
+    {
+        return value + 1;
+    }
+
+    [EntryPoint]
+    public static unsafe void Main()
+    {
+        Console.WriteLine("Language and data-layout tour");
+        Console.Write("embedded bytes: ");
+        Console.WriteLine(Assets.Message.Length);
+        Console.Write("embedded prefix: ");
+        Console.Write((char)Assets.Message[0]);
+        Console.WriteLine((char)Assets.Message[1]);
+        rune marker = r'λ';
+        rune decoded;
+        int bytesRead;
+        bool decodedOk = Utf8.TryDecode("λ", 0, out decoded, out bytesRead);
+        NativeBuffer<byte> encoded = stackalloc byte[4];
+        nuint bytesWritten;
+        bool encodedOk = Utf8.TryEncode(marker, encoded, out bytesWritten);
+        Console.Write("rune: ");
+        Console.WriteLine(marker);
+        Console.Write("utf8 roundtrip: ");
+        Console.WriteLine(decodedOk && encodedOk && decoded == marker);
+        Console.Write("decoded bytes: ");
+        Console.WriteLine(bytesRead);
+        Console.Write("encoded bytes: ");
+        Console.WriteLine(bytesWritten);
+        Transform twice = value=>value * 2;
+        int offset = 5;
+        Transform adjusted = [captured=offset] value=>value + captured;
+        Console.Write("captureless lambda: ");
+        Console.WriteLine(twice(21));
+        Console.Write("captured lambda: ");
+        Console.WriteLine(adjusted(37));
+        Score first = new Score(20);
+        Score second = new Score(22);
+        Score total = first + second;
+        Console.Write("operator sum: ");
+        Console.WriteLine(total.Value);
+        Console.Write("operator equality: ");
+        Console.WriteLine(total == new Score(42));
+        Console.Write("operator ordering: ");
+        Console.WriteLine(first < second);
+        Reading reading = new Temperature(42);
+        INamed named = reading;
+        Console.Write("interface name: ");
+        Console.WriteLine(named.Name);
+        Console.Write("abstract value: ");
+        Console.WriteLine(reading.Value());
+        Console.Write("type test: ");
+        Console.WriteLine(reading is Temperature);
+        RequestId request = (RequestId)42u;
+        Console.Write("newtype value: ");
+        Console.WriteLine((uint)request);
+        PacketHeader header = new PacketHeader();
+        header.Kind = (byte)1;
+        header.Length = 42;
+        RegisterView register = new RegisterView();
+        register.Value = 0x00020001u;
+        NumberBits bits = new NumberBits();
+        bits.Integer = 1065353216u;
+        Console.Write("packed size: ");
+        Console.WriteLine(sizeof(PacketHeader));
+        Console.Write("packed alignment: ");
+        Console.WriteLine(alignof(PacketHeader));
+        Console.Write("packed field offset: ");
+        Console.WriteLine(offsetof(PacketHeader, Length));
+        Console.Write("explicit low: ");
+        Console.WriteLine(register.Low);
+        Console.Write("explicit high: ");
+        Console.WriteLine(register.High);
+        Console.Write("union float: ");
+        Console.WriteLine(bits.Float);
+        int iterations = 0;
+        do
+        {
+            iterations++;
+        }
+        while (iterations < 3);
+        Console.Write("do/no-recursion: ");
+        Console.WriteLine(AddOne(iterations));
+        static if (Target.PointerSize == 8)
+        {
+            Console.WriteLine("x64 pointer width");
+        }
+        else
+        {
+            Console.WriteLine("32-bit pointer width");
+        }
+    }
+}

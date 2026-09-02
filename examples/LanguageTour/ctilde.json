@@ -1,0 +1,12 @@
+{
+  "target": "hosted",
+  "architecture": "x64",
+  "sources": ["Program.ct"],
+  "build": {
+    "configuration": "release",
+    "cLayout": "modules",
+    "optimization": "speed",
+    "cpuTarget": "baseline",
+    "floatingPoint": "precise"
+  }
+}

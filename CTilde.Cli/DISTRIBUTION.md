@@ -24,6 +24,8 @@ ctilde --project path/to/ctilde.json --build
 
 Alternatively, pass `--idf-path`. On Windows, the compiler detects a matching Espressif Installation Manager PowerShell profile before trying the stock `export.ps1`, so it reuses the installation's Python environment and toolchain.
 
+An ESP-IDF manifest can select `espIdf.artifact: "managed-module"` to emit a Runtime ABI 18 / Managed Module ABI 1 `.ctm` image and deterministic `.ctmeta.json` reference. This artifact requires `build.cLayout: "modules"` and a `managedModule` block. Managed module names accept at most 63 ASCII bytes and versions at most 31 ASCII bytes. The hosted target does not load `.ctm` files; hosted dynamic loading uses the separate native C ABI `[NativeImport]` facility.
+
 Use `ctilde --help` for generated-C, project, toolchain, and ESP-IDF options. ESP-IDF and hosted C toolchains are external dependencies and are not included in this archive.
 
 The Cosmopolitan target introduced in Draft 0.24 uses an external official `cosmocc` toolchain. CTilde does not bundle or download its roughly 421 MiB release archive during compilation, install a systemwide APE loader, or call unsupported physical `*-linux-cosmo-gcc` executables directly. The first target requires the supported `x86_64-unknown-cosmo-cc` wrapper and matching `x86_64-linux-cosmo-objcopy`; see [the repository design](../COSMOPOLITAN.md).

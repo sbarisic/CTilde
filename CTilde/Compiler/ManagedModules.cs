@@ -43,6 +43,9 @@ public sealed record ManagedModuleMetadata(
     ImmutableArray<ManagedModuleTypeMetadata> Types,
     ImmutableArray<ManagedModuleExportMetadata> Exports)
 {
+    internal const int MaximumNameAsciiBytes = 63;
+    internal const int MaximumVersionAsciiBytes = 31;
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -111,11 +114,16 @@ public sealed record ManagedModuleMetadata(
             throw new CTildeProjectException($"Managed-module metadata '{source}' has an API hash that does not match its public surface.", "CT6201");
     }
 
-    private static bool IsCanonicalName(string? value) => value is not null &&
+    internal static bool IsCanonicalName(string? value) => value is not null &&
+        IsWithinAsciiCapacity(value, MaximumNameAsciiBytes) &&
         Regex.IsMatch(value, "^[A-Za-z][A-Za-z0-9]*(?:[.][A-Za-z][A-Za-z0-9]*)*$", RegexOptions.CultureInvariant);
 
-    private static bool IsExactVersion(string? value) => value is not null &&
+    internal static bool IsExactVersion(string? value) => value is not null &&
+        IsWithinAsciiCapacity(value, MaximumVersionAsciiBytes) &&
         Regex.IsMatch(value, "^(0|[1-9][0-9]*)(?:[.](0|[1-9][0-9]*)){2}(?:-[0-9A-Za-z.-]+)?(?:[+][0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant);
+
+    private static bool IsWithinAsciiCapacity(string value, int maximumBytes) =>
+        value.Length <= maximumBytes && value.All(character => character <= '\u007f');
 
     private static bool IsHash(string? value) => value is { Length: 64 } && value.All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
 

@@ -7,7 +7,7 @@ public static class Program
     [EntryPoint]
     public static unsafe void Main()
     {
-        Console.WriteLine("C~ Draft 0.42 standard-library tour");
+        Console.WriteLine("C~ Draft 0.45 standard-library tour");
         defer Console.ReadLine();
         defer Console.WriteLine("Done!");
         StringExamples.Run();

@@ -12,13 +12,13 @@ $shellProject = Join-Path $PSScriptRoot "ctilde.json"
 $moduleOutput = Join-Path $PSScriptRoot "Modules\Hello\build\managed-modules\examples.hello.ctm"
 $moduleStorage = Join-Path $PSScriptRoot "storage\modules\examples.hello.ctm"
 
-dotnet run --project $cli -- --project $moduleProject --build
+dotnet run --project $cli -- --project $moduleProject --build --idf-path $IdfPath
 if ($LASTEXITCODE -ne 0) { throw "Managed Hello module build failed." }
 
 New-Item -ItemType Directory -Force (Split-Path -Parent $moduleStorage) | Out-Null
 Copy-Item -LiteralPath $moduleOutput -Destination $moduleStorage -Force
 
-dotnet run --project $cli -- --project $shellProject --build
+dotnet run --project $cli -- --project $shellProject --build --idf-path $IdfPath
 if ($LASTEXITCODE -ne 0) { throw "Managed shell firmware build failed." }
 
 if (-not $BuildOnly) {

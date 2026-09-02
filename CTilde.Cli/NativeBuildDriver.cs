@@ -76,8 +76,19 @@ internal static class HostedBuildDriver
             HostedRuntimeFileStager.Stage(request, runtimeFiles);
         if (result == 0 && request.Trace)
             Console.Error.WriteLine($"trace: wrote native executable {request.ExecutablePath}");
-        return new NativeBuildOutcome(result, compiler.Kind == HostedCompilerKind.Msvc ? "msvc" : "gcc",
+        return new NativeBuildOutcome(result, BackendName(compiler),
             compiler.Command, compiler.WslCompiler, stackUsageFiles);
+    }
+
+    private static string BackendName(HostedCompiler compiler)
+        => ClassifyBackend(compiler.Kind == HostedCompilerKind.Msvc, compiler.Command, compiler.WslCompiler);
+
+    internal static string ClassifyBackend(bool isMsvc, string compilerCommand, string? wslCompiler)
+    {
+        if (isMsvc)
+            return "msvc";
+        var executable = wslCompiler ?? Path.GetFileNameWithoutExtension(compilerCommand);
+        return executable.Contains("clang", StringComparison.OrdinalIgnoreCase) ? "clang" : "gcc";
     }
 
     private static async Task<HostedCompiler> ResolveCompilerAsync(string configured, string workingDirectory, CancellationToken cancellationToken)

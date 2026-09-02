@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.45 introduces Runtime ABI 18 and Managed Module ABI 1 for trusted ESP-IDF ELF applications. Managed applications share the firmware runtime, receive per-process mutable static state and heap accounting, run as FreeRTOS tasks, and unload with their unused module graph. Draft 0.44 remains the dependency-oriented C-emission and verified-stack-contract revision. Debug metadata remains version 3.
+Draft 0.45 introduces Runtime ABI 18 and Managed Module ABI 1 for trusted ESP-IDF ELF applications. Managed applications bind to the firmware-owned process host and runtime-service table, receive per-process mutable static state and heap accounting, run as FreeRTOS tasks, and unload after their final tracked process/runtime reference disappears. The runtime can preflight and retain an exact dependency graph, but callable managed-library imports, canonical shared types, and complete extraction of the remaining per-module language-runtime and standard-library helpers are still in progress. Draft 0.44 remains the dependency-oriented C-emission and verified-stack-contract revision. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -111,7 +111,7 @@ public static class Program
 
 SIMD lane values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` for explicit supported-target intrinsic lowering, or set top-level `simdOptimizations: true` to optimize scalar geometry in hosted x64 applications and implicitly select SIMD128. `Vec3x4` stores three `F32x4` components in exactly 48 bytes.
 
-The [feature example](examples/Features/Program.ct) covers more syntax, the [standard-library tour](examples/StandardLibrary/README.md) exercises the Draft 0.40 through 0.42 APIs, and the [hosted path tracer](examples/HostedIo/README.md) shows a larger object-oriented program.
+The [example catalog](examples/README.md) groups 18 editor projects by language/hosted, systems-target, managed-module, and ESP-IDF responsibilities. The focused [language tour](examples/LanguageTour/README.md) covers embedded assets, runes, lambdas, operators, abstract dispatch, and native data layouts. The [collections and geometry tour](examples/CollectionsAndGeometry/README.md) exercises the generic containers and scalar math surface, while the [hosted path tracer](examples/HostedIo/README.md) remains the larger multi-file program.
 
 ## Build the compiler
 
@@ -218,7 +218,7 @@ Release builds can select `speed` or `aggressive` optimization, `baseline` or x6
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
-An ESP-IDF managed application selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Build emits a deterministic `.ctmeta.json` reference and an ELF `.ctm` containing the Module ABI 1 preflight manifest. The firmware-side runtime and the [ManagedShell example](examples/ManagedShell/README.md) load modules only below `/storage/modules`; managed module code is trusted and has accounting but no memory protection.
+An ESP-IDF managed application selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Build emits a deterministic `.ctmeta.json` reference and an ELF `.ctm` containing the Module ABI 1 preflight manifest. The firmware-side process host and the two [ManagedShell solution projects](examples/ManagedShell/README.md) load direct-child module files from the flat `/storage/modules` namespace; managed module code is trusted and has accounting but no memory protection. Managed Module ABI 1 is not a hosted artifact format.
 
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
@@ -245,7 +245,7 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 ## Native interop and ownership
 
-C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path.
+C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path. The [hosted native-import example](examples/HostedNativeImport/README.md) builds and executes one stateful plug-in under MSVC, WSL GCC, and WSL Clang; it deliberately does not present that C ABI as managed-module loading.
 
 The generated header exposes exported methods and Runtime ABI 18 lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 1 descriptor and bind to the firmware-owned `ct_runtime_api_v18` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
@@ -263,7 +263,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 - `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
 - `Editors.sln` contains the three Visual Studio extension projects.
-- `Examples.sln` contains the 13 example projects, including a Draft 0.40 through 0.42 standard-library tour and the three grouped T-CAN variants.
+- `Examples.sln` contains 18 projects grouped as language and hosted programs, systems targets, managed modules, and T-CAN variants. It includes separate editor projects for the ManagedShell firmware and its managed Hello application.
 - `CTilde.StandardLibrary.sln` contains the physical standard-library project.
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
@@ -295,8 +295,11 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 - [TODO.md](TODO.md): outstanding work only.
 - [FUTURE_FEATURES.md](FUTURE_FEATURES.md): historical design record for Drafts 0.26 through 0.34.
 - [COSMOPOLITAN.md](COSMOPOLITAN.md): APE target design and acceptance stages.
+- [examples/README.md](examples/README.md): categorized runnable examples, prerequisites, and deliberate coverage boundaries.
 
 ## Validation
+
+`Test/Test-ExampleCatalog.ps1` compares the complete output of the focused hosted tours, checks both managed-module projects, and executes the native-import example. `-IncludeEspIdfBuild` adds real `.ctm`, metadata, and firmware packaging when ESP-IDF is installed; `CTILDE_EXAMPLE_ESP_IDF_BUILD=1` enables that lane through the Release validation tier. The ordinary portable smoke remains ahead of the larger compiler and SIMD matrices.
 
 The fixed fast gate builds managed projects once, runs every conformance case under MSVC, repeats only toolchain-sensitive cases under WSL GCC and Clang, and reuses those outputs for the managed editor tests:
 

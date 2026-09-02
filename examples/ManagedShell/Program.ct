@@ -13,19 +13,16 @@ internal static class ShellPlatform
     [Extern("ct_managed_shell_print_modules")]
     [NoAlloc]
     [NoThrow]
-    [NoBlock]
     internal static void PrintModules();
 
     [Extern("ct_managed_shell_print_processes")]
     [NoAlloc]
     [NoThrow]
-    [NoBlock]
     internal static void PrintProcesses();
 
     [Extern("ct_managed_shell_print_free_heap")]
     [NoAlloc]
     [NoThrow]
-    [NoBlock]
     internal static void PrintFreeHeap();
 }
 
@@ -165,7 +162,14 @@ public static class Program
             Console.WriteLine("process not found");
             return;
         }
-        process.Send(Encoding.UTF8.GetBytes(words[2]));
+        string payload = words[2];
+        int index = 3;
+        while (index < words.Length)
+        {
+            payload = payload + " " + words[index];
+            index++;
+        }
+        process.Send(Encoding.UTF8.GetBytes(payload));
     }
 
     private static void Dispatch(string line)

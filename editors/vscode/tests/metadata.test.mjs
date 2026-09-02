@@ -149,7 +149,16 @@ test("project schema includes native build configuration", async () => {
   assert.ok(schema.allOf.some(rule => rule.if?.properties?.kind?.const === "standard-library" &&
     rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("build")) &&
     rule.then?.not?.anyOf?.some(restriction => restriction.required?.includes("simdOptimizations"))));
-  assert.deepEqual(schema.properties.espIdf.required, ["bindings"]);
+  assert.equal(schema.properties.espIdf.required, undefined);
+  assert.deepEqual(schema.properties.espIdf.properties.artifact.enum, ["firmware", "managed-module"]);
+  assert.equal(schema.properties.espIdf.properties.artifact.default, "firmware");
+  assert.equal(schema.properties.managedModule.properties.name.maxLength, 63);
+  assert.equal(schema.properties.managedModule.properties.version.maxLength, 31);
+  assert.ok(schema.allOf.some(rule =>
+    rule.if?.properties?.espIdf?.properties?.artifact?.const === "managed-module" &&
+    rule.then?.required?.includes("managedModule") &&
+    rule.then?.properties?.target?.enum?.includes("esp-idf") &&
+    rule.then?.properties?.build?.properties?.cLayout?.const === "modules"));
   assert.ok(schema.properties.target.enum.includes("cosmopolitan"));
   assert.ok(schema.properties.target.enum.includes("esp32_qemu"));
   assert.ok(schema.properties.target.enum.includes("esp32c3_qemu"));

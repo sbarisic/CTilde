@@ -1,6 +1,6 @@
 # Standard-library tour
 
-This hosted x64 example demonstrates the Draft 0.40 through Draft 0.42 library foundations in small, responsibility-based source files:
+This hosted x64 project runs on the current Draft 0.45 compiler and demonstrates the library foundations introduced from Draft 0.40 through Draft 0.42 in small, responsibility-based source files:
 
 - ordinal UTF-8 string search, replacement, splitting, segments, joining, and ASCII helpers;
 - `StringBuilder`, composite formatting, numeric format specifications, and custom `IFormattable` values;
@@ -19,3 +19,5 @@ dotnet ..\..\CTilde.Cli\bin\Release\net10.0\ctilde.dll --project .\ctilde.json -
 Indexes and lengths in the string examples are UTF-8 byte offsets. Native conversion remains explicit: `Utf8` copies validated bytes into managed storage, while `NativeUtf8String.Borrow` supplies a temporary zero-allocation C string for synchronous native calls.
 
 The I/O tour creates `ctilde-stdlib-tour` beneath the current directory, reads its file through a seekable `FileStream`, prints metadata, then removes the directory before returning.
+
+Generic value helpers, mutable collections, versioned enumerators, vectors, matrices, and quaternions have their own focused [CollectionsAndGeometry example](../CollectionsAndGeometry/README.md), keeping this I/O-oriented tour readable.

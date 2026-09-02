@@ -314,7 +314,7 @@ A narrow `[Naked]` export emits one GNU `__attribute__((naked, noreturn))` defin
 
 ## ESP-IDF managed-module ABI
 
-Managed modules are ELF32 `ET_DYN` images for the resolved ESP-IDF architecture. They contain a `.ctilde.manifest` record whose fixed-width header identifies Runtime ABI 18, Managed Module ABI 1, architecture, kind, canonical name and version, build identity, API hash, task stack, heap limit, and exact dependencies. The loader validates this record from bytes before relocation.
+Managed modules are ELF32 `ET_DYN` images for the resolved ESP-IDF architecture. They contain a `.ctilde.manifest` record whose fixed-width header identifies Runtime ABI 18, Managed Module ABI 1, architecture, kind, canonical name and version, build identity, API hash, task stack, heap limit, and exact dependencies. Names occupy a 64-byte array and accept at most 63 ASCII bytes; versions occupy a 32-byte array and accept at most 31 ASCII bytes. The final byte remains available for the required NUL terminator. The compiler applies these limits to project, reference, and dependency identities before emitting C, and the loader validates the record from bytes before relocation. Module files are direct children of `/storage/modules`; the flat namespace matches Espressif's basename-keyed dynamic-module registry and prevents preflight/relocation path aliasing.
 
 The only callable dynamic ABI entries are `ct_managed_module_descriptor()` and `ct_managed_module_bind_runtime(const ct_runtime_api_v18*)`. The preflight manifest is retained as a dynamic object solely so Espressif `project_so(...)` section garbage collection cannot discard it. All other generated definitions have hidden visibility and resolve through module-relative relocations. A conforming module must have no `R_XTENSA_GLOB_DAT` or equivalent relocation for module-owned objects. The loader may reject any undefined symbol not present in its explicit native allowlist.
 
@@ -322,9 +322,15 @@ The only callable dynamic ABI entries are `ct_managed_module_descriptor()` and `
 
 `ct_runtime_api_v18` begins with `Size` and `AbiVersion`, followed by allocation/free/final-release, exception/fault, canonical type registration, current process/module/thread state, cancellation, managed call pinning, and generic runtime-service slots. A module checks the size and ABI before storing the borrowed table pointer. Console services use service ordinals 16, 17, and 18 with `ct_runtime_console_transfer_v18`; thread attach/detach use ordinals 1 and 2. Service payloads are synchronous borrowed memory.
 
+The ESP-IDF host also publishes the private-layout `ct_managed_process_*` entry points used by `System.Diagnostics.Process`. `ct_managed_process_current()` returns the current logical process identifier, or zero outside managed execution, so a module can address its own copied-message mailbox without exposing a native process pointer. Completion becomes observable only after process cleanup releases the module graph and signals its wait object.
+
+Firmware inspection copies names into fixed 64-byte module-name and 32-byte version fields while holding the registry lock; no returned pointer aliases unloadable module storage. Module snapshots report direct load-graph references as `LoadReferences`, distinct from process count. Process handles become visible through a one-way publication slot only after their FreeRTOS TLS cleanup callback is installed. Forced deletion closes a combined stop-bit/active-operation gate before it removes the task, so allocator lists, type registrations, managed-call counters, mailboxes, and bounded console output are never observed halfway through a runtime mutation.
+
 Managed allocations have a firmware-private prefix recording process, provider module, size, and allocation-list links; the public managed object header begins after that prefix and remains unchanged. Mutable static access asks the runtime for the current process's instance of the descriptor. Module string literals and descriptors may not survive unload unless rooted through a runtime-owned canonical representation.
 
-Managed imports and exports use deterministic identities derived from canonical containing type, member, parameter passing, concrete parameter and result types, ownership, and effects. They are separate from `[Export]`, which remains native C interoperability. Public managed signatures cannot contain generic types. Metadata references compile declarations without adding provider source to the consumer compilation.
+Managed import/export identities are reserved from the canonical containing type, member, parameter passing, concrete parameter and result types, ownership, and effects. They are separate from `[Export]`, which remains native C interoperability. The Draft 0.45 compiler emits deterministic public signatures and exact dependency identities, and it rejects generic types in public managed signatures. The firmware loader can recursively validate, retain, initialize, and reverse-release those exact binary dependencies. The compiler does not yet consume provider metadata as declarations, patch managed import slots, or execute cross-module managed calls; those operations remain requirements of the complete Managed Module ABI rather than behavior of the current application-only programming surface.
+
+The [ManagedShell example](examples/ManagedShell/README.md) contains separate solution projects for the firmware host and its `.ctm` application module.
 
 ## Console and file I/O
 
@@ -378,6 +384,8 @@ Reachable imports are ordered by ordinal logical library and symbol. Compatible 
 The loader address is transferred into the structurally typed function-pointer slot with a checked size assertion and byte copy. Generated code does not alias data and function pointers or rely on a warning-producing cast. Taking the C~ method address reads the resolved slot directly. Resolution runs after panic and runtime-fault setup and before C~ static initialization. Libraries remain loaded through reverse static finalization and unload afterward in reverse load order. Failures report `CTI0001`, `CTI0002`, or `CTI0003` with logical and mapped names, symbol when applicable, declaration location, and native loader details before entering the configured panic path.
 
 This facility loads ordinary native C ABI libraries only. It does not expose handles, provide automatic marshalling, register C~-managed module descriptors, or independently change the selected runtime ABI. Cosmopolitan, ESP-IDF, freestanding, macOS, versioned `.so` names, and non-default calling conventions are outside Draft 0.39 native-import support.
+
+The [HostedNativeImport example](examples/HostedNativeImport/README.md) provides a complete typed C~ declaration, stateful C plug-in, and MSVC/WSL build matrix. It is intentionally separate from the ESP-IDF Managed Module ABI described above.
 
 ## Native section placement
 

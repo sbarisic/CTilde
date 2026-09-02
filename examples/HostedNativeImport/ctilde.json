@@ -1,0 +1,17 @@
+{
+  "target": "hosted",
+  "architecture": "x64",
+  "sources": ["Program.ct"],
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "build/generated",
+    "generatedHeader": "build/generated/ctilde_exports.h",
+    "symbolMap": "build/generated/ctilde_symbols.json",
+    "configuration": "release",
+    "optimization": "speed",
+    "cpuTarget": "baseline",
+    "floatingPoint": "precise",
+    "compiler": "msvc",
+    "executable": "build/HostedNativeImport.exe"
+  }
+}

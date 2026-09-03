@@ -8,9 +8,11 @@
 extern "C" {
 #endif
 
-#define CTILDE_RUNTIME_ABI_VERSION 18u
+#define CTILDE_RUNTIME_ABI_VERSION 19u
 #define CTILDE_MANAGED_MODULE_ABI_VERSION 1u
-#define CTILDE_MANAGED_MODULE_ROOT "/storage/modules"
+#define CTILDE_MANAGED_MODULE_SD_ROOT "/sd/modules"
+#define CTILDE_MANAGED_MODULE_FALLBACK_ROOT "/storage/modules"
+#define CTILDE_MANAGED_MODULE_ROOT CTILDE_MANAGED_MODULE_FALLBACK_ROOT
 #define CTILDE_MANAGED_MODULE_NAME_CAPACITY 64u
 #define CTILDE_MANAGED_MODULE_VERSION_CAPACITY 32u
 
@@ -19,19 +21,55 @@ extern "C" {
 #define CT_RUNTIME_SERVICE_CONSOLE_WRITE 16u
 #define CT_RUNTIME_SERVICE_CONSOLE_READ 17u
 #define CT_RUNTIME_SERVICE_CONSOLE_FLUSH 18u
+#define CT_RUNTIME_SERVICE_FILE_OPEN 32u
+#define CT_RUNTIME_SERVICE_FILE_READ 33u
+#define CT_RUNTIME_SERVICE_FILE_WRITE 34u
+#define CT_RUNTIME_SERVICE_FILE_SEEK 35u
+#define CT_RUNTIME_SERVICE_FILE_LENGTH 36u
+#define CT_RUNTIME_SERVICE_FILE_SET_LENGTH 37u
+#define CT_RUNTIME_SERVICE_FILE_FLUSH 38u
+#define CT_RUNTIME_SERVICE_FILE_CLOSE 39u
+#define CT_RUNTIME_SERVICE_PATH_METADATA 48u
+#define CT_RUNTIME_SERVICE_FILE_DELETE 49u
+#define CT_RUNTIME_SERVICE_PATH_MOVE 50u
+#define CT_RUNTIME_SERVICE_DIRECTORY_CREATE 51u
+#define CT_RUNTIME_SERVICE_DIRECTORY_DELETE 52u
+#define CT_RUNTIME_SERVICE_DIRECTORY_OPEN 53u
+#define CT_RUNTIME_SERVICE_DIRECTORY_READ 54u
+#define CT_RUNTIME_SERVICE_DIRECTORY_CLOSE 55u
+#define CT_RUNTIME_SERVICE_CURRENT_DIRECTORY_GET 56u
+#define CT_RUNTIME_SERVICE_CURRENT_DIRECTORY_SET 57u
+#define CT_RUNTIME_SERVICE_PATH_SEPARATOR 58u
 
-typedef struct ct_runtime_console_transfer_v18 {
+typedef struct ct_runtime_console_transfer_v19 {
     uint8_t *Data;
     size_t Length;
     size_t Count;
     bool Eof;
-} ct_runtime_console_transfer_v18;
+} ct_runtime_console_transfer_v19;
+
+typedef struct ct_runtime_io_path_v19 { uint32_t Size; const uint8_t *Path; size_t PathLength; } ct_runtime_io_path_v19;
+typedef struct ct_runtime_io_open_v19 { uint32_t Size; const uint8_t *Path; size_t PathLength; uint8_t Mode; uint8_t Access; uintptr_t Handle; } ct_runtime_io_open_v19;
+typedef struct ct_runtime_io_transfer_v19 { uint32_t Size; uintptr_t Handle; uint8_t *Data; size_t Length; size_t Count; bool Eof; } ct_runtime_io_transfer_v19;
+typedef struct ct_runtime_io_seek_v19 { uint32_t Size; uintptr_t Handle; int64_t Offset; uint8_t Origin; int64_t Value; } ct_runtime_io_seek_v19;
+typedef struct ct_runtime_io_value_v19 { uint32_t Size; uintptr_t Handle; int64_t Value; } ct_runtime_io_value_v19;
+typedef struct ct_runtime_io_handle_v19 { uint32_t Size; uintptr_t Handle; } ct_runtime_io_handle_v19;
+typedef struct ct_runtime_io_two_paths_v19 { uint32_t Size; const uint8_t *Source; size_t SourceLength; const uint8_t *Destination; size_t DestinationLength; bool Flag; } ct_runtime_io_two_paths_v19;
+typedef struct ct_runtime_io_path_flag_v19 { uint32_t Size; const uint8_t *Path; size_t PathLength; bool Flag; } ct_runtime_io_path_flag_v19;
+typedef struct ct_runtime_io_metadata_v19 {
+    uint32_t Size; const uint8_t *Path; size_t PathLength;
+    uint8_t Kind; uint32_t Attributes; int64_t Length;
+    bool HasCreationTime; int64_t CreationSeconds; int32_t CreationNanoseconds;
+    bool HasAccessTime; int64_t AccessSeconds; int32_t AccessNanoseconds;
+    bool HasModificationTime; int64_t ModificationSeconds; int32_t ModificationNanoseconds;
+} ct_runtime_io_metadata_v19;
+typedef struct ct_runtime_io_directory_read_v19 { uint32_t Size; uintptr_t Handle; uint8_t *Name; size_t NameCapacity; size_t NameLength; uint8_t Kind; uint32_t Attributes; int64_t Length; } ct_runtime_io_directory_read_v19;
 
 typedef struct ct_type_descriptor ct_type_descriptor;
 typedef struct ct_process_context ct_process_context;
 typedef struct ct_managed_module_descriptor_v1 ct_managed_module_descriptor_v1;
 
-typedef struct ct_runtime_api_v18 {
+typedef struct ct_runtime_api_v19 {
     uint32_t Size;
     uint32_t AbiVersion;
     void *(*Allocate)(size_t size, const ct_managed_module_descriptor_v1 *module);
@@ -49,7 +87,7 @@ typedef struct ct_runtime_api_v18 {
     void (*EnterCall)(const ct_managed_module_descriptor_v1 *module);
     void (*LeaveCall)(const ct_managed_module_descriptor_v1 *module);
     int32_t (*Service)(uint32_t service, void *payload, size_t size);
-} ct_runtime_api_v18;
+} ct_runtime_api_v19;
 
 typedef struct ct_managed_dependency_v1 {
     const char *Name;
@@ -111,10 +149,13 @@ typedef struct ct_managed_module_info {
 int ctilde_managed_runtime_initialize(void);
 size_t ctilde_managed_processes(ct_managed_process_info *output, size_t capacity);
 size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity);
+uint32_t ctilde_managed_process_for_task(uintptr_t task_handle);
 int ctilde_managed_preflight(const char *path, char *error, size_t error_capacity);
-const ct_runtime_api_v18 *ctilde_runtime_api_v18(void);
+const ct_runtime_api_v19 *ctilde_runtime_api_v19(void);
 
-/* Managed standard-library entry points. The managed layouts are private to ABI 18. */
+/* Managed standard-library entry points. The managed layouts are private to ABI 19. */
+
+void ctilde_managed_storage_invalidate_prefix(const char *prefix, uint64_t generation);
 uintptr_t ct_managed_process_start(const void *path, const void *arguments);
 uintptr_t ct_managed_process_current(void);
 uint32_t ct_managed_process_id(uintptr_t handle);

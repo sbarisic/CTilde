@@ -107,6 +107,13 @@ internal sealed partial class CEmitter
                 AddType(Model.Types.GetValueOrDefault("System.IO.FileMetadata"));
         }
 
+        // Typed-IR lowering may register an array shape while lowering an
+        // otherwise pruned standard-library member. If the array declaration
+        // is retained, its value-type element must also be in the C type
+        // closure so the flexible-array member never names an undefined type.
+        foreach (var array in _arrayTypes)
+            AddCType(array.ElementType);
+
         while (pending.Count != 0)
         {
             var type = pending.Dequeue();

@@ -154,6 +154,8 @@ test("project schema includes native build configuration", async () => {
   assert.equal(schema.properties.espIdf.properties.artifact.default, "firmware");
   assert.equal(schema.properties.managedModule.properties.name.maxLength, 63);
   assert.equal(schema.properties.managedModule.properties.version.maxLength, 31);
+  assert.equal(schema.properties.managedModule.properties.nativeSources.uniqueItems, true);
+  assert.equal(schema.properties.managedModule.properties.nativeSources.items.pattern, "\\.c$");
   assert.ok(schema.allOf.some(rule =>
     rule.if?.properties?.espIdf?.properties?.artifact?.const === "managed-module" &&
     rule.then?.required?.includes("managedModule") &&

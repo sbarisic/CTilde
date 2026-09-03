@@ -5,6 +5,7 @@ using System.Text;
 public static class Program
 {
     private static int invocationCount;
+    private static uint burnChecksum;
 
     private static int Listen(Process current)
     {
@@ -13,6 +14,29 @@ public static class Program
         {
             byte[] payload;
             if (current.TryReceive(250u, out payload))
+            {
+                string message = Encoding.UTF8.GetString(payload);
+                Console.Write("message: ");
+                Console.WriteLine(message);
+                if (message == "exit")
+                    return 0;
+            }
+        }
+        Console.WriteLine("cancellation observed");
+        return -1;
+    }
+
+    private static int Burn(Process current)
+    {
+        Console.WriteLine("burning CPU in watchdog-safe bursts");
+        uint checksum = burnChecksum + 1u;
+        while (!Process.IsCancellationRequested)
+        {
+            for (int index = 0; index < 250000; index++)
+                checksum = checksum * 1664525u + 1013904223u;
+            burnChecksum = checksum;
+            byte[] payload;
+            if (current.TryReceive(10u, out payload))
             {
                 string message = Encoding.UTF8.GetString(payload);
                 Console.Write("message: ");
@@ -42,6 +66,8 @@ public static class Program
             return -1;
         if (args.Length > 0 && args[0] == "listen")
             return Listen(current);
+        if (args.Length > 0 && args[0] == "burn")
+            return Burn(current);
         return args.Length;
     }
 }

@@ -1,0 +1,194 @@
+using System.Storage;
+
+namespace Esp.Idf.Storage;
+
+public struct SdSpiConfiguration
+{
+    public int Host;
+    public int Miso;
+    public int Mosi;
+    public int Clock;
+    public int ChipSelect;
+    public uint FrequencyKilohertz;
+
+    public SdSpiConfiguration(int host, int miso, int mosi, int clock,
+        int chipSelect, uint frequencyKilohertz)
+    {
+        Host = host;
+        Miso = miso;
+        Mosi = mosi;
+        Clock = clock;
+        ChipSelect = chipSelect;
+        FrequencyKilohertz = frequencyKilohertz;
+    }
+
+    public static SdSpiConfiguration TCan485
+    {
+        get
+        {
+            return new SdSpiConfiguration(2, 2, 15, 14, 13, 20000U);
+        }
+    }
+}
+
+public struct SdCardInfo
+{
+    public ulong CapacityBytes;
+    public uint SectorSize;
+    public uint FrequencyKilohertz;
+    public int ManufacturerId;
+    public int OemId;
+    public int ProductRevision;
+    public uint SerialNumber;
+    public int ManufacturingDate;
+    public bool IsHighCapacity;
+}
+
+internal static class SdStorageRuntime
+{
+    [Extern("ct_storage_sdspi_open")]
+    internal static int Open(SdSpiConfiguration configuration, out nuint card,
+        out nuint device, out SdCardInfo info);
+
+    [Extern("ct_storage_sdspi_status")]
+    internal static int Status(nuint card);
+
+    [Extern("ct_storage_sdspi_close")]
+    internal static int Close(nuint card);
+
+    [Extern("ct_storage_monitor_create")]
+    internal static int Create(SdSpiConfiguration configuration, out nuint monitor);
+
+    [Extern("ct_storage_monitor_add_fat")]
+    internal static int AddFat(nuint monitor, int partitionIndex,
+        System.Runtime.NativeUtf8String path, int maximumOpenFiles);
+
+    [Extern("ct_storage_monitor_start")]
+    internal static int Start(nuint monitor);
+
+    [Extern("ct_storage_monitor_state")]
+    internal static RemovableStorageState State(nuint monitor);
+
+    [Extern("ct_storage_monitor_generation")]
+    internal static ulong Generation(nuint monitor);
+
+    [Extern("ct_storage_monitor_last_error")]
+    internal static int LastError(nuint monitor);
+
+    [Extern("ct_storage_monitor_remount")]
+    internal static int Remount(nuint monitor);
+
+    [Extern("ct_storage_monitor_release")]
+    internal static int Release(nuint monitor);
+}
+
+public sealed class SdSpiCard : System.IDisposable
+{
+    private nuint handle;
+    private BlockDevice device;
+    private SdCardInfo info;
+
+    private SdSpiCard(nuint handle, BlockDevice device, SdCardInfo info)
+    {
+        this.handle = handle;
+        this.device = device;
+        this.info = info;
+    }
+
+    public static SdSpiCard Open(SdSpiConfiguration configuration)
+    {
+        nuint card;
+        nuint device;
+        SdCardInfo info;
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Open(configuration,
+            out card, out device, out info), "SdSpiCard.Open");
+        return new SdSpiCard(card, new BlockDevice(device), info);
+    }
+
+    public BlockDevice Device { get { RequireOpen(); return device; } }
+    public SdCardInfo Info { get { RequireOpen(); return info; } }
+    public bool IsPresent { get { return handle != (nuint)0 && SdStorageRuntime.Status(handle) == 0; } }
+
+    public void Dispose()
+    {
+        if (handle == (nuint)0)
+            return;
+        device.Dispose();
+        nuint current = handle;
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Close(current),
+            "SdSpiCard.Dispose");
+        handle = (nuint)0;
+    }
+
+    private void RequireOpen()
+    {
+        if (handle == (nuint)0)
+            throw new System.ObjectDisposedException();
+    }
+}
+
+public enum RemovableStorageState : byte
+{
+    NotPresent=0, Mounting=1, Mounted=2, Removing=3, Faulted=4
+}
+
+public sealed class RemovableSdCardMonitor : System.IDisposable
+{
+    private nuint handle;
+    private bool started;
+
+    public RemovableSdCardMonitor(SdSpiConfiguration configuration)
+    {
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Create(configuration,
+            out handle), "SdMonitor.Create");
+        started = false;
+    }
+
+    public void AddFatMount(int partitionIndex, string path, int maximumOpenFiles)
+    {
+        RequireOpen();
+        if (started)
+            throw new System.InvalidOperationException();
+        System.Runtime.NativeUtf8String nativePath =
+            System.Runtime.NativeUtf8String.Borrow(path);
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.AddFat(handle,
+            partitionIndex, nativePath, maximumOpenFiles), "SdMonitor.AddMount");
+    }
+
+    public void Start()
+    {
+        RequireOpen();
+        if (started)
+            return;
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Start(handle),
+            "SdMonitor.Start");
+        started = true;
+    }
+
+    public RemovableStorageState State { get { RequireOpen(); return SdStorageRuntime.State(handle); } }
+    public ulong Generation { get { RequireOpen(); return SdStorageRuntime.Generation(handle); } }
+    public int LastError { get { RequireOpen(); return SdStorageRuntime.LastError(handle); } }
+
+    public void Remount()
+    {
+        RequireOpen();
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Remount(handle),
+            "SdMonitor.Remount");
+    }
+
+    public void Dispose()
+    {
+        if (handle == (nuint)0)
+            return;
+        nuint current = handle;
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Release(current),
+            "SdMonitor.Dispose");
+        handle = (nuint)0;
+    }
+
+    private void RequireOpen()
+    {
+        if (handle == (nuint)0)
+            throw new System.ObjectDisposedException();
+    }
+}

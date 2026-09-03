@@ -45,16 +45,16 @@ internal static partial class ConformanceTests
             Assert(!combined.Contains("void app_main(void)", StringComparison.Ordinal), "A managed module emitted the firmware app_main entry.");
             Assert(combined.Contains("ct_managed_module_v1", StringComparison.Ordinal) &&
                 combined.Contains(".ctilde.manifest", StringComparison.Ordinal) &&
-                combined.Contains("ct_runtime_api_v18", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
+                combined.Contains("ct_runtime_api_v19", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
             Assert(combined.Contains("uint64_t FingerprintHigh; uint64_t FingerprintLow;", StringComparison.Ordinal),
-                "Runtime ABI 18 type descriptors omitted their canonical fingerprint fields.");
+                "Runtime ABI 19 type descriptors omitted their canonical fingerprint fields.");
             Assert(combined.Contains("ct_managed_module_static_state", StringComparison.Ordinal) &&
                 combined.Contains("CurrentModuleState", StringComparison.Ordinal), "Mutable statics were not lowered through per-process module state.");
             Assert(combined.Contains("CT_GENERATED_LOCAL", StringComparison.Ordinal),
                 "Managed module definitions were not hidden from the ELF dynamic symbol table.");
             Assert(combined.Contains("ct_runtime_api->Service(UINT32_C(16)", StringComparison.Ordinal) &&
                 !combined.Contains("fwrite(value->Data, 1u, (size_t)value->Length, stdout)", StringComparison.Ordinal),
-                "Managed Console output did not route through the shared Runtime ABI 18 service table.");
+                "Managed Console output did not route through the shared Runtime ABI 19 service table.");
 
             var currentProcessSource = """
                 using System.Diagnostics;
@@ -94,7 +94,7 @@ internal static partial class ConformanceTests
                 "Managed public metadata emission failed.");
             Assert(first.ToString() == second.ToString(), "Managed public metadata was not deterministic.");
             var metadata = JsonSerializer.Deserialize<JsonElement>(first.ToString());
-            Assert(metadata.GetProperty("runtimeAbi").GetInt32() == 18 && metadata.GetProperty("moduleAbi").GetInt32() == 1 &&
+            Assert(metadata.GetProperty("runtimeAbi").GetInt32() == 19 && metadata.GetProperty("moduleAbi").GetInt32() == 1 &&
                 metadata.GetProperty("name").GetString() == "Demo.App" && metadata.GetProperty("apiHash").GetString()!.Length == 64,
                 "Managed public metadata omitted its exact ABI identity.");
 

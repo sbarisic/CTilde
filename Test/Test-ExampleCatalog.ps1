@@ -71,7 +71,9 @@ Invoke-HostedExample 'examples/CollectionsAndGeometry/ctilde.json' @(
 
 foreach ($manifest in @(
     'examples/ManagedShell/ctilde.json',
-    'examples/ManagedShell/Modules/Hello/ctilde.json'
+    'examples/ManagedShell/Modules/Hello/ctilde.json',
+    'examples/ManagedShell/Modules/Memory/ctilde.json',
+    'examples/ManagedShell/Modules/TaskManager/ctilde.json'
 )) {
     $null = Invoke-Ctilde $manifest @('--check', '--verbosity', 'quiet')
     Write-Host "PASS $manifest"
@@ -94,6 +96,10 @@ if ($buildEspIdf) {
     foreach ($artifact in @(
         'examples/ManagedShell/Modules/Hello/build/managed-modules/examples.hello.ctm',
         'examples/ManagedShell/Modules/Hello/build/managed-modules/examples.hello.ctmeta.json',
+        'examples/ManagedShell/Modules/Memory/build/managed-modules/memory.ctm',
+        'examples/ManagedShell/Modules/Memory/build/managed-modules/memory.ctmeta.json',
+        'examples/ManagedShell/Modules/TaskManager/build/managed-modules/taskmgr.ctm',
+        'examples/ManagedShell/Modules/TaskManager/build/managed-modules/taskmgr.ctmeta.json',
         'examples/ManagedShell/build/ctilde_managed_shell.bin'
     )) {
         if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot $artifact) -PathType Leaf)) {

@@ -29,8 +29,10 @@
 
 | Project | What it demonstrates | Requirements |
 | --- | --- | --- |
-| [Managed Shell Firmware](ManagedShell/README.md) | LittleFS shell, shared Runtime ABI 18, process/module registry, load/run/wait/message commands, status LED, and final application unload | ESP-IDF 6 and ESP32 |
-| [Managed Hello Module](ManagedShell/Modules/Hello/Program.ct) | A `.ctm` application with arguments, process-local mutable statics, copied-message receive, cooperative cancellation, and managed exit code | ESP-IDF 6 Xtensa toolchain |
+| [Managed Shell Firmware](ManagedShell/README.md) | LittleFS plus removable T-CAN485 SD/FAT VFS, Runtime ABI 19 process filesystem services, SD-first module lookup, process/module registry, diagnostics tools, status LED, and final application unload | ESP-IDF 6 and ESP32 |
+| [Managed Hello Module](ManagedShell/Modules/Hello/Program.ct) | A `.ctm` application with arguments, process-local mutable statics, copied-message receive, cooperative cancellation, and safe CPU-load mode | ESP-IDF 6 Xtensa toolchain |
+| [Managed Memory Tool](ManagedShell/Modules/Memory/Program.ct) | A separate `memory.ctm` application with module-local native reporting for RAM, allocator, process, module, task, and LittleFS diagnostics | ESP-IDF 6 Xtensa toolchain |
+| [Managed Task Manager](ManagedShell/Modules/TaskManager/Program.ct) | A separate `taskmgr.ctm` application with module-local native sampling for process CPU, heap, threads, stack headroom, and termination | ESP-IDF 6 Xtensa toolchain |
 | [T-CAN Hardware](TCan485/README.md) | Physical ESP32 peripherals, generated bindings, runtime services, debugger acceptance, and Wi-Fi opt-in | ESP-IDF 6 and T-CAN485 |
 | [T-CAN QEMU ESP32](TCan485/README.md) | Xtensa ESP-IDF runtime and language fixture under QEMU | ESP-IDF 6 QEMU |
 | [T-CAN QEMU ESP32-C3](TCan485/README.md) | RISC-V ESP-IDF runtime and language fixture under QEMU | ESP-IDF 6 QEMU |

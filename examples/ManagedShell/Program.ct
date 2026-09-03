@@ -4,6 +4,7 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using Esp.Idf;
+using Esp.Idf.Storage;
 
 namespace Examples.ManagedShell;
 
@@ -242,10 +243,12 @@ public static class Program
 {
     private static Process[] processes = new Process[16];
     private static int processCount;
+    private static RemovableSdCardMonitor sdMonitor;
 
     private static void Help()
     {
-        Console.WriteLine("commands: ls, modules, ps, exec <file> [args], kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("commands: ls, storage, remount, modules, ps, exec <file> [args], kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("applications: exec memory.ctm, exec taskmgr.ctm [kill <id>]");
     }
 
     private static Process FindProcess(uint id)
@@ -263,13 +266,34 @@ public static class Program
 
     private static void ListFiles()
     {
-        string[] entries = Directory.GetFileSystemEntries("/storage/modules");
+        if (Directory.Exists("/sd/modules"))
+            ListFilesAt("/sd/modules", "SD");
+        ListFilesAt("/storage/modules", "LittleFS");
+    }
+
+    private static void ListFilesAt(string path, string label)
+    {
+        if (!Directory.Exists(path))
+            return;
+        Console.Write(label);
+        Console.WriteLine(":");
+        string[] entries = Directory.GetFileSystemEntries(path);
         int index = 0;
         while (index < entries.Length)
         {
             Console.WriteLine(entries[index]);
             index++;
         }
+    }
+
+    private static void PrintStorage()
+    {
+        Console.Write("SD state=");
+        Console.Write(sdMonitor.State.ToString());
+        Console.Write(" generation=");
+        Console.Write(sdMonitor.Generation);
+        Console.Write(" error=");
+        Console.WriteLine(sdMonitor.LastError);
     }
 
     private static string[] Arguments(string[] words, int start)
@@ -310,8 +334,6 @@ public static class Program
             }
         }
         string path = words[1];
-        if (!path.StartsWith("/"))
-            path = Path.Combine("/storage/modules", path);
         ShellLed.ProcessStarting();
         Process process = Process.Start(path, Arguments(words, 2));
         if (process.Id == 0u)
@@ -397,6 +419,10 @@ public static class Program
             Help();
         else if (command == "ls")
             ListFiles();
+        else if (command == "storage")
+            PrintStorage();
+        else if (command == "remount")
+            sdMonitor.Remount();
         else if (command == "modules")
             ShellPlatform.PrintModules();
         else if (command == "ps")
@@ -421,12 +447,15 @@ public static class Program
         EspError ledResult = ShellLed.InitializeOrange();
         if (ShellPlatform.Initialize() != 0)
             return;
+        sdMonitor = new RemovableSdCardMonitor(SdSpiConfiguration.TCan485);
+        sdMonitor.AddFatMount(-1, "/sd", 16);
+        sdMonitor.Start();
         if (!ledResult.IsSuccess)
         {
             Console.Write("LED initialization failed: ");
             Console.WriteLine(ledResult.GetName());
         }
-        Console.WriteLine("CTilde managed shell - Runtime ABI 18 / Module ABI 1");
+        Console.WriteLine("CTilde managed shell - Runtime ABI 19 / Module ABI 1");
         Help();
         while (true)
         {

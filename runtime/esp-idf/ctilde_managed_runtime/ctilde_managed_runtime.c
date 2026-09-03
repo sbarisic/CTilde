@@ -1,12 +1,15 @@
 #include "ctilde_managed_runtime.h"
 
 #include <errno.h>
+#include <dirent.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #include "esp_dlfcn.h"
 #include "esp_err.h"
@@ -127,6 +130,22 @@ typedef struct ct_binary_manifest_v1 {
 typedef struct ct_module ct_module;
 typedef struct ct_process ct_process;
 
+typedef struct ct_process_file {
+    struct ct_process_file *Next;
+    FILE *Stream;
+    char Path[CT_MODULE_PATH_MAX];
+} ct_process_file;
+
+typedef struct ct_process_directory {
+    struct ct_process_directory *Next;
+    DIR *Directory;
+    char Path[CT_MODULE_PATH_MAX];
+    char *PendingName;
+    uint8_t PendingKind;
+    uint32_t PendingAttributes;
+    int64_t PendingLength;
+} ct_process_directory;
+
 typedef struct ct_allocation {
     struct ct_allocation *Previous;
     struct ct_allocation *Next;
@@ -214,6 +233,9 @@ struct ct_process {
     char *Arguments[CT_MAX_ARGUMENTS];
     size_t ArgumentLengths[CT_MAX_ARGUMENTS];
     int32_t ArgumentCount;
+    char *CurrentDirectory;
+    ct_process_file *Files;
+    ct_process_directory *Directories;
     ct_execution_context Context;
     StaticSemaphore_t CompletionStorage;
     SemaphoreHandle_t Completion;
@@ -423,14 +445,16 @@ static int resolve_module_path_bytes(const uint8_t *data, size_t length, char ou
     char relative[CT_MODULE_PATH_MAX];
     (void)memcpy(relative, data, length);
     relative[length] = '\0';
-    const char *root = CTILDE_MANAGED_MODULE_ROOT;
-    const size_t root_length = strlen(root);
     const char *suffix = relative;
     if (relative[0] == '/') {
-        if (strncmp(relative, root, root_length) != 0 || relative[root_length] != '/') {
+        const size_t sd_length = strlen(CTILDE_MANAGED_MODULE_SD_ROOT);
+        const size_t fallback_length = strlen(CTILDE_MANAGED_MODULE_FALLBACK_ROOT);
+        const bool under_sd = strncmp(relative, CTILDE_MANAGED_MODULE_SD_ROOT, sd_length) == 0 && relative[sd_length] == '/';
+        const bool under_fallback = strncmp(relative, CTILDE_MANAGED_MODULE_FALLBACK_ROOT, fallback_length) == 0 && relative[fallback_length] == '/';
+        if (!under_sd && !under_fallback) {
             return -EPERM;
         }
-        suffix = relative + root_length + 1;
+        suffix = relative + (under_sd ? sd_length : fallback_length) + 1;
     }
     /* Espressif's current dlopen registry keys modules by basename. Restrict
        callers to one unambiguous loader namespace so preflight and relocation
@@ -439,7 +463,24 @@ static int resolve_module_path_bytes(const uint8_t *data, size_t length, char ou
         return -EINVAL;
     }
     if (strcmp(suffix, ".") == 0 || strcmp(suffix, "..") == 0) return -EPERM;
-    const int written = snprintf(output, CT_MODULE_PATH_MAX, "%s/%s", root, suffix);
+    if (relative[0] == '/') {
+        (void)memcpy(output, relative, length + 1);
+        return 0;
+    }
+    char sd_path[CT_MODULE_PATH_MAX];
+    int written = snprintf(sd_path, sizeof(sd_path), "%s/%s", CTILDE_MANAGED_MODULE_SD_ROOT, suffix);
+    if (written <= 0 || written >= (int)sizeof(sd_path)) return -ENAMETOOLONG;
+    struct stat info;
+    if (stat(sd_path, &info) == 0) {
+        (void)memcpy(output, sd_path, (size_t)written + 1);
+        return 0;
+    }
+    /* Only absence selects the LittleFS fallback. Permission and media errors
+       must surface so a present but unreadable SD module is never hidden by a
+       different fallback binary. */
+    const int sd_error = errno;
+    if (sd_error != ENOENT && sd_error != ENOTDIR && sd_error != ENODEV) return -sd_error;
+    written = snprintf(output, CT_MODULE_PATH_MAX, "%s/%s", CTILDE_MANAGED_MODULE_FALLBACK_ROOT, suffix);
     return written > 0 && written < CT_MODULE_PATH_MAX ? 0 : -ENAMETOOLONG;
 }
 
@@ -553,7 +594,7 @@ int ctilde_managed_preflight(const char *path, char *error, size_t error_capacit
     char resolved[CT_MODULE_PATH_MAX];
     const int path_result = resolve_module_path_bytes((const uint8_t *)path, path == NULL ? 0 : strlen(path), resolved);
     if (path_result != 0) {
-        set_error(error, error_capacity, "module path must name a direct child of /storage/modules");
+        set_error(error, error_capacity, "module path must be a bare name or a direct child of /sd/modules or /storage/modules");
         return path_result;
     }
     ct_binary_manifest_v1 *manifest;
@@ -666,21 +707,22 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     for (size_t index = 0; index < depth; ++index) next_chain[index] = chain[index];
     next_chain[depth] = module->Name;
     for (uint32_t index = 0; index < manifest->DependencyCount; ++index) {
+        char dependency_name[CT_MODULE_NAME_MAX + 5];
+        const int written = snprintf(dependency_name, sizeof(dependency_name), "%s.ctm", manifest->Dependencies[index].Name);
+        if (written <= 0 || written >= (int)sizeof(dependency_name)) { result = -ENAMETOOLONG; goto fail; }
         char dependency_path[CT_MODULE_PATH_MAX];
-        const int written = snprintf(dependency_path, sizeof(dependency_path), "%s/%s.ctm", CTILDE_MANAGED_MODULE_ROOT, manifest->Dependencies[index].Name);
-        if (written <= 0 || written >= (int)sizeof(dependency_path)) { result = -ENAMETOOLONG; goto fail; }
+        result = resolve_module_path_bytes((const uint8_t *)dependency_name, (size_t)written, dependency_path);
+        if (result != 0) goto fail;
         result = load_module_recursive(dependency_path, next_chain, depth + 1, &module->Dependencies[index]);
         if (result != 0) goto fail;
         ++module->DependencyCount;
         if (!exact_dependency(&manifest->Dependencies[index], module->Dependencies[index])) { result = -ESTALE; goto fail; }
     }
 
-    const char *loader_name = strrchr(path, '/');
-    loader_name = loader_name == NULL ? path : loader_name + 1;
-    module->DynamicHandle = dlopen(loader_name, RTLD_NOW);
+    module->DynamicHandle = dlopen(path, RTLD_NOW);
     if (module->DynamicHandle == NULL) { result = -ENOEXEC; goto fail; }
     typedef const ct_managed_module_descriptor_v1 *(*descriptor_function)(void);
-    typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v18 *runtime);
+    typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v19 *runtime);
     descriptor_function get_descriptor = (descriptor_function)dlsym(module->DynamicHandle, "ct_managed_module_descriptor");
     bind_runtime_function bind_runtime = (bind_runtime_function)dlsym(module->DynamicHandle, "ct_managed_module_bind_runtime");
     const ct_managed_module_descriptor_v1 *descriptor = get_descriptor == NULL ? NULL : get_descriptor();
@@ -699,7 +741,7 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         result = -ENOEXEC;
         goto fail;
     }
-    if (bind_runtime(ctilde_runtime_api_v18()) != 0) {
+    if (bind_runtime(ctilde_runtime_api_v19()) != 0) {
         ESP_LOGE(TAG, "Module '%s' rejected Runtime ABI %u", manifest->Name, CTILDE_RUNTIME_ABI_VERSION);
         result = -ELIBBAD;
         goto fail;
@@ -943,6 +985,382 @@ static void api_leave_call(const ct_managed_module_descriptor_v1 *descriptor)
         !leave_context_call(context, context->Module)) abort();
 }
 
+static int copy_runtime_path(ct_process *process, const uint8_t *data, size_t length,
+    char output[CT_MODULE_PATH_MAX])
+{
+    if (data == NULL || length == 0 || memchr(data, 0, length) != NULL) return -EINVAL;
+    size_t used = 0;
+    if (data[0] != '/') {
+        used = process->CurrentDirectory == NULL ? 0 : strlen(process->CurrentDirectory);
+        if (used == 0) { output[0] = '/'; used = 1; }
+        else (void)memcpy(output, process->CurrentDirectory, used);
+        if (used > 1 && output[used - 1] != '/') output[used++] = '/';
+    }
+    if (used + length >= CT_MODULE_PATH_MAX) return -ENAMETOOLONG;
+    (void)memcpy(output + used, data, length);
+    used += length;
+    output[used] = '\0';
+    if (strstr(output, "/../") != NULL || strstr(output, "/./") != NULL ||
+        strcmp(output, "/..") == 0 || strcmp(output, "/.") == 0 ||
+        (used >= 3 && strcmp(output + used - 3, "/..") == 0) ||
+        (used >= 2 && strcmp(output + used - 2, "/.") == 0)) return -EPERM;
+    return 0;
+}
+
+static ct_process_file *find_process_file(ct_process *process, uintptr_t handle)
+{
+    for (ct_process_file *file = process->Files; file != NULL; file = file->Next)
+        if ((uintptr_t)file == handle) return file->Stream == NULL ? NULL : file;
+    return NULL;
+}
+
+static ct_process_directory *find_process_directory(ct_process *process, uintptr_t handle)
+{
+    for (ct_process_directory *directory = process->Directories; directory != NULL; directory = directory->Next)
+        if ((uintptr_t)directory == handle) return directory->Directory == NULL ? NULL : directory;
+    return NULL;
+}
+
+static int close_process_file(ct_process *process, ct_process_file *file)
+{
+    ct_process_file **link = &process->Files;
+    while (*link != NULL && *link != file) link = &(*link)->Next;
+    if (*link == NULL) return -EBADF;
+    *link = file->Next;
+    const int result = file->Stream == NULL ? 0 : fclose(file->Stream);
+    free(file);
+    return result == 0 ? 0 : -(errno == 0 ? EIO : errno);
+}
+
+static int close_process_directory(ct_process *process, ct_process_directory *directory)
+{
+    ct_process_directory **link = &process->Directories;
+    while (*link != NULL && *link != directory) link = &(*link)->Next;
+    if (*link == NULL) return -EBADF;
+    *link = directory->Next;
+    const int result = directory->Directory == NULL ? 0 : closedir(directory->Directory);
+    free(directory->PendingName);
+    free(directory);
+    return result == 0 ? 0 : -(errno == 0 ? EIO : errno);
+}
+
+static void close_process_io(ct_process *process)
+{
+    while (process->Files != NULL) (void)close_process_file(process, process->Files);
+    while (process->Directories != NULL) (void)close_process_directory(process, process->Directories);
+}
+
+static uint8_t metadata_kind(mode_t mode)
+{
+    if (S_ISREG(mode)) return 1;
+    if (S_ISDIR(mode)) return 2;
+#ifdef S_ISLNK
+    if (S_ISLNK(mode)) return 3;
+#endif
+    return 4;
+}
+
+static uint32_t metadata_attributes(const char *path, const struct stat *value)
+{
+    uint32_t result = 0;
+    if ((value->st_mode & S_IWUSR) == 0) result |= 1u;
+    const char *name = strrchr(path, '/');
+    name = name == NULL ? path : name + 1;
+    if (name[0] == '.' && name[1] != '\0') result |= 2u;
+    if (S_ISDIR(value->st_mode)) result |= 4u;
+#ifdef S_ISLNK
+    if (S_ISLNK(value->st_mode)) result |= 8u;
+#endif
+    return result;
+}
+
+static int stat_path(const char *path, struct stat *value) { return stat(path, value); }
+
+static int make_directories(char *path)
+{
+    for (char *cursor = path + 1; *cursor != '\0'; ++cursor) {
+        if (*cursor != '/') continue;
+        *cursor = '\0';
+        if (mkdir(path, 0777) != 0 && errno != EEXIST) { *cursor = '/'; return -errno; }
+        *cursor = '/';
+    }
+    if (mkdir(path, 0777) != 0 && errno != EEXIST) return -errno;
+    return 0;
+}
+
+static int remove_tree(const char *path)
+{
+    struct stat info;
+    if (stat_path(path, &info) != 0) return -errno;
+    if (!S_ISDIR(info.st_mode)) return unlink(path) == 0 ? 0 : -errno;
+    DIR *directory = opendir(path);
+    if (directory == NULL) return -errno;
+    int result = 0;
+    struct dirent *entry;
+    while ((entry = readdir(directory)) != NULL) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+        char child[CT_MODULE_PATH_MAX];
+        const int written = snprintf(child, sizeof(child), "%s/%s", path, entry->d_name);
+        if (written <= 0 || written >= (int)sizeof(child)) { result = -ENAMETOOLONG; break; }
+        result = remove_tree(child);
+        if (result != 0) break;
+    }
+    const int close_result = closedir(directory);
+    if (result == 0 && close_result != 0) result = -errno;
+    if (result == 0 && rmdir(path) != 0) result = -errno;
+    return result;
+}
+
+static bool path_has_prefix(const char *path, const char *prefix)
+{
+    const size_t length = strlen(prefix);
+    return strncmp(path, prefix, length) == 0 && (path[length] == '\0' || path[length] == '/');
+}
+
+void ctilde_managed_storage_invalidate_prefix(const char *prefix, uint64_t generation)
+{
+    (void)generation;
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || prefix == NULL) return;
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
+        ct_process *process = &s_processes[index];
+        if (!process->Used) continue;
+        ct_process_file *file = process->Files;
+        while (file != NULL) {
+            ct_process_file *next = file->Next;
+            if (file->Stream != NULL && path_has_prefix(file->Path, prefix)) {
+                (void)fclose(file->Stream);
+                file->Stream = NULL;
+            }
+            file = next;
+        }
+        ct_process_directory *directory = process->Directories;
+        while (directory != NULL) {
+            ct_process_directory *next = directory->Next;
+            if (directory->Directory != NULL && path_has_prefix(directory->Path, prefix)) {
+                (void)closedir(directory->Directory);
+                directory->Directory = NULL;
+            }
+            directory = next;
+        }
+        if (process->CurrentDirectory != NULL && path_has_prefix(process->CurrentDirectory, prefix)) {
+            free(process->CurrentDirectory);
+            process->CurrentDirectory = malloc(2);
+            if (process->CurrentDirectory != NULL) { process->CurrentDirectory[0] = '/'; process->CurrentDirectory[1] = '\0'; }
+        }
+    }
+    xSemaphoreGive(s_registry);
+}
+
+static int32_t api_file_service(ct_process *process, uint32_t service, void *payload, size_t size)
+{
+    if (service == CT_RUNTIME_SERVICE_FILE_OPEN) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_open_v19)) return -EINVAL;
+        ct_runtime_io_open_v19 *request = payload;
+        if (request->Size != sizeof(*request) || request->Mode > 5 || request->Access > 2) return -EINVAL;
+        char path[CT_MODULE_PATH_MAX];
+        int result = copy_runtime_path(process, request->Path, request->PathLength, path);
+        if (result != 0) return result;
+        int flags = request->Access == 0 ? O_RDONLY : request->Access == 1 ? O_WRONLY : O_RDWR;
+        if (request->Mode == 1) flags |= O_CREAT | O_TRUNC;
+        else if (request->Mode == 2) flags |= O_CREAT | O_APPEND;
+        else if (request->Mode == 3) flags |= O_CREAT | O_EXCL;
+        else if (request->Mode == 4) flags |= O_CREAT;
+        else if (request->Mode == 5) flags |= O_TRUNC;
+        int descriptor = open(path, flags, 0666);
+        if (descriptor < 0) return -errno;
+        const char *mode = request->Access == 0 ? "rb" :
+            request->Mode == 2 ? (request->Access == 1 ? "ab" : "a+b") :
+            request->Access == 1 ? "wb" : "r+b";
+        FILE *stream = fdopen(descriptor, mode);
+        if (stream == NULL) { const int error = errno; close(descriptor); return -error; }
+        ct_process_file *file = calloc(1, sizeof(*file));
+        if (file == NULL) { fclose(stream); return -ENOMEM; }
+        file->Stream = stream;
+        (void)snprintf(file->Path, sizeof(file->Path), "%s", path);
+        file->Next = process->Files;
+        process->Files = file;
+        request->Handle = (uintptr_t)file;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_FILE_READ || service == CT_RUNTIME_SERVICE_FILE_WRITE) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_transfer_v19)) return -EINVAL;
+        ct_runtime_io_transfer_v19 *request = payload;
+        ct_process_file *file = request->Size == sizeof(*request) ? find_process_file(process, request->Handle) : NULL;
+        if (file == NULL || (request->Length != 0 && request->Data == NULL)) return -EBADF;
+        request->Count = service == CT_RUNTIME_SERVICE_FILE_READ
+            ? fread(request->Data, 1, request->Length, file->Stream)
+            : fwrite(request->Data, 1, request->Length, file->Stream);
+        request->Eof = service == CT_RUNTIME_SERVICE_FILE_READ && feof(file->Stream);
+        if (ferror(file->Stream)) { const int error = errno == 0 ? EIO : errno; clearerr(file->Stream); return -error; }
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_FILE_SEEK) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_seek_v19)) return -EINVAL;
+        ct_runtime_io_seek_v19 *request = payload;
+        ct_process_file *file = request->Size == sizeof(*request) ? find_process_file(process, request->Handle) : NULL;
+        if (file == NULL || request->Origin > 2) return -EBADF;
+        const int origin = request->Origin == 0 ? SEEK_SET : request->Origin == 1 ? SEEK_CUR : SEEK_END;
+        if (fseeko(file->Stream, (off_t)request->Offset, origin) != 0) return -errno;
+        const off_t position = ftello(file->Stream);
+        if (position < 0) return -errno;
+        request->Value = (int64_t)position;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_FILE_LENGTH || service == CT_RUNTIME_SERVICE_FILE_SET_LENGTH) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_value_v19)) return -EINVAL;
+        ct_runtime_io_value_v19 *request = payload;
+        ct_process_file *file = request->Size == sizeof(*request) ? find_process_file(process, request->Handle) : NULL;
+        if (file == NULL) return -EBADF;
+        if (service == CT_RUNTIME_SERVICE_FILE_SET_LENGTH)
+            return ftruncate(fileno(file->Stream), (off_t)request->Value) == 0 ? 0 : -errno;
+        const off_t current = ftello(file->Stream);
+        if (current < 0 || fseeko(file->Stream, 0, SEEK_END) != 0) return -errno;
+        const off_t length = ftello(file->Stream);
+        if (length < 0 || fseeko(file->Stream, current, SEEK_SET) != 0) return -errno;
+        request->Value = (int64_t)length;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_FILE_FLUSH || service == CT_RUNTIME_SERVICE_FILE_CLOSE) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_handle_v19)) return -EINVAL;
+        ct_runtime_io_handle_v19 *request = payload;
+        ct_process_file *file = request->Size == sizeof(*request) ? find_process_file(process, request->Handle) : NULL;
+        if (file == NULL) return -EBADF;
+        return service == CT_RUNTIME_SERVICE_FILE_CLOSE ? close_process_file(process, file) :
+            (fflush(file->Stream) == 0 ? 0 : -errno);
+    }
+    return -ENOSYS;
+}
+
+static int32_t api_path_service(ct_process *process, uint32_t service, void *payload, size_t size)
+{
+    if (service == CT_RUNTIME_SERVICE_PATH_METADATA) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_metadata_v19)) return -EINVAL;
+        ct_runtime_io_metadata_v19 *request = payload;
+        char path[CT_MODULE_PATH_MAX];
+        int result = request->Size == sizeof(*request) ? copy_runtime_path(process, request->Path, request->PathLength, path) : -EINVAL;
+        if (result != 0) return result;
+        struct stat info;
+        if (stat_path(path, &info) != 0) return -errno;
+        request->Kind = metadata_kind(info.st_mode);
+        request->Attributes = metadata_attributes(path, &info);
+        request->Length = (int64_t)info.st_size;
+        request->HasCreationTime = false;
+        request->HasAccessTime = true; request->AccessSeconds = (int64_t)info.st_atime; request->AccessNanoseconds = 0;
+        request->HasModificationTime = true; request->ModificationSeconds = (int64_t)info.st_mtime; request->ModificationNanoseconds = 0;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_FILE_DELETE || service == CT_RUNTIME_SERVICE_DIRECTORY_CREATE ||
+        service == CT_RUNTIME_SERVICE_DIRECTORY_DELETE || service == CT_RUNTIME_SERVICE_CURRENT_DIRECTORY_SET) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_path_flag_v19)) return -EINVAL;
+        ct_runtime_io_path_flag_v19 *request = payload;
+        char path[CT_MODULE_PATH_MAX];
+        int result = request->Size == sizeof(*request) ? copy_runtime_path(process, request->Path, request->PathLength, path) : -EINVAL;
+        if (result != 0) return result;
+        if (service == CT_RUNTIME_SERVICE_FILE_DELETE) return unlink(path) == 0 ? 0 : -errno;
+        if (service == CT_RUNTIME_SERVICE_DIRECTORY_CREATE) return make_directories(path);
+        if (service == CT_RUNTIME_SERVICE_DIRECTORY_DELETE)
+            return request->Flag ? remove_tree(path) : (rmdir(path) == 0 ? 0 : -errno);
+        struct stat info;
+        if (stat(path, &info) != 0) return -errno;
+        if (!S_ISDIR(info.st_mode)) return -ENOTDIR;
+        char *replacement = malloc(strlen(path) + 1);
+        if (replacement == NULL) return -ENOMEM;
+        (void)memcpy(replacement, path, strlen(path) + 1);
+        free(process->CurrentDirectory);
+        process->CurrentDirectory = replacement;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_PATH_MOVE) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_two_paths_v19)) return -EINVAL;
+        ct_runtime_io_two_paths_v19 *request = payload;
+        char source[CT_MODULE_PATH_MAX], destination[CT_MODULE_PATH_MAX];
+        int result = request->Size == sizeof(*request) ? copy_runtime_path(process, request->Source, request->SourceLength, source) : -EINVAL;
+        if (result == 0) result = copy_runtime_path(process, request->Destination, request->DestinationLength, destination);
+        if (result != 0) return result;
+        struct stat ignored;
+        if (!request->Flag && stat_path(destination, &ignored) == 0) return -EEXIST;
+        return rename(source, destination) == 0 ? 0 : -errno;
+    }
+    if (service == CT_RUNTIME_SERVICE_CURRENT_DIRECTORY_GET) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_transfer_v19)) return -EINVAL;
+        ct_runtime_io_transfer_v19 *request = payload;
+        if (request->Size != sizeof(*request)) return -EINVAL;
+        const char *current = process->CurrentDirectory == NULL ? "/" : process->CurrentDirectory;
+        request->Count = strlen(current);
+        if (request->Length < request->Count) return -ENOBUFS;
+        if (request->Count != 0 && request->Data == NULL) return -EINVAL;
+        (void)memcpy(request->Data, current, request->Count);
+        return 0;
+    }
+    return -ENOSYS;
+}
+
+static int32_t api_directory_service(ct_process *process, uint32_t service, void *payload, size_t size)
+{
+    if (service == CT_RUNTIME_SERVICE_DIRECTORY_OPEN) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_open_v19)) return -EINVAL;
+        ct_runtime_io_open_v19 *request = payload;
+        char path[CT_MODULE_PATH_MAX];
+        int result = request->Size == sizeof(*request) ? copy_runtime_path(process, request->Path, request->PathLength, path) : -EINVAL;
+        if (result != 0) return result;
+        DIR *stream = opendir(path);
+        if (stream == NULL) return -errno;
+        ct_process_directory *directory = calloc(1, sizeof(*directory));
+        if (directory == NULL) { closedir(stream); return -ENOMEM; }
+        directory->Directory = stream;
+        (void)snprintf(directory->Path, sizeof(directory->Path), "%s", path);
+        directory->Next = process->Directories;
+        process->Directories = directory;
+        request->Handle = (uintptr_t)directory;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_DIRECTORY_READ) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_directory_read_v19)) return -EINVAL;
+        ct_runtime_io_directory_read_v19 *request = payload;
+        ct_process_directory *directory = request->Size == sizeof(*request) ? find_process_directory(process, request->Handle) : NULL;
+        if (directory == NULL) return -EBADF;
+        if (directory->PendingName == NULL) {
+            struct dirent *entry;
+            do { errno = 0; entry = readdir(directory->Directory); }
+            while (entry != NULL && (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0));
+            if (entry == NULL) return errno == 0 ? 1 : -errno;
+            const size_t name_length = strlen(entry->d_name);
+            directory->PendingName = malloc(name_length + 1);
+            if (directory->PendingName == NULL) return -ENOMEM;
+            (void)memcpy(directory->PendingName, entry->d_name, name_length + 1);
+            char path[CT_MODULE_PATH_MAX];
+            const int written = snprintf(path, sizeof(path), "%s/%s", directory->Path, entry->d_name);
+            struct stat info;
+            if (written > 0 && written < (int)sizeof(path) && stat_path(path, &info) == 0) {
+                directory->PendingKind = metadata_kind(info.st_mode);
+                directory->PendingAttributes = metadata_attributes(path, &info);
+                directory->PendingLength = (int64_t)info.st_size;
+            }
+        }
+        request->NameLength = strlen(directory->PendingName);
+        if (request->NameCapacity < request->NameLength) return -ENOBUFS;
+        if (request->NameLength != 0 && request->Name == NULL) return -EINVAL;
+        (void)memcpy(request->Name, directory->PendingName, request->NameLength);
+        request->Kind = directory->PendingKind;
+        request->Attributes = directory->PendingAttributes;
+        request->Length = directory->PendingLength;
+        free(directory->PendingName);
+        directory->PendingName = NULL;
+        directory->PendingKind = 0;
+        directory->PendingAttributes = 0;
+        directory->PendingLength = 0;
+        return 0;
+    }
+    if (service == CT_RUNTIME_SERVICE_DIRECTORY_CLOSE) {
+        if (payload == NULL || size != sizeof(ct_runtime_io_handle_v19)) return -EINVAL;
+        ct_runtime_io_handle_v19 *request = payload;
+        ct_process_directory *directory = request->Size == sizeof(*request) ? find_process_directory(process, request->Handle) : NULL;
+        return directory == NULL ? -EBADF : close_process_directory(process, directory);
+    }
+    return -ENOSYS;
+}
+
 static int32_t api_service(uint32_t service, void *payload, size_t size)
 {
     ct_execution_context *context = current_context();
@@ -968,8 +1386,8 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
         return 0;
     }
     if (service == CT_RUNTIME_SERVICE_CONSOLE_WRITE) {
-        if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v18)) return -EINVAL;
-        ct_runtime_console_transfer_v18 *transfer = (ct_runtime_console_transfer_v18 *)payload;
+        if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v19)) return -EINVAL;
+        ct_runtime_console_transfer_v19 *transfer = (ct_runtime_console_transfer_v19 *)payload;
         if (transfer->Length != 0 && transfer->Data == NULL) return -EINVAL;
         if (!begin_runtime_operation(context)) await_forced_task_deletion();
         transfer->Count = fwrite(transfer->Data, 1u, transfer->Length, stdout);
@@ -979,8 +1397,8 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
         return result;
     }
     if (service == CT_RUNTIME_SERVICE_CONSOLE_READ) {
-        if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v18)) return -EINVAL;
-        ct_runtime_console_transfer_v18 *transfer = (ct_runtime_console_transfer_v18 *)payload;
+        if (payload == NULL || size != sizeof(ct_runtime_console_transfer_v19)) return -EINVAL;
+        ct_runtime_console_transfer_v19 *transfer = (ct_runtime_console_transfer_v19 *)payload;
         if (transfer->Length != 0 && transfer->Data == NULL) return -EINVAL;
         clearerr(stdin);
         transfer->Count = fread(transfer->Data, 1u, transfer->Length, stdin);
@@ -995,17 +1413,38 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
         end_runtime_operation(context);
         return result;
     }
+    if (service == CT_RUNTIME_SERVICE_PATH_SEPARATOR) return '/';
+    if (service >= CT_RUNTIME_SERVICE_FILE_OPEN && service <= CT_RUNTIME_SERVICE_FILE_CLOSE) {
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
+        xSemaphoreTake(s_registry, portMAX_DELAY);
+        const int32_t result = api_file_service(process, service, payload, size);
+        xSemaphoreGive(s_registry);
+        end_runtime_operation(context);
+        return result;
+    }
+    if (service >= CT_RUNTIME_SERVICE_PATH_METADATA && service <= CT_RUNTIME_SERVICE_CURRENT_DIRECTORY_SET) {
+        if (!begin_runtime_operation(context)) await_forced_task_deletion();
+        xSemaphoreTake(s_registry, portMAX_DELAY);
+        int32_t result;
+        if (service >= CT_RUNTIME_SERVICE_DIRECTORY_OPEN && service <= CT_RUNTIME_SERVICE_DIRECTORY_CLOSE)
+            result = api_directory_service(process, service, payload, size);
+        else
+            result = api_path_service(process, service, payload, size);
+        xSemaphoreGive(s_registry);
+        end_runtime_operation(context);
+        return result;
+    }
     return -ENOSYS;
 }
 
-static const ct_runtime_api_v18 s_runtime_api = {
-    sizeof(ct_runtime_api_v18), CTILDE_RUNTIME_ABI_VERSION, api_allocate, api_free, api_free, NULL, api_runtime_fault,
+static const ct_runtime_api_v19 s_runtime_api = {
+    sizeof(ct_runtime_api_v19), CTILDE_RUNTIME_ABI_VERSION, api_allocate, api_free, api_free, NULL, api_runtime_fault,
     api_register_type, api_unregister_types, api_current_process, api_current_module_state,
     api_current_thread_state, api_set_thread_state, ct_managed_process_cancellation_requested,
     api_enter_call, api_leave_call, api_service
 };
 
-const ct_runtime_api_v18 *ctilde_runtime_api_v18(void)
+const ct_runtime_api_v19 *ctilde_runtime_api_v19(void)
 {
     return &s_runtime_api;
 }
@@ -1060,6 +1499,11 @@ static void cleanup_process(ct_process *process, bool forced)
             }
         }
     }
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    close_process_io(process);
+    free(process->CurrentDirectory);
+    process->CurrentDirectory = NULL;
+    xSemaphoreGive(s_registry);
     release_arena(process);
     for (uint32_t index = process->InstanceCount; index > 0; --index) {
         free(process->Instances[index - 1].State);
@@ -1156,6 +1600,13 @@ static ct_process *allocate_process(void)
             (void)memset(process, 0, sizeof(*process));
             process->Used = true;
             process->Id = s_next_process_id++;
+            process->CurrentDirectory = malloc(2);
+            if (process->CurrentDirectory == NULL) {
+                (void)memset(process, 0, sizeof(*process));
+                return NULL;
+            }
+            process->CurrentDirectory[0] = '/';
+            process->CurrentDirectory[1] = '\0';
             process->Completion = xSemaphoreCreateBinaryStatic(&process->CompletionStorage);
             process->Mailbox = xQueueCreateStatic(CT_MAILBOX_DEPTH, sizeof(ct_message *), process->MailboxBuffer, &process->MailboxStorage);
             if (process->Completion == NULL || process->Mailbox == NULL) {
@@ -1518,6 +1969,22 @@ size_t ctilde_managed_processes(ct_managed_process_info *output, size_t capacity
     }
     xSemaphoreGive(s_registry);
     return count;
+}
+
+uint32_t ctilde_managed_process_for_task(uintptr_t task_handle)
+{
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || task_handle == 0u) return 0u;
+    ct_execution_context *context = (ct_execution_context *)pvTaskGetThreadLocalStoragePointer(
+        (TaskHandle_t)task_handle, CONFIG_CTILDE_MANAGED_TLS_INDEX);
+    ct_process *process = context == NULL ? NULL : context->Process;
+    if (process == NULL) return 0u;
+    for (size_t index = 0; index < CONFIG_CTILDE_MANAGED_MAX_PROCESSES; ++index) {
+        if (process != &s_processes[index]) continue;
+        if (!__atomic_load_n(&process->Used, __ATOMIC_ACQUIRE)) return 0u;
+        const uint32_t id = __atomic_load_n(&process->Id, __ATOMIC_ACQUIRE);
+        return __atomic_load_n(&s_published_process_ids[index], __ATOMIC_ACQUIRE) == id ? id : 0u;
+    }
+    return 0u;
 }
 
 size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity)

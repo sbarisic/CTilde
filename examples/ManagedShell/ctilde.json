@@ -1,5 +1,6 @@
 {
   "target": "esp-idf",
+  "architecture": "xtensa",
   "sources": [
     "Program.ct"
   ],

@@ -1,5 +1,6 @@
 # Changelog
 
+- Aligned source metadata and standard-library documentation with Draft 0.46, Runtime ABI 19, and the new ESP-IDF storage surface. The extension package was intentionally not rebuilt for this source revision.
 - Aligned the working tree with Draft 0.45 managed-module manifests, Runtime ABI 18 process documentation, fixed module-identity capacities, and the expanded 18-project example catalog. No extension package was produced by this source revision.
 - Added Draft 0.39 `[NativeImport]` diagnostics, navigation, semantic metadata, and schema support for platform-selected `hosted.runtimeFiles` while retaining the Draft 0.38 hosted x64 SIMD and `Vec3x4` support.
 

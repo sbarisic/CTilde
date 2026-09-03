@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "managed_diagnostics_host.h"
 
 #define CTILDE_SHELL_TLS_INDEX 1
 
@@ -44,6 +45,11 @@ int32_t ct_managed_shell_initialize(void)
     if (runtime_result != 0) {
         printf("Managed runtime initialization failed: %d\n", runtime_result);
         return runtime_result;
+    }
+    const int diagnostics_result = ct_managed_diagnostics_host_initialize();
+    if (diagnostics_result != 0) {
+        printf("Managed diagnostics initialization failed: %d\n", diagnostics_result);
+        return diagnostics_result;
     }
     size_t total = 0u;
     size_t used = 0u;

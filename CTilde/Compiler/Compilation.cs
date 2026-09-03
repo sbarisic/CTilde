@@ -79,10 +79,13 @@ public sealed class Compilation
             var environment = Enum.IsDefined(Options.Environment) ? Options.Environment : TargetEnvironment.Native;
             var architecture = ResolveArchitecture(target, Options.Architecture);
             var nativeIntegers = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind is SyntaxKind.NintKeyword or SyntaxKind.NuintKeyword or SyntaxKind.SizeofKeyword or SyntaxKind.AlignofKeyword or SyntaxKind.OffsetofKeyword);
-            var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String");
             var hostedIo = StandardLibrary.RequiresHostedIo(SyntaxTrees);
             var vectors = StandardLibrary.RequiredVectors(SyntaxTrees);
             var foundations = StandardLibrary.RequiredFoundations(SyntaxTrees);
+            // Native UTF-8 is a standard-library primitive used internally by
+            // System.Storage even when the application does not spell its name.
+            var nativeUtf8 = SyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text == "NativeUtf8String")
+                || (foundations & StandardFoundationTypes.Storage) != 0;
             var allSyntaxTrees = (_standardLibraryOverride ?? StandardLibrary.GetSyntaxTrees(target, nativeIntegers, nativeUtf8, hostedIo, vectors, foundations)).AddRange(SyntaxTrees);
             foreach (var tree in allSyntaxTrees)
                 diagnostics.AddRange(tree.Diagnostics);

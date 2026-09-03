@@ -1,6 +1,6 @@
 # C~ for Visual Studio
 
-Version 0.15.0 of this preview extension supports the current C~ Draft 0.45 compiler, hosted native imports, ESP-IDF managed-module project manifests, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.15.0 of this preview extension supports the current C~ Draft 0.46 compiler, `System.Storage`, Runtime ABI 19 managed filesystem services, hosted native imports, ESP-IDF managed-module project manifests, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 

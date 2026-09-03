@@ -1,11 +1,15 @@
 using System.Collections.Immutable;
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace CTilde;
 
 internal static class ManagedModuleMetadataEmitter
 {
+    private static readonly Regex LocalInclude = new("^\\s*#\\s*include\\s*\"([^\"]+)\"", RegexOptions.CultureInvariant);
+
     public static ManagedModuleMetadata Emit(Compilation compilation, BoundProgram program, ManagedModuleConfiguration configuration)
     {
         if (compilation.Options.ManagedModuleKind != configuration.Kind)
@@ -39,6 +43,7 @@ internal static class ManagedModuleMetadataEmitter
             reference.Name, reference.Version, reference.BuildIdentity, reference.ApiHash)).OrderBy(item => item.Name, StringComparer.Ordinal).ToImmutableArray();
         var sourceIdentity = string.Join('\n', compilation.SyntaxTrees.OrderBy(tree => tree.Text.FilePath, StringComparer.Ordinal)
             .Select(tree => $"{tree.Text.FilePath.Replace('\\', '/')}:{ManagedModuleMetadata.HashIdentity(tree.Text.Text)}"));
+        var nativeIdentity = NativeIdentity(configuration);
         var buildText = string.Join('\n',
             $"draft={CompilerContract.DraftVersion}",
             $"runtime={CompilerContract.RuntimeAbiVersion}",
@@ -49,11 +54,46 @@ internal static class ManagedModuleMetadataEmitter
             $"architecture={compilation.Options.Architecture}",
             $"api={apiHash}",
             sourceIdentity,
+            nativeIdentity,
             string.Join('\n', dependencies.Select(dependency => $"dep={dependency.Name}:{dependency.Version}:{dependency.BuildIdentity}:{dependency.ApiHash}")));
 
         return new ManagedModuleMetadata(1, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
             CompilerContract.ManagedModuleAbiVersion, configuration.Kind.ToString().ToLowerInvariant(), configuration.Name,
             configuration.Version, ManagedModuleMetadata.HashIdentity(buildText), apiHash, dependencies, types, exports);
+    }
+
+    private static string NativeIdentity(ManagedModuleConfiguration configuration)
+    {
+        if (configuration.NativeSources.IsDefaultOrEmpty)
+            return string.Empty;
+        var root = Path.GetFullPath(configuration.ProjectRoot ?? throw new InvalidOperationException(
+            "Managed-module native sources require a project identity root."));
+        var inputs = new HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        var pending = new Queue<string>(configuration.NativeSources.Select(Path.GetFullPath));
+        while (pending.Count != 0)
+        {
+            var current = pending.Dequeue();
+            if (!inputs.Add(current))
+                continue;
+            foreach (var line in File.ReadLines(current))
+            {
+                var match = LocalInclude.Match(line);
+                if (!match.Success)
+                    continue;
+                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, match.Groups[1].Value));
+                if (IsInside(candidate, root) && File.Exists(candidate))
+                    pending.Enqueue(candidate);
+            }
+        }
+        return string.Join('\n', inputs.Order(StringComparer.Ordinal).Select(path =>
+            $"native={Path.GetRelativePath(root, path).Replace('\\', '/')}:{Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant()}"));
+    }
+
+    private static bool IsInside(string path, string directory)
+    {
+        var relative = Path.GetRelativePath(directory, path);
+        return relative != ".." && !relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) &&
+            !Path.IsPathRooted(relative);
     }
 
     private static IEnumerable<ManagedModuleExportMetadata> Exports(TypeSymbol type)

@@ -79,7 +79,7 @@ internal static class TargetValidator
                 foreach (var operation in model.Effects.Operations.GetValueOrDefault(caller).Where(operation =>
                              operation.Target?.ContainingType.FullName == "System.Diagnostics.ProcessRuntime" &&
                              operation.Target.ExternName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true))
-                    model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 18.", operation.Syntax.Source, operation.Syntax.Span);
+                    model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 19.", operation.Syntax.Source, operation.Syntax.Span);
             }
         }
 

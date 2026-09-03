@@ -46,7 +46,10 @@ public sealed record ManagedModuleConfiguration(
     string Version,
     ImmutableArray<ManagedModuleReference> References,
     uint MainTaskStackBytes,
-    ulong? HeapLimitBytes);
+    ulong? HeapLimitBytes,
+    ImmutableArray<string> NativeSources = default,
+    string? ProjectRoot = null,
+    string? NativeComponentDirectory = null);
 
 public enum CTildeRunExecutor
 {
@@ -351,7 +354,7 @@ public static class CTildeProjectFile
         files = files.Concat(restoredModules.SourceFiles).Distinct(comparer).OrderBy(path => path, comparer).ToImmutableArray();
         var build = CreateBuildConfiguration(document.Build, target, root, fullManifestPath, files);
         var espIdfArtifact = ParseEspIdfArtifact(document.EspIdf?.Artifact, target, fullManifestPath);
-        var managedModule = CreateManagedModuleConfiguration(document.ManagedModule, espIdfArtifact, target, root, fullManifestPath);
+        var managedModule = CreateManagedModuleConfiguration(document.ManagedModule, espIdfArtifact, target, root, fullManifestPath, build);
         if (espIdfArtifact == EspIdfArtifact.ManagedModule && build.CLayout != GeneratedCLayout.Modules)
             throw new CTildeProjectException($"ESP-IDF managed-module project '{fullManifestPath}' requires build.cLayout 'modules'.", "CT6202");
         var run = CreateRunConfiguration(document.Run, build, root, fullManifestPath);
@@ -620,7 +623,8 @@ public static class CTildeProjectFile
         EspIdfArtifact artifact,
         CompilationTarget target,
         string root,
-        string manifestPath)
+        string manifestPath,
+        CTildeProjectBuildConfiguration build)
     {
         if (artifact != EspIdfArtifact.ManagedModule)
         {
@@ -651,6 +655,29 @@ public static class CTildeProjectFile
         if (document.HeapLimitBytes is > 0 and < 1024)
             throw new CTildeProjectException($"managedModule.heapLimitBytes in '{manifestPath}' must be zero/unlimited or at least 1024.", "CT6202");
 
+        var nativeSources = ResolveExistingFiles(document.NativeSources ?? [], "managedModule.nativeSources", root, manifestPath,
+            path => Path.GetExtension(path).Equals(".c", StringComparison.Ordinal));
+        var mainDirectory = Path.Combine(build.EspIdfProjectDirectory!, "main");
+        foreach (var source in nativeSources)
+        {
+            if (!IsInsideDirectory(source, mainDirectory))
+                throw new CTildeProjectException($"Managed-module native source '{source}' in '{manifestPath}' must be inside the ESP-IDF main component '{mainDirectory}'.", "CT6202");
+            if (IsInsideDirectory(source, build.GeneratedDirectory))
+                throw new CTildeProjectException($"Managed-module native source '{source}' in '{manifestPath}' cannot be inside the generated C directory.", "CT6202");
+        }
+        if (Directory.Exists(mainDirectory))
+        {
+            var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+            var declared = nativeSources.ToHashSet(comparer);
+            var undeclared = Directory.EnumerateFiles(mainDirectory, "*.c", SearchOption.AllDirectories)
+                .Select(Path.GetFullPath)
+                .Where(path => !IsInsideDirectory(path, build.GeneratedDirectory) && !declared.Contains(path))
+                .Order(comparer)
+                .FirstOrDefault();
+            if (undeclared is not null)
+                throw new CTildeProjectException($"Managed-module C source '{undeclared}' in '{manifestPath}' must be declared in managedModule.nativeSources.", "CT6202");
+        }
+
         var references = ImmutableArray.CreateBuilder<ManagedModuleReference>();
         var referenceMetadata = ImmutableArray.CreateBuilder<ManagedModuleMetadata>();
         var names = new HashSet<string>(StringComparer.Ordinal);
@@ -669,7 +696,7 @@ public static class CTildeProjectFile
         }
         ValidateManagedReferenceGraph(document.Name, referenceMetadata.ToImmutable(), manifestPath);
         return new ManagedModuleConfiguration(kind, document.Name, document.Version, references.ToImmutable(), stack,
-            document.HeapLimitBytes is null or 0 ? null : document.HeapLimitBytes);
+            document.HeapLimitBytes is null or 0 ? null : document.HeapLimitBytes, nativeSources, root, mainDirectory);
     }
 
     private static void ValidateManagedReferenceGraph(string rootName, ImmutableArray<ManagedModuleMetadata> references, string manifestPath)
@@ -1174,6 +1201,7 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("name")] string? Name,
         [property: JsonPropertyName("version")] string? Version,
         [property: JsonPropertyName("references")] string[]? References,
+        [property: JsonPropertyName("nativeSources")] string[]? NativeSources,
         [property: JsonPropertyName("mainTaskStackBytes")] uint? MainTaskStackBytes,
         [property: JsonPropertyName("heapLimitBytes")] ulong? HeapLimitBytes);
 

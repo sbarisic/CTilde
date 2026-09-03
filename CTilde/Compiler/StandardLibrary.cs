@@ -25,7 +25,8 @@ internal enum StandardFoundationTypes
     Random = 2,
     Stopwatch = 4,
     Process = 8,
-    All = TimeSpan | Random | Stopwatch | Process,
+    Storage = 16,
+    All = TimeSpan | Random | Stopwatch | Process | Storage,
 }
 
 internal static class StandardLibrary
@@ -76,6 +77,8 @@ internal static class StandardLibrary
             files.Add("Random.ct");
         if ((foundations & (StandardFoundationTypes.Stopwatch | StandardFoundationTypes.Process)) != 0)
             files.Add("Diagnostics.ct");
+        if ((foundations & StandardFoundationTypes.Storage) != 0)
+            files.Add("Storage.ct");
         files.Add("Generics.ct");
         files.Add("ArrayAlgorithms.ct");
         files.Add("Utf8.ct");
@@ -105,7 +108,11 @@ internal static class StandardLibrary
             files.Add("HostedStreams.ct");
         }
         if (target == CompilationTarget.EspIdf)
+        {
             files.Add("EspIdf.ct");
+            if ((foundations & StandardFoundationTypes.Storage) != 0)
+                files.Add("EspStorage.ct");
+        }
         return files;
     }
 
@@ -139,6 +146,11 @@ internal static class StandardLibrary
                 "Random" => StandardFoundationTypes.Random,
                 "Stopwatch" => StandardFoundationTypes.Stopwatch | StandardFoundationTypes.TimeSpan,
                 "Process" or "ProcessState" => StandardFoundationTypes.Process | StandardFoundationTypes.TimeSpan,
+                "BlockDevice" or "BlockDeviceInfo" or "MbrPartition" or "MbrPartitionType" or
+                    "MbrPartitionTable" or "FatFileSystem" or "FatFormatOptions" or
+                    "FatKind" or "FatMountOptions" or "FatVolumeInfo" or "MountPoint" or
+                    "SdSpiConfiguration" or "SdCardInfo" or "SdSpiCard" or
+                    "RemovableSdCardMonitor" or "RemovableStorageState" => StandardFoundationTypes.Storage,
                 _ => StandardFoundationTypes.None,
             };
         }
@@ -152,6 +164,13 @@ internal static class StandardLibrary
         foreach (var tree in trees)
         {
             var tokens = tree.Tokens.Where(token => token.Kind != SyntaxKind.EndOfFileToken).ToArray();
+            if (tokens.Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text is
+                    "BlockDevice" or "BlockDeviceInfo" or "MbrPartition" or "MbrPartitionType" or
+                    "MbrPartitionTable" or "FatFileSystem" or "FatFormatOptions" or
+                    "FatKind" or "FatMountOptions" or "FatVolumeInfo" or "MountPoint" or
+                    "SdSpiConfiguration" or "SdCardInfo" or "SdSpiCard" or
+                    "RemovableSdCardMonitor" or "RemovableStorageState"))
+                return true;
             usesIoName |= tokens.Any(token => token.Kind == SyntaxKind.IdentifierToken && token.Text is "File" or "FileHandle" or "FileMode" or "FileAccess" or "IOException");
             for (var index = 0; index + 2 < tokens.Length; index++)
             {
@@ -173,9 +192,9 @@ internal static class StandardLibrary
     {
         var names = target switch
         {
-            CompilationTarget.EspIdf => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "EspIdf.docs.xml" },
-            CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml" },
-            _ => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml" },
+            CompilationTarget.EspIdf => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml", "Storage.docs.xml", "EspIdf.docs.xml" },
+            CompilationTarget.Hosted or CompilationTarget.Cosmopolitan => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml", "Storage.docs.xml" },
+            _ => new[] { "System.docs.xml", "Generics.docs.xml", "Collections.docs.xml", "Geometry.docs.xml", "HostedIO.docs.xml", "Storage.docs.xml" },
         };
         var assembly = typeof(StandardLibrary).Assembly;
         return [.. names.Select(name =>
@@ -215,7 +234,7 @@ internal static class StandardLibrary
             }
             else
             {
-                path = Path.Combine(sourceRoot, file == "EspIdf.ct" ? Path.Combine("Esp", "Idf", file) : Path.Combine("System", file));
+                path = Path.Combine(sourceRoot, file is "EspIdf.ct" or "EspStorage.ct" ? Path.Combine("Esp", "Idf", file) : Path.Combine("System", file));
                 text = overrides is not null && overrides.TryGetValue(Path.GetFullPath(path), out var openText)
                     ? openText
                     : File.ReadAllText(path, new UTF8Encoding(false, true));

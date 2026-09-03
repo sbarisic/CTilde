@@ -353,6 +353,9 @@ internal static class CTildeCommand
                     Console.Error.WriteLine($"trace: emitted {request.GeneratedHeaderPath}");
                 if (request.ManagedModuleMetadataPath is not null)
                     Console.Error.WriteLine($"trace: emitted {request.ManagedModuleMetadataPath}");
+                if (request.ManagedModule is { } module && !module.NativeSources.IsDefaultOrEmpty)
+                    foreach (var source in module.NativeSources.OrderBy(path => path, StringComparer.Ordinal))
+                        Console.Error.WriteLine($"trace: managed native source {source}");
             }
             reporter?.Detail($"Generated artifacts changed: {changedOutputs}");
             reporter?.Phase($"Generated C: {request.GeneratedCPath ?? request.GeneratedDirectory}");

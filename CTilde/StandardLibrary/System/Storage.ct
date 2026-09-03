@@ -1,0 +1,447 @@
+using System.IO;
+using System.Runtime;
+
+namespace System.Storage;
+
+public struct BlockDeviceInfo
+{
+    public ulong Length;
+    public nuint ReadAlignment;
+    public nuint WriteAlignment;
+    public nuint EraseAlignment;
+    public nuint PreferredReadSize;
+    public nuint PreferredWriteSize;
+    public nuint PreferredEraseSize;
+    public bool IsReadOnly;
+}
+
+internal static class StorageRuntime
+{
+    [Extern("ct_storage_block_info")]
+    internal static int GetInfo(nuint handle, out BlockDeviceInfo info);
+
+    [Extern("ct_storage_block_read")]
+    internal static unsafe int Read(nuint handle, ulong offset, NativeBuffer<byte> destination);
+
+    [Extern("ct_storage_block_write")]
+    internal static unsafe int Write(nuint handle, ulong offset, ReadOnlyNativeBuffer<byte> source);
+
+    [Extern("ct_storage_block_erase")]
+    internal static int Erase(nuint handle, ulong offset, nuint length);
+
+    [Extern("ct_storage_block_flush")]
+    internal static int Flush(nuint handle);
+
+    [Extern("ct_storage_block_slice")]
+    internal static int Slice(nuint handle, ulong offset, ulong length, out nuint result);
+
+    [Extern("ct_storage_block_release")]
+    internal static int Release(nuint handle);
+
+    [Extern("ct_storage_fat_mount")]
+    internal static int Mount(NativeUtf8String path, nuint device, int maximumOpenFiles,
+        out nuint mount);
+
+    [Extern("ct_storage_fat_unmount")]
+    internal static int Unmount(nuint mount);
+
+    [Extern("ct_storage_fat_volume_info")]
+    internal static int VolumeInfo(nuint mount, out FatVolumeInfo info);
+
+    [Extern("ct_storage_fat_generation")]
+    internal static ulong Generation(nuint mount);
+
+    [Extern("ct_storage_fat_is_available")]
+    internal static bool IsAvailable(nuint mount);
+
+    [Extern("ct_storage_fat_format")]
+    internal static int Format(nuint device, byte kind, uint allocationUnitBytes,
+        byte fatCopies);
+
+    internal static void Check(int result, string operation)
+    {
+        if (result != 0)
+            throw new IOException(operation + " failed (" + result.ToString() + ").",
+                result, operation, "");
+    }
+}
+
+public sealed class BlockDevice : IDisposable
+{
+    private nuint handle;
+    private BlockDeviceInfo info;
+
+    internal BlockDevice(nuint handle)
+    {
+        if (handle == (nuint)0)
+            throw new ArgumentException();
+        this.handle = handle;
+        StorageRuntime.Check(StorageRuntime.GetInfo(handle, out info), "BlockDevice.Info");
+    }
+
+    internal nuint Handle
+    {
+        get
+        {
+            RequireOpen();
+            return handle;
+        }
+    }
+
+    public ulong Length { get { return info.Length; } }
+    public nuint ReadAlignment { get { return info.ReadAlignment; } }
+    public nuint WriteAlignment { get { return info.WriteAlignment; } }
+    public nuint EraseAlignment { get { return info.EraseAlignment; } }
+    public nuint PreferredReadSize { get { return info.PreferredReadSize; } }
+    public nuint PreferredWriteSize { get { return info.PreferredWriteSize; } }
+    public nuint PreferredEraseSize { get { return info.PreferredEraseSize; } }
+    public bool IsReadOnly { get { return info.IsReadOnly; } }
+
+    public unsafe void Read(ulong offset, NativeBuffer<byte> destination)
+    {
+        RequireOpen();
+        StorageRuntime.Check(StorageRuntime.Read(handle, offset, destination), "BlockDevice.Read");
+    }
+
+    public unsafe void Write(ulong offset, ReadOnlyNativeBuffer<byte> source)
+    {
+        RequireOpen();
+        StorageRuntime.Check(StorageRuntime.Write(handle, offset, source), "BlockDevice.Write");
+    }
+
+    public void Erase(ulong offset, nuint length)
+    {
+        RequireOpen();
+        StorageRuntime.Check(StorageRuntime.Erase(handle, offset, length), "BlockDevice.Erase");
+    }
+
+    public void Flush()
+    {
+        RequireOpen();
+        StorageRuntime.Check(StorageRuntime.Flush(handle), "BlockDevice.Flush");
+    }
+
+    public BlockDevice Slice(ulong offset, ulong length)
+    {
+        RequireOpen();
+        nuint child;
+        StorageRuntime.Check(StorageRuntime.Slice(handle, offset, length, out child),
+            "BlockDevice.Slice");
+        return new BlockDevice(child);
+    }
+
+    public void Dispose()
+    {
+        if (handle == (nuint)0)
+            return;
+        nuint current = handle;
+        StorageRuntime.Check(StorageRuntime.Release(current), "BlockDevice.Dispose");
+        handle = (nuint)0;
+    }
+
+    private void RequireOpen()
+    {
+        if (handle == (nuint)0)
+            throw new ObjectDisposedException();
+    }
+}
+
+public enum MbrPartitionType : byte
+{
+    Empty=0, Fat12=1, Fat16Small=4, Extended=5, Fat16=6, Fat32=11,
+    Fat32Lba=12, Fat16Lba=14, ExtendedLba=15, GptProtective=238
+}
+
+public struct MbrPartition
+{
+    public bool IsBootable;
+    public MbrPartitionType Type;
+    public uint FirstSector;
+    public uint SectorCount;
+
+    public MbrPartition(bool bootable, MbrPartitionType type, uint firstSector,
+        uint sectorCount)
+    {
+        IsBootable = bootable;
+        Type = type;
+        FirstSector = firstSector;
+        SectorCount = sectorCount;
+    }
+
+    public bool IsEmpty { get { return Type == MbrPartitionType.Empty; } }
+}
+
+public sealed class MbrPartitionTable
+{
+    private MbrPartition[] entries;
+
+    private MbrPartitionTable(MbrPartition[] entries)
+    {
+        this.entries = entries;
+    }
+
+    public MbrPartition[] Partitions { get { return entries; } }
+
+    public static unsafe MbrPartitionTable Read(BlockDevice device)
+    {
+        MbrPartition[] entries;
+        if (!TryRead(device, out entries))
+            throw new IOException("Invalid or unsupported MBR.", 0, "Mbr.Read", "");
+        return new MbrPartitionTable(entries);
+    }
+
+    public static unsafe bool TryRead(BlockDevice device, out MbrPartition[] entries)
+    {
+        if (device == null)
+            throw new ArgumentNullException();
+        entries = new MbrPartition[0];
+        NativeBuffer<byte> sector = stackalloc byte[512];
+        device.Read(0UL, sector);
+        if (sector[510] != (byte)0x55 || sector[511] != (byte)0xaa)
+            return false;
+        MbrPartition[] result = new MbrPartition[4];
+        int index = 0;
+        while (index < 4)
+        {
+            int offset = 446 + index * 16;
+            byte active = sector[(nuint)offset];
+            if (active != (byte)0 && active != (byte)0x80)
+                return false;
+            byte type = sector[(nuint)(offset + 4)];
+            if (type == (byte)MbrPartitionType.GptProtective ||
+                type == (byte)MbrPartitionType.Extended ||
+                type == (byte)MbrPartitionType.ExtendedLba)
+                return false;
+            uint first = ReadUInt32(sector, offset + 8);
+            uint count = ReadUInt32(sector, offset + 12);
+            if ((type == 0) != (count == 0U))
+                return false;
+            result[index] = new MbrPartition(active != 0, (MbrPartitionType)type,
+                first, count);
+            index++;
+        }
+        if (!Validate(device, result))
+            return false;
+        entries = result;
+        return true;
+    }
+
+    public static unsafe void WriteLayout(BlockDevice device, MbrPartition[] partitions)
+    {
+        if (device == null || partitions == null)
+            throw new ArgumentNullException();
+        if (partitions.Length != 4 || !Validate(device, partitions))
+            throw new ArgumentException();
+        NativeBuffer<byte> sector = stackalloc byte[512];
+        device.Read(0UL, sector);
+        int clear = 446;
+        while (clear < 510)
+        {
+            sector[(nuint)clear] = (byte)0;
+            clear++;
+        }
+        int index = 0;
+        while (index < 4)
+        {
+            MbrPartition partition = partitions[index];
+            int offset = 446 + index * 16;
+            if (partition.IsBootable)
+                sector[(nuint)offset] = (byte)0x80;
+            else
+                sector[(nuint)offset] = (byte)0;
+            sector[(nuint)(offset + 4)] = (byte)partition.Type;
+            WriteUInt32(sector, offset + 8, partition.FirstSector);
+            WriteUInt32(sector, offset + 12, partition.SectorCount);
+            index++;
+        }
+        sector[510] = (byte)0x55;
+        sector[511] = (byte)0xaa;
+        ReadOnlyNativeBuffer<byte> source = sector;
+        device.Write(0UL, source);
+        device.Flush();
+    }
+
+    public static MbrPartition[] CreateAligned(BlockDevice device,
+        MbrPartitionType[] types, ulong[] sizes)
+    {
+        if (device == null || types == null || sizes == null)
+            throw new ArgumentNullException();
+        if (types.Length != sizes.Length || types.Length > 4)
+            throw new ArgumentException();
+        MbrPartition[] result = new MbrPartition[4];
+        ulong sector = 2048UL;
+        int index = 0;
+        while (index < types.Length)
+        {
+            ulong sectors = (sizes[index] + 511UL) / 512UL;
+            sectors = (sectors + 2047UL) / 2048UL * 2048UL;
+            if (sector > 4294967295UL || sectors > 4294967295UL)
+                throw new ArgumentOutOfRangeException();
+            result[index] = new MbrPartition(false, types[index], (uint)sector,
+                (uint)sectors);
+            sector += sectors;
+            index++;
+        }
+        if (!Validate(device, result))
+            throw new ArgumentOutOfRangeException();
+        return result;
+    }
+
+    private static bool Validate(BlockDevice device, MbrPartition[] partitions)
+    {
+        ulong sectors = device.Length / 512UL;
+        int bootable = 0;
+        int index = 0;
+        while (index < 4)
+        {
+            MbrPartition current = partitions[index];
+            if (current.IsBootable)
+                bootable++;
+            if (current.Type == MbrPartitionType.GptProtective ||
+                current.Type == MbrPartitionType.Extended ||
+                current.Type == MbrPartitionType.ExtendedLba)
+                return false;
+            if (current.IsEmpty)
+            {
+                if (current.IsBootable || current.FirstSector != 0U ||
+                    current.SectorCount != 0U)
+                    return false;
+            }
+            else
+            {
+                ulong end = (ulong)current.FirstSector + (ulong)current.SectorCount;
+                if (current.FirstSector == 0U || current.SectorCount == 0U || end > sectors)
+                    return false;
+                int other = 0;
+                while (other < index)
+                {
+                    MbrPartition prior = partitions[other];
+                    ulong priorEnd = (ulong)prior.FirstSector + (ulong)prior.SectorCount;
+                    if (!prior.IsEmpty && (ulong)current.FirstSector < priorEnd &&
+                        (ulong)prior.FirstSector < end)
+                        return false;
+                    other++;
+                }
+            }
+            index++;
+        }
+        return bootable <= 1;
+    }
+
+    private static unsafe uint ReadUInt32(NativeBuffer<byte> value, int offset)
+    {
+        return (uint)value[(nuint)offset] | ((uint)value[(nuint)(offset + 1)] << 8) |
+            ((uint)value[(nuint)(offset + 2)] << 16) | ((uint)value[(nuint)(offset + 3)] << 24);
+    }
+
+    private static unsafe void WriteUInt32(NativeBuffer<byte> value, int offset, uint item)
+    {
+        value[(nuint)offset] = (byte)item;
+        value[(nuint)(offset + 1)] = (byte)(item >> 8);
+        value[(nuint)(offset + 2)] = (byte)(item >> 16);
+        value[(nuint)(offset + 3)] = (byte)(item >> 24);
+    }
+}
+
+public enum FatKind : byte { Automatic=0, Fat12=1, Fat16=2, Fat32=3 }
+
+public struct FatFormatOptions
+{
+    public FatKind Kind;
+    public uint AllocationUnitBytes;
+    public byte FatCopies;
+
+    public FatFormatOptions(FatKind kind, uint allocationUnitBytes, byte fatCopies)
+    {
+        Kind = kind;
+        AllocationUnitBytes = allocationUnitBytes;
+        FatCopies = fatCopies;
+    }
+}
+
+public struct FatMountOptions
+{
+    public int MaximumOpenFiles;
+
+    public FatMountOptions(int maximumOpenFiles)
+    {
+        MaximumOpenFiles = maximumOpenFiles;
+    }
+}
+
+public struct FatVolumeInfo
+{
+    public ulong CapacityBytes;
+    public ulong FreeBytes;
+    public uint SectorSize;
+    public uint ClusterSize;
+}
+
+public sealed class MountPoint : IDisposable
+{
+    private nuint handle;
+    private string path;
+
+    internal MountPoint(nuint handle, string path)
+    {
+        this.handle = handle;
+        this.path = path;
+    }
+
+    public string Path { get { return path; } }
+    public bool IsMounted { get { return handle != (nuint)0 && StorageRuntime.IsAvailable(handle); } }
+    public ulong Generation { get { RequireMounted(); return StorageRuntime.Generation(handle); } }
+    public FatVolumeInfo VolumeInfo
+    {
+        get
+        {
+            RequireMounted();
+            FatVolumeInfo value;
+            StorageRuntime.Check(StorageRuntime.VolumeInfo(handle, out value),
+                "FatFileSystem.VolumeInfo");
+            return value;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (handle == (nuint)0)
+            return;
+        nuint current = handle;
+        StorageRuntime.Check(StorageRuntime.Unmount(current), "FatFileSystem.Unmount");
+        handle = (nuint)0;
+    }
+
+    private void RequireMounted()
+    {
+        if (handle == (nuint)0)
+            throw new ObjectDisposedException();
+        if (!StorageRuntime.IsAvailable(handle))
+            throw new IOException("The mount is unavailable.", 0,
+                "FatFileSystem.Mount", path);
+    }
+}
+
+public static class FatFileSystem
+{
+    public static void Format(BlockDevice device, FatFormatOptions options)
+    {
+        if (device == null)
+            throw new ArgumentNullException();
+        StorageRuntime.Check(StorageRuntime.Format(device.Handle, (byte)options.Kind,
+            options.AllocationUnitBytes, options.FatCopies), "FatFileSystem.Format");
+    }
+
+    public static MountPoint Mount(string path, BlockDevice device, FatMountOptions options)
+    {
+        if (path == null || device == null)
+            throw new ArgumentNullException();
+        if (options.MaximumOpenFiles <= 0)
+            throw new ArgumentOutOfRangeException();
+        nuint mount;
+        NativeUtf8String nativePath = NativeUtf8String.Borrow(path);
+        StorageRuntime.Check(StorageRuntime.Mount(nativePath, device.Handle,
+            options.MaximumOpenFiles, out mount), "FatFileSystem.Mount");
+        return new MountPoint(mount, path);
+    }
+}

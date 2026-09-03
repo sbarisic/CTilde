@@ -156,6 +156,12 @@
           "default": [],
           "description": "Exact project-relative compiled metadata references; referenced source is not added to this compilation."
         },
+        "nativeSources": {
+          "type": "array", "uniqueItems": true,
+          "items": { "type": "string", "pattern": "\\.c$" },
+          "default": [],
+          "description": "Exact private C implementation files inside the managed module's ESP-IDF main component. Files compile into the module; their project-local quoted-header closure contributes to build identity, not API hash."
+        },
         "mainTaskStackBytes": { "type": "integer", "minimum": 2048, "multipleOf": 16, "default": 8192 },
         "heapLimitBytes": { "type": "integer", "minimum": 0, "description": "Per-process heap quota in bytes; zero or omission means unlimited." }
       }

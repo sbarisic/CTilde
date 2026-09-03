@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<doc>
+  <members>
+    <member name="T:System.Storage.BlockDevice"><summary>An explicitly disposed aligned block device.</summary></member>
+    <member name="T:System.Storage.MbrPartitionTable"><summary>Reads and atomically replaces the four primary MBR partition entries.</summary></member>
+    <member name="T:System.Storage.FatFileSystem"><summary>Explicit FAT formatting and VFS mounting over a block device.</summary></member>
+    <member name="T:System.Storage.MountPoint"><summary>An owned VFS mount with availability and generation information.</summary></member>
+    <member name="T:Esp.Idf.Storage.SdSpiCard"><summary>An SD card connected through the ESP-IDF SDSPI host.</summary></member>
+    <member name="T:Esp.Idf.Storage.RemovableSdCardMonitor"><summary>Monitors, unmounts, and remounts removable FAT media.</summary></member>
+  </members>
+</doc>

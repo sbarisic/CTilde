@@ -34,12 +34,19 @@ internal sealed class BuildReporter : IDisposable
         if (request.ManifestPath is not null)
             Console.Out.WriteLine($"  Project: {request.ManifestPath}");
         Console.Out.WriteLine($"  Sources: {request.Inputs.Count} C~ file(s)");
+        if (request.ManagedModule is { } module && !module.NativeSources.IsDefaultOrEmpty)
+            Console.Out.WriteLine($"  Native sources: {module.NativeSources.Length} C file(s)");
         Console.Out.WriteLine($"  Target: {TargetName(request)} {ArchitectureName(request.Architecture)} | {request.Configuration} | {request.Compiler}");
         Console.Out.WriteLine($"  Output: {request.CLayout.ToString().ToLowerInvariant()} C | {OptimizationName(request)}");
         Console.Out.WriteLine($"  {operation}: compiling C~ sources...");
         if (Verbosity >= BuildVerbosity.Detailed)
+        {
             foreach (var source in request.Inputs.OrderBy(path => path, StringComparer.Ordinal))
                 Console.Out.WriteLine($"    {source}");
+            if (request.ManagedModule is { } detailedModule && !detailedModule.NativeSources.IsDefaultOrEmpty)
+                foreach (var source in detailedModule.NativeSources.OrderBy(path => path, StringComparer.Ordinal))
+                    Console.Out.WriteLine($"    native: {source}");
+        }
     }
 
     public void BeginStandardLibrary(CTildeProject project, string operation)

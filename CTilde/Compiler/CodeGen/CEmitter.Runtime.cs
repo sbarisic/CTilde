@@ -194,13 +194,23 @@ internal sealed partial class CEmitter
         writer.WriteLine("typedef struct ct_interface_entry ct_interface_entry;");
         if (IsManagedModule)
         {
-            writer.WriteLine("typedef struct ct_runtime_api_v18 ct_runtime_api_v18;");
+            writer.WriteLine("typedef struct ct_runtime_api_v19 ct_runtime_api_v19;");
             writer.WriteLine("typedef struct ct_managed_module_descriptor_v1 ct_managed_module_descriptor_v1;");
             writer.WriteLine("typedef struct ct_process_context ct_process_context;");
-            writer.WriteLine("struct ct_runtime_api_v18 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v1*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v1*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v1*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); void (*EnterCall)(const ct_managed_module_descriptor_v1*); void (*LeaveCall)(const ct_managed_module_descriptor_v1*); int32_t (*Service)(uint32_t, void*, size_t); };");
-            writer.WriteLine("const ct_runtime_api_v18* ct_runtime_api = NULL;");
+            writer.WriteLine("struct ct_runtime_api_v19 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v1*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v1*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v1*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); void (*EnterCall)(const ct_managed_module_descriptor_v1*); void (*LeaveCall)(const ct_managed_module_descriptor_v1*); int32_t (*Service)(uint32_t, void*, size_t); };");
+            writer.WriteLine("const ct_runtime_api_v19* ct_runtime_api = NULL;");
             writer.WriteLine("extern const ct_managed_module_descriptor_v1 ct_managed_module_v1;");
-            writer.WriteLine("typedef struct ct_runtime_console_transfer_v18 { uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_console_transfer_v18;");
+            writer.WriteLine("typedef struct ct_runtime_console_transfer_v19 { uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_console_transfer_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_path_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; } ct_runtime_io_path_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_open_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; uint8_t Mode; uint8_t Access; uintptr_t Handle; } ct_runtime_io_open_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_transfer_v19 { uint32_t Size; uintptr_t Handle; uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_io_transfer_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_seek_v19 { uint32_t Size; uintptr_t Handle; int64_t Offset; uint8_t Origin; int64_t Value; } ct_runtime_io_seek_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_value_v19 { uint32_t Size; uintptr_t Handle; int64_t Value; } ct_runtime_io_value_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_handle_v19 { uint32_t Size; uintptr_t Handle; } ct_runtime_io_handle_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_two_paths_v19 { uint32_t Size; const uint8_t* Source; size_t SourceLength; const uint8_t* Destination; size_t DestinationLength; bool Flag; } ct_runtime_io_two_paths_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_path_flag_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; bool Flag; } ct_runtime_io_path_flag_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_metadata_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; uint8_t Kind; uint32_t Attributes; int64_t Length; bool HasCreationTime; int64_t CreationSeconds; int32_t CreationNanoseconds; bool HasAccessTime; int64_t AccessSeconds; int32_t AccessNanoseconds; bool HasModificationTime; int64_t ModificationSeconds; int32_t ModificationNanoseconds; } ct_runtime_io_metadata_v19;");
+            writer.WriteLine("typedef struct ct_runtime_io_directory_read_v19 { uint32_t Size; uintptr_t Handle; uint8_t* Name; size_t NameCapacity; size_t NameLength; uint8_t Kind; uint32_t Attributes; int64_t Length; } ct_runtime_io_directory_read_v19;");
             writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length);");
             writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof);");
             writer.WriteLine("static void ct_runtime_console_flush(void);");
@@ -1601,8 +1611,8 @@ internal sealed partial class CEmitter
     {
         if (IsManagedModule)
         {
-            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length) { ct_runtime_console_transfer_v18 transfer = { (uint8_t*)(uintptr_t)(const void*)data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count != length) ct_fail(\"CTC0001\", \"<runtime-service>\", 0); }");
-            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) { ct_runtime_console_transfer_v18 transfer = { data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(17), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count > length) ct_fail(\"CTC0004\", \"<runtime-service>\", 0); *eof = transfer.Eof; return transfer.Count; }");
+            writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length) { ct_runtime_console_transfer_v19 transfer = { (uint8_t*)(uintptr_t)(const void*)data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count != length) ct_fail(\"CTC0001\", \"<runtime-service>\", 0); }");
+            writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) { ct_runtime_console_transfer_v19 transfer = { data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(17), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count > length) ct_fail(\"CTC0004\", \"<runtime-service>\", 0); *eof = transfer.Eof; return transfer.Count; }");
             writer.WriteLine("static void ct_runtime_console_flush(void) { if (ct_runtime_api->Service(UINT32_C(18), NULL, 0u) != 0) ct_fail(\"CTC0007\", \"<runtime-service>\", 0); }");
             writer.WriteLine();
             return;

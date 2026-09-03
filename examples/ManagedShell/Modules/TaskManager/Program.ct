@@ -1,0 +1,41 @@
+using System;
+
+internal static class DiagnosticsPlatform
+{
+    [Extern("ct_managed_diagnostics_print_task_manager")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void PrintTaskManager();
+
+    [Extern("ct_managed_diagnostics_kill")]
+    [NoAlloc]
+    [NoThrow]
+    internal static int Kill(uint processId);
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        if (args.Length == 0)
+        {
+            DiagnosticsPlatform.PrintTaskManager();
+            return 0;
+        }
+        uint processId;
+        if (args.Length != 2 || args[0] != "kill" || !uint.TryParse(args[1], out processId))
+        {
+            Console.WriteLine("usage: taskmgr [kill <pid>]");
+            return 2;
+        }
+        if (DiagnosticsPlatform.Kill(processId) != 0)
+        {
+            Console.WriteLine("process not active");
+            return 1;
+        }
+        Console.Write("termination requested for process ");
+        Console.WriteLine(processId);
+        return 0;
+    }
+}

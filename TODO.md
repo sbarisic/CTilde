@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.45 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.46 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -47,10 +47,14 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 
 - [ ] Verify native USB CDC or USB Serial/JTAG console output on suitable ESP32-C3, ESP32-S2, or ESP32-S3 hardware. The accepted T-CAN485 validates its onboard USB-to-UART bridge only.
 - [ ] Add ESP log-level APIs only if `System.Console` proves insufficient.
+- [ ] Extend `System.Storage` beyond the Draft 0.46 T-CAN485 SDSPI path only after separate hardware evidence: native SDMMC, shared SPI-bus arbitration, card-detect GPIOs, and other boards are deferred.
+- [ ] Add GPT and extended/logical MBR partitions only with explicit on-media compatibility tests. Draft 0.46 supports whole devices and four primary MBR entries.
+- [ ] Add bind mounts or a general overlay VFS only when applications need namespace composition. ManagedShell currently implements module lookup precedence directly.
+- [ ] Complete removable-card hardware acceptance: no-card boot, insertion, removal with open files, reinsertion, multi-partition mounts, Unicode names, and destructive formatting on an explicitly disposable card.
 
 ## Managed modules
 
-Draft 0.45 establishes Runtime ABI 18 and Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, and hidden module-local definitions. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules. A manual ManagedShell serial session completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
+Draft 0.46 advances managed applications to Runtime ABI 19 while retaining Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, and hidden module-local definitions. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules; it now also owns process filesystem handles and current directories. A manual Draft 0.45 ManagedShell serial session completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
 
 - [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
 - [ ] Implement canonical type fingerprints, descriptor registration, and runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.

@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.45 and runtime ABI 18. Draft 0.45 adds the ESP-IDF managed-process surface and Managed Module ABI 1. Draft 0.43 remains the runtime-service-provider revision that made the common standard library available to freestanding and ESP-IDF projects. ESP-IDF keeps its built-in platform adapters unless a complete service group is overridden. Debug metadata remains version 3.
+This document is the canonical standard-library reference for C~ Draft 0.46 and Runtime ABI 19. Draft 0.46 adds block devices, FAT mounts, T-CAN485 SDSPI storage, removable-media monitoring, and managed-process filesystem services. Managed Module ABI 1 and debug metadata version 3 remain unchanged.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 
@@ -382,7 +382,17 @@ defer File.Close(file);
 
 `File` includes existence, copy/move/delete, metadata, byte-array, text, line, append, and stream helpers. `Directory` includes existence, recursive creation/deletion, move, current-directory access, and ordinally sorted full-path enumeration. Recursive deletion never follows symbolic links or Windows reparse points. `Path` provides target separators, combine, file/directory name, extension, root, and rooted-path operations.
 
-`FileMetadata` reports `FileSystemEntryKind`, portable `FileAttributes`, length, and creation/access/modification timestamps with explicit availability flags. Each `FileTimestamp` stores signed Unix seconds plus nanoseconds. POSIX metadata uses `lstat`; Windows reports reparse points as links. `IOException.ErrorCode` is host-dependent and its operation identifies the failing API. Freestanding providers return the portable status plus a backend-defined native code to the panic boundary. Concurrent access to one handle or stream requires external synchronization. Async I/O, sharing controls, watchers, memory mapping, globbing, and lazy enumeration are not part of Draft 0.43.
+`FileMetadata` reports `FileSystemEntryKind`, portable `FileAttributes`, length, and creation/access/modification timestamps with explicit availability flags. Each `FileTimestamp` stores signed Unix seconds plus nanoseconds. POSIX metadata uses `lstat`; Windows reports reparse points as links. ESP-IDF FAT and LittleFS currently expose no symbolic links and use `stat`. `IOException.ErrorCode` is host-dependent and its operation identifies the failing API. Freestanding providers return the portable status plus a backend-defined native code to the panic boundary. Concurrent access to one handle or stream requires external synchronization. Async I/O, sharing controls, watchers, memory mapping, globbing, and lazy enumeration are not part of Draft 0.46.
+
+## Block devices and mounted storage
+
+`System.Storage.BlockDevice` is an explicitly disposed opaque device. It reports byte length, read/write/erase alignment, preferred transfer sizes, and read-only state. `Read`, `Write`, `Erase`, and `Flush` validate alignment and bounds. A slice retains its parent until disposal. Raw I/O is rejected while the device is mounted.
+
+`MbrPartitionTable.Read` and `TryRead` inspect exactly four primary entries. `WriteLayout` validates flags, overlap, sector alignment, device bounds, 32-bit LBAs, and the single-bootable limit before one sector write and flush. It rejects protective GPT and extended partitions, preserves bootstrap and disk-signature bytes, and replaces the partition entries and MBR signature. `CreateAlignedLayout` creates 1 MiB-aligned primary layouts.
+
+`FatFileSystem.Format` is the only formatting entry and requires an unmounted device. `FatFileSystem.Mount` never formats automatically. It returns an idempotently disposed `MountPoint` that exposes its normalized UTF-8 prefix, state, generation, capacity, and free space. Prefixes must be absolute, contain no traversal segments, and fit ESP-IDF's 15-byte VFS prefix limit.
+
+`Esp.Idf.Storage.SdSpiConfiguration.TCan485` selects SPI2 with MISO 2, MOSI 15, SCLK 14, CS 13, and a 20 MHz clock. `SdSpiCard.Open` owns the card, bus, and root block device until explicit disposal. `RemovableSdCardMonitor` accepts whole-card or primary-partition FAT mappings, reports `NotPresent`, `Mounting`, `Mounted`, `Removing`, or `Faulted`, probes status every 500 ms, retries an absent card every second, invalidates mounted generations before unmount, and remounts after reinsertion. Current support is limited to the classic T-CAN485 SDSPI wiring.
 
 ## Environment
 

@@ -744,6 +744,13 @@ static void monitor_task(void *argument)
     ct_monitor *monitor = argument;
     while (!__atomic_load_n(&monitor->StopRequested, __ATOMIC_ACQUIRE)) {
         if (monitor->Card == NULL) {
+            const bool remount = __atomic_exchange_n(&monitor->RemountRequested, false,
+                __ATOMIC_ACQ_REL);
+            if (!remount && __atomic_load_n(&monitor->State, __ATOMIC_ACQUIRE) ==
+                CT_STORAGE_FAULTED) {
+                vTaskDelay(pdMS_TO_TICKS(500));
+                continue;
+            }
             const int32_t result = monitor_mount(monitor);
             if (result != 0) monitor_set_state(monitor,
                 result == -ESP_ERR_TIMEOUT || result == -ESP_ERR_NOT_FOUND ? CT_STORAGE_NOT_PRESENT : CT_STORAGE_FAULTED,

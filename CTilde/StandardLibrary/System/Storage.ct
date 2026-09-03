@@ -62,7 +62,7 @@ internal static class StorageRuntime
     {
         if (result != 0)
             throw new IOException(operation + " failed (" + result.ToString() + ").",
-                result, operation, "");
+            result, operation, "");
     }
 }
 
@@ -88,14 +88,69 @@ public sealed class BlockDevice : IDisposable
         }
     }
 
-    public ulong Length { get { return info.Length; } }
-    public nuint ReadAlignment { get { return info.ReadAlignment; } }
-    public nuint WriteAlignment { get { return info.WriteAlignment; } }
-    public nuint EraseAlignment { get { return info.EraseAlignment; } }
-    public nuint PreferredReadSize { get { return info.PreferredReadSize; } }
-    public nuint PreferredWriteSize { get { return info.PreferredWriteSize; } }
-    public nuint PreferredEraseSize { get { return info.PreferredEraseSize; } }
-    public bool IsReadOnly { get { return info.IsReadOnly; } }
+    public ulong Length
+    {
+        get
+        {
+            return info.Length;
+        }
+    }
+
+    public nuint ReadAlignment
+    {
+        get
+        {
+            return info.ReadAlignment;
+        }
+    }
+
+    public nuint WriteAlignment
+    {
+        get
+        {
+            return info.WriteAlignment;
+        }
+    }
+
+    public nuint EraseAlignment
+    {
+        get
+        {
+            return info.EraseAlignment;
+        }
+    }
+
+    public nuint PreferredReadSize
+    {
+        get
+        {
+            return info.PreferredReadSize;
+        }
+    }
+
+    public nuint PreferredWriteSize
+    {
+        get
+        {
+            return info.PreferredWriteSize;
+        }
+    }
+
+    public nuint PreferredEraseSize
+    {
+        get
+        {
+            return info.PreferredEraseSize;
+        }
+    }
+
+    public bool IsReadOnly
+    {
+        get
+        {
+            return info.IsReadOnly;
+        }
+    }
 
     public unsafe void Read(ulong offset, NativeBuffer<byte> destination)
     {
@@ -148,8 +203,8 @@ public sealed class BlockDevice : IDisposable
 
 public enum MbrPartitionType : byte
 {
-    Empty=0, Fat12=1, Fat16Small=4, Extended=5, Fat16=6, Fat32=11,
-    Fat32Lba=12, Fat16Lba=14, ExtendedLba=15, GptProtective=238
+    Empty=0, Fat12=1, Fat16Small=4, Extended=5, Fat16=6, Fat32=11, Fat32Lba=12, Fat16Lba=14,
+        ExtendedLba=15, GptProtective=238
 }
 
 public struct MbrPartition
@@ -159,8 +214,7 @@ public struct MbrPartition
     public uint FirstSector;
     public uint SectorCount;
 
-    public MbrPartition(bool bootable, MbrPartitionType type, uint firstSector,
-        uint sectorCount)
+    public MbrPartition(bool bootable, MbrPartitionType type, uint firstSector, uint sectorCount)
     {
         IsBootable = bootable;
         Type = type;
@@ -168,7 +222,13 @@ public struct MbrPartition
         SectorCount = sectorCount;
     }
 
-    public bool IsEmpty { get { return Type == MbrPartitionType.Empty; } }
+    public bool IsEmpty
+    {
+        get
+        {
+            return Type == MbrPartitionType.Empty;
+        }
+    }
 }
 
 public sealed class MbrPartitionTable
@@ -180,7 +240,13 @@ public sealed class MbrPartitionTable
         this.entries = entries;
     }
 
-    public MbrPartition[] Partitions { get { return entries; } }
+    public MbrPartition[] Partitions
+    {
+        get
+        {
+            return entries;
+        }
+    }
 
     public static unsafe MbrPartitionTable Read(BlockDevice device)
     {
@@ -208,9 +274,8 @@ public sealed class MbrPartitionTable
             if (active != (byte)0 && active != (byte)0x80)
                 return false;
             byte type = sector[(nuint)(offset + 4)];
-            if (type == (byte)MbrPartitionType.GptProtective ||
-                type == (byte)MbrPartitionType.Extended ||
-                type == (byte)MbrPartitionType.ExtendedLba)
+            if (type == (byte)MbrPartitionType.GptProtective || type == (byte)MbrPartitionType.Extended
+                || type == (byte)MbrPartitionType.ExtendedLba)
                 return false;
             uint first = ReadUInt32(sector, offset + 8);
             uint count = ReadUInt32(sector, offset + 12);
@@ -261,8 +326,8 @@ public sealed class MbrPartitionTable
         device.Flush();
     }
 
-    public static MbrPartition[] CreateAligned(BlockDevice device,
-        MbrPartitionType[] types, ulong[] sizes)
+    public static MbrPartition[] CreateAligned(BlockDevice device, MbrPartitionType[] types,
+        ulong[] sizes)
     {
         if (device == null || types == null || sizes == null)
             throw new ArgumentNullException();
@@ -277,8 +342,7 @@ public sealed class MbrPartitionTable
             sectors = (sectors + 2047UL) / 2048UL * 2048UL;
             if (sector > 4294967295UL || sectors > 4294967295UL)
                 throw new ArgumentOutOfRangeException();
-            result[index] = new MbrPartition(false, types[index], (uint)sector,
-                (uint)sectors);
+            result[index] = new MbrPartition(false, types[index], (uint)sector, (uint)sectors);
             sector += sectors;
             index++;
         }
@@ -297,28 +361,28 @@ public sealed class MbrPartitionTable
             MbrPartition current = partitions[index];
             if (current.IsBootable)
                 bootable++;
-            if (current.Type == MbrPartitionType.GptProtective ||
-                current.Type == MbrPartitionType.Extended ||
-                current.Type == MbrPartitionType.ExtendedLba)
+            if (current.Type == MbrPartitionType.GptProtective || current.Type == MbrPartitionType.Extended
+                || current.Type == MbrPartitionType.ExtendedLba)
                 return false;
             if (current.IsEmpty)
             {
-                if (current.IsBootable || current.FirstSector != 0U ||
-                    current.SectorCount != 0U)
+                if (current.IsBootable || current.FirstSector != 0U || current.SectorCount
+                    != 0U)
                     return false;
             }
             else
             {
                 ulong end = (ulong)current.FirstSector + (ulong)current.SectorCount;
-                if (current.FirstSector == 0U || current.SectorCount == 0U || end > sectors)
+                if (current.FirstSector == 0U || current.SectorCount == 0U || end
+                    > sectors)
                     return false;
                 int other = 0;
                 while (other < index)
                 {
                     MbrPartition prior = partitions[other];
                     ulong priorEnd = (ulong)prior.FirstSector + (ulong)prior.SectorCount;
-                    if (!prior.IsEmpty && (ulong)current.FirstSector < priorEnd &&
-                        (ulong)prior.FirstSector < end)
+                    if (!prior.IsEmpty && (ulong)current.FirstSector < priorEnd && (ulong)prior.FirstSector
+                        < end)
                         return false;
                     other++;
                 }
@@ -330,11 +394,13 @@ public sealed class MbrPartitionTable
 
     private static unsafe uint ReadUInt32(NativeBuffer<byte> value, int offset)
     {
-        return (uint)value[(nuint)offset] | ((uint)value[(nuint)(offset + 1)] << 8) |
-            ((uint)value[(nuint)(offset + 2)] << 16) | ((uint)value[(nuint)(offset + 3)] << 24);
+        return(uint)value[(nuint)offset] | ((uint)value[(nuint)(offset + 1)] << 8)
+            | ((uint)value[(nuint)(offset + 2)] << 16) | ((uint)value[(nuint)(offset
+            + 3)] << 24);
     }
 
-    private static unsafe void WriteUInt32(NativeBuffer<byte> value, int offset, uint item)
+    private static unsafe void WriteUInt32(NativeBuffer<byte> value, int offset,
+        uint item)
     {
         value[(nuint)offset] = (byte)item;
         value[(nuint)(offset + 1)] = (byte)(item >> 8);
@@ -343,7 +409,10 @@ public sealed class MbrPartitionTable
     }
 }
 
-public enum FatKind : byte { Automatic=0, Fat12=1, Fat16=2, Fat32=3 }
+public enum FatKind : byte
+{
+    Automatic=0, Fat12=1, Fat16=2, Fat32=3
+}
 
 public struct FatFormatOptions
 {
@@ -388,17 +457,38 @@ public sealed class MountPoint : IDisposable
         this.path = path;
     }
 
-    public string Path { get { return path; } }
-    public bool IsMounted { get { return handle != (nuint)0 && StorageRuntime.IsAvailable(handle); } }
-    public ulong Generation { get { RequireMounted(); return StorageRuntime.Generation(handle); } }
+    public string Path
+    {
+        get
+        {
+            return path;
+        }
+    }
+
+    public bool IsMounted
+    {
+        get
+        {
+            return handle != (nuint)0 && StorageRuntime.IsAvailable(handle);
+        }
+    }
+
+    public ulong Generation
+    {
+        get
+        {
+            RequireMounted();
+            return StorageRuntime.Generation(handle);
+        }
+    }
+
     public FatVolumeInfo VolumeInfo
     {
         get
         {
             RequireMounted();
             FatVolumeInfo value;
-            StorageRuntime.Check(StorageRuntime.VolumeInfo(handle, out value),
-                "FatFileSystem.VolumeInfo");
+            StorageRuntime.Check(StorageRuntime.VolumeInfo(handle, out value), "FatFileSystem.VolumeInfo");
             return value;
         }
     }
@@ -417,8 +507,8 @@ public sealed class MountPoint : IDisposable
         if (handle == (nuint)0)
             throw new ObjectDisposedException();
         if (!StorageRuntime.IsAvailable(handle))
-            throw new IOException("The mount is unavailable.", 0,
-                "FatFileSystem.Mount", path);
+            throw new IOException("The mount is unavailable.", 0, "FatFileSystem.Mount",
+            path);
     }
 }
 
@@ -440,8 +530,8 @@ public static class FatFileSystem
             throw new ArgumentOutOfRangeException();
         nuint mount;
         NativeUtf8String nativePath = NativeUtf8String.Borrow(path);
-        StorageRuntime.Check(StorageRuntime.Mount(nativePath, device.Handle,
-            options.MaximumOpenFiles, out mount), "FatFileSystem.Mount");
+        StorageRuntime.Check(StorageRuntime.Mount(nativePath, device.Handle, options.MaximumOpenFiles,
+            out mount), "FatFileSystem.Mount");
         return new MountPoint(mount, path);
     }
 }

@@ -5,19 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#080a0d">
-  <meta name="description" content="C~ is a small, statically typed systems language with familiar C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
+  <meta name="description" content="C~ is a statically typed systems language with C#-style syntax, deterministic C23 output, explicit ownership, SIMD, freestanding and ESP-IDF targets, and managed applications for ESP32.">
   <meta property="og:type" content="website">
   <meta property="og:title" content="C~ — Familiar syntax. Native systems.">
-  <meta property="og:description" content="A small systems language with C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
+  <meta property="og:description" content="C#-style systems programming with deterministic C23 output, explicit ownership, native targets, and managed ESP32 applications.">
   <meta property="og:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
   <meta property="og:image:alt" content="C~ — Familiar syntax. Native systems.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="C~ — Familiar syntax. Native systems.">
-  <meta name="twitter:description" content="A small systems language with C#-style syntax, deterministic GNU C23 output, assembly functions, and freestanding native images.">
+  <meta name="twitter:description" content="C#-style systems programming with deterministic C23 output, explicit ownership, native targets, and managed ESP32 applications.">
   <meta name="twitter:image" content="https://raw.githubusercontent.com/sbarisic/CTilde/master/website/og.png">
   <title>C~ — Familiar syntax. Native systems.</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
   <script src="script.js" defer></script>
 </head>
@@ -31,6 +32,7 @@
         <span class="wordmark-name">C tilde</span>
       </a>
       <nav class="header-links" aria-label="Project links">
+        <a href="#capabilities">Capabilities</a>
         <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md" target="_blank" rel="noopener noreferrer">Language guide</a>
         <a class="github-link" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
@@ -42,17 +44,18 @@
       <div class="hero-lines" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span></span> Draft 0.25 experimental systems language</p>
+          <p class="eyebrow"><span></span> Draft 0.46 experimental systems language</p>
           <h1>Familiar syntax.<br><em>Native systems.</em></h1>
-          <p class="hero-lede">C~ is a small, statically typed language with C#-style syntax. It compiles to deterministic GNU C23 and native programs—without the CLR.</p>
+          <p class="hero-lede">C~ brings C#-style structure to native systems work. It compiles to deterministic C23 for desktop programs, freestanding images, Cosmopolitan executables, ESP-IDF firmware, and trusted managed applications on ESP32—without the CLR.</p>
           <div class="hero-actions">
             <a class="button button-primary" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">View on GitHub <span aria-hidden="true">↗</span></a>
             <a class="button button-secondary" href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md" target="_blank" rel="noopener noreferrer">Read the language guide</a>
           </div>
           <ul class="hero-facts" aria-label="C tilde at a glance">
-            <li>Statically typed</li>
+            <li>Explicit ownership</li>
             <li>Native binaries</li>
-            <li>Deterministic output</li>
+            <li>Portable standard library</li>
+            <li>ESP32 managed apps</li>
           </ul>
         </div>
 
@@ -75,13 +78,71 @@
         <article class="highlight-card">
           <p class="highlight-index">02</p>
           <h2>Native at the boundary</h2>
-          <p>Deterministic GNU C23 output and explicit native contracts connect C~ to C libraries without a managed runtime.</p>
+          <p>Deterministic C23 output, native imports, exported C ABI functions, inline assembly, and runtime-effect contracts keep every boundary visible.</p>
         </article>
         <article class="highlight-card">
           <p class="highlight-index">03</p>
           <h2>Built for real targets</h2>
-          <p>Use the same language for hosted programs, ESP-IDF firmware, controlled GNU/ELF freestanding images, and measured x86-64 Cosmopolitan APEs that run unchanged on Linux and Windows.</p>
+          <p>Use the same language and standard-library surface for hosted programs, ESP-IDF firmware, controlled GNU/ELF freestanding images, and x86-64 Cosmopolitan APEs.</p>
         </article>
+      </div>
+    </section>
+
+    <section class="capabilities" id="capabilities" aria-labelledby="capabilities-heading">
+      <div class="shell">
+        <div class="section-heading capability-heading">
+          <p class="eyebrow"><span></span> Current implementation</p>
+          <h2 id="capabilities-heading">One language, several execution models.</h2>
+          <p>C~ keeps target choices explicit. Hosted applications can lean on native libraries and profile-guided optimization; firmware and freestanding programs provide the services their standard library needs; ESP32 can also load trusted C~ applications at runtime.</p>
+        </div>
+
+        <div class="status-strip" aria-label="Current compatibility versions">
+          <div><strong>0.46</strong><span>Language draft</span></div>
+          <div><strong>19</strong><span>Runtime ABI</span></div>
+          <div><strong>1</strong><span>Managed Module ABI</span></div>
+          <div><strong>3</strong><span>Debug metadata</span></div>
+        </div>
+
+        <div class="capability-grid">
+          <article class="capability-card">
+            <p class="capability-label">Standard library</p>
+            <h3>Useful above the metal</h3>
+            <p>Strings and strict UTF-8, scalar parsing, streams, files, directories, collections, math, geometry, time, random numbers, threads, mutexes, and TLS ship as source with the compiler.</p>
+            <ul><li>Generic collections</li><li>Rune-aware text</li><li>Portable runtime services</li></ul>
+          </article>
+          <article class="capability-card">
+            <p class="capability-label">Native performance</p>
+            <h3>Controlled release builds</h3>
+            <p>Select speed or aggressive optimization, baseline or AVX2 code generation, precise or fast floating point, LTO, and hosted PGO without hiding the resolved native flags.</p>
+            <ul><li>MSVC, GCC, and Clang</li><li>SIMD128 lane types</li><li>Stack-usage reports</li></ul>
+          </article>
+          <article class="capability-card">
+            <p class="capability-label">Hosted</p>
+            <h3>Desktop-native applications</h3>
+            <p>Build Windows and Linux executables, load allowlisted native libraries, and use the full synchronous I/O and threading surface. The HostedIo example combines a 12-worker packet renderer with a flattened SAH BVH.</p>
+            <ul><li>Native imports</li><li>Packet SIMD</li><li>Measured benchmarks</li></ul>
+          </article>
+          <article class="capability-card">
+            <p class="capability-label">ESP-IDF storage</p>
+            <h3>Filesystems that notice removal</h3>
+            <p>Draft 0.46 adds block devices, primary MBR partitions, explicit FAT formatting and mounts, T-CAN485 SDSPI support, and generation-aware removable-media handling.</p>
+            <ul><li>ESP32 and ESP32-C3</li><li>LittleFS and FAT</li><li>Per-process file state</li></ul>
+          </article>
+          <article class="capability-card">
+            <p class="capability-label">Managed ESP32 apps</p>
+            <h3>Load, run, reclaim</h3>
+            <p>Managed Module ABI 1 packages a C~ application as a checked <code>.ctm</code> ELF. ManagedShell demonstrates FreeRTOS-backed processes, RGB status, and loadable memory and task-manager tools whose native C stays inside each module.</p>
+            <ul><li>Independent state and heaps</li><li>Copied-message IPC</li><li>Immediate unload and reload</li></ul>
+          </article>
+          <article class="capability-card">
+            <p class="capability-label">Tooling</p>
+            <h3>Edit and debug in context</h3>
+            <p>VS Code and Visual Studio understand <code>.ctproj</code> projects through the language server. The C~-aware debug adapter maps native execution back to source and supports hosted and ESP-IDF QEMU launch workflows.</p>
+            <ul><li>Diagnostics and completion</li><li>Semantic navigation</li><li>Logical breakpoints</li></ul>
+          </article>
+        </div>
+
+        <p class="capability-note">Managed modules are currently ESP-IDF-only trusted native code. Managed-library linking and shared public types across separately compiled C~ modules remain future work.</p>
       </div>
     </section>
 
@@ -105,6 +166,11 @@
             <button class="tab" id="tab-asm-functions" type="button" role="tab" aria-selected="false" aria-controls="panel-asm-functions" tabindex="-1">Asm functions</button>
             <button class="tab" id="tab-const-data" type="button" role="tab" aria-selected="false" aria-controls="panel-const-data" tabindex="-1">Const data</button>
             <button class="tab" id="tab-freestanding" type="button" role="tab" aria-selected="false" aria-controls="panel-freestanding" tabindex="-1">Freestanding</button>
+            <button class="tab" id="tab-collections" type="button" role="tab" aria-selected="false" aria-controls="panel-collections" tabindex="-1">Collections</button>
+            <button class="tab" id="tab-simd" type="button" role="tab" aria-selected="false" aria-controls="panel-simd" tabindex="-1">SIMD</button>
+            <button class="tab" id="tab-storage" type="button" role="tab" aria-selected="false" aria-controls="panel-storage" tabindex="-1">Storage</button>
+            <button class="tab" id="tab-modules" type="button" role="tab" aria-selected="false" aria-controls="panel-modules" tabindex="-1">Managed apps</button>
+            <button class="tab" id="tab-runtime" type="button" role="tab" aria-selected="false" aria-controls="panel-runtime" tabindex="-1">Runtime roles</button>
           </div>
           <p class="sr-only" id="example-status" aria-live="polite"></p>
 
@@ -379,7 +445,7 @@
             <div class="example-copy">
               <p class="example-number">09 / ASSEMBLY FUNCTIONS</p>
               <h3>Call assembly like an ordinary function.</h3>
-              <p>Draft 0.25 gives raw GNU assembly a typed C ABI boundary. Parameters and results use explicit operands while effect attributes describe the opaque native work.</p>
+              <p>Raw GNU assembly functions have a typed C ABI boundary. Parameters and results use explicit operands while effect attributes describe the opaque native work.</p>
               <a href="https://github.com/sbarisic/CTilde/blob/master/LANGUAGE.md#inline-assembly" target="_blank" rel="noopener noreferrer">Read about assembly functions <span aria-hidden="true">→</span></a>
             </div>
             <div class="code-window">
@@ -491,6 +557,133 @@ DebugWrite(<span class="tok-string">'C'</span>);
 }</code></pre>
             </div>
           </div>
+
+          <div class="example-panel" id="panel-collections" role="tabpanel" aria-labelledby="tab-collections" hidden>
+            <div class="example-copy">
+              <p class="example-number">12 / COLLECTIONS</p>
+              <h3>Use mutable collections without giving up value semantics.</h3>
+              <p>Generic lists, stacks, queues, sets, dictionaries, and fail-fast enumerators are part of the C~ standard library.</p>
+              <a href="https://github.com/sbarisic/CTilde/tree/master/examples/CollectionsAndGeometry" target="_blank" rel="noopener noreferrer">Run the collections tour <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>CollectionsAndGeometry/Program.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde generic collections example"><code><span class="tok-keyword">using</span> <span class="tok-type">System.Collections</span>;
+
+<span class="tok-type">List</span>&lt;<span class="tok-keyword">int</span>&gt; values = <span class="tok-keyword">new</span> <span class="tok-type">List</span>&lt;<span class="tok-keyword">int</span>&gt;();
+values.Add(<span class="tok-number">2</span>);
+values.Insert(<span class="tok-number">0</span>, <span class="tok-number">1</span>);
+
+<span class="tok-type">ListEnumerator</span>&lt;<span class="tok-keyword">int</span>&gt; items = values.GetEnumerator();
+<span class="tok-keyword">while</span> (items.MoveNext())
+    <span class="tok-type">Console</span>.WriteLine(items.Current);</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-simd" role="tabpanel" aria-labelledby="tab-simd" hidden>
+            <div class="example-copy">
+              <p class="example-number">13 / SIMD128</p>
+              <h3>Keep four lanes visible in the source.</h3>
+              <p><code>F32x4</code>, integer lanes, masks, and <code>Vec3x4</code> have fixed 16-byte semantics with portable scalar lowering and explicit supported-target SIMD128 lowering.</p>
+              <a href="https://github.com/sbarisic/CTilde/tree/master/examples/HostedIo" target="_blank" rel="noopener noreferrer">See the packet renderer <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>HostedIo/Hittables.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde SIMD packet example"><code><span class="tok-type">F32x4</span> a = rays.Directions.LengthSquared();
+<span class="tok-type">F32x4</span> halfB = centerToOrigin.Dot(rays.Directions);
+<span class="tok-type">F32x4</span> c = centerToOrigin.LengthSquared()
+    - <span class="tok-type">F32x4</span>.Splat(radius * radius);
+
+<span class="tok-type">F32x4</span> discriminant = halfB * halfB - a * c;
+<span class="tok-type">Mask32x4</span> hits = <span class="tok-type">F32x4</span>.CompareGreaterThanOrEqual(
+    discriminant, <span class="tok-type">F32x4</span>.Zero);</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-storage" role="tabpanel" aria-labelledby="tab-storage" hidden>
+            <div class="example-copy">
+              <p class="example-number">14 / REMOVABLE STORAGE</p>
+              <h3>Treat media changes as state, not surprises.</h3>
+              <p>The ESP-IDF storage layer exposes block devices, primary MBR layouts, FAT volumes, and a generation-aware removable-SD monitor.</p>
+              <a href="https://github.com/sbarisic/CTilde/blob/master/STDLIB.md#block-devices-and-mounted-storage" target="_blank" rel="noopener noreferrer">Read the storage contract <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>Esp/Idf/EspStorage.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde removable storage example"><code><span class="tok-keyword">using</span> <span class="tok-type">Esp.Idf.Storage</span>;
+
+<span class="tok-type">RemovableSdCardMonitor</span> card =
+    <span class="tok-keyword">new</span> <span class="tok-type">RemovableSdCardMonitor</span>(
+        <span class="tok-type">SdSpiConfiguration</span>.TCan485);
+
+card.AddFatMount(<span class="tok-number">0</span>, <span class="tok-string">"/sd"</span>, <span class="tok-number">8</span>);
+card.Start();
+
+<span class="tok-keyword">if</span> (card.State == <span class="tok-type">RemovableStorageState</span>.Faulted)
+    card.Remount();</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-modules" role="tabpanel" aria-labelledby="tab-modules" hidden>
+            <div class="example-copy">
+              <p class="example-number">15 / MANAGED ESP32 APPLICATION</p>
+              <h3>Run native modules as logical processes.</h3>
+              <p>A <code>.ctm</code> application shares Runtime ABI 19 with firmware while keeping its mutable statics, heap accounting, cancellation state, and copied mailbox process-local.</p>
+              <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>ManagedShell/Modules/Hello/Program.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde managed ESP32 application example"><code><span class="tok-keyword">using</span> <span class="tok-type">System.Diagnostics</span>;
+<span class="tok-keyword">using</span> <span class="tok-type">System.Text</span>;
+
+<span class="tok-attribute">[EntryPoint]</span>
+<span class="tok-keyword">public static int</span> Main(<span class="tok-keyword">string</span>[] args)
+{
+    <span class="tok-type">Process</span> current = <span class="tok-type">Process</span>.Current;
+    <span class="tok-keyword">byte</span>[] payload;
+    <span class="tok-keyword">if</span> (current.TryReceive(<span class="tok-number">250u</span>, <span class="tok-keyword">out</span> payload))
+        <span class="tok-type">Console</span>.WriteLine(<span class="tok-type">Encoding</span>.UTF8.GetString(payload));
+    <span class="tok-keyword">return</span> <span class="tok-type">Process</span>.IsCancellationRequested ? -<span class="tok-number">1</span> : <span class="tok-number">0</span>;
+}</code></pre>
+            </div>
+          </div>
+
+          <div class="example-panel" id="panel-runtime" role="tabpanel" aria-labelledby="tab-runtime" hidden>
+            <div class="example-copy">
+              <p class="example-number">16 / RUNTIME PROVIDERS</p>
+              <h3>Bring the standard library to your platform.</h3>
+              <p>Freestanding and ESP-IDF projects can satisfy typed runtime roles for allocation, panic, console, files, clocks, threads, mutexes, and TLS.</p>
+              <a href="https://github.com/sbarisic/CTilde/tree/master/examples/QemuFreestanding" target="_blank" rel="noopener noreferrer">Inspect a freestanding provider <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="code-window">
+              <div class="code-toolbar" aria-hidden="true">
+                <span></span><span></span><span></span>
+                <b>QemuFreestanding/Kernel.ct</b>
+              </div>
+              <pre tabindex="0" aria-label="C tilde runtime provider example"><code><span class="tok-attribute">[RuntimeImpl(Runtime.ConsoleWrite)]</span>
+<span class="tok-attribute">[NoAlloc]</span>
+<span class="tok-attribute">[NoThrow]</span>
+<span class="tok-attribute">[NoBlock]</span>
+<span class="tok-attribute">[NoRuntime]</span>
+<span class="tok-keyword">private static unsafe</span> <span class="tok-type">RuntimeTransferResult</span> ConsoleWrite(
+    <span class="tok-type">ReadOnlyNativeBuffer</span>&lt;<span class="tok-keyword">byte</span>&gt; value)
+{
+    <span class="tok-comment">// Platform-specific output.</span>
+    <span class="tok-keyword">return new</span> <span class="tok-type">RuntimeTransferResult</span>(
+        <span class="tok-type">RuntimeStatus</span>.Success, <span class="tok-number">0</span>, value.Length);
+}</code></pre>
+            </div>
+          </div>
         </div>
       </div>
     </section>
@@ -499,7 +692,7 @@ DebugWrite(<span class="tok-string">'C'</span>);
       <div class="shell project-cta-inner">
         <div>
           <p class="eyebrow"><span></span> Open source</p>
-          <h2 id="project-heading">The compiler, specification, and examples are all in one place.</h2>
+          <h2 id="project-heading">The compiler, specification, standard library, and 20 example projects are all in one place.</h2>
         </div>
         <div class="project-links">
           <a class="button button-primary" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">Explore C~ on GitHub <span aria-hidden="true">↗</span></a>

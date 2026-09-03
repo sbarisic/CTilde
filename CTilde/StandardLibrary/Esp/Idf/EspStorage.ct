@@ -11,8 +11,8 @@ public struct SdSpiConfiguration
     public int ChipSelect;
     public uint FrequencyKilohertz;
 
-    public SdSpiConfiguration(int host, int miso, int mosi, int clock,
-        int chipSelect, uint frequencyKilohertz)
+    public SdSpiConfiguration(int host, int miso, int mosi, int clock, int chipSelect,
+        uint frequencyKilohertz)
     {
         Host = host;
         Miso = miso;
@@ -47,8 +47,8 @@ public struct SdCardInfo
 internal static class SdStorageRuntime
 {
     [Extern("ct_storage_sdspi_open")]
-    internal static int Open(SdSpiConfiguration configuration, out nuint card,
-        out nuint device, out SdCardInfo info);
+    internal static int Open(SdSpiConfiguration configuration, out nuint card, out nuint device,
+        out SdCardInfo info);
 
     [Extern("ct_storage_sdspi_status")]
     internal static int Status(nuint card);
@@ -60,8 +60,8 @@ internal static class SdStorageRuntime
     internal static int Create(SdSpiConfiguration configuration, out nuint monitor);
 
     [Extern("ct_storage_monitor_add_fat")]
-    internal static int AddFat(nuint monitor, int partitionIndex,
-        System.Runtime.NativeUtf8String path, int maximumOpenFiles);
+    internal static int AddFat(nuint monitor, int partitionIndex, System.Runtime.NativeUtf8String path,
+        int maximumOpenFiles);
 
     [Extern("ct_storage_monitor_start")]
     internal static int Start(nuint monitor);
@@ -105,9 +105,31 @@ public sealed class SdSpiCard : System.IDisposable
         return new SdSpiCard(card, new BlockDevice(device), info);
     }
 
-    public BlockDevice Device { get { RequireOpen(); return device; } }
-    public SdCardInfo Info { get { RequireOpen(); return info; } }
-    public bool IsPresent { get { return handle != (nuint)0 && SdStorageRuntime.Status(handle) == 0; } }
+    public BlockDevice Device
+    {
+        get
+        {
+            RequireOpen();
+            return device;
+        }
+    }
+
+    public SdCardInfo Info
+    {
+        get
+        {
+            RequireOpen();
+            return info;
+        }
+    }
+
+    public bool IsPresent
+    {
+        get
+        {
+            return handle != (nuint)0 && SdStorageRuntime.Status(handle) == 0;
+        }
+    }
 
     public void Dispose()
     {
@@ -115,8 +137,7 @@ public sealed class SdSpiCard : System.IDisposable
             return;
         device.Dispose();
         nuint current = handle;
-        System.Storage.StorageRuntime.Check(SdStorageRuntime.Close(current),
-            "SdSpiCard.Dispose");
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Close(current), "SdSpiCard.Dispose");
         handle = (nuint)0;
     }
 
@@ -149,10 +170,9 @@ public sealed class RemovableSdCardMonitor : System.IDisposable
         RequireOpen();
         if (started)
             throw new System.InvalidOperationException();
-        System.Runtime.NativeUtf8String nativePath =
-            System.Runtime.NativeUtf8String.Borrow(path);
-        System.Storage.StorageRuntime.Check(SdStorageRuntime.AddFat(handle,
-            partitionIndex, nativePath, maximumOpenFiles), "SdMonitor.AddMount");
+        System.Runtime.NativeUtf8String nativePath = System.Runtime.NativeUtf8String.Borrow(path);
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.AddFat(handle, partitionIndex,
+            nativePath, maximumOpenFiles), "SdMonitor.AddMount");
     }
 
     public void Start()
@@ -160,20 +180,41 @@ public sealed class RemovableSdCardMonitor : System.IDisposable
         RequireOpen();
         if (started)
             return;
-        System.Storage.StorageRuntime.Check(SdStorageRuntime.Start(handle),
-            "SdMonitor.Start");
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Start(handle), "SdMonitor.Start");
         started = true;
     }
 
-    public RemovableStorageState State { get { RequireOpen(); return SdStorageRuntime.State(handle); } }
-    public ulong Generation { get { RequireOpen(); return SdStorageRuntime.Generation(handle); } }
-    public int LastError { get { RequireOpen(); return SdStorageRuntime.LastError(handle); } }
+    public RemovableStorageState State
+    {
+        get
+        {
+            RequireOpen();
+            return SdStorageRuntime.State(handle);
+        }
+    }
+
+    public ulong Generation
+    {
+        get
+        {
+            RequireOpen();
+            return SdStorageRuntime.Generation(handle);
+        }
+    }
+
+    public int LastError
+    {
+        get
+        {
+            RequireOpen();
+            return SdStorageRuntime.LastError(handle);
+        }
+    }
 
     public void Remount()
     {
         RequireOpen();
-        System.Storage.StorageRuntime.Check(SdStorageRuntime.Remount(handle),
-            "SdMonitor.Remount");
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Remount(handle), "SdMonitor.Remount");
     }
 
     public void Dispose()
@@ -181,8 +222,7 @@ public sealed class RemovableSdCardMonitor : System.IDisposable
         if (handle == (nuint)0)
             return;
         nuint current = handle;
-        System.Storage.StorageRuntime.Check(SdStorageRuntime.Release(current),
-            "SdMonitor.Dispose");
+        System.Storage.StorageRuntime.Check(SdStorageRuntime.Release(current), "SdMonitor.Dispose");
         handle = (nuint)0;
     }
 

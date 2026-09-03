@@ -15,7 +15,7 @@
 typedef struct ct_taskmgr_task_info {
     uintptr_t Handle;
     uint32_t ProcessId;
-    UBaseType_t Number;
+    uint32_t Number;
     uint64_t RunTime;
     size_t StackMinimumBytes;
 } ct_taskmgr_task_info;
@@ -107,30 +107,31 @@ static bool capture_task_snapshot(
 {
     (void)memset(snapshot, 0, sizeof(*snapshot));
     for (unsigned attempt = 0u; attempt < CT_TASK_SNAPSHOT_ATTEMPTS; ++attempt) {
-        const UBaseType_t before = api->TaskGetCount();
+        const uint32_t before = api->TaskGetCount();
         const size_t capacity = (size_t)before + CT_TASK_SNAPSHOT_SLACK;
-        TaskStatus_t *raw = (TaskStatus_t *)calloc(capacity, sizeof(*raw));
+        ct_diagnostics_task_info *raw =
+            (ct_diagnostics_task_info *)calloc(capacity, sizeof(*raw));
         ct_taskmgr_task_info *items = (ct_taskmgr_task_info *)calloc(capacity, sizeof(*items));
         if (raw == NULL || items == NULL) {
             free(raw);
             free(items);
             return false;
         }
-        configRUN_TIME_COUNTER_TYPE total_run_time = 0;
-        const UBaseType_t captured = api->TaskGetSystemState(raw, (UBaseType_t)capacity, &total_run_time);
-        const UBaseType_t after = api->TaskGetCount();
+        uint64_t total_run_time = 0;
+        const uint32_t captured = api->Tasks(raw, (uint32_t)capacity, &total_run_time);
+        const uint32_t after = api->TaskGetCount();
         if (captured == 0u || captured != after) {
             free(raw);
             free(items);
             continue;
         }
-        for (UBaseType_t index = 0u; index < captured; ++index) {
+        for (uint32_t index = 0u; index < captured; ++index) {
             ct_taskmgr_task_info *item = &items[index];
-            item->Handle = (uintptr_t)raw[index].xHandle;
+            item->Handle = raw[index].Handle;
             item->ProcessId = api->ProcessForTask(item->Handle);
-            item->Number = raw[index].xTaskNumber;
-            item->RunTime = (uint64_t)raw[index].ulRunTimeCounter;
-            item->StackMinimumBytes = (size_t)raw[index].usStackHighWaterMark * sizeof(StackType_t);
+            item->Number = raw[index].Number;
+            item->RunTime = raw[index].RunTime;
+            item->StackMinimumBytes = raw[index].StackMinimumBytes;
         }
         free(raw);
         sort_tasks(items, captured);
@@ -191,7 +192,7 @@ void ct_managed_diagnostics_print_task_manager(void)
         puts("Task manager\n  error: unable to capture initial task snapshot");
         return;
     }
-    api->TaskDelay(pdMS_TO_TICKS(CT_TASKMGR_SAMPLE_MILLISECONDS));
+    api->TaskDelayMilliseconds(CT_TASKMGR_SAMPLE_MILLISECONDS);
     if (!capture_task_snapshot(api, &second)) {
         release_task_snapshot(&first);
         puts("Task manager\n  error: unable to capture final task snapshot");
@@ -210,8 +211,8 @@ void ct_managed_diagnostics_print_task_manager(void)
     const uint64_t maximum_cpu = (uint64_t)api->CoreCount * 1000u;
     uint64_t idle_run_time = 0u;
     unsigned stable_idle_tasks = 0u;
-    for (BaseType_t core = 0; core < (BaseType_t)api->CoreCount; ++core) {
-        const uintptr_t idle_handle = (uintptr_t)api->TaskGetIdleHandleForCore(core);
+    for (int32_t core = 0; core < (int32_t)api->CoreCount; ++core) {
+        const uintptr_t idle_handle = api->TaskGetIdleHandleForCore(core);
         for (size_t index = 0u; index < second.Count; ++index) {
             const ct_taskmgr_task_info *current = &second.Items[index];
             if (current->Handle != idle_handle) continue;

@@ -43,8 +43,12 @@ internal static class StandardLibrary
     {
         return SyntaxTreeCache.GetOrAdd((target, includeNativeIntegers, includeNativeUtf8, includeHostedIo, vectors, foundations), key =>
         {
+            var includeStorage = key.Target != CompilationTarget.Freestanding &&
+                (key.Foundations & StandardFoundationTypes.Storage) != 0;
+            var effectiveHostedIo = key.HostedIo || includeStorage;
             var files = FilesFor(key.Target, key.HostedIo, key.Vectors, key.Foundations);
-            return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8, key.HostedIo, key.Target == CompilationTarget.Freestanding, null, null, applyTransforms: true);
+            return LoadSyntaxTrees(files, key.NativeIntegers, key.NativeUtf8 || includeStorage,
+                effectiveHostedIo, key.Target == CompilationTarget.Freestanding, null, null, applyTransforms: true);
         });
     }
 
@@ -58,8 +62,10 @@ internal static class StandardLibrary
         IReadOnlyDictionary<string, string>? overrides = null,
         bool applyTransforms = true)
     {
-        return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors, StandardFoundationTypes.All), includeNativeIntegers, includeNativeUtf8,
-            includeHostedIo, target == CompilationTarget.Freestanding, Path.GetFullPath(sourceRoot), overrides, applyTransforms);
+        var includeStorage = target != CompilationTarget.Freestanding;
+        return LoadSyntaxTrees(FilesFor(target, includeHostedIo, vectors, StandardFoundationTypes.All),
+            includeNativeIntegers, includeNativeUtf8 || includeStorage, includeHostedIo || includeStorage,
+            target == CompilationTarget.Freestanding, Path.GetFullPath(sourceRoot), overrides, applyTransforms);
     }
 
     private static IReadOnlyList<string> FilesFor(CompilationTarget target, bool includeHostedIo, StandardVectorTypes vectors, StandardFoundationTypes foundations)
@@ -77,7 +83,9 @@ internal static class StandardLibrary
             files.Add("Random.ct");
         if ((foundations & (StandardFoundationTypes.Stopwatch | StandardFoundationTypes.Process)) != 0)
             files.Add("Diagnostics.ct");
-        if ((foundations & StandardFoundationTypes.Storage) != 0)
+        var includeStorage = target != CompilationTarget.Freestanding &&
+            (foundations & StandardFoundationTypes.Storage) != 0;
+        if (includeStorage)
             files.Add("Storage.ct");
         files.Add("Generics.ct");
         files.Add("ArrayAlgorithms.ct");
@@ -102,7 +110,7 @@ internal static class StandardLibrary
             files.Add("Matrix4x4.ct");
             files.Add("Quaternion.ct");
         }
-        if (includeHostedIo)
+        if (includeHostedIo || includeStorage)
         {
             files.Add("HostedIO.ct");
             files.Add("HostedStreams.ct");

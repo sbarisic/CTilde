@@ -202,7 +202,6 @@ public static class Program
         {
             Console.WriteLine("32-bit pointer width");
         }
-
         Console.ReadLine();
     }
 }

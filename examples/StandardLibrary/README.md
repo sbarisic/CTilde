@@ -21,3 +21,5 @@ Indexes and lengths in the string examples are UTF-8 byte offsets. Native conver
 The I/O tour creates `ctilde-stdlib-tour` beneath the current directory, reads its file through a seekable `FileStream`, prints metadata, then removes the directory before returning.
 
 Generic value helpers, mutable collections, versioned enumerators, vectors, matrices, and quaternions have their own focused [CollectionsAndGeometry example](../CollectionsAndGeometry/README.md), keeping this I/O-oriented tour readable.
+
+`System.Storage` is not a hosted block-device backend. The compiler nevertheless resolves its internal native-UTF-8 and common I/O declaration dependencies automatically whenever a non-freestanding project selects that surface, so shared source does not need to name implementation helper types explicitly.

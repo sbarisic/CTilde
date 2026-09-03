@@ -16,7 +16,7 @@ The implementation preserves these current contracts:
 - deterministic output that does not depend on input-file order.
 - strict whole-program effect analysis, including `[NoAlloc]`.
 - explicit ARC ownership and deterministic cleanup.
-- one managed runtime in each final program.
+- one managed runtime in each final hosted or firmware program; ESP-IDF `.ctm` modules bind the firmware-owned runtime instead of embedding another process host.
 - target-specific restrictions through validators, not parser forks.
 - source-owned modular output and stable symbol identities.
 - no network or file-system access inside ordinary semantic binding.

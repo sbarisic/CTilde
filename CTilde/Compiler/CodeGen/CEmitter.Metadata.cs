@@ -69,8 +69,8 @@ internal sealed partial class CEmitter
         {
             if (IsManagedModule)
             {
-                writer.WriteLine("extern const char* esp_err_to_name(int32_t code);");
-                writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name(code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
+                writer.WriteLine("extern const char* esp_err_to_name(int code);");
+                writer.WriteLine("ct_string* ct_esp_error_name(int32_t code) { const char* name = esp_err_to_name((int)code); return ct_string_from_bytes((const uint8_t*)name, (int32_t)strlen(name), \"<esp-error>\", 0); }");
             }
             else
             {

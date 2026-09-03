@@ -1,0 +1,209 @@
+using System;
+
+internal enum NanoKeyKind : byte
+{
+    None=0, Insert=1, Left=2, Right=3, Up=4, Down=5, Home=6, End=7,
+    PageUp=8, PageDown=9, Backspace=10, Delete=11, Enter=12, Tab=13,
+    Save=14, Exit=15, Refresh=16, Resize=17, PasteStart=18, PasteEnd=19
+}
+
+internal struct NanoKey
+{
+    public NanoKeyKind Kind;
+    public byte B0;
+    public byte B1;
+    public byte B2;
+    public byte B3;
+    public int Length;
+    public int Rows;
+    public int Columns;
+}
+
+internal sealed class NanoInput
+{
+    private byte[] sequence = new byte[24];
+    private int sequenceLength;
+    private int utf8Length;
+    private int utf8Expected;
+    private byte u0;
+    private byte u1;
+    private byte u2;
+    private byte u3;
+
+    public bool Feed(int input, out NanoKey key)
+    {
+        key = new NanoKey();
+        if (input < 0 || input > 255)
+            return false;
+        byte value = (byte)input;
+        if (sequenceLength > 0)
+            return FeedSequence(value, out key);
+        if (utf8Expected > 0)
+            return FeedUtf8(value, out key);
+        if (value == (byte)27)
+        {
+            sequence[0] = value;
+            sequenceLength = 1;
+            return false;
+        }
+        if (value == (byte)15) return SetKind(NanoKeyKind.Save, out key);
+        if (value == (byte)24) return SetKind(NanoKeyKind.Exit, out key);
+        if (value == (byte)12) return SetKind(NanoKeyKind.Refresh, out key);
+        if (value == (byte)8 || value == (byte)127)
+            return SetKind(NanoKeyKind.Backspace, out key);
+        if (value == (byte)13 || value == (byte)10)
+            return SetKind(NanoKeyKind.Enter, out key);
+        if (value == (byte)9) return SetKind(NanoKeyKind.Tab, out key);
+        if (value >= (byte)32 && value < (byte)127)
+            return SetInsert(value, (byte)0, (byte)0, (byte)0, 1, out key);
+        if (value >= (byte)0xc2 && value <= (byte)0xdf)
+            return StartUtf8(value, 2);
+        if (value >= (byte)0xe0 && value <= (byte)0xef)
+            return StartUtf8(value, 3);
+        if (value >= (byte)0xf0 && value <= (byte)0xf4)
+            return StartUtf8(value, 4);
+        return false;
+    }
+
+    private bool StartUtf8(byte value, int expected)
+    {
+        u0 = value;
+        utf8Length = 1;
+        utf8Expected = expected;
+        return false;
+    }
+
+    private bool FeedUtf8(byte value, out NanoKey key)
+    {
+        key = new NanoKey();
+        if ((value & (byte)0xc0) != (byte)0x80)
+        {
+            utf8Length = 0;
+            utf8Expected = 0;
+            return false;
+        }
+        if (utf8Length == 1) u1 = value;
+        else if (utf8Length == 2) u2 = value;
+        else u3 = value;
+        utf8Length++;
+        if (utf8Length < utf8Expected)
+            return false;
+        int count = utf8Expected;
+        utf8Length = 0;
+        utf8Expected = 0;
+        return SetInsert(u0, u1, u2, u3, count, out key);
+    }
+
+    private bool FeedSequence(byte value, out NanoKey key)
+    {
+        key = new NanoKey();
+        if (sequenceLength >= sequence.Length)
+        {
+            sequenceLength = 0;
+            return false;
+        }
+        sequence[sequenceLength++] = value;
+        if (sequenceLength == 2 && value != (byte)'[')
+        {
+            sequenceLength = 0;
+            return false;
+        }
+        if (sequenceLength < 3)
+            return false;
+        byte final = sequence[sequenceLength - 1];
+        if (sequenceLength == 3)
+        {
+            if (final == (byte)'A') return Complete(NanoKeyKind.Up, out key);
+            if (final == (byte)'B') return Complete(NanoKeyKind.Down, out key);
+            if (final == (byte)'C') return Complete(NanoKeyKind.Right, out key);
+            if (final == (byte)'D') return Complete(NanoKeyKind.Left, out key);
+            if (final == (byte)'H') return Complete(NanoKeyKind.Home, out key);
+            if (final == (byte)'F') return Complete(NanoKeyKind.End, out key);
+        }
+        if (final != (byte)'~' && final != (byte)'t')
+            return false;
+        if (final == (byte)'~')
+        {
+            int number = ParseNumber(2, sequenceLength - 1);
+            if (number == 1 || number == 7) return Complete(NanoKeyKind.Home, out key);
+            if (number == 3) return Complete(NanoKeyKind.Delete, out key);
+            if (number == 4 || number == 8) return Complete(NanoKeyKind.End, out key);
+            if (number == 5) return Complete(NanoKeyKind.PageUp, out key);
+            if (number == 6) return Complete(NanoKeyKind.PageDown, out key);
+            if (number == 200) return Complete(NanoKeyKind.PasteStart, out key);
+            if (number == 201) return Complete(NanoKeyKind.PasteEnd, out key);
+        }
+        else
+        {
+            int firstSemicolon = Find((byte)';', 2);
+            int secondSemicolon = Find((byte)';', firstSemicolon + 1);
+            if (firstSemicolon > 2 && secondSemicolon > firstSemicolon &&
+                ParseNumber(2, firstSemicolon) == 8)
+            {
+                int rows = ParseNumber(firstSemicolon + 1, secondSemicolon);
+                int columns = ParseNumber(secondSemicolon + 1, sequenceLength - 1);
+                sequenceLength = 0;
+                if (rows > 0 && columns > 0)
+                {
+                    key.Kind = NanoKeyKind.Resize;
+                    key.Rows = rows;
+                    key.Columns = columns;
+                    return true;
+                }
+                return false;
+            }
+        }
+        sequenceLength = 0;
+        return false;
+    }
+
+    private int Find(byte value, int start)
+    {
+        for (int index = start; index < sequenceLength; index++)
+            if (sequence[index] == value)
+                return index;
+        return -1;
+    }
+
+    private int ParseNumber(int start, int end)
+    {
+        if (start >= end)
+            return -1;
+        int result = 0;
+        for (int index = start; index < end; index++)
+        {
+            byte value = sequence[index];
+            if (value < (byte)48)
+                return -1;
+            if (value > (byte)57)
+                return -1;
+            result = result * 10 + (int)(value - (byte)48);
+        }
+        return result;
+    }
+
+    private bool Complete(NanoKeyKind kind, out NanoKey key)
+    {
+        sequenceLength = 0;
+        key = new NanoKey();
+        key.Kind = kind;
+        return true;
+    }
+
+    private static bool SetKind(NanoKeyKind kind, out NanoKey key)
+    {
+        key = new NanoKey();
+        key.Kind = kind;
+        return true;
+    }
+
+    private static bool SetInsert(byte b0, byte b1, byte b2, byte b3, int count,
+        out NanoKey key)
+    {
+        key = new NanoKey();
+        key.Kind = NanoKeyKind.Insert;
+        key.B0 = b0; key.B1 = b1; key.B2 = b2; key.B3 = b3;
+        key.Length = count;
+        return true;
+    }
+}

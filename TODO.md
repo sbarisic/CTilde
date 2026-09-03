@@ -51,6 +51,7 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 - [ ] Add GPT and extended/logical MBR partitions only with explicit on-media compatibility tests. Draft 0.46 supports whole devices and four primary MBR entries.
 - [ ] Add bind mounts or a general overlay VFS only when applications need namespace composition. ManagedShell currently implements module lookup precedence directly.
 - [ ] Complete `sd.ctm` removable-card hardware acceptance: no-card boot, status/info, insertion, deliberate mount/unmount/remount, removal with open files, reinsertion, four-entry MBR read/write, multi-partition mounts, Unicode names, and destructive formatting on an explicitly disposable card.
+- [ ] Complete `nano.ctm` hardware acceptance in a foreground Windows Terminal session: LittleFS and SD files, Unicode input, bracketed paste, terminal resize, normal/discard/cancel exits, cancellation, media removal during save, backup recovery, and terminal-state restoration.
 
 ## Managed modules
 

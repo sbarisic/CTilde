@@ -1,0 +1,575 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+
+internal static class NanoSinkRuntime
+{
+    [Extern("ct_nano_sink_create")]
+    [NoThrow]
+    internal static nuint Create(uint capacity);
+
+    [Extern("ct_nano_sink_destroy")]
+    [NoThrow]
+    internal static void Destroy(nuint sink);
+
+    [Extern("ct_nano_sink_reset")]
+    [NoThrow]
+    internal static void Reset(nuint sink);
+
+    [Extern("ct_nano_sink_append")]
+    [NoThrow]
+    internal static int Append(nuint sink, byte value);
+
+    [Extern("ct_nano_sink_flush")]
+    [NoThrow]
+    internal static int Flush(nuint sink);
+
+    [Extern("ct_nano_sleep")]
+    [NoThrow]
+    internal static void Sleep(uint milliseconds);
+
+    [Extern("ct_nano_query_size")]
+    [NoThrow]
+    internal static int QuerySize();
+}
+
+internal sealed class NanoTerminal
+{
+    private const int MaximumRows = 50;
+    private const int MaximumColumns = 160;
+    private nuint sink;
+    private byte[] digits = new byte[20];
+    private bool failed;
+    private int rows;
+    private int columns;
+
+    public NanoTerminal(int requestedRows, int requestedColumns)
+    {
+        SetSize(requestedRows, requestedColumns);
+        sink = NanoSinkRuntime.Create(32768u);
+        if (sink == (nuint)0)
+            throw new OutOfMemoryException();
+    }
+
+    public int Rows { get { return rows; } }
+    public int Columns { get { return columns; } }
+    public int ContentRows { get { return rows - 3; } }
+
+    public void SetSize(int requestedRows, int requestedColumns)
+    {
+        rows = requestedRows;
+        columns = requestedColumns;
+        if (rows > MaximumRows) rows = MaximumRows;
+        if (columns > MaximumColumns) columns = MaximumColumns;
+    }
+
+    public bool IsUsable()
+    {
+        return rows >= 6 && columns >= 20;
+    }
+
+    public bool Enter()
+    {
+        Reset();
+        Escape(); Append("[?1049h");
+        Escape(); Append("[?2004h");
+        Escape(); Append("[?25l");
+        return Flush();
+    }
+
+    public void Leave()
+    {
+        if (sink == (nuint)0)
+            return;
+        Reset();
+        Escape(); Append("[?25h");
+        Escape(); Append("[?2004l");
+        Escape(); Append("[?1049l");
+        Flush();
+        nuint current = sink;
+        sink = (nuint)0;
+        NanoSinkRuntime.Destroy(current);
+    }
+
+    public bool Paint(NanoBuffer buffer, string path, bool dirty, string message,
+        bool confirming, int topLine, int leftColumn)
+    {
+        Reset();
+        Escape(); Append("[?25l");
+        Escape(); Append("[H");
+        Escape(); Append("[7m");
+        Append(" C~ nano  ");
+        Append(path);
+        if (dirty) Append("  [Modified]");
+        ClearLine();
+        Escape(); Append("[0m");
+        AppendNewLine();
+
+        int position = PositionForLine(buffer, topLine);
+        for (int row = 0; row < ContentRows; row++)
+        {
+            if (position < buffer.Length)
+            {
+                int end = buffer.LineEnd(position);
+                RenderLine(buffer, position, end, leftColumn);
+                if (end < buffer.Length)
+                    position = end + 1;
+                else
+                    position = buffer.Length;
+            }
+            else
+                Append((byte)'~');
+            ClearLine();
+            AppendNewLine();
+        }
+
+        Escape(); Append("[7m");
+        if (confirming)
+            Append(" Save modified buffer?  Y Yes  N No  C Cancel");
+        else if (message != null && message.Length > 0)
+            Append(message);
+        else
+        {
+            Append(" Ln "); AppendNumber(buffer.LineNumber(buffer.Cursor));
+            Append(", Col "); AppendNumber(buffer.DisplayColumn(buffer.Cursor) + 1);
+            Append("   "); AppendNumber(buffer.Length); Append("/32768 bytes");
+        }
+        ClearLine();
+        Escape(); Append("[0m");
+        AppendNewLine();
+        Append("^O Write Out    ^X Exit    ^L Refresh");
+        ClearLine();
+
+        int cursorLine = buffer.LineNumber(buffer.Cursor);
+        int cursorRow = cursorLine - topLine + 2;
+        int cursorColumn = buffer.DisplayColumn(buffer.Cursor) - leftColumn + 1;
+        if (cursorRow < 2) cursorRow = 2;
+        if (cursorRow > rows - 2) cursorRow = rows - 2;
+        if (cursorColumn < 1) cursorColumn = 1;
+        if (cursorColumn > columns) cursorColumn = columns;
+        Position(cursorRow, cursorColumn);
+        Escape(); Append("[?25h");
+        return Flush();
+    }
+
+    private int PositionForLine(NanoBuffer buffer, int line)
+    {
+        int position = 0;
+        int current = 1;
+        while (current < line && position < buffer.Length)
+        {
+            position = buffer.NextLineStart(position);
+            current++;
+        }
+        return position;
+    }
+
+    private void RenderLine(NanoBuffer buffer, int position, int end, int left)
+    {
+        int column = 0;
+        while (position < end && column < left + columns)
+        {
+            byte value = buffer.GetByte(position);
+            if (value == (byte)9)
+            {
+                int width = 4 - (column % 4);
+                for (int index = 0; index < width; index++)
+                {
+                    if (column >= left && column < left + columns)
+                        Append((byte)' ');
+                    column++;
+                }
+                position++;
+            }
+            else
+            {
+                int next = buffer.NextPosition(position);
+                if (column >= left)
+                {
+                    if (value < (byte)32 || value == (byte)127)
+                        Append((byte)'?');
+                    else
+                        for (int index = position; index < next; index++)
+                            Append(buffer.GetByte(index));
+                }
+                column++;
+                position = next;
+            }
+        }
+    }
+
+    private void Position(int row, int column)
+    {
+        Escape(); Append((byte)'['); AppendNumber(row); Append((byte)';');
+        AppendNumber(column); Append((byte)'H');
+    }
+
+    private void ClearLine()
+    {
+        Escape(); Append("[K");
+    }
+
+    private void AppendNewLine()
+    {
+        Append((byte)13); Append((byte)10);
+    }
+
+    private void Escape()
+    {
+        Append((byte)27);
+    }
+
+    private void Append(string value)
+    {
+        if (value == null)
+            return;
+        for (int index = 0; index < value.Length; index++)
+            Append((byte)value[index]);
+    }
+
+    private void AppendNumber(int value)
+    {
+        if (value == 0)
+        {
+            Append((byte)'0');
+            return;
+        }
+        int count = 0;
+        while (value > 0)
+        {
+            digits[count++] = (byte)('0' + value % 10);
+            value /= 10;
+        }
+        while (count > 0)
+            Append(digits[--count]);
+    }
+
+    private void Append(byte value)
+    {
+        if (!failed && NanoSinkRuntime.Append(sink, value) != 0)
+            failed = true;
+    }
+
+    private void Reset()
+    {
+        failed = false;
+        NanoSinkRuntime.Reset(sink);
+    }
+
+    private bool Flush()
+    {
+        return !failed && NanoSinkRuntime.Flush(sink) == 0;
+    }
+}
+
+internal static class NanoFiles
+{
+    public static byte[] Load(string path, out bool exists)
+    {
+        string backup = path + ".nano.bak";
+        string temporary = path + ".nano.tmp";
+        if (!File.Exists(path) && File.Exists(backup))
+            File.Move(backup, path);
+        if (File.Exists(temporary))
+            File.Delete(temporary);
+        exists = File.Exists(path);
+        if (!exists)
+            return new byte[0];
+        FileMetadata metadata = File.GetMetadata(path);
+        if (metadata.Length < 0 || metadata.Length > NanoBuffer.MaximumLength + 3)
+            throw new IOException("File exceeds the 32 KiB editor limit.");
+        return File.ReadAllBytes(path);
+    }
+
+    public static bool Save(string path, NanoBuffer buffer)
+    {
+        string backup = path + ".nano.bak";
+        string temporary = path + ".nano.tmp";
+        bool movedOriginal = false;
+        try
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+            FileStream stream = new FileStream(temporary, FileMode.Create,
+                FileAccess.Write);
+            defer stream.Dispose();
+            buffer.WriteTo(stream);
+            stream.Flush();
+            stream.Dispose();
+
+            if (File.Exists(backup)) File.Delete(backup);
+            if (File.Exists(path))
+            {
+                File.Move(path, backup);
+                movedOriginal = true;
+            }
+            File.Move(temporary, path);
+            if (File.Exists(backup)) File.Delete(backup);
+            return true;
+        }
+        catch (Exception)
+        {
+            if (!File.Exists(path) && movedOriginal && File.Exists(backup))
+            {
+                try { File.Move(backup, path); }
+                catch (Exception) { }
+            }
+            return false;
+        }
+    }
+}
+
+public static class Program
+{
+    private static bool QuerySize(NanoInput input, out int rows, out int columns)
+    {
+        rows = 24;
+        columns = 80;
+        if (NanoSinkRuntime.QuerySize() != 0)
+            return false;
+        int attempts = 100;
+        while (attempts > 0)
+        {
+            attempts--;
+            int value = Console.Read();
+            if (value < 0)
+            {
+                NanoSinkRuntime.Sleep(2u);
+                continue;
+            }
+            NanoKey key;
+            if (input.Feed(value, out key) && key.Kind == NanoKeyKind.Resize)
+            {
+                rows = key.Rows;
+                columns = key.Columns;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static void EnsureVisible(NanoBuffer buffer, NanoTerminal terminal,
+        ref int topLine, ref int leftColumn)
+    {
+        int line = buffer.LineNumber(buffer.Cursor);
+        if (line < topLine) topLine = line;
+        if (line >= topLine + terminal.ContentRows)
+            topLine = line - terminal.ContentRows + 1;
+        int column = buffer.DisplayColumn(buffer.Cursor);
+        if (column < leftColumn) leftColumn = column;
+        if (column >= leftColumn + terminal.Columns)
+            leftColumn = column - terminal.Columns + 1;
+    }
+
+    private static void MoveVertical(NanoBuffer buffer, int direction, ref int goal)
+    {
+        if (goal < 0)
+            goal = buffer.DisplayColumn(buffer.Cursor);
+        int currentStart = buffer.LineStart(buffer.Cursor);
+        int target;
+        if (direction < 0)
+            target = buffer.PreviousLineStart(currentStart);
+        else
+            target = buffer.NextLineStart(currentStart);
+        if (direction < 0 && currentStart == 0)
+            return;
+        if (direction > 0 && target == buffer.Length &&
+            buffer.LineEnd(currentStart) == buffer.Length)
+            return;
+        buffer.MoveTo(buffer.PositionAtColumn(target, goal));
+    }
+
+    private static bool ApplyKey(NanoBuffer buffer, NanoKey key,
+        NanoTerminal terminal, ref bool dirty, ref int goal, ref string message)
+    {
+        bool changed = false;
+        if (key.Kind == NanoKeyKind.Left)
+            buffer.MoveTo(buffer.PreviousPosition(buffer.Cursor));
+        else if (key.Kind == NanoKeyKind.Right)
+            buffer.MoveTo(buffer.NextPosition(buffer.Cursor));
+        else if (key.Kind == NanoKeyKind.Home)
+            buffer.MoveTo(buffer.LineStart(buffer.Cursor));
+        else if (key.Kind == NanoKeyKind.End)
+            buffer.MoveTo(buffer.LineEnd(buffer.Cursor));
+        else if (key.Kind == NanoKeyKind.Up)
+            MoveVertical(buffer, -1, ref goal);
+        else if (key.Kind == NanoKeyKind.Down)
+            MoveVertical(buffer, 1, ref goal);
+        else if (key.Kind == NanoKeyKind.PageUp || key.Kind == NanoKeyKind.PageDown)
+        {
+            int direction = 1;
+            if (key.Kind == NanoKeyKind.PageUp)
+                direction = -1;
+            for (int index = 0; index < terminal.ContentRows; index++)
+                MoveVertical(buffer, direction, ref goal);
+        }
+        else if (key.Kind == NanoKeyKind.Backspace)
+            changed = buffer.Backspace();
+        else if (key.Kind == NanoKeyKind.Delete)
+            changed = buffer.Delete();
+        else if (key.Kind == NanoKeyKind.Enter)
+            changed = buffer.InsertAscii((byte)10);
+        else if (key.Kind == NanoKeyKind.Tab)
+            changed = buffer.InsertAscii((byte)9);
+        else if (key.Kind == NanoKeyKind.Insert)
+            changed = buffer.Insert(key.B0, key.B1, key.B2, key.B3, key.Length);
+
+        if (key.Kind != NanoKeyKind.Up && key.Kind != NanoKeyKind.Down &&
+            key.Kind != NanoKeyKind.PageUp && key.Kind != NanoKeyKind.PageDown)
+            goal = -1;
+        if (changed)
+        {
+            dirty = true;
+            message = "";
+        }
+        else if ((key.Kind == NanoKeyKind.Insert || key.Kind == NanoKeyKind.Enter ||
+            key.Kind == NanoKeyKind.Tab) && buffer.Length >= NanoBuffer.MaximumLength)
+            message = "File limit reached";
+        return changed;
+    }
+
+    private static int Run(string path)
+    {
+        byte[] source;
+        bool existed;
+        try { source = NanoFiles.Load(path, out existed); }
+        catch (Exception)
+        {
+            Console.WriteLine("nano: could not open file");
+            return 1;
+        }
+
+        NanoBuffer buffer;
+        try { buffer = new NanoBuffer(source); }
+        catch (FormatException)
+        {
+            Console.WriteLine("nano: file is not canonical UTF-8 or is too large");
+            return 1;
+        }
+        source = null;
+        NanoInput input = new NanoInput();
+        int rows;
+        int columns;
+        QuerySize(input, out rows, out columns);
+        NanoTerminal terminal = new NanoTerminal(rows, columns);
+        defer terminal.Leave();
+        if (!terminal.IsUsable())
+        {
+            Console.WriteLine("nano: terminal must be at least 20x6");
+            return 1;
+        }
+        if (!terminal.Enter())
+            return 1;
+
+        bool dirty = buffer.WasNormalized;
+        bool confirming = false;
+        bool pasting = false;
+        int topLine = 1;
+        int leftColumn = 0;
+        int goalColumn = -1;
+        string message = "";
+        if (!existed)
+            message = "New file";
+        else if (dirty)
+            message = "Line endings normalized to LF";
+        bool repaint = true;
+        while (!Process.IsCancellationRequested)
+        {
+            if (repaint)
+            {
+                EnsureVisible(buffer, terminal, ref topLine, ref leftColumn);
+                if (!terminal.Paint(buffer, path, dirty, message, confirming,
+                    topLine, leftColumn))
+                    return 1;
+                repaint = false;
+            }
+            int value = Console.Read();
+            if (value < 0)
+            {
+                NanoSinkRuntime.Sleep(2u);
+                continue;
+            }
+            NanoKey key;
+            if (!input.Feed(value, out key))
+                continue;
+            if (key.Kind == NanoKeyKind.PasteStart)
+            {
+                pasting = true;
+                continue;
+            }
+            if (key.Kind == NanoKeyKind.PasteEnd)
+            {
+                pasting = false;
+                repaint = true;
+                continue;
+            }
+            if (confirming)
+            {
+                if (key.Kind == NanoKeyKind.Insert && key.Length == 1 &&
+                    (key.B0 == (byte)'y' || key.B0 == (byte)'Y'))
+                {
+                    if (NanoFiles.Save(path, buffer))
+                        return 0;
+                    confirming = false;
+                    message = "Save failed; original retained";
+                }
+                else if (key.Kind == NanoKeyKind.Insert && key.Length == 1 &&
+                    (key.B0 == (byte)'n' || key.B0 == (byte)'N'))
+                    return 0;
+                else if (key.Kind == NanoKeyKind.Insert && key.Length == 1 &&
+                    (key.B0 == (byte)'c' || key.B0 == (byte)'C'))
+                {
+                    confirming = false;
+                    message = "Exit cancelled";
+                }
+                repaint = true;
+                continue;
+            }
+            if (!pasting && key.Kind == NanoKeyKind.Exit)
+            {
+                if (!dirty) return 0;
+                confirming = true;
+                repaint = true;
+                continue;
+            }
+            if (!pasting && key.Kind == NanoKeyKind.Save)
+            {
+                if (NanoFiles.Save(path, buffer))
+                {
+                    dirty = false;
+                    message = "Wrote file";
+                }
+                else
+                    message = "Save failed; original retained";
+                repaint = true;
+                continue;
+            }
+            if (!pasting && key.Kind == NanoKeyKind.Refresh)
+            {
+                QuerySize(input, out rows, out columns);
+                terminal.SetSize(rows, columns);
+                if (!terminal.IsUsable()) return 1;
+                repaint = true;
+                continue;
+            }
+            if (pasting && key.Kind != NanoKeyKind.Insert && key.Kind != NanoKeyKind.Enter &&
+                key.Kind != NanoKeyKind.Tab)
+                continue;
+            ApplyKey(buffer, key, terminal, ref dirty, ref goalColumn, ref message);
+            repaint = true;
+        }
+        return 1;
+    }
+
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        if (args.Length != 1 || args[0] == "--help")
+        {
+            Console.WriteLine("usage: nano.ctm <path>");
+            if (args.Length == 1)
+                return 0;
+            return 2;
+        }
+        return Run(args[0]);
+    }
+}

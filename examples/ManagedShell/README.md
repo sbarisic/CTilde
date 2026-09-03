@@ -1,6 +1,6 @@
 # ManagedShell
 
-ManagedShell is the Draft 0.46 ESP-IDF example for Runtime ABI 19 and Managed Module ABI 1. `Examples.sln` exposes the firmware plus the managed Hello, memory, task-manager, and SD applications as separate projects under **Managed Modules**. The firmware mounts LittleFS at `/storage`, owns the T-CAN485 removable-SD monitor for `/sd`, initializes the shared process/runtime-service host, and accepts the extensionless built-ins `ls`, `modules`, `ps`, `kill`, `wait`, `send`, `free`, and `help`.
+ManagedShell is the Draft 0.46 ESP-IDF example for Runtime ABI 19 and Managed Module ABI 1. `Examples.sln` exposes the firmware plus the managed Hello, memory, task-manager, SD, and Nano applications as separate projects under **Managed Modules**. The firmware mounts LittleFS at `/storage`, owns the T-CAN485 removable-SD monitor for `/sd`, initializes the shared process/runtime-service host, and accepts the extensionless built-ins `ls`, `modules`, `ps`, `kill`, `wait`, `send`, `free`, and `help`.
 
 Applications must be invoked with their exact lowercase `.ctm` extension. A bare application name is not inferred and the old `exec` command no longer exists. Applications run in the foreground by default; a final unquoted `&` starts one in the background and prints its process identifier. Double quotes preserve whitespace and may form all or part of an argument. The parser supports `\"`, `\\`, `\t`, `\r`, and `\n`; malformed quotes or escapes execute nothing. A quoted `"&"` remains an ordinary argument. There is no expansion, globbing, piping, redirection, comment syntax, or single-quote syntax.
 
@@ -47,6 +47,14 @@ sd.ctm mbr write --yes <entry0> <entry1> <entry2> <entry3>
 ```
 
 An MBR entry is `empty` or `[boot:]<type>:<firstLba>:<sectorCount>`. Type can be a supported FAT name or `0xNN`. MBR writing preserves bootstrap and disk-signature bytes, replaces exactly four partition entries plus the signature, flushes, and verifies the result. It neither formats nor mounts a partition. Formatting does not remount automatically. These commands erase or replace storage structures; use them only on a disposable or backed-up card.
+
+## Text editor
+
+Run `nano.ctm <path>` in the foreground to edit one strict UTF-8 file. New files begin empty; existing CRLF or lone-CR line endings are normalized to LF and marked modified. The editor preserves an existing UTF-8 BOM, limits editable text to 32 KiB, and uses sibling `.nano.tmp` and `.nano.bak` files for recovery-safe replacement. If the target is missing on the next launch while its backup exists, Nano restores that backup before loading it.
+
+Arrow keys, Home, End, Page Up, and Page Down move the cursor. Enter, Tab, Backspace, Delete, typed Unicode scalars, and bracketed paste edit the buffer. `Ctrl+O` saves, `Ctrl+X` exits, and `Ctrl+L` repeats terminal-size negotiation and repaints. Exiting a modified buffer offers save, discard, and cancel choices. Terminal-size negotiation waits at most 200 ms, falls back to 80 by 24, caps the display at 160 by 50, and rejects terminals smaller than 20 by 6. Tabs use four-column stops; Unicode scalars occupy one display cell in this initial editor.
+
+Do not launch Nano with a trailing `&`. ManagedShell does not arbitrate terminal input or job control for background interactive applications. Nano restores the normal screen, cursor visibility, and bracketed-paste mode on normal exit, cancellation, and I/O failure.
 
 Runtime statistics, 64-bit counters, and task tracing add firmware RAM, flash, and scheduling overhead. Both reports are live snapshots: a task, process, allocation, or filesystem value can change immediately after collection.
 

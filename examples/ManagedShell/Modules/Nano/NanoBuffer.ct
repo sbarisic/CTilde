@@ -1,0 +1,317 @@
+using System;
+using System.IO;
+
+internal sealed class NanoBuffer
+{
+    public const int MaximumLength = 32768;
+    private const int SpareBytes = 64;
+
+    private byte[] data;
+    private int gapStart;
+    private int gapEnd;
+    private bool hasBom;
+    private bool normalized;
+
+    public NanoBuffer(byte[] source)
+    {
+        if (source == null)
+            throw new ArgumentNullException();
+        int start = 0;
+        if (source.Length >= 3 && source[0] == (byte)0xef &&
+            source[1] == (byte)0xbb && source[2] == (byte)0xbf)
+        {
+            hasBom = true;
+            start = 3;
+        }
+        if (source.Length - start > MaximumLength || !ValidateUtf8(source, start,
+            source.Length - start))
+            throw new FormatException();
+
+        // Compact into the loaded array itself. Keeping a second full-size
+        // allocation here would exceed the module's 64 KiB heap for a file
+        // near the 32 KiB editor limit.
+        data = source;
+        int scan = start;
+        int output = 0;
+        while (scan < source.Length)
+        {
+            byte value = source[scan++];
+            if (value == (byte)13)
+            {
+                normalized = true;
+                if (scan < source.Length && source[scan] == (byte)10)
+                    scan++;
+                data[output++] = (byte)10;
+            }
+            else
+                data[output++] = value;
+        }
+        gapStart = output;
+        gapEnd = data.Length;
+    }
+
+    public int Length { get { return data.Length - (gapEnd - gapStart); } }
+    public int Cursor { get { return gapStart; } }
+    public bool HasBom { get { return hasBom; } }
+    public bool WasNormalized { get { return normalized; } }
+
+    public byte GetByte(int index)
+    {
+        if (index < 0 || index >= Length)
+            throw new ArgumentOutOfRangeException();
+        if (index < gapStart)
+            return data[index];
+        return data[index + gapEnd - gapStart];
+    }
+
+    public void MoveTo(int position)
+    {
+        if (position < 0 || position > Length)
+            throw new ArgumentOutOfRangeException();
+        while (gapStart > position)
+        {
+            gapStart--;
+            gapEnd--;
+            data[gapEnd] = data[gapStart];
+        }
+        while (gapStart < position)
+        {
+            data[gapStart] = data[gapEnd];
+            gapStart++;
+            gapEnd++;
+        }
+    }
+
+    public bool Insert(byte b0, byte b1, byte b2, byte b3, int count)
+    {
+        if (count < 1 || count > 4 || Length > MaximumLength - count)
+            return false;
+        byte[] scalar = new byte[count];
+        scalar[0] = b0;
+        if (count > 1) scalar[1] = b1;
+        if (count > 2) scalar[2] = b2;
+        if (count > 3) scalar[3] = b3;
+        if (!ValidateUtf8(scalar, 0, count) || !EnsureGap(count))
+            return false;
+        for (int index = 0; index < count; index++)
+            data[gapStart++] = scalar[index];
+        return true;
+    }
+
+    public bool InsertAscii(byte value)
+    {
+        if (value >= (byte)128 || !EnsureGap(1))
+            return false;
+        data[gapStart++] = value;
+        return true;
+    }
+
+    public bool Backspace()
+    {
+        if (gapStart == 0)
+            return false;
+        gapStart--;
+        while (gapStart > 0 && IsContinuation(data[gapStart]))
+            gapStart--;
+        return true;
+    }
+
+    public bool Delete()
+    {
+        if (gapEnd == data.Length)
+            return false;
+        int count = ScalarLength(data[gapEnd]);
+        gapEnd += count;
+        return true;
+    }
+
+    public int PreviousPosition(int position)
+    {
+        if (position <= 0)
+            return 0;
+        position--;
+        while (position > 0 && IsContinuation(GetByte(position)))
+            position--;
+        return position;
+    }
+
+    public int NextPosition(int position)
+    {
+        if (position >= Length)
+            return Length;
+        int next = position + ScalarLength(GetByte(position));
+        if (next > Length)
+            return Length;
+        return next;
+    }
+
+    public int LineStart(int position)
+    {
+        while (position > 0 && GetByte(position - 1) != (byte)10)
+            position--;
+        return position;
+    }
+
+    public int LineEnd(int position)
+    {
+        while (position < Length && GetByte(position) != (byte)10)
+            position++;
+        return position;
+    }
+
+    public int PreviousLineStart(int position)
+    {
+        int start = LineStart(position);
+        if (start == 0)
+            return 0;
+        return LineStart(start - 1);
+    }
+
+    public int NextLineStart(int position)
+    {
+        int end = LineEnd(position);
+        if (end == Length)
+            return Length;
+        return end + 1;
+    }
+
+    public int DisplayColumn(int position)
+    {
+        int current = LineStart(position);
+        int column = 0;
+        while (current < position)
+        {
+            byte value = GetByte(current);
+            if (value == (byte)9)
+                column += 4 - (column % 4);
+            else
+                column++;
+            current = NextPosition(current);
+        }
+        return column;
+    }
+
+    public int PositionAtColumn(int lineStart, int column)
+    {
+        int position = lineStart;
+        int currentColumn = 0;
+        int end = LineEnd(lineStart);
+        while (position < end)
+        {
+            int width = 1;
+            if (GetByte(position) == (byte)9)
+                width = 4 - (currentColumn % 4);
+            if (currentColumn + width > column)
+                break;
+            currentColumn += width;
+            position = NextPosition(position);
+        }
+        return position;
+    }
+
+    public int LineNumber(int position)
+    {
+        int line = 1;
+        for (int index = 0; index < position; index++)
+            if (GetByte(index) == (byte)10)
+                line++;
+        return line;
+    }
+
+    public void WriteTo(FileStream stream)
+    {
+        if (hasBom)
+        {
+            byte[] bom = new byte[3];
+            bom[0] = (byte)0xef; bom[1] = (byte)0xbb; bom[2] = (byte)0xbf;
+            stream.Write(bom, 0, 3);
+        }
+        if (gapStart > 0)
+            stream.Write(data, 0, gapStart);
+        int suffix = data.Length - gapEnd;
+        if (suffix > 0)
+            stream.Write(data, gapEnd, suffix);
+    }
+
+    private bool EnsureGap(int count)
+    {
+        if (Length > MaximumLength - count)
+            return false;
+        if (gapEnd - gapStart >= count)
+            return true;
+        int capacity = data.Length * 2;
+        int required = Length + count + SpareBytes;
+        if (capacity < required)
+            capacity = required;
+        if (capacity > MaximumLength + SpareBytes)
+            capacity = MaximumLength + SpareBytes;
+        byte[] replacement = new byte[capacity];
+        for (int index = 0; index < gapStart; index++)
+            replacement[index] = data[index];
+        int suffix = data.Length - gapEnd;
+        int replacementGapEnd = capacity - suffix;
+        for (int index = 0; index < suffix; index++)
+            replacement[replacementGapEnd + index] = data[gapEnd + index];
+        data = replacement;
+        gapEnd = replacementGapEnd;
+        return true;
+    }
+
+    private static bool IsContinuation(byte value)
+    {
+        return (value & (byte)0xc0) == (byte)0x80;
+    }
+
+    private static int ScalarLength(byte value)
+    {
+        if (value < (byte)0x80) return 1;
+        if (value < (byte)0xe0) return 2;
+        if (value < (byte)0xf0) return 3;
+        return 4;
+    }
+
+    private static bool ValidateUtf8(byte[] value, int offset, int count)
+    {
+        int end = offset + count;
+        int index = offset;
+        while (index < end)
+        {
+            byte first = value[index++];
+            if (first < (byte)0x80)
+                continue;
+            int continuation = 0;
+            uint scalar = 0u;
+            if (first >= (byte)0xc2 && first <= (byte)0xdf)
+            {
+                continuation = 1;
+                scalar = (uint)(first & (byte)0x1f);
+            }
+            else if (first >= (byte)0xe0 && first <= (byte)0xef)
+            {
+                continuation = 2;
+                scalar = (uint)(first & (byte)0x0f);
+            }
+            else if (first >= (byte)0xf0 && first <= (byte)0xf4)
+            {
+                continuation = 3;
+                scalar = (uint)(first & (byte)0x07);
+            }
+            else
+                return false;
+            if (index + continuation > end)
+                return false;
+            for (int part = 0; part < continuation; part++)
+            {
+                byte next = value[index++];
+                if (!IsContinuation(next))
+                    return false;
+                scalar = (scalar << 6) | (uint)(next & (byte)0x3f);
+            }
+            if ((continuation == 2 && scalar < 0x800u) ||
+                (continuation == 3 && scalar < 0x10000u) ||
+                scalar > 0x10ffffu || (scalar >= 0xd800u && scalar <= 0xdfffu))
+                return false;
+        }
+        return true;
+    }
+}

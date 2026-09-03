@@ -1,0 +1,107 @@
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+typedef struct ct_runtime_api_v19 {
+    uint32_t Size;
+    uint32_t AbiVersion;
+    void *(*Allocate)(size_t, const void *);
+    void (*Free)(void *);
+    void (*FinalRelease)(void *);
+    void (*Raise)(void *);
+    void (*RuntimeFault)(const char *, const char *, int32_t);
+    const void *(*RegisterType)(const void *);
+    void (*UnregisterTypes)(const void *);
+    void *(*CurrentProcess)(void);
+    void *(*CurrentModuleState)(const void *);
+    void *(*CurrentThreadState)(void);
+    void (*SetThreadState)(void *);
+    bool (*CancellationRequested)(void);
+    void (*EnterCall)(const void *);
+    void (*LeaveCall)(const void *);
+    int32_t (*Service)(uint32_t, void *, size_t);
+} ct_runtime_api_v19;
+
+typedef struct ct_console_transfer_v19 {
+    uint8_t *Data;
+    size_t Length;
+    size_t Count;
+    bool Eof;
+} ct_console_transfer_v19;
+
+typedef struct nano_sink {
+    uint8_t *Data;
+    size_t Length;
+    size_t Capacity;
+} nano_sink;
+
+extern const ct_runtime_api_v19 *ct_runtime_api;
+
+uintptr_t ct_nano_sink_create(uint32_t capacity)
+{
+    if (capacity == 0 || capacity > 32768 || ct_runtime_api == NULL) return 0;
+    nano_sink *sink = calloc(1, sizeof(*sink));
+    if (sink == NULL) return 0;
+    sink->Data = malloc(capacity);
+    if (sink->Data == NULL) { free(sink); return 0; }
+    sink->Capacity = capacity;
+    return (uintptr_t)sink;
+}
+
+void ct_nano_sink_destroy(uintptr_t handle)
+{
+    nano_sink *sink = (nano_sink *)handle;
+    if (sink == NULL) return;
+    free(sink->Data);
+    free(sink);
+}
+
+void ct_nano_sink_reset(uintptr_t handle)
+{
+    nano_sink *sink = (nano_sink *)handle;
+    if (sink != NULL) sink->Length = 0;
+}
+
+int32_t ct_nano_sink_append(uintptr_t handle, uint8_t value)
+{
+    nano_sink *sink = (nano_sink *)handle;
+    if (sink == NULL || sink->Length >= sink->Capacity) return -1;
+    sink->Data[sink->Length++] = value;
+    return 0;
+}
+
+int32_t ct_nano_sink_flush(uintptr_t handle)
+{
+    nano_sink *sink = (nano_sink *)handle;
+    if (sink == NULL || ct_runtime_api == NULL) return -1;
+    ct_console_transfer_v19 transfer = {
+        .Data = sink->Data, .Length = sink->Length, .Count = 0, .Eof = false,
+    };
+    const int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer,
+        sizeof(transfer));
+    if (result != 0 || transfer.Count != transfer.Length)
+        return result == 0 ? -1 : result;
+    return ct_runtime_api->Service(UINT32_C(18), NULL, 0u);
+}
+
+int32_t ct_nano_query_size(void)
+{
+    static const uint8_t request[] = { 27u, '[', '1', '8', 't' };
+    if (ct_runtime_api == NULL) return -1;
+    ct_console_transfer_v19 transfer = {
+        .Data = (uint8_t *)(uintptr_t)(const void *)request,
+        .Length = sizeof(request), .Count = 0, .Eof = false,
+    };
+    const int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer,
+        sizeof(transfer));
+    if (result != 0 || transfer.Count != transfer.Length)
+        return result == 0 ? -1 : result;
+    return ct_runtime_api->Service(UINT32_C(18), NULL, 0u);
+}
+
+void ct_nano_sleep(uint32_t milliseconds)
+{
+    (void)usleep((useconds_t)milliseconds * 1000u);
+}

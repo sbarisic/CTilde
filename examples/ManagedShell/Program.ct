@@ -247,7 +247,7 @@ public static class Program
     {
         Console.WriteLine("commands: ls, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
         Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
-        Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help");
+        Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help, nano.ctm <path>");
     }
 
     private static Process FindProcess(uint id)

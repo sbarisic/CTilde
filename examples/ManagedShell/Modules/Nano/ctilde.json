@@ -1,0 +1,31 @@
+{
+  "target": "esp-idf",
+  "architecture": "xtensa",
+  "sources": [
+    "NanoBuffer.ct",
+    "NanoInput.ct",
+    "Program.ct"
+  ],
+  "espIdf": {
+    "artifact": "managed-module"
+  },
+  "managedModule": {
+    "kind": "application",
+    "name": "nano",
+    "version": "1.0.0",
+    "references": [],
+    "nativeSources": [
+      "main/nano_sink.c"
+    ],
+    "mainTaskStackBytes": 8192,
+    "heapLimitBytes": 65536
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

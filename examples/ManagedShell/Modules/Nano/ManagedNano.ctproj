@@ -1,0 +1,29 @@
+<Project ToolsVersion="Current" DefaultTargets="Build">
+  <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
+  <PropertyGroup>
+    <ProjectGuid>{D6F28B9B-85C3-4B50-915B-7347621F38C4}</ProjectGuid>
+    <CTildeManifest>ctilde.json</CTildeManifest>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>
+    <OutputPath>$(MSBuildProjectDirectory)\obj\$(Configuration)\</OutputPath>
+    <DisableFastUpToDateCheck>true</DisableFastUpToDateCheck>
+    <DefineCommonItemSchemas>true</DefineCommonItemSchemas>
+    <CTildeProjectItemExcludes>$(DefaultItemExcludes);$(DefaultExcludesInProjectFolder);.git\**;**\.git\**;.vs\**;**\.vs\**;.ctilde\**;**\.ctilde\**;.ctilde-cache\**;**\.ctilde-cache\**;bin\**;**\bin\**;obj\**;**\obj\**;build\**;**\build\**;node_modules\**;**\node_modules\**;main\generated\**;**\main\generated\**;managed_components\**;**\managed_components\**;**\*.ctproj</CTildeProjectItemExcludes>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|AnyCPU"><Configuration>Debug</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|AnyCPU"><Configuration>Release</Configuration><Platform>AnyCPU</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectCapability Include="CTilde" />
+    <ProjectCapability Include="UseFileGlobs" />
+    <ProjectCapability Include="OpenProjectFile" />
+    <ProjectCapability Include="HandlesOwnReload" />
+    <ProjectCapability Include="ProjectConfigurationsDeclaredAsItems" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="**\*" Exclude="$(CTildeProjectItemExcludes)" />
+  </ItemGroup>
+  <Import Project="$(MSBuildToolsPath)\Microsoft.Common.targets" />
+  <Import Project="$(CTildeProjectSystemPath)\CTilde.targets" Condition="Exists('$(CTildeProjectSystemPath)\CTilde.targets')" />
+</Project>

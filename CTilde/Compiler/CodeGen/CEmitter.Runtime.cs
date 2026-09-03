@@ -67,7 +67,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("#if defined(_MSC_VER)\n#include <intrin.h>\n#include <windows.h>\n#endif");
         if (!IsFreestanding && !IsEspIdf)
             writer.WriteLine("#if defined(_WIN32)\n#include <windows.h>\n#endif");
-        if (!IsFreestanding && (_usesManagedThreading || IsEspIdf && _usesHostedIo))
+        if (!IsFreestanding && (_usesManagedThreading || IsEspIdf && _usesHostedIo && !IsManagedModule))
         {
             writer.WriteLine("#if defined(_MSC_VER)");
             writer.WriteLine("#include <process.h>");
@@ -1611,6 +1611,7 @@ internal sealed partial class CEmitter
     {
         if (IsManagedModule)
         {
+            writer.WriteLine("CT_NORETURN static void ct_runtime_service_fail(const char* code, uint8_t status, int32_t native_code) { (void)status; (void)native_code; ct_fail(code, \"<runtime-service>\", 0); }");
             writer.WriteLine("static void ct_runtime_console_write(const uint8_t* data, size_t length) { ct_runtime_console_transfer_v19 transfer = { (uint8_t*)(uintptr_t)(const void*)data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(16), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count != length) ct_fail(\"CTC0001\", \"<runtime-service>\", 0); }");
             writer.WriteLine("static size_t ct_runtime_console_read(uint8_t* data, size_t length, bool* eof) { ct_runtime_console_transfer_v19 transfer = { data, length, 0u, false }; int32_t result = ct_runtime_api->Service(UINT32_C(17), &transfer, sizeof(transfer)); if (result != 0 || transfer.Count > length) ct_fail(\"CTC0004\", \"<runtime-service>\", 0); *eof = transfer.Eof; return transfer.Count; }");
             writer.WriteLine("static void ct_runtime_console_flush(void) { if (ct_runtime_api->Service(UINT32_C(18), NULL, 0u) != 0) ct_fail(\"CTC0007\", \"<runtime-service>\", 0); }");

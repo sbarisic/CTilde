@@ -13,7 +13,8 @@ $modules = @(
     [pscustomobject]@{ Name = "Managed Hello"; Directory = "Hello"; Artifact = "examples.hello.ctm" },
     [pscustomobject]@{ Name = "Memory diagnostics"; Directory = "Memory"; Artifact = "memory.ctm" },
     [pscustomobject]@{ Name = "Task manager"; Directory = "TaskManager"; Artifact = "taskmgr.ctm" },
-    [pscustomobject]@{ Name = "SD manager"; Directory = "Sd"; Artifact = "sd.ctm" }
+    [pscustomobject]@{ Name = "SD manager"; Directory = "Sd"; Artifact = "sd.ctm" },
+    [pscustomobject]@{ Name = "Nano editor"; Directory = "Nano"; Artifact = "nano.ctm" }
 )
 
 $shellSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Program.ct") -Raw
@@ -57,8 +58,8 @@ foreach ($requiredHostMarker in @('storage_control', 'submit_operation',
         throw "Managed storage host is missing '$requiredHostMarker'."
     }
 }
-$storageRuntimeSource = Get-Content -LiteralPath (Join-Path $root
-    "..\runtime\esp-idf\ctilde_storage\ctilde_storage.c") -Raw
+$storageRuntimePath = Join-Path $root "..\runtime\esp-idf\ctilde_storage\ctilde_storage.c"
+$storageRuntimeSource = Get-Content -LiteralPath $storageRuntimePath -Raw
 if ($storageRuntimeSource -notmatch '(?s)if \(fat_result != FR_OK\).*?f_mount\(NULL, mount->DriveName, 0\).*?esp_vfs_fat_unregister_path\(path\)' -or
     $storageRuntimeSource -notmatch '(?s)fat_result = f_mount\(&probe, name, 1\).*?FRESULT unmount_result = f_mount\(NULL, name, 0\)') {
     throw "Failed FAT mounts must unregister their FATFS objects before releasing VFS or stack storage."
@@ -69,6 +70,16 @@ foreach ($requiredSdCommand in @('sd.ctm status', 'sd.ctm info', 'sd.ctm mount',
         'sd.ctm mbr show', 'sd.ctm mbr write --yes')) {
     if ($sdSource -notmatch [regex]::Escape($requiredSdCommand)) {
         throw "SD application is missing '$requiredSdCommand'."
+    }
+}
+$nanoSources = Get-Content -LiteralPath @(
+    (Join-Path $PSScriptRoot "Modules\Nano\NanoBuffer.ct"),
+    (Join-Path $PSScriptRoot "Modules\Nano\NanoInput.ct"),
+    (Join-Path $PSScriptRoot "Modules\Nano\Program.ct")
+) -Raw
+foreach ($forbiddenNanoHelper in @('String.Format', '.Split(', '.ToString(')) {
+    if ($nanoSources -match [regex]::Escape($forbiddenNanoHelper)) {
+        throw "Nano must not pull allocation-heavy helper '$forbiddenNanoHelper' into nano.ctm."
     }
 }
 
@@ -82,8 +93,8 @@ foreach ($module in $modules) {
     $moduleStorage = Join-Path $PSScriptRoot ("storage\modules\" + $module.Artifact)
     dotnet run --project $cli -- --project $moduleProject --build --idf-path $IdfPath
     if ($LASTEXITCODE -ne 0) { throw "$($module.Name) module build failed." }
-    if ($module.Artifact -eq "sd.ctm" -and (Get-Item -LiteralPath $moduleOutput).Length -gt 98304) {
-        throw "SD manager exceeds the 96 KiB ESP32 module-load budget. Avoid pulling allocation-heavy formatting or splitting helpers into sd.ctm."
+    if ($module.Artifact -in @("sd.ctm", "nano.ctm") -and (Get-Item -LiteralPath $moduleOutput).Length -gt 98304) {
+        throw "$($module.Name) exceeds the 96 KiB ESP32 module-load budget. Avoid pulling allocation-heavy formatting or splitting helpers into $($module.Artifact)."
     }
     New-Item -ItemType Directory -Force (Split-Path -Parent $moduleStorage) | Out-Null
     Copy-Item -LiteralPath $moduleOutput -Destination $moduleStorage -Force

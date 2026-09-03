@@ -105,6 +105,18 @@ internal sealed partial class CEmitter
             // support is emitted, even if the metadata call itself is unreachable.
             if (_usesHostedIo)
                 AddType(Model.Types.GetValueOrDefault("System.IO.FileMetadata"));
+            if (_usesHostedIo && UsesEspRuntimeIo)
+            {
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeResult"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeTransferResult"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeFileMode"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeFileAccess"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeSeekOrigin"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeFileTimestamp"));
+                AddType(Model.Types.GetValueOrDefault("System.Runtime.RuntimeFileMetadata"));
+                _usesNativeUtf8 = true;
+                _usesNativeIntegers = true;
+            }
         }
 
         // Typed-IR lowering may register an array shape while lowering an

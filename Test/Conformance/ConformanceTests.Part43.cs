@@ -50,6 +50,68 @@ internal static partial class ConformanceTests
                 $"ManagedShell command-line parsing failed ({result.ExitCode}).\n{result.StandardOutput}\n{result.StandardError}");
         });
 
+        suite.Run("managed nano buffer and ANSI input parsing", () =>
+        {
+            var bufferSource = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "Nano", "NanoBuffer.ct"));
+            var inputSource = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "Nano", "NanoInput.ct"));
+            const string harness = """
+                using System;
+
+                public static class Program
+                {
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        byte[] original = new byte[8];
+                        original[0] = (byte)0xef; original[1] = (byte)0xbb; original[2] = (byte)0xbf;
+                        original[3] = (byte)97; original[4] = (byte)13; original[5] = (byte)10;
+                        original[6] = (byte)0xc3; original[7] = (byte)0xa9;
+                        NanoBuffer buffer = new NanoBuffer(original);
+                        Console.WriteLine(buffer.HasBom && buffer.WasNormalized && buffer.Length == 4
+                            && buffer.GetByte(0) == (byte)97 && buffer.GetByte(1) == (byte)10);
+                        buffer.MoveTo(4);
+                        Console.WriteLine(buffer.Backspace() && buffer.Length == 2 && buffer.Cursor == 2);
+                        Console.WriteLine(buffer.Insert((byte)0xc3, (byte)0xa9, (byte)0, (byte)0, 2)
+                            && buffer.Length == 4);
+                        buffer.MoveTo(0);
+                        Console.WriteLine(buffer.NextPosition(2) == 4 && buffer.PreviousPosition(4) == 2);
+
+                        bool rejected = false;
+                        try
+                        {
+                            byte[] invalid = new byte[2]; invalid[0] = (byte)0xc0; invalid[1] = (byte)0x80;
+                            NanoBuffer unused = new NanoBuffer(invalid);
+                        }
+                        catch (FormatException) { rejected = true; }
+                        Console.WriteLine(rejected);
+
+                        NanoInput input = new NanoInput();
+                        NanoKey key;
+                        input.Feed(27, out key); input.Feed(91, out key);
+                        Console.WriteLine(input.Feed(68, out key) && key.Kind == NanoKeyKind.Left);
+                        input.Feed(27, out key); input.Feed(91, out key);
+                        input.Feed(50, out key); input.Feed(48, out key); input.Feed(48, out key);
+                        Console.WriteLine(input.Feed(126, out key) && key.Kind == NanoKeyKind.PasteStart);
+                        input.Feed(27, out key); input.Feed(91, out key); input.Feed(56, out key);
+                        input.Feed(59, out key); input.Feed(50, out key); input.Feed(52, out key);
+                        input.Feed(59, out key); input.Feed(49, out key); input.Feed(48, out key);
+                        input.Feed(48, out key);
+                        Console.WriteLine(input.Feed(116, out key) && key.Kind == NanoKeyKind.Resize
+                            && key.Rows == 24 && key.Columns == 100);
+                    }
+                }
+                """;
+            var result = CompileAndRun([
+                SyntaxTree.ParseText(bufferSource, "NanoBuffer.ct"),
+                SyntaxTree.ParseText(inputSource, "NanoInput.ct"),
+                SyntaxTree.ParseText(harness, "Program.ct")]);
+            Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) ==
+                "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\n",
+                $"Nano buffer/input behavior failed ({result.ExitCode}).\n{result.StandardOutput}\n{result.StandardError}");
+        });
+
         suite.Run("managed module utility definitions retain valid GNU attributes", () =>
         {
             const string source = """
@@ -105,6 +167,9 @@ internal static partial class ConformanceTests
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var combined = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
+            var types = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_types.h").Content;
+            var runtimeHeader = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime_internal.h").Content;
+            var runtime = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime.c").Content;
             Assert(combined.Contains("ct_runtime_api_v19", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(32)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(48)", StringComparison.Ordinal) &&
@@ -113,6 +178,13 @@ internal static partial class ConformanceTests
                 "Managed System.IO did not lower through Runtime ABI 19 filesystem services.");
             Assert(!combined.Contains("fopen(path", StringComparison.Ordinal),
                 "Managed System.IO retained a private libc filesystem implementation.");
+            Assert(types.Contains("typedef struct ct_native_utf8_string", StringComparison.Ordinal) &&
+                runtime.Contains("ct_runtime_service_fail", StringComparison.Ordinal) &&
+                runtime.Contains("path.Data", StringComparison.Ordinal) &&
+                !runtime.Contains("path.Pointer", StringComparison.Ordinal) &&
+                !types.Contains("freertos/FreeRTOS.h", StringComparison.Ordinal) &&
+                runtimeHeader.Contains("esp_err_to_name(int code)", StringComparison.Ordinal),
+                "Managed System.IO omitted or malformed its native UTF-8 and service-failure bridge.");
         });
 
         suite.Run("draft 0.46 ESP storage ownership surface", () =>

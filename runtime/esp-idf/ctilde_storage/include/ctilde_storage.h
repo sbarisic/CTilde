@@ -90,6 +90,10 @@ ct_storage_monitor_state_t ct_storage_monitor_state(uintptr_t monitor);
 uint64_t ct_storage_monitor_generation(uintptr_t monitor);
 int32_t ct_storage_monitor_last_error(uintptr_t monitor);
 int32_t ct_storage_monitor_remount(uintptr_t monitor);
+int32_t ct_storage_monitor_volume_info(uintptr_t monitor, int32_t mapping_index,
+    ct_storage_fat_volume_info_t *info);
+int32_t ct_storage_monitor_card_info(uintptr_t monitor,
+    ct_storage_sd_card_info *info);
 int32_t ct_storage_monitor_release(uintptr_t monitor);
 
 /* The managed runtime supplies this hook. It is intentionally weak so the

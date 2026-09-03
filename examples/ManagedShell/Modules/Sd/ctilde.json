@@ -2,9 +2,22 @@
   "target": "esp-idf",
   "architecture": "xtensa",
   "sources": [
-    "Program.ct",
-    "ShellCommandLine.ct"
+    "Program.ct"
   ],
+  "espIdf": {
+    "artifact": "managed-module"
+  },
+  "managedModule": {
+    "kind": "application",
+    "name": "sd",
+    "version": "1.0.0",
+    "references": [],
+    "nativeSources": [
+      "main/sd_native.c"
+    ],
+    "mainTaskStackBytes": 8192,
+    "heapLimitBytes": 32768
+  },
   "build": {
     "cLayout": "modules",
     "generatedDirectory": "main/generated",

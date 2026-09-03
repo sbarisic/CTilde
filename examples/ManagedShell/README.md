@@ -1,8 +1,12 @@
 # ManagedShell
 
-ManagedShell is the Draft 0.46 ESP-IDF example for Runtime ABI 19 and Managed Module ABI 1. `Examples.sln` exposes the firmware, managed Hello application, memory tool, and task manager as separate projects under **Managed Modules**. The firmware mounts LittleFS at `/storage`, starts the T-CAN485 removable-SD monitor for `/sd`, initializes the shared process/runtime-service host, and accepts `ls`, `storage`, `remount`, `modules`, `ps`, `exec`, `kill`, `wait`, `send`, `free`, and `help` commands. `memory.ctm` and `taskmgr.ctm` are separate managed CLI applications loaded through `exec`; they are not shell built-ins. A `send` payload preserves every space-separated word after the process identifier.
+ManagedShell is the Draft 0.46 ESP-IDF example for Runtime ABI 19 and Managed Module ABI 1. `Examples.sln` exposes the firmware plus the managed Hello, memory, task-manager, and SD applications as separate projects under **Managed Modules**. The firmware mounts LittleFS at `/storage`, owns the T-CAN485 removable-SD monitor for `/sd`, initializes the shared process/runtime-service host, and accepts the extensionless built-ins `ls`, `modules`, `ps`, `kill`, `wait`, `send`, `free`, and `help`.
 
-Bare module names search `/sd/modules` first and `/storage/modules` second. Only an absent SD entry selects the LittleFS fallback; a present but corrupt or ABI-incompatible SD module reports its real error. Explicit paths must be direct children of one of those two roots. Nested paths, traversal, backslashes, and absolute paths outside the roots are rejected. The monitor uses the supported T-CAN485 SDSPI wiring on SPI2: MISO 2, MOSI 15, SCLK 14, CS 13, at 20 MHz. No card at boot is nonfatal and remains eligible for automatic retry. A configuration, partition, or mount error latches the `Faulted` state instead of retrying continuously; `remount` explicitly clears that hold and requests a clean reprobe. `storage` reports monitor state, mount generation, and the latest error. Unsafe physical removal can lose unflushed FAT data.
+Applications must be invoked with their exact lowercase `.ctm` extension. A bare application name is not inferred and the old `exec` command no longer exists. Applications run in the foreground by default; a final unquoted `&` starts one in the background and prints its process identifier. Double quotes preserve whitespace and may form all or part of an argument. The parser supports `\"`, `\\`, `\t`, `\r`, and `\n`; malformed quotes or escapes execute nothing. A quoted `"&"` remains an ordinary argument. There is no expansion, globbing, piping, redirection, comment syntax, or single-quote syntax.
+
+Application names search `/sd/modules` first and `/storage/modules` second. Only an absent SD entry selects the LittleFS fallback; a present but corrupt or ABI-incompatible SD module reports its real error. Explicit paths must be direct children of one of those two roots. Nested paths, traversal, backslashes, and absolute paths outside the roots are rejected. A `send` payload preserves every parsed argument after the process identifier, joined with spaces.
+
+The resident platform owns the card monitor and a versioned, serialized storage-control bridge. Storage command parsing, validation, policy, and reporting live in the LittleFS-shipped `sd.ctm`, not in the shell. The monitor uses the supported T-CAN485 SDSPI wiring on SPI2: MISO 2, MOSI 15, SCLK 14, CS 13, at 20 MHz. No card at boot is nonfatal and remains eligible for automatic retry. Unsafe physical removal can lose unflushed FAT data.
 
 The serial shell passes `ct> ` to `Console.ReadLine(string)` so ESP-IDF `linenoise` owns the prompt and keeps cursor redraws aligned. It provides visible input, Backspace/Delete, cursor editing, and a volatile 32-command Up/Down history. The history is intentionally RAM-only and resets with the firmware.
 
@@ -14,7 +18,7 @@ The onboard GPIO4 WS2812 is a low-brightness status display. Orange means that f
 
 ## Diagnostics
 
-`free` keeps its compact existing shell output. Run `exec memory.ctm` for the comprehensive one-shot report. The application accepts no arguments. Its sections have these meanings:
+`free` keeps its compact existing shell output. Run `memory.ctm` for the comprehensive one-shot report. The application accepts no arguments. Its sections have these meanings:
 
 - `RAM summary` reports exact total, used, currently available, attributed allocation payload, allocator overhead, lifetime minimum free, peak used, largest currently possible one-block allocation, fragmentation, and block counts.
 - `Capability pools` reports default, 8-bit, 32-bit, internal, DMA, executable, and SPIRAM heaps. These rows overlap and must not be summed.
@@ -27,9 +31,22 @@ Facilities which are unavailable are printed as `not configured` or an explicit 
 
 The full reporters, their formatting strings, and their private C entry points live in `memory.ctm` and `taskmgr.ctm`, not in the always-resident shell firmware. Each module declares its implementation through `managedModule.nativeSources`; the generated component source list links that C directly into the corresponding ELF. Consequently, the implementation occupies LittleFS and temporary loader memory only while its module is present or loaded. Firmware retains a small versioned host accessor table and the enabled FreeRTOS trace/runtime-statistics support because a loaded module cannot directly access private runtime state or unregistered ESP-IDF functions. Diagnostics protocol version 2 exposes fixed-width, example-owned heap and task records plus wrapper operations instead of leaking ESP-IDF or FreeRTOS structures into either module's native source. The accessor stores no module callback and is safe across unload. It is an example-local contract, not Runtime ABI 19 or Managed Module ABI 1.
 
-Run `exec taskmgr.ctm` to sample for 250 ms between two raw FreeRTOS task snapshots and list only starting, running, or cancelling managed processes. CPU uses a per-core scale: one saturated core is 100%, so this dual-core target can report up to 200% system load. Each row contains PID, state, root module, thread count, attributed heap use and limit, interval CPU, and lifetime minimum task-stack headroom. Tasks are matched by both task number and native handle. If every runtime-published process task cannot be mapped in both samples, that process prints `cpu=n/a stack-min=n/a` instead of a misleading partial measurement. The report includes the short-lived `taskmgr` process itself because it is a normal managed application.
+Run `taskmgr.ctm` to sample for 250 ms between two raw FreeRTOS task snapshots and list only starting, running, or cancelling managed processes. CPU uses a per-core scale: one saturated core is 100%, so this dual-core target can report up to 200% system load. Each row contains PID, state, root module, thread count, attributed heap use and limit, interval CPU, and lifetime minimum task-stack headroom. Tasks are matched by both task number and native handle. If every runtime-published process task cannot be mapped in both samples, that process prints `cpu=n/a stack-min=n/a` instead of a misleading partial measurement. The report includes the short-lived `taskmgr` process itself because it is a normal managed application.
 
-`exec taskmgr.ctm kill <pid>` resolves the published runtime process identifier and uses the same policy as the shell's `kill <pid>`: cooperative cancellation followed by forced termination after one second. Other application arguments print `usage: taskmgr [kill <pid>]`; arguments to `memory.ctm` print `usage: memory`.
+`taskmgr.ctm kill <pid>` resolves the published runtime process identifier and uses the same policy as the shell's `kill <pid>`: cooperative cancellation followed by forced termination after one second. Other application arguments print `usage: taskmgr [kill <pid>]`; arguments to `memory.ctm` print `usage: memory`.
+
+## SD management
+
+`sd.ctm` is the sole SD administration command. Read-only inspection is available with `sd.ctm status`, `sd.ctm info`, and `sd.ctm mbr show`. Lifecycle commands are `sd.ctm mount [whole|p0|p1|p2|p3]`, `sd.ctm unmount`, and `sd.ctm remount`. A deliberate unmount invalidates open `/sd` handles and resets affected process current directories to `/`.
+
+Destructive operations require an unmounted card and the literal `--yes` acknowledgement:
+
+```text
+sd.ctm format --yes <whole|p0|p1|p2|p3> [auto|fat12|fat16|fat32] [allocationUnitBytes] [1|2]
+sd.ctm mbr write --yes <entry0> <entry1> <entry2> <entry3>
+```
+
+An MBR entry is `empty` or `[boot:]<type>:<firstLba>:<sectorCount>`. Type can be a supported FAT name or `0xNN`. MBR writing preserves bootstrap and disk-signature bytes, replaces exactly four partition entries plus the signature, flushes, and verifies the result. It neither formats nor mounts a partition. Formatting does not remount automatically. These commands erase or replace storage structures; use them only on a disposable or backed-up card.
 
 Runtime statistics, 64-bit counters, and task tracing add firmware RAM, flash, and scheduling overhead. Both reports are live snapshots: a task, process, allocation, or filesystem value can change immediately after collection.
 
@@ -39,10 +56,10 @@ Build both images with:
 .\examples\ManagedShell\Test-ManagedShell.ps1 -BuildOnly
 ```
 
-After flashing, this interaction demonstrates copied IPC and cooperative cancellation. Replace `<id>` with the identifier printed by `exec`:
+After flashing, this interaction demonstrates copied IPC and cooperative cancellation. Replace `<id>` with the identifier printed by the background launch:
 
 ```text
-exec examples.hello.ctm listen
+examples.hello.ctm listen &
 send <id> hello from the shell
 kill <id>
 wait <id>
@@ -53,31 +70,31 @@ The module prints `message: hello from the shell`, then `cancellation observed`;
 The standalone applications produce output in this form. Exact identifiers, byte counts, task counts, stack headroom, and percentages depend on the build and live activity. Each diagnostics application appears in its own report while it is running.
 
 ```text
-ct> exec taskmgr.ctm
+ct> taskmgr.ctm
 Task manager
   sample-ms=250 cpu-scale=per-core cores=2 maximum=200.0%
   system-cpu=<sample>% freertos-tasks=<count> active-processes=1
   PID STATE MODULE THREADS HEAP LIMIT CPU STACK-MIN
   pid=<id> state=running module=taskmgr threads=1 heap=<bytes> limit=32768 cpu=<sample>% stack-min=<bytes>
 
-ct> exec examples.hello.ctm listen
+ct> examples.hello.ctm listen &
 hello from managed process <id> invocation #1
 arguments: 1
 listening for copied messages
 started process <id>
-ct> exec taskmgr.ctm
+ct> taskmgr.ctm
   system-cpu=<sample>% freertos-tasks=<count> active-processes=2
   pid=<id> state=running module=examples.hello threads=1 heap=<bytes> limit=65536 cpu=<sample>% stack-min=<bytes>
   pid=<id> state=running module=taskmgr threads=1 heap=<bytes> limit=32768 cpu=<sample>% stack-min=<bytes>
 
-ct> exec examples.hello.ctm burn
+ct> examples.hello.ctm burn &
 started process <id>
 burning CPU in watchdog-safe bursts
-ct> exec taskmgr.ctm
+ct> taskmgr.ctm
   system-cpu=<sample>% freertos-tasks=<count> active-processes=2
   pid=<id> state=running module=examples.hello threads=1 heap=<bytes> limit=65536 cpu=<nonzero-sample>% stack-min=<bytes>
   pid=<id> state=running module=taskmgr threads=1 heap=<bytes> limit=32768 cpu=<sample>% stack-min=<bytes>
-ct> exec taskmgr.ctm kill <id>
+ct> taskmgr.ctm kill <id>
 cancellation observed
 termination requested for process <id>
 ct> wait <id>

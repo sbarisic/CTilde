@@ -21,6 +21,7 @@
     <Content Include="../examples/InlineAssemblyWindows/*.ct" Link="Examples/InlineAssemblyWindows/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../examples/ObjectModel/*.ct" Link="Examples/ObjectModel/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../examples/HostedIo/*.ct" Link="Examples/HostedIo/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/ManagedShell/ShellCommandLine.ct" Link="Examples/ManagedShell/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Snapshots/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

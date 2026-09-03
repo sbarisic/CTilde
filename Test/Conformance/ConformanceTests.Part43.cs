@@ -6,6 +6,76 @@ internal static partial class ConformanceTests
 {
     public static void RegisterPart43(ConformanceSuite suite)
     {
+        suite.Run("managed shell quoted command-line parsing", () =>
+        {
+            var parser = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "ShellCommandLine.ct"));
+            const string harness = """
+                using System;
+                using Examples.ManagedShell;
+
+                public static class Program
+                {
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        string[] values;
+                        bool background;
+                        bool ok = ShellCommandLine.TryParse("program.ctm 1 \"argument 2\" 3", out values, out background);
+                        Console.WriteLine(ok && !background && values.Length == 4 && values[0] == "program.ctm"
+                            && values[1] == "1" && values[2] == "argument 2" && values[3] == "3");
+                        ok = ShellCommandLine.TryParse("tool.ctm \"\" pre\"two words\"post", out values, out background);
+                        Console.WriteLine(ok && values.Length == 3 && values[1] == ""
+                            && values[2] == "pretwo wordspost");
+                        ok = ShellCommandLine.TryParse("tool.ctm \"&\"", out values, out background);
+                        Console.WriteLine(ok && !background && values.Length == 2 && values[1] == "&");
+                        ok = ShellCommandLine.TryParse("tool.ctm &", out values, out background);
+                        Console.WriteLine(ok && background && values.Length == 1);
+                        ok = ShellCommandLine.TryParse("tool.ctm a\\tb\\n", out values, out background);
+                        Console.WriteLine(ok && values.Length == 2 && values[1].Length == 4);
+                        ok = ShellCommandLine.TryParse("tool.ctm a\\\"b c\\\\d", out values, out background);
+                        Console.WriteLine(ok && values.Length == 3 && values[1] == "a\"b"
+                            && values[2] == "c\\d");
+                        Console.WriteLine(!ShellCommandLine.TryParse("bad \"", out values, out background));
+                        Console.WriteLine(!ShellCommandLine.TryParse("bad \\q", out values, out background));
+                        Console.WriteLine(!ShellCommandLine.TryParse("bad \\", out values, out background));
+                    }
+                }
+                """;
+            var result = CompileAndRun([
+                SyntaxTree.ParseText(parser, "ShellCommandLine.ct"),
+                SyntaxTree.ParseText(harness, "Program.ct")]);
+            Assert(result.ExitCode == 0 && Normalize(result.StandardOutput) ==
+                "True\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\nTrue\n",
+                $"ManagedShell command-line parsing failed ({result.ExitCode}).\n{result.StandardOutput}\n{result.StandardError}");
+        });
+
+        suite.Run("managed module utility definitions retain valid GNU attributes", () =>
+        {
+            const string source = """
+                public static class Program
+                {
+                    [EntryPoint]
+                    public static int Main(string[] args)
+                    {
+                        if (args.Length == 0)
+                            return -1;
+                        return args[0].IndexOf(':');
+                    }
+                }
+                """;
+            var module = new ManagedModuleConfiguration(
+                ManagedModuleKind.Application, "Tests.UtilityAttributes", "1.0.0", [], 4096, 16384);
+            var compilation = Compile(source, new CompilationOptions(
+                CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                ManagedModuleKind: module.Kind, ManagedModule: module));
+            var bundle = compilation.EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var combined = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
+            Assert(!combined.Contains("CT_GENERATED_LOCAL {", StringComparison.Ordinal),
+                "Managed-module externalization attached a visibility attribute to a function body.");
+        });
+
         suite.Run("draft 0.46 storage surface and managed filesystem services", () =>
         {
             var configuration = new ManagedModuleConfiguration(

@@ -953,7 +953,7 @@ internal sealed partial class CEmitter : ILoweringServices
 
     private static bool IsManagedDefinition(string line)
     {
-        if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] is '#' or '}' ||
+        if (line.Length == 0 || char.IsWhiteSpace(line[0]) || line[0] is '#' or '{' or '}' ||
             line.StartsWith("extern ", StringComparison.Ordinal) ||
             line.StartsWith("typedef ", StringComparison.Ordinal) ||
             line.StartsWith("struct ", StringComparison.Ordinal) ||

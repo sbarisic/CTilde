@@ -4,7 +4,6 @@ using System.IO;
 using System.Text;
 using System.Threading;
 using Esp.Idf;
-using Esp.Idf.Storage;
 
 namespace Examples.ManagedShell;
 
@@ -243,12 +242,12 @@ public static class Program
 {
     private static Process[] processes = new Process[16];
     private static int processCount;
-    private static RemovableSdCardMonitor sdMonitor;
 
     private static void Help()
     {
-        Console.WriteLine("commands: ls, storage, remount, modules, ps, exec <file> [args], kill <id>, wait <id>, send <id> <text>, free, help");
-        Console.WriteLine("applications: exec memory.ctm, exec taskmgr.ctm [kill <id>]");
+        Console.WriteLine("commands: ls, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
+        Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help");
     }
 
     private static Process FindProcess(uint id)
@@ -286,16 +285,6 @@ public static class Program
         }
     }
 
-    private static void PrintStorage()
-    {
-        Console.Write("SD state=");
-        Console.Write(sdMonitor.State.ToString());
-        Console.Write(" generation=");
-        Console.Write(sdMonitor.Generation);
-        Console.Write(" error=");
-        Console.WriteLine(sdMonitor.LastError);
-    }
-
     private static string[] Arguments(string[] words, int start)
     {
         string[] result = new string[words.Length - start];
@@ -314,28 +303,27 @@ public static class Program
         return uint.TryParse(text, out id);
     }
 
-    private static void Execute(string[] words)
+    private static void Execute(string[] words, bool background)
     {
-        if (words.Length < 2)
+        int slot = -1;
+        if (background)
         {
-            Console.WriteLine("usage: exec <file> [args]");
-            return;
-        }
-        int slot = processCount;
-        if (slot == processes.Length)
-        {
-            slot = 0;
-            while (slot < processCount && !processes[slot].HasExited)
-                slot++;
-            if (slot == processCount)
+            slot = processCount;
+            if (slot == processes.Length)
             {
-                Console.WriteLine("process handle table is full");
-                return;
+                slot = 0;
+                while (slot < processCount && !processes[slot].HasExited)
+                    slot++;
+                if (slot == processCount)
+                {
+                    Console.WriteLine("process handle table is full");
+                    return;
+                }
             }
         }
-        string path = words[1];
+        string path = words[0];
         ShellLed.ProcessStarting();
-        Process process = Process.Start(path, Arguments(words, 2));
+        Process process = Process.Start(path, Arguments(words, 1));
         if (process.Id == 0u)
         {
             ShellLed.ProcessStartFailed();
@@ -343,11 +331,21 @@ public static class Program
             return;
         }
         ShellLed.ProcessStarted(process);
-        processes[slot] = process;
-        if (processCount < processes.Length)
-            processCount++;
-        Console.Write("started process ");
-        Console.WriteLine(process.Id);
+        if (background)
+        {
+            processes[slot] = process;
+            if (processCount < processes.Length)
+                processCount++;
+            Console.Write("started process ");
+            Console.WriteLine(process.Id);
+            return;
+        }
+        int exitCode = process.Wait();
+        if (exitCode != 0)
+        {
+            Console.Write("exit code: ");
+            Console.WriteLine(exitCode);
+        }
     }
 
     private static void Kill(string[] words)
@@ -411,24 +409,29 @@ public static class Program
 
     private static void Dispatch(string line)
     {
-        string[] words = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] words;
+        bool background;
+        if (!ShellCommandLine.TryParse(line, out words, out background))
+        {
+            Console.WriteLine("syntax error: malformed quoting or escape");
+            return;
+        }
         if (words.Length == 0)
             return;
         string command = words[0];
+        if (background && !command.EndsWith(".ctm"))
+        {
+            Console.WriteLine("syntax error: '&' is valid only for applications");
+            return;
+        }
         if (command == "help")
             Help();
         else if (command == "ls")
             ListFiles();
-        else if (command == "storage")
-            PrintStorage();
-        else if (command == "remount")
-            sdMonitor.Remount();
         else if (command == "modules")
             ShellPlatform.PrintModules();
         else if (command == "ps")
             ShellPlatform.PrintProcesses();
-        else if (command == "exec")
-            Execute(words);
         else if (command == "kill")
             Kill(words);
         else if (command == "wait")
@@ -437,6 +440,8 @@ public static class Program
             Send(words);
         else if (command == "free")
             ShellPlatform.PrintFreeHeap();
+        else if (command.EndsWith(".ctm"))
+            Execute(words, background);
         else
             Console.WriteLine("unknown command");
     }
@@ -447,9 +452,6 @@ public static class Program
         EspError ledResult = ShellLed.InitializeOrange();
         if (ShellPlatform.Initialize() != 0)
             return;
-        sdMonitor = new RemovableSdCardMonitor(SdSpiConfiguration.TCan485);
-        sdMonitor.AddFatMount(-1, "/sd", 16);
-        sdMonitor.Start();
         if (!ledResult.IsSuccess)
         {
             Console.Write("LED initialization failed: ");

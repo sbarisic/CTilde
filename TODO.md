@@ -50,7 +50,7 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 - [ ] Extend `System.Storage` beyond the Draft 0.46 T-CAN485 SDSPI path only after separate hardware evidence: native SDMMC, shared SPI-bus arbitration, card-detect GPIOs, and other boards are deferred.
 - [ ] Add GPT and extended/logical MBR partitions only with explicit on-media compatibility tests. Draft 0.46 supports whole devices and four primary MBR entries.
 - [ ] Add bind mounts or a general overlay VFS only when applications need namespace composition. ManagedShell currently implements module lookup precedence directly.
-- [ ] Complete removable-card hardware acceptance: no-card boot, insertion, removal with open files, reinsertion, multi-partition mounts, Unicode names, and destructive formatting on an explicitly disposable card.
+- [ ] Complete `sd.ctm` removable-card hardware acceptance: no-card boot, status/info, insertion, deliberate mount/unmount/remount, removal with open files, reinsertion, four-entry MBR read/write, multi-partition mounts, Unicode names, and destructive formatting on an explicitly disposable card.
 
 ## Managed modules
 

@@ -9,6 +9,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managed_diagnostics_host.h"
+#include "managed_storage_host.h"
 
 #define CTILDE_SHELL_TLS_INDEX 1
 
@@ -50,6 +51,11 @@ int32_t ct_managed_shell_initialize(void)
     if (diagnostics_result != 0) {
         printf("Managed diagnostics initialization failed: %d\n", diagnostics_result);
         return diagnostics_result;
+    }
+    const int storage_result = ct_managed_storage_host_initialize();
+    if (storage_result != 0) {
+        printf("Managed storage initialization failed: %d\n", storage_result);
+        return storage_result;
     }
     size_t total = 0u;
     size_t used = 0u;

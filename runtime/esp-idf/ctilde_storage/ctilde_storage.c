@@ -80,6 +80,8 @@ typedef struct ct_monitor {
     size_t MappingCount;
     ct_card *Card;
     ct_device *Root;
+    ct_storage_sd_card_info CardInfo;
+    bool CardInfoAvailable;
     TaskHandle_t Task;
     SemaphoreHandle_t Stopped;
     StaticSemaphore_t StoppedStorage;
@@ -497,6 +499,11 @@ int32_t ct_storage_fat_mount(const char *path, uintptr_t device_handle,
     if (esp_result != ESP_OK) { detach_disk(mount->Drive); free(mount); return neg(esp_result); }
     FRESULT fat_result = f_mount(mount->FileSystem, mount->DriveName, 1);
     if (fat_result != FR_OK) {
+        /* f_mount registers the FATFS object even when immediate volume
+           discovery fails. Remove it before esp_vfs_fat_unregister_path
+           releases the object, otherwise FatFs retains a dangling pointer
+           and the next mount attempts to free state through released memory. */
+        (void)f_mount(NULL, mount->DriveName, 0);
         (void)esp_vfs_fat_unregister_path(path);
         detach_disk(mount->Drive); free(mount); return -(int32_t)(0x7000 + fat_result);
     }
@@ -596,9 +603,11 @@ int32_t ct_storage_fat_format(uintptr_t device_handle, uint8_t kind,
         if (fat_result == FR_OK) {
             const BYTE expected = kind == 1 ? FS_FAT12 : kind == 2 ? FS_FAT16 : FS_FAT32;
             if (probe.fs_type != expected) fat_result = FR_INVALID_PARAMETER;
-            FRESULT unmount_result = f_mount(NULL, name, 0);
-            if (fat_result == FR_OK) fat_result = unmount_result;
         }
+        /* Registration happens before the optional immediate mount. Always
+           unregister the stack probe, including failed verification. */
+        FRESULT unmount_result = f_mount(NULL, name, 0);
+        if (fat_result == FR_OK) fat_result = unmount_result;
     }
     detach_disk(drive);
     if (fat_result == FR_OK && device->Block->ops->sync != NULL)
@@ -707,6 +716,7 @@ static void monitor_unmount(ct_monitor *monitor)
         (void)ct_storage_sdspi_close((uintptr_t)monitor->Card);
         monitor->Card = NULL;
     }
+    __atomic_store_n(&monitor->CardInfoAvailable, false, __ATOMIC_RELEASE);
 }
 
 static int32_t monitor_mount(ct_monitor *monitor)
@@ -718,6 +728,8 @@ static int32_t monitor_mount(ct_monitor *monitor)
     if (result != 0) return result;
     monitor->Card = card_from(card);
     monitor->Root = device_from(device);
+    monitor->CardInfo = info;
+    __atomic_store_n(&monitor->CardInfoAvailable, true, __ATOMIC_RELEASE);
     for (size_t index = 0; index < monitor->MappingCount; ++index) {
         ct_monitor_mapping *mapping = &monitor->Mappings[index];
         result = monitor_device_for_mapping(monitor, mapping);
@@ -837,6 +849,27 @@ int32_t ct_storage_monitor_remount(uintptr_t handle)
     ct_monitor *monitor = monitor_from(handle);
     if (monitor == NULL || monitor->Task == NULL) return -EINVAL;
     __atomic_store_n(&monitor->RemountRequested, true, __ATOMIC_RELEASE);
+    return 0;
+}
+
+int32_t ct_storage_monitor_volume_info(uintptr_t handle, int32_t mapping_index,
+    ct_storage_fat_volume_info_t *info)
+{
+    ct_monitor *monitor = monitor_from(handle);
+    if (monitor == NULL || info == NULL || mapping_index < 0 ||
+        (size_t)mapping_index >= monitor->MappingCount) return -EINVAL;
+    ct_mount *mount = monitor->Mappings[mapping_index].Mount;
+    return mount == NULL ? -ENODEV : ct_storage_fat_volume_info((uintptr_t)mount, info);
+}
+
+int32_t ct_storage_monitor_card_info(uintptr_t handle,
+    ct_storage_sd_card_info *info)
+{
+    ct_monitor *monitor = monitor_from(handle);
+    if (monitor == NULL || info == NULL) return -EINVAL;
+    if (!__atomic_load_n(&monitor->CardInfoAvailable, __ATOMIC_ACQUIRE))
+        return -ENODEV;
+    *info = monitor->CardInfo;
     return 0;
 }
 

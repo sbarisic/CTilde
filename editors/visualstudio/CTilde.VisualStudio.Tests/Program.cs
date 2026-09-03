@@ -218,14 +218,15 @@ Run("repository C~ project contracts", () =>
         "examples/ManagedShell/Modules/Hello/ManagedHello.ctproj",
         "examples/ManagedShell/Modules/Memory/ManagedMemory.ctproj",
         "examples/ManagedShell/Modules/TaskManager/ManagedTaskManager.ctproj",
+        "examples/ManagedShell/Modules/Sd/ManagedSd.ctproj",
         "examples/QemuFreestanding/QemuFreestanding.ctproj",
         "examples/TCan485/TCan485.Hardware.ctproj",
         "examples/TCan485/TCan485.QemuEsp32.ctproj",
         "examples/TCan485/TCan485.QemuEsp32C3.ctproj",
     };
     var contracts = relativeProjects.Select(path => CTildeProjectContract.Load(Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar)))).ToArray();
-    Equal(21, contracts.Length);
-    Equal(21, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
+    Equal(22, contracts.Length);
+    Equal(22, contracts.Select(contract => contract.ProjectGuid).Distinct().Count());
     True(contracts.All(contract => File.Exists(contract.ManifestPath)));
     foreach (var contract in contracts)
     {

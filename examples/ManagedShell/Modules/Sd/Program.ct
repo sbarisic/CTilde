@@ -1,0 +1,455 @@
+using System;
+using System.Globalization;
+using System.Text;
+
+internal struct SdSnapshot
+{
+    public uint Size;
+    public uint Version;
+    public uint State;
+    public int SelectedTarget;
+    public int LastError;
+    public uint Present;
+    public ulong Generation;
+    public ulong CapacityBytes;
+    public ulong VolumeCapacityBytes;
+    public ulong VolumeFreeBytes;
+    public uint SectorSize;
+    public uint FrequencyKilohertz;
+    public int ManufacturerId;
+    public int OemId;
+    public int ProductRevision;
+    public uint SerialNumber;
+    public int ManufacturingDate;
+    public uint IsHighCapacity;
+    public uint VolumeSectorSize;
+    public uint VolumeClusterSize;
+    public uint CardInfoAvailable;
+    public uint VolumeInfoAvailable;
+}
+
+internal struct MbrEntry
+{
+    public uint Bootable;
+    public uint Type;
+    public uint FirstSector;
+    public uint SectorCount;
+}
+
+internal struct MbrLayout
+{
+    public MbrEntry Entry0;
+    public MbrEntry Entry1;
+    public MbrEntry Entry2;
+    public MbrEntry Entry3;
+}
+
+internal static class SdHost
+{
+    [Extern("ct_managed_sd_get_snapshot")]
+    internal static int Snapshot(out SdSnapshot output);
+
+    [Extern("ct_managed_sd_mount")]
+    internal static int Mount(int target, uint timeoutMilliseconds);
+
+    [Extern("ct_managed_sd_unmount")]
+    internal static int Unmount(uint timeoutMilliseconds);
+
+    [Extern("ct_managed_sd_remount")]
+    internal static int Remount(uint timeoutMilliseconds);
+
+    [Extern("ct_managed_sd_format")]
+    internal static int Format(int target, uint kind, uint allocationUnitBytes,
+        uint fatCopies, uint timeoutMilliseconds);
+
+    [Extern("ct_managed_sd_read_mbr")]
+    internal static int ReadMbr(out MbrLayout output);
+
+    [Extern("ct_managed_sd_write_mbr")]
+    internal static int WriteMbr(in MbrLayout layout, uint timeoutMilliseconds);
+
+    [Extern("ct_managed_sd_error_name")]
+    [NoAlloc]
+    [NoThrow]
+    internal static unsafe byte* ErrorName(int code);
+}
+
+public static class Program
+{
+    private const uint ControlTimeoutMilliseconds = 10000u;
+    private const uint FormatTimeoutMilliseconds = 120000u;
+
+    private static void Help()
+    {
+        Console.WriteLine("usage:");
+        Console.WriteLine("  sd.ctm status");
+        Console.WriteLine("  sd.ctm info");
+        Console.WriteLine("  sd.ctm mount [whole|p0|p1|p2|p3]");
+        Console.WriteLine("  sd.ctm unmount");
+        Console.WriteLine("  sd.ctm remount");
+        Console.WriteLine("  sd.ctm format --yes <whole|p0|p1|p2|p3> [auto|fat12|fat16|fat32] [allocationUnitBytes] [1|2]");
+        Console.WriteLine("  sd.ctm mbr show");
+        Console.WriteLine("  sd.ctm mbr write --yes <entry0> <entry1> <entry2> <entry3>");
+        Console.WriteLine("MBR entry: empty or [boot:]<type>:<firstLba>:<sectorCount>");
+    }
+
+    private static string StateName(uint state)
+    {
+        if (state == 0u) return "not-present";
+        if (state == 1u) return "mounting";
+        if (state == 2u) return "mounted";
+        if (state == 3u) return "removing";
+        if (state == 4u) return "faulted";
+        if (state == 5u) return "unmounted";
+        return "unknown";
+    }
+
+    private static void PrintTarget(int target)
+    {
+        if (target < 0)
+        {
+            Console.Write("whole");
+            return;
+        }
+        Console.Write("p");
+        Console.Write(target);
+    }
+
+    private static bool TryTarget(string value, out int target)
+    {
+        target = -1;
+        if (value == "whole")
+            return true;
+        if (value == "p0") target = 0;
+        else if (value == "p1") target = 1;
+        else if (value == "p2") target = 2;
+        else if (value == "p3") target = 3;
+        else return false;
+        return true;
+    }
+
+    private static unsafe string ErrorName(int code)
+    {
+        byte* value = SdHost.ErrorName(code);
+        if (value == null)
+            return "UNKNOWN";
+        string result;
+        if (!Utf8.TryGetString(value, 64u, out result))
+            return "UNKNOWN";
+        return result;
+    }
+
+    private static unsafe int Failure(string operation, int code)
+    {
+        Console.Write(operation);
+        Console.Write(" failed: ");
+        Console.Write(ErrorName(code));
+        Console.Write(" (");
+        Console.Write(code);
+        Console.WriteLine(")");
+        return 1;
+    }
+
+    private static unsafe bool TrySnapshot(out SdSnapshot snapshot)
+    {
+        int result = SdHost.Snapshot(out snapshot);
+        if (result == 0)
+            return true;
+        Failure("status", result);
+        return false;
+    }
+
+    private static unsafe void PrintStatus(SdSnapshot snapshot)
+    {
+        Console.Write("state=");
+        Console.Write(StateName(snapshot.State));
+        Console.Write(" present=");
+        Console.Write(snapshot.Present != 0u);
+        Console.Write(" target=");
+        PrintTarget(snapshot.SelectedTarget);
+        Console.Write(" path=/sd generation=");
+        Console.Write(snapshot.Generation);
+        Console.Write(" error=");
+        Console.Write(ErrorName(snapshot.LastError));
+        Console.Write(" (");
+        Console.Write(snapshot.LastError);
+        Console.WriteLine(")");
+    }
+
+    private static unsafe int Status()
+    {
+        SdSnapshot snapshot;
+        if (!TrySnapshot(out snapshot))
+            return 1;
+        PrintStatus(snapshot);
+        return 0;
+    }
+
+    private static unsafe int Info()
+    {
+        SdSnapshot snapshot;
+        if (!TrySnapshot(out snapshot))
+            return 1;
+        PrintStatus(snapshot);
+        if (snapshot.CardInfoAvailable == 0u)
+        {
+            Console.WriteLine("card information unavailable");
+            return 0;
+        }
+        Console.Write("capacity-bytes="); Console.WriteLine(snapshot.CapacityBytes);
+        Console.Write("sector-bytes="); Console.WriteLine(snapshot.SectorSize);
+        Console.Write("clock-khz="); Console.WriteLine(snapshot.FrequencyKilohertz);
+        Console.Write("manufacturer="); Console.WriteLine(snapshot.ManufacturerId);
+        Console.Write("oem="); Console.WriteLine(snapshot.OemId);
+        Console.Write("revision="); Console.WriteLine(snapshot.ProductRevision);
+        Console.Write("serial="); Console.WriteLine(snapshot.SerialNumber);
+        Console.Write("manufacturing-date="); Console.WriteLine(snapshot.ManufacturingDate);
+        Console.Write("high-capacity="); Console.WriteLine(snapshot.IsHighCapacity != 0u);
+        if (snapshot.VolumeInfoAvailable != 0u)
+        {
+            Console.Write("volume-capacity-bytes="); Console.WriteLine(snapshot.VolumeCapacityBytes);
+            Console.Write("volume-free-bytes="); Console.WriteLine(snapshot.VolumeFreeBytes);
+            Console.Write("volume-sector-bytes="); Console.WriteLine(snapshot.VolumeSectorSize);
+            Console.Write("volume-cluster-bytes="); Console.WriteLine(snapshot.VolumeClusterSize);
+        }
+        else
+            Console.WriteLine("volume information unavailable");
+        return 0;
+    }
+
+    private static unsafe int Mount(string[] args)
+    {
+        if (args.Length > 2)
+            return Usage("usage: sd.ctm mount [whole|p0|p1|p2|p3]");
+        int target = -2;
+        if (args.Length == 2 && !TryTarget(args[1], out target))
+            return Usage("invalid mount target");
+        int result = SdHost.Mount(target, ControlTimeoutMilliseconds);
+        if (result == 0)
+            return Status();
+        return Failure("mount", result);
+    }
+
+    private static unsafe int Unmount(string[] args)
+    {
+        if (args.Length != 1)
+            return Usage("usage: sd.ctm unmount");
+        int result = SdHost.Unmount(ControlTimeoutMilliseconds);
+        if (result == 0)
+            return Status();
+        return Failure("unmount", result);
+    }
+
+    private static unsafe int Remount(string[] args)
+    {
+        if (args.Length != 1)
+            return Usage("usage: sd.ctm remount");
+        int result = SdHost.Remount(ControlTimeoutMilliseconds);
+        if (result == 0)
+            return Status();
+        return Failure("remount", result);
+    }
+
+    private static bool TryFatKind(string value, out uint kind)
+    {
+        kind = 0u;
+        if (value == "auto") return true;
+        if (value == "fat12") kind = 1u;
+        else if (value == "fat16") kind = 2u;
+        else if (value == "fat32") kind = 3u;
+        else return false;
+        return true;
+    }
+
+    private static unsafe int Format(string[] args)
+    {
+        if (args.Length < 3 || args.Length > 6 || args[1] != "--yes")
+            return Usage("usage: sd.ctm format --yes <target> [kind] [allocationUnitBytes] [1|2]");
+        int target;
+        if (!TryTarget(args[2], out target))
+            return Usage("invalid format target");
+        uint kind = 0u;
+        uint allocationUnitBytes = 0u;
+        uint fatCopies = 2u;
+        if (args.Length > 3 && !TryFatKind(args[3], out kind))
+            return Usage("invalid FAT kind");
+        if (args.Length > 4 && !uint.TryParse(args[4], out allocationUnitBytes))
+            return Usage("invalid allocation-unit size");
+        if (args.Length > 5 && (!uint.TryParse(args[5], out fatCopies) || fatCopies < 1u
+            || fatCopies > 2u))
+            return Usage("FAT copies must be 1 or 2");
+        int result = SdHost.Format(target, kind, allocationUnitBytes, fatCopies,
+            FormatTimeoutMilliseconds);
+        if (result != 0)
+            return Failure("format", result);
+        Console.Write("formatted ");
+        PrintTarget(target);
+        Console.WriteLine();
+        return 0;
+    }
+
+    private static void PrintType(uint type)
+    {
+        if (type == 0u) Console.Write("empty");
+        else if (type == 1u) Console.Write("fat12");
+        else if (type == 4u) Console.Write("fat16-small");
+        else if (type == 6u) Console.Write("fat16");
+        else if (type == 11u) Console.Write("fat32");
+        else if (type == 12u) Console.Write("fat32-lba");
+        else if (type == 14u) Console.Write("fat16-lba");
+        else
+        {
+            Console.Write("type-");
+            Console.Write(type);
+        }
+    }
+
+    private static bool TryType(string value, out uint type)
+    {
+        type = 0u;
+        if (value == "fat12") type = 1u;
+        else if (value == "fat16-small") type = 4u;
+        else if (value == "fat16") type = 6u;
+        else if (value == "fat32") type = 11u;
+        else if (value == "fat32-lba") type = 12u;
+        else if (value == "fat16-lba") type = 14u;
+        else if (value.StartsWith("0x") && value.Length > 2 &&
+            uint.TryParse(value.Substring(2), NumberStyles.HexNumber, out type) && type <= 255u)
+            return type != 0u && type != 5u && type != 15u && type != 238u;
+        else return false;
+        return true;
+    }
+
+    private static bool TryEntry(string value, out MbrEntry entry)
+    {
+        entry = new MbrEntry();
+        if (value == "empty")
+            return true;
+
+        string fields = value;
+        if (fields.StartsWith("boot:"))
+        {
+            entry.Bootable = 1u;
+            fields = fields.Substring(5);
+        }
+
+        int firstSeparator = fields.IndexOf(':');
+        if (firstSeparator <= 0)
+            return false;
+        int secondSeparator = fields.IndexOf(':', firstSeparator + 1);
+        if (secondSeparator <= firstSeparator + 1 || secondSeparator >= fields.Length - 1
+            || fields.IndexOf(':', secondSeparator + 1) >= 0)
+            return false;
+
+        string typeText = fields.Substring(0, firstSeparator);
+        string firstSectorText = fields.Substring(firstSeparator + 1,
+            secondSeparator - firstSeparator - 1);
+        string sectorCountText = fields.Substring(secondSeparator + 1);
+        if (!TryType(typeText, out entry.Type) ||
+            !uint.TryParse(firstSectorText, out entry.FirstSector) ||
+            !uint.TryParse(sectorCountText, out entry.SectorCount) ||
+            entry.FirstSector == 0u || entry.SectorCount == 0u)
+            return false;
+        return true;
+    }
+
+    private static void PrintEntry(int index, MbrEntry entry)
+    {
+        Console.Write("p"); Console.Write(index); Console.Write(": ");
+        if (entry.Type == 0u)
+        {
+            Console.WriteLine("empty");
+            return;
+        }
+        if (entry.Bootable != 0u) Console.Write("boot:");
+        PrintType(entry.Type);
+        Console.Write(":"); Console.Write(entry.FirstSector);
+        Console.Write(":"); Console.WriteLine(entry.SectorCount);
+    }
+
+    private static unsafe int MbrShow(string[] args)
+    {
+        if (args.Length != 2)
+            return Usage("usage: sd.ctm mbr show");
+        MbrLayout layout;
+        int result = SdHost.ReadMbr(out layout);
+        if (result != 0)
+            return Failure("mbr show", result);
+        PrintEntry(0, layout.Entry0);
+        PrintEntry(1, layout.Entry1);
+        PrintEntry(2, layout.Entry2);
+        PrintEntry(3, layout.Entry3);
+        return 0;
+    }
+
+    private static bool Overlaps(MbrEntry left, MbrEntry right)
+    {
+        if (left.Type == 0u || right.Type == 0u)
+            return false;
+        ulong leftEnd = (ulong)left.FirstSector + (ulong)left.SectorCount;
+        ulong rightEnd = (ulong)right.FirstSector + (ulong)right.SectorCount;
+        return (ulong)left.FirstSector < rightEnd && (ulong)right.FirstSector < leftEnd;
+    }
+
+    private static bool ValidateLayout(MbrLayout layout)
+    {
+        int bootable = (int)layout.Entry0.Bootable + (int)layout.Entry1.Bootable
+            + (int)layout.Entry2.Bootable + (int)layout.Entry3.Bootable;
+        return bootable <= 1 && !Overlaps(layout.Entry0, layout.Entry1)
+            && !Overlaps(layout.Entry0, layout.Entry2) && !Overlaps(layout.Entry0, layout.Entry3)
+            && !Overlaps(layout.Entry1, layout.Entry2) && !Overlaps(layout.Entry1, layout.Entry3)
+            && !Overlaps(layout.Entry2, layout.Entry3);
+    }
+
+    private static unsafe int MbrWrite(string[] args)
+    {
+        if (args.Length != 7 || args[2] != "--yes")
+            return Usage("usage: sd.ctm mbr write --yes <entry0> <entry1> <entry2> <entry3>");
+        MbrLayout layout = new MbrLayout();
+        if (!TryEntry(args[3], out layout.Entry0) || !TryEntry(args[4], out layout.Entry1)
+            || !TryEntry(args[5], out layout.Entry2) || !TryEntry(args[6], out layout.Entry3)
+            || !ValidateLayout(layout))
+            return Usage("invalid MBR layout");
+        int result = SdHost.WriteMbr(in layout, ControlTimeoutMilliseconds);
+        if (result != 0)
+            return Failure("mbr write", result);
+        Console.WriteLine("MBR written and verified");
+        return 0;
+    }
+
+    private static unsafe int Mbr(string[] args)
+    {
+        if (args.Length >= 2 && args[1] == "show")
+            return MbrShow(args);
+        if (args.Length >= 2 && args[1] == "write")
+            return MbrWrite(args);
+        return Usage("usage: sd.ctm mbr show|write");
+    }
+
+    private static int Usage(string message)
+    {
+        Console.WriteLine(message);
+        return 2;
+    }
+
+    [EntryPoint]
+    public static unsafe int Main(string[] args)
+    {
+        if (args.Length == 0 || args[0] == "help")
+        {
+            Help();
+            if (args.Length <= 1)
+                return 0;
+            return 2;
+        }
+        if (args[0] == "status" && args.Length == 1) return Status();
+        if (args[0] == "info" && args.Length == 1) return Info();
+        if (args[0] == "mount") return Mount(args);
+        if (args[0] == "unmount") return Unmount(args);
+        if (args[0] == "remount") return Remount(args);
+        if (args[0] == "format") return Format(args);
+        if (args[0] == "mbr") return Mbr(args);
+        Help();
+        return 2;
+    }
+}

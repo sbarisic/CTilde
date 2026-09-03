@@ -44,7 +44,6 @@ public static class ShellCommandLine
                 position++;
             if (position == line.Length)
                 break;
-
             StringBuilder value = new StringBuilder();
             bool inQuotes = false;
             bool wasQuoted = false;
@@ -107,8 +106,8 @@ public static class ShellCommandLine
             background = false;
             return false;
         }
-        background = parsedCount > 0 && values[parsedCount - 1] == "&"
-            && !quoted[parsedCount - 1];
+        background = parsedCount > 0 && values[parsedCount - 1] == "&" && !quoted[parsedCount
+            - 1];
         if (background)
             parsedCount--;
         arguments = new string[parsedCount];

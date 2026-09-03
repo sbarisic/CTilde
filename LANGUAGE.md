@@ -1,14 +1,14 @@
 # C~ language specification
 
-Specification version: draft 0.46
+Specification version: draft 0.49
 
 ## Status
 
-This document is the normative specification for C~ draft 0.46.
+This document is the normative specification for C~ draft 0.49.
 
-C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.46 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
+C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.49 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 
-Draft 0.46 introduces `System.Storage`, ESP32 SDSPI/FatFs/VFS integration, removable-media generations, and Runtime ABI 19 filesystem services for managed modules. Draft 0.45 introduced Managed Module ABI 1 and the firmware-owned process host. Debug metadata remains version 3.
+Draft 0.47 introduced metadata-linked managed libraries, and Draft 0.48 added redirected process streams and reclaimable process identities. Draft 0.49 introduces Runtime ABI 22, Managed Module ABI 3, schema-3 metadata, provider-owned cleanup-safe call stubs, and ESP32/Xtensa managed code overlays. Runtime ABI 19 filesystem services and the Draft 0.46 storage surface remain available. Debug metadata remains version 3.
 
 `CompilationTarget.Cosmopolitan` uses the hosted language and standard-library contract with `TargetProfile.Cosmopolitan`. Draft 0.42 requires the explicit x64 semantic architecture and supported single-architecture Cosmopolitan wrapper. Arm64 and fat x64/Arm64 output are deferred. The staged engineering contract is in [COSMOPOLITAN.md](COSMOPOLITAN.md).
 
@@ -674,13 +674,21 @@ The C backend generates `int main(void)`, initializes static storage, calls the 
 
 An ESP-IDF project selects `espIdf.artifact: "managed-module"` and `build.cLayout: "modules"`. Its `managedModule` block contains `kind` (`application` or `library`), a canonical name, an exact version, exact `.ctmeta.json` references, the application task stack size, an optional heap limit, and optional exact `nativeSources`. Canonical names are ASCII and at most 63 bytes; exact versions are ASCII and at most 31 bytes, leaving one NUL byte in each fixed ABI field. The same limits apply to every referenced identity and dependency. A native source must be a declared checked-in `.c` file inside the module ESP-IDF `main` component; missing, duplicate, external, generated-directory, and undeclared component C sources are rejected. The generated CMake fragment adds declared files to the component source list. Their project-local quoted-header closure participates in the module build identity, while the managed API hash remains a function of the public managed surface only.
 
-Build emits `<name>.ctm`, a 32-bit target ELF shared object, and deterministic `<name>.ctmeta.json` public metadata. The ELF contains a fixed binary preflight manifest for Runtime ABI 19 and Managed Module ABI 1. Private native functions can satisfy module-local `[Extern]` declarations without becoming managed exports. The module emits neither `app_main` nor a private copy of the firmware module/process host. The current implementation still emits reachable compiler-generated language-runtime and standard-library helpers in each module; complete shared-code extraction remains implementation work.
+Build emits `<name>.ctm`, a 32-bit target ELF shared object, and deterministic schema-3 `<name>.ctmeta.json` public metadata. The ELF contains a fixed binary preflight manifest for Runtime ABI 22 and Managed Module ABI 3. Private native functions can satisfy module-local `[Extern]` declarations without becoming managed exports. The module emits neither `app_main` nor a private copy of the firmware module/process host. Reachable compiler-generated helpers can still be module-local; moving every non-generic standard-library implementation into firmware remains implementation work.
 
-Managed Module ABI 1 is ESP-IDF-only in Draft 0.46. A hosted application can resolve ordinary native C ABI methods through `[NativeImport]`, but the hosted target does not emit `.ctm` files, consume `.ctmeta.json` references, or register managed C~ module types in a shared desktop runtime.
+Managed Module ABI 3 is ESP-IDF-only in Draft 0.49. A hosted application can resolve ordinary native C ABI methods through `[NativeImport]`, but the hosted target does not emit `.ctm` files or register managed C~ module types in a shared desktop runtime.
 
-Every public type and member of a managed library is recorded in its managed ABI metadata. Public signatures may use scalars, enums, strings, arrays, concrete classes and structures, interfaces, and delegates. Public generic definitions and constructed generic types are rejected. `internal` is reserved as binary-module-local access. Draft 0.46 does not yet consume provider metadata, patch managed import slots, or execute cross-module managed calls. The complete Managed Module ABI will allow managed references to cross module boundaries only inside one logical process; process messages are copied byte arrays and never transfer managed identity.
+Every public type and member of a managed library is recorded in its managed ABI metadata. Public signatures may use scalars, enums, strings, arrays, concrete classes and structures, interfaces, and delegates. Public generic definitions and constructed generic types are rejected. A consumer parses the provider's emitted declarations without compiling provider source. `internal` is binary-module-local. Callable concrete members use deterministic identities and loader-checked import slots. Each export resolves to a provider-owned stable resident stub, which pins the provider and restores its module and overlay context through the ordinary cleanup stack on both return and exception propagation. Managed references may cross module boundaries only inside one logical process. Process messages remain copied byte arrays and never transfer managed identity.
 
-The firmware owns one versioned `ct_runtime_api_v19` table, process registry, and module registry. A module binds the table through its fixed entry function. Mutable statics are stored in per-process module instances; code and immutable metadata are shared. Applications run as logical processes backed by one managed main FreeRTOS task. Arguments are copied before entry. Generated type descriptors carry stable 128-bit fingerprints, casts compare fingerprints rather than only addresses, and the firmware registers compatible descriptors and removes provider registrations before unload. Generated metadata does not yet replace module-local descriptor addresses with the canonical descriptor returned by registration, and there is no shared runtime-sized `ct_type_ops` dictionary. Translation of an unhandled managed exception into a failed process exit also remains incomplete; current applications must not rely on an exception boundary to protect the firmware.
+The firmware owns one versioned `ct_runtime_api_v22` table, process registry, and module registry. A module binds the table through its fixed entry function. Mutable statics are stored in per-process module instances; resident code and immutable metadata are shared. Applications run as logical processes backed by one managed main FreeRTOS task. Arguments are copied before entry. Generated type descriptors carry stable 128-bit fingerprints, casts compare fingerprints rather than only addresses, and the firmware registers compatible descriptors and removes provider registrations before unload. The ABI reserves runtime-sized `ct_type_ops`; complete shared generic-container lowering and authoritative substitution of every embedded local descriptor pointer remain in progress.
+
+`[Overlay("name")]` may place a concrete type, body-bearing method, constructor, or property in a named overlay. Type placement is inherited by executable members; a member can select another overlay or use `[Resident]`. Names are case-sensitive ASCII identifiers of at most 31 bytes, begin with a letter, and contain letters, digits, `_`, or `-`. Entry points, abstract or bodyless methods, interfaces, fields, interrupts, native imports or exports, runtime implementations, naked methods, and explicit sections cannot be overlay bodies. The feature is available only to ESP-IDF Xtensa managed applications and libraries; ESP32-C3/RISC-V and all other targets reject it.
+
+Overlay-enabled dependency closures are single-task. Source `Thread.Start` is rejected, and Runtime ABI 22 rejects secondary thread attachment. Managed delegates and virtual or interface dispatch name stable resident stubs. Taking an unmanaged pointer to an overlay body is invalid; only explicitly synchronous native callbacks may enter its stable stub on the process main task. Calls proven to stay inside one overlay may call the loaded body directly. Resident, cross-overlay, imported, delegate, virtual, interface, and generic-dispatch calls use stable stubs.
+
+Each process has at most one lazily allocated executable overlay window sized for the largest reachable payload. Entering another overlay replaces that window after validation and relocation; leaving reloads the caller's overlay before returning. Thus nested transitions and recursion are valid, but overlay source storage must remain available for the process lifetime. A deliberate storage operation reports busy while a live process depends on that prefix. Physical removal makes future transitions unavailable and forces affected processes through resident cleanup without user finalizers.
+
+`ProcessStartInfo` selects inherited or redirected stdin, stdout, and stderr. Redirected endpoints use independent bounded 8 KiB queues. `ProcessPipeReader` and `ProcessPipeWriter` provide timed operations and explicit close; writers apply backpressure, and cancellation or closure wakes polling operations. `Process.TryOpen` resolves a currently retained global process identity. Completed slots may be recycled; monotonically increasing IDs prevent a stale handle from naming a later process in the same slot.
 
 Module paths name direct children of `/sd/modules` or `/storage/modules`. A bare filename searches the SD path first and falls back to LittleFS only when the SD entry is absent; an unreadable, corrupt, or ABI-incompatible SD module reports its own error. Empty names, `.`, `..`, nested paths, backslashes, and absolute paths outside those roots are rejected. This flat namespace matches the current Espressif loader's basename-keyed module registry and ensures preflight and relocation select the same file. Dependency metadata names an exact canonical name, version, build identity, and API hash. The current structural loader recursively preflights exact dependencies, rejects cycles and global version/build/API conflicts, creates process-local module instances in dependency order, and releases newly unused modules in reverse order. It also pins modules across dependent load references and tracked active calls, type registrations, and allocations. This is loader scaffolding rather than a supported managed-library programming surface: the compiler does not yet consume provider declarations, bind managed import slots, or account for cross-module objects, vtables, delegates, callbacks, and function leases.
 
@@ -1138,7 +1146,7 @@ The compiler should continue after recoverable lexical, syntax, and semantic err
 
 ## Conformance
 
-A compiler conforms to Draft 0.46 when:
+A compiler conforms to Draft 0.49 when:
 
 1. It implements every non-deferred rule in this document.
 2. Invalid programs produce structured diagnostics and no C.
@@ -1146,7 +1154,7 @@ A compiler conforms to Draft 0.46 when:
 4. Generated C compiles as GNU C23 without warnings.
 5. Native execution passes the language and runtime conformance suite.
 
-The canonical backend is GNU C23. Draft 0.46 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
+The canonical backend is GNU C23. Draft 0.49 has no second backend. Unity and modular layouts consume the same optimized whole-program IR and must have equivalent behavior.
 
 ## Deliberate differences from C#
 

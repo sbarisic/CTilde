@@ -109,9 +109,11 @@ public sealed class Compilation
             ValidateSourceOwners(diagnostics);
             ValidateCpuFeatures(diagnostics, target, architecture);
             var sourceRoot = ValidateSourceRoot(diagnostics, target);
-            var model = new CompilationModel(allSyntaxTrees, SyntaxTrees, diagnostics, target, architecture, Options.EffectiveCpuFeatures, environment,
+            var projectSyntaxTrees = SyntaxTrees.Where(tree => tree.Origin != SyntaxTreeOrigin.ManagedModuleReference).ToImmutableArray();
+            var model = new CompilationModel(allSyntaxTrees, projectSyntaxTrees, diagnostics, target, architecture, Options.EffectiveCpuFeatures, environment,
                 Options.SimdOptimizations,
-                _requireEntryPoint, _requireEntryPoint && managedModuleKind is null, managedModuleKind);
+                _requireEntryPoint, _requireEntryPoint && managedModuleKind is null, managedModuleKind,
+                Options.ManagedModule?.References.Any(reference => reference.Metadata?.HasOverlays == true) == true);
             _boundProgram = BoundProgramBuilder.Build(model, Options.Target, architecture, sourceRoot, Options.NoRecursion);
             _diagnostics = diagnostics.ToImmutable();
             _analyzed = true;
@@ -178,7 +180,12 @@ public sealed class Compilation
         EnsureAnalyzed();
         var success = !_diagnostics.Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error);
         if (success)
-            writer.Write(ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, configuration).ToDeterministicJson());
+        {
+            var ir = new TypedIrLowerer(_boundProgram!).Lower();
+            var optimizedIr = new TypedIrOptimizer(_boundProgram!).Optimize(ir);
+            writer.Write(ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, configuration,
+                optimizedIr.Functions).ToDeterministicJson());
+        }
         return new EmitResult(success, _diagnostics);
     }
 
@@ -192,11 +199,12 @@ public sealed class Compilation
     {
         if (_generatedOutput is not null)
             return;
-        var managedMetadata = Options.ManagedModule is null ? null : ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, Options.ManagedModule);
+        var ir = new TypedIrLowerer(_boundProgram!).Lower();
+        var optimizedIr = new TypedIrOptimizer(_boundProgram!).Optimize(ir);
+        var managedMetadata = Options.ManagedModule is null ? null : ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, Options.ManagedModule,
+            optimizedIr.Functions);
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory,
             Options.SourceIdentityRoot, Options.PanicPolicy, Options.Environment, Options.ManagedModule, managedMetadata);
-        var ir = new TypedIrLowerer(_boundProgram).Lower();
-        var optimizedIr = new TypedIrOptimizer(_boundProgram).Optimize(ir);
         var emissionIr = new TypedIrEmissionLowerer(emitter).Lower(optimizedIr);
         _generatedOutput = emitter.EmitOutput(emissionIr, new CHeaderEmitter(_boundProgram).Emit());
     }
@@ -291,7 +299,7 @@ public sealed class Compilation
             diagnostics.Add("CT4112", $"The source identity root is invalid: {exception.Message}", SyntaxTrees.FirstOrDefault()?.Text ?? SourceText.From(string.Empty), new TextSpan(0, 0));
             return;
         }
-        foreach (var tree in SyntaxTrees.Where(tree => root is not null && Path.IsPathFullyQualified(tree.Text.FilePath)))
+        foreach (var tree in SyntaxTrees.Where(tree => tree.Origin == SyntaxTreeOrigin.User && root is not null && Path.IsPathFullyQualified(tree.Text.FilePath)))
         {
             var relative = Path.GetRelativePath(root!, Path.GetFullPath(tree.Text.FilePath));
             if (relative == ".." || relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) || Path.IsPathFullyQualified(relative))

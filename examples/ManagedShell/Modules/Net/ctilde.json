@@ -1,0 +1,23 @@
+{
+  "target": "esp-idf",
+  "architecture": "xtensa",
+  "sources": ["Program.ct"],
+  "espIdf": { "artifact": "managed-module" },
+  "managedModule": {
+    "kind": "application",
+    "name": "net",
+    "version": "1.0.0",
+    "references": [],
+    "nativeSources": ["main/net_native.c"],
+    "mainTaskStackBytes": 8192,
+    "heapLimitBytes": 65536
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

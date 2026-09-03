@@ -14,7 +14,12 @@ $modules = @(
     [pscustomobject]@{ Name = "Memory diagnostics"; Directory = "Memory"; Artifact = "memory.ctm" },
     [pscustomobject]@{ Name = "Task manager"; Directory = "TaskManager"; Artifact = "taskmgr.ctm" },
     [pscustomobject]@{ Name = "SD manager"; Directory = "Sd"; Artifact = "sd.ctm" },
-    [pscustomobject]@{ Name = "Nano editor"; Directory = "Nano"; Artifact = "nano.ctm" }
+    [pscustomobject]@{ Name = "Nano editor"; Directory = "Nano"; Artifact = "nano.ctm" },
+    [pscustomobject]@{ Name = "Network administration"; Directory = "Net"; Artifact = "net.ctm" },
+    [pscustomobject]@{ Name = "Managed SSH library"; Directory = "SystemSsh"; Artifact = "system.ssh.ctm" },
+    [pscustomobject]@{ Name = "SSH administration service"; Directory = "Sshd"; Artifact = "sshd.ctm" },
+    [pscustomobject]@{ Name = "Managed overlay library"; Directory = "OverlayLibrary"; Artifact = "tests.overlay.library.ctm" },
+    [pscustomobject]@{ Name = "Managed overlay acceptance"; Directory = "OverlayFixture"; Artifact = "tests.overlay.ctm" }
 )
 
 $shellSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Program.ct") -Raw
@@ -25,6 +30,10 @@ if ($shellSource -match 'command\s*==\s*"(?:memory|taskmgr|storage|remount|exec)
 if ($shellSource -notmatch 'command\.EndsWith\("\.ctm"\)' -or
     $shellSource -match 'command\s*==\s*"exec"') {
     throw "ManagedShell must dispatch only explicit lowercase .ctm application names."
+}
+if ($shellSource -notmatch 'ListFilesAt\("/sd", "SD"\)' -or
+    $shellSource -notmatch 'usage: ls \[path\]') {
+    throw "ManagedShell ls must expose the SD root and accept an explicit directory path."
 }
 $parserSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "ShellCommandLine.ct") -Raw
 foreach ($requiredParserMarker in @('TryEscape', 'wasQuoted', 'background', 'inQuotes')) {
@@ -50,6 +59,22 @@ $storageApiHeaders = @(
 if ((Get-Content -LiteralPath $storageApiHeaders[0] -Raw) -cne
     (Get-Content -LiteralPath $storageApiHeaders[1] -Raw)) {
     throw "Managed storage host API headers must remain byte-identical."
+}
+$networkApiHeaders = @(
+    (Join-Path $PSScriptRoot "main\managed_network_host_api.h"),
+    (Join-Path $PSScriptRoot "Modules\Net\main\managed_network_host_api.h")
+)
+if ((Get-Content -LiteralPath $networkApiHeaders[0] -Raw) -cne
+    (Get-Content -LiteralPath $networkApiHeaders[1] -Raw)) {
+    throw "Managed network host API headers must remain byte-identical."
+}
+$sshApiHeaders = @(
+    (Join-Path $PSScriptRoot "main\managed_ssh_host_api.h"),
+    (Join-Path $PSScriptRoot "Modules\SystemSsh\main\managed_ssh_host_api.h")
+)
+if ((Get-Content -LiteralPath $sshApiHeaders[0] -Raw) -cne
+    (Get-Content -LiteralPath $sshApiHeaders[1] -Raw)) {
+    throw "Managed SSH host API headers must remain byte-identical."
 }
 $storageHostSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "main\managed_storage_host.c") -Raw
 foreach ($requiredHostMarker in @('storage_control', 'submit_operation',
@@ -81,6 +106,16 @@ foreach ($forbiddenNanoHelper in @('String.Format', '.Split(', '.ToString(')) {
     if ($nanoSources -match [regex]::Escape($forbiddenNanoHelper)) {
         throw "Nano must not pull allocation-heavy helper '$forbiddenNanoHelper' into nano.ctm."
     }
+}
+$managedRuntimePath = Join-Path $root "..\runtime\esp-idf\ctilde_managed_runtime\ctilde_managed_runtime.c"
+$managedRuntimeSource = Get-Content -LiteralPath $managedRuntimePath -Raw
+if ($managedRuntimeSource -notmatch '(?s)CT_RUNTIME_SERVICE_CONSOLE_READ.*?transfer->Count == 0u.*?vTaskDelay\(1u\)') {
+    throw "Empty managed-console reads must yield to the FreeRTOS idle task."
+}
+$shellCMake = Get-Content -LiteralPath (Join-Path $PSScriptRoot "CMakeLists.txt") -Raw
+if ($shellCMake -notmatch 'ctilde_storage_stage' -or
+    $shellCMake -notmatch 'add_dependencies\(littlefs_storage_bin ctilde_storage_stage\)') {
+    throw "ManagedShell must restage newly built modules before every LittleFS image build."
 }
 
 node --test $diagnosticsTest

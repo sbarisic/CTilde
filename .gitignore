@@ -221,6 +221,7 @@ orleans.codegen.cs
 /examples/ManagedShell/Modules/*/sdkconfig
 /examples/ManagedShell/Modules/*/sdkconfig.old
 /examples/ManagedShell/Modules/*/main/generated/
+/examples/ManagedShell/provisioning.local/
 
 # Hosted I/O example output
 /examples/Hello/build/

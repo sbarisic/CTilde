@@ -59,8 +59,8 @@ internal static class SdHost
     internal static int Remount(uint timeoutMilliseconds);
 
     [Extern("ct_managed_sd_format")]
-    internal static int Format(int target, uint kind, uint allocationUnitBytes,
-        uint fatCopies, uint timeoutMilliseconds);
+    internal static int Format(int target, uint kind, uint allocationUnitBytes, uint fatCopies,
+        uint timeoutMilliseconds);
 
     [Extern("ct_managed_sd_read_mbr")]
     internal static int ReadMbr(out MbrLayout output);
@@ -95,12 +95,18 @@ public static class Program
 
     private static string StateName(uint state)
     {
-        if (state == 0u) return "not-present";
-        if (state == 1u) return "mounting";
-        if (state == 2u) return "mounted";
-        if (state == 3u) return "removing";
-        if (state == 4u) return "faulted";
-        if (state == 5u) return "unmounted";
+        if (state == 0u)
+            return "not-present";
+        if (state == 1u)
+            return "mounting";
+        if (state == 2u)
+            return "mounted";
+        if (state == 3u)
+            return "removing";
+        if (state == 4u)
+            return "faulted";
+        if (state == 5u)
+            return "unmounted";
         return "unknown";
     }
 
@@ -120,11 +126,16 @@ public static class Program
         target = -1;
         if (value == "whole")
             return true;
-        if (value == "p0") target = 0;
-        else if (value == "p1") target = 1;
-        else if (value == "p2") target = 2;
-        else if (value == "p3") target = 3;
-        else return false;
+        if (value == "p0")
+            target = 0;
+        else if (value == "p1")
+            target = 1;
+        else if (value == "p2")
+            target = 2;
+        else if (value == "p3")
+            target = 3;
+        else
+            return false;
         return true;
     }
 
@@ -196,21 +207,34 @@ public static class Program
             Console.WriteLine("card information unavailable");
             return 0;
         }
-        Console.Write("capacity-bytes="); Console.WriteLine(snapshot.CapacityBytes);
-        Console.Write("sector-bytes="); Console.WriteLine(snapshot.SectorSize);
-        Console.Write("clock-khz="); Console.WriteLine(snapshot.FrequencyKilohertz);
-        Console.Write("manufacturer="); Console.WriteLine(snapshot.ManufacturerId);
-        Console.Write("oem="); Console.WriteLine(snapshot.OemId);
-        Console.Write("revision="); Console.WriteLine(snapshot.ProductRevision);
-        Console.Write("serial="); Console.WriteLine(snapshot.SerialNumber);
-        Console.Write("manufacturing-date="); Console.WriteLine(snapshot.ManufacturingDate);
-        Console.Write("high-capacity="); Console.WriteLine(snapshot.IsHighCapacity != 0u);
+        Console.Write("capacity-bytes=");
+        Console.WriteLine(snapshot.CapacityBytes);
+        Console.Write("sector-bytes=");
+        Console.WriteLine(snapshot.SectorSize);
+        Console.Write("clock-khz=");
+        Console.WriteLine(snapshot.FrequencyKilohertz);
+        Console.Write("manufacturer=");
+        Console.WriteLine(snapshot.ManufacturerId);
+        Console.Write("oem=");
+        Console.WriteLine(snapshot.OemId);
+        Console.Write("revision=");
+        Console.WriteLine(snapshot.ProductRevision);
+        Console.Write("serial=");
+        Console.WriteLine(snapshot.SerialNumber);
+        Console.Write("manufacturing-date=");
+        Console.WriteLine(snapshot.ManufacturingDate);
+        Console.Write("high-capacity=");
+        Console.WriteLine(snapshot.IsHighCapacity != 0u);
         if (snapshot.VolumeInfoAvailable != 0u)
         {
-            Console.Write("volume-capacity-bytes="); Console.WriteLine(snapshot.VolumeCapacityBytes);
-            Console.Write("volume-free-bytes="); Console.WriteLine(snapshot.VolumeFreeBytes);
-            Console.Write("volume-sector-bytes="); Console.WriteLine(snapshot.VolumeSectorSize);
-            Console.Write("volume-cluster-bytes="); Console.WriteLine(snapshot.VolumeClusterSize);
+            Console.Write("volume-capacity-bytes=");
+            Console.WriteLine(snapshot.VolumeCapacityBytes);
+            Console.Write("volume-free-bytes=");
+            Console.WriteLine(snapshot.VolumeFreeBytes);
+            Console.Write("volume-sector-bytes=");
+            Console.WriteLine(snapshot.VolumeSectorSize);
+            Console.Write("volume-cluster-bytes=");
+            Console.WriteLine(snapshot.VolumeClusterSize);
         }
         else
             Console.WriteLine("volume information unavailable");
@@ -253,11 +277,16 @@ public static class Program
     private static bool TryFatKind(string value, out uint kind)
     {
         kind = 0u;
-        if (value == "auto") return true;
-        if (value == "fat12") kind = 1u;
-        else if (value == "fat16") kind = 2u;
-        else if (value == "fat32") kind = 3u;
-        else return false;
+        if (value == "auto")
+            return true;
+        if (value == "fat12")
+            kind = 1u;
+        else if (value == "fat16")
+            kind = 2u;
+        else if (value == "fat32")
+            kind = 3u;
+        else
+            return false;
         return true;
     }
 
@@ -275,8 +304,8 @@ public static class Program
             return Usage("invalid FAT kind");
         if (args.Length > 4 && !uint.TryParse(args[4], out allocationUnitBytes))
             return Usage("invalid allocation-unit size");
-        if (args.Length > 5 && (!uint.TryParse(args[5], out fatCopies) || fatCopies < 1u
-            || fatCopies > 2u))
+        if (args.Length > 5 && (!uint.TryParse(args[5], out fatCopies) || fatCopies
+            < 1u || fatCopies > 2u))
             return Usage("FAT copies must be 1 or 2");
         int result = SdHost.Format(target, kind, allocationUnitBytes, fatCopies,
             FormatTimeoutMilliseconds);
@@ -290,13 +319,20 @@ public static class Program
 
     private static void PrintType(uint type)
     {
-        if (type == 0u) Console.Write("empty");
-        else if (type == 1u) Console.Write("fat12");
-        else if (type == 4u) Console.Write("fat16-small");
-        else if (type == 6u) Console.Write("fat16");
-        else if (type == 11u) Console.Write("fat32");
-        else if (type == 12u) Console.Write("fat32-lba");
-        else if (type == 14u) Console.Write("fat16-lba");
+        if (type == 0u)
+            Console.Write("empty");
+        else if (type == 1u)
+            Console.Write("fat12");
+        else if (type == 4u)
+            Console.Write("fat16-small");
+        else if (type == 6u)
+            Console.Write("fat16");
+        else if (type == 11u)
+            Console.Write("fat32");
+        else if (type == 12u)
+            Console.Write("fat32-lba");
+        else if (type == 14u)
+            Console.Write("fat16-lba");
         else
         {
             Console.Write("type-");
@@ -307,16 +343,23 @@ public static class Program
     private static bool TryType(string value, out uint type)
     {
         type = 0u;
-        if (value == "fat12") type = 1u;
-        else if (value == "fat16-small") type = 4u;
-        else if (value == "fat16") type = 6u;
-        else if (value == "fat32") type = 11u;
-        else if (value == "fat32-lba") type = 12u;
-        else if (value == "fat16-lba") type = 14u;
-        else if (value.StartsWith("0x") && value.Length > 2 &&
-            uint.TryParse(value.Substring(2), NumberStyles.HexNumber, out type) && type <= 255u)
+        if (value == "fat12")
+            type = 1u;
+        else if (value == "fat16-small")
+            type = 4u;
+        else if (value == "fat16")
+            type = 6u;
+        else if (value == "fat32")
+            type = 11u;
+        else if (value == "fat32-lba")
+            type = 12u;
+        else if (value == "fat16-lba")
+            type = 14u;
+        else if (value.StartsWith("0x") && value.Length > 2 && uint.TryParse(value.Substring(2),
+            NumberStyles.HexNumber, out type) && type <= 255u)
             return type != 0u && type != 5u && type != 15u && type != 238u;
-        else return false;
+        else
+            return false;
         return true;
     }
 
@@ -325,46 +368,47 @@ public static class Program
         entry = new MbrEntry();
         if (value == "empty")
             return true;
-
         string fields = value;
         if (fields.StartsWith("boot:"))
         {
             entry.Bootable = 1u;
             fields = fields.Substring(5);
         }
-
         int firstSeparator = fields.IndexOf(':');
         if (firstSeparator <= 0)
             return false;
         int secondSeparator = fields.IndexOf(':', firstSeparator + 1);
-        if (secondSeparator <= firstSeparator + 1 || secondSeparator >= fields.Length - 1
-            || fields.IndexOf(':', secondSeparator + 1) >= 0)
+        if (secondSeparator <= firstSeparator + 1 || secondSeparator >= fields.Length
+            - 1 || fields.IndexOf(':', secondSeparator + 1) >= 0)
             return false;
-
         string typeText = fields.Substring(0, firstSeparator);
-        string firstSectorText = fields.Substring(firstSeparator + 1,
-            secondSeparator - firstSeparator - 1);
+        string firstSectorText = fields.Substring(firstSeparator + 1, secondSeparator
+            - firstSeparator - 1);
         string sectorCountText = fields.Substring(secondSeparator + 1);
-        if (!TryType(typeText, out entry.Type) ||
-            !uint.TryParse(firstSectorText, out entry.FirstSector) ||
-            !uint.TryParse(sectorCountText, out entry.SectorCount) ||
-            entry.FirstSector == 0u || entry.SectorCount == 0u)
+        if (!TryType(typeText, out entry.Type) || !uint.TryParse(firstSectorText,
+            out entry.FirstSector) || !uint.TryParse(sectorCountText, out entry.SectorCount)
+            || entry.FirstSector == 0u || entry.SectorCount == 0u)
             return false;
         return true;
     }
 
     private static void PrintEntry(int index, MbrEntry entry)
     {
-        Console.Write("p"); Console.Write(index); Console.Write(": ");
+        Console.Write("p");
+        Console.Write(index);
+        Console.Write(": ");
         if (entry.Type == 0u)
         {
             Console.WriteLine("empty");
             return;
         }
-        if (entry.Bootable != 0u) Console.Write("boot:");
+        if (entry.Bootable != 0u)
+            Console.Write("boot:");
         PrintType(entry.Type);
-        Console.Write(":"); Console.Write(entry.FirstSector);
-        Console.Write(":"); Console.WriteLine(entry.SectorCount);
+        Console.Write(":");
+        Console.Write(entry.FirstSector);
+        Console.Write(":");
+        Console.WriteLine(entry.SectorCount);
     }
 
     private static unsafe int MbrShow(string[] args)
@@ -388,17 +432,17 @@ public static class Program
             return false;
         ulong leftEnd = (ulong)left.FirstSector + (ulong)left.SectorCount;
         ulong rightEnd = (ulong)right.FirstSector + (ulong)right.SectorCount;
-        return (ulong)left.FirstSector < rightEnd && (ulong)right.FirstSector < leftEnd;
+        return(ulong)left.FirstSector < rightEnd && (ulong)right.FirstSector < leftEnd;
     }
 
     private static bool ValidateLayout(MbrLayout layout)
     {
         int bootable = (int)layout.Entry0.Bootable + (int)layout.Entry1.Bootable
             + (int)layout.Entry2.Bootable + (int)layout.Entry3.Bootable;
-        return bootable <= 1 && !Overlaps(layout.Entry0, layout.Entry1)
-            && !Overlaps(layout.Entry0, layout.Entry2) && !Overlaps(layout.Entry0, layout.Entry3)
-            && !Overlaps(layout.Entry1, layout.Entry2) && !Overlaps(layout.Entry1, layout.Entry3)
-            && !Overlaps(layout.Entry2, layout.Entry3);
+        return bootable <= 1 && !Overlaps(layout.Entry0, layout.Entry1) && !Overlaps(layout.Entry0,
+            layout.Entry2) && !Overlaps(layout.Entry0, layout.Entry3) && !Overlaps(layout.Entry1,
+            layout.Entry2) && !Overlaps(layout.Entry1, layout.Entry3) && !Overlaps(layout.Entry2,
+            layout.Entry3);
     }
 
     private static unsafe int MbrWrite(string[] args)
@@ -442,13 +486,20 @@ public static class Program
                 return 0;
             return 2;
         }
-        if (args[0] == "status" && args.Length == 1) return Status();
-        if (args[0] == "info" && args.Length == 1) return Info();
-        if (args[0] == "mount") return Mount(args);
-        if (args[0] == "unmount") return Unmount(args);
-        if (args[0] == "remount") return Remount(args);
-        if (args[0] == "format") return Format(args);
-        if (args[0] == "mbr") return Mbr(args);
+        if (args[0] == "status" && args.Length == 1)
+            return Status();
+        if (args[0] == "info" && args.Length == 1)
+            return Info();
+        if (args[0] == "mount")
+            return Mount(args);
+        if (args[0] == "unmount")
+            return Unmount(args);
+        if (args[0] == "remount")
+            return Remount(args);
+        if (args[0] == "format")
+            return Format(args);
+        if (args[0] == "mbr")
+            return Mbr(args);
         Help();
         return 2;
     }

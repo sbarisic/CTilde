@@ -105,6 +105,12 @@ __attribute__((weak)) void ctilde_managed_storage_invalidate_prefix(
     (void)generation;
 }
 
+__attribute__((weak)) bool ctilde_managed_storage_prefix_busy(const char *prefix)
+{
+    (void)prefix;
+    return false;
+}
+
 static int32_t neg(esp_err_t error)
 {
     return error == ESP_OK ? 0 : -(int32_t)error;

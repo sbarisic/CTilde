@@ -1,0 +1,250 @@
+using System;
+using System.IO;
+using System.Runtime;
+using System.Text;
+
+internal static class NetHost
+{
+    [Extern("ct_net_scan")]
+    internal static int Scan();
+
+    [Extern("ct_net_scan_count")]
+    internal static uint ScanCount();
+
+    [Extern("ct_net_scan_ssid")]
+    internal static unsafe byte* ScanSsid(uint index);
+
+    [Extern("ct_net_scan_rssi")]
+    internal static int ScanRssi(uint index);
+
+    [Extern("ct_net_scan_channel")]
+    internal static uint ScanChannel(uint index);
+
+    [Extern("ct_net_connect")]
+    internal static int Connect(NativeUtf8String ssid, NativeUtf8String password,
+        NativeUtf8String hostname);
+
+    [Extern("ct_net_disconnect")]
+    internal static int Disconnect();
+
+    [Extern("ct_net_refresh_status")]
+    internal static int RefreshStatus();
+
+    [Extern("ct_net_initialized")]
+    internal static uint Initialized();
+
+    [Extern("ct_net_connected")]
+    internal static uint Connected();
+
+    [Extern("ct_net_address_ready")]
+    internal static uint AddressReady();
+
+    [Extern("ct_net_rssi")]
+    internal static int Rssi();
+
+    [Extern("ct_net_last_error")]
+    internal static int LastError();
+
+    [Extern("ct_net_ssid")]
+    internal static unsafe byte* Ssid();
+
+    [Extern("ct_net_address")]
+    internal static unsafe byte* Address();
+
+    [Extern("ct_net_gateway")]
+    internal static unsafe byte* Gateway();
+
+    [Extern("ct_net_dns")]
+    internal static unsafe byte* Dns();
+
+    [Extern("ct_net_wait")]
+    internal static int Wait(uint timeoutMilliseconds);
+
+    [Extern("ct_net_error_name")]
+    internal static unsafe byte* ErrorName(int code);
+}
+
+internal static class Program
+{
+    private static void Help()
+    {
+        Console.WriteLine("usage:");
+        Console.WriteLine("  net.ctm status");
+        Console.WriteLine("  net.ctm wifi scan");
+        Console.WriteLine("  net.ctm wifi connect-profile <name>");
+        Console.WriteLine("  net.ctm wifi disconnect");
+        Console.WriteLine("  net.ctm wait [timeout-ms]");
+    }
+
+    private static unsafe string Text(byte* value)
+    {
+        string result;
+        if (value == null || !Utf8.TryGetString(value, 128u, out result))
+            return "";
+        return result;
+    }
+
+    private static unsafe int Failure(string operation, int code)
+    {
+        Console.Write(operation);
+        Console.Write(" failed: ");
+        Console.Write(Text(NetHost.ErrorName(code)));
+        Console.Write(" (");
+        Console.Write(code);
+        Console.WriteLine(")");
+        return 1;
+    }
+
+    private static bool SafeProfileName(string name)
+    {
+        if (name == null || name.Length == 0 || name.Length > 32)
+            return false;
+        for (int index = 0; index < name.Length; index++)
+        {
+            char value = name[index];
+            if (!(value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z' || value
+                >= '0' && value <= '9' || value == '-' || value == '_'))
+                return false;
+        }
+        return true;
+    }
+
+    private static bool TryProfile(string name, out string ssid, out string password,
+        out string hostname)
+    {
+        ssid = null;
+        password = null;
+        hostname = "";
+        if (!SafeProfileName(name))
+            return false;
+        string[] lines = File.ReadAllLines("/storage/net/profiles/" + name + ".conf");
+        for (int index = 0; index < lines.Length; index++)
+        {
+            string line = lines[index].Trim(' ');
+            if (line.Length == 0 || line[0] == '#')
+                continue;
+            int equals = line.IndexOf('=');
+            if (equals <= 0)
+                return false;
+            string key = line.Substring(0, equals).Trim(' ');
+            string value = line.Substring(equals + 1).Trim(' ');
+            if (key == "ssid")
+            {
+                if (ssid != null)
+                    return false;
+                ssid = value;
+            }
+            else if (key == "password")
+            {
+                if (password != null)
+                    return false;
+                password = value;
+            }
+            else if (key == "hostname")
+            {
+                if (hostname.Length != 0)
+                    return false;
+                hostname = value;
+            }
+            else
+                return false;
+        }
+        return ssid != null && password != null && ssid.Length > 0 && ssid.Length
+            <= 32 && password.Length <= 63 && hostname.Length <= 63;
+    }
+
+    private static unsafe int Status()
+    {
+        int result = NetHost.RefreshStatus();
+        if (result != 0)
+            return Failure("status", result);
+        Console.Write("initialized=");
+        Console.Write(NetHost.Initialized() != 0u);
+        Console.Write(" connected=");
+        Console.Write(NetHost.Connected() != 0u);
+        Console.Write(" ready=");
+        Console.Write(NetHost.AddressReady() != 0u);
+        Console.Write(" ssid=");
+        Console.Write(Text(NetHost.Ssid()));
+        Console.Write(" address=");
+        Console.Write(Text(NetHost.Address()));
+        Console.Write(" gateway=");
+        Console.Write(Text(NetHost.Gateway()));
+        Console.Write(" dns=");
+        Console.Write(Text(NetHost.Dns()));
+        Console.Write(" rssi=");
+        Console.Write(NetHost.Rssi());
+        Console.Write(" last-error=");
+        Console.WriteLine(NetHost.LastError());
+        return 0;
+    }
+
+    private static unsafe int Scan()
+    {
+        int result = NetHost.Scan();
+        if (result != 0)
+            return Failure("scan", result);
+        uint count = NetHost.ScanCount();
+        Console.Write("networks: ");
+        Console.WriteLine(count);
+        for (uint index = 0u; index < count; index++)
+        {
+            Console.Write("  ssid=");
+            Console.Write(Text(NetHost.ScanSsid(index)));
+            Console.Write(" rssi=");
+            Console.Write(NetHost.ScanRssi(index));
+            Console.Write(" channel=");
+            Console.WriteLine(NetHost.ScanChannel(index));
+        }
+        return 0;
+    }
+
+    [EntryPoint]
+    public static unsafe int Main(string[] args)
+    {
+        if (args.Length == 1 && args[0] == "status")
+            return Status();
+        if (args.Length == 2 && args[0] == "wifi" && args[1] == "scan")
+            return Scan();
+        if (args.Length == 2 && args[0] == "wifi" && args[1] == "disconnect")
+        {
+            int result = NetHost.Disconnect();
+            if (result == 0)
+                return 0;
+            return Failure("disconnect", result);
+        }
+        if (args.Length == 3 && args[0] == "wifi" && args[1] == "connect-profile")
+        {
+            string ssid;
+            string password;
+            string hostname;
+            if (!TryProfile(args[2], out ssid, out password, out hostname))
+            {
+                Console.WriteLine("invalid Wi-Fi profile");
+                return 2;
+            }
+            NativeUtf8String nativeSsid = NativeUtf8String.Borrow(ssid);
+            NativeUtf8String nativePassword = NativeUtf8String.Borrow(password);
+            NativeUtf8String nativeHostname = NativeUtf8String.Borrow(hostname);
+            int result = NetHost.Connect(nativeSsid, nativePassword, nativeHostname);
+            if (result == 0)
+                return 0;
+            return Failure("connect", result);
+        }
+        if (args.Length >= 1 && args.Length <= 2 && args[0] == "wait")
+        {
+            uint timeout = 30000u;
+            if (args.Length == 2 && !uint.TryParse(args[1], out timeout))
+            {
+                Help();
+                return 2;
+            }
+            int result = NetHost.Wait(timeout);
+            if (result == 0)
+                return 0;
+            return Failure("wait", result);
+        }
+        Help();
+        return 2;
+    }
+}

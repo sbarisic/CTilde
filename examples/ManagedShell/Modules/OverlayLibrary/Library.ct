@@ -1,0 +1,36 @@
+using System;
+
+[Overlay("library")]
+public static class OverlayLibrary
+{
+    private static int cleanupCount;
+
+    public static int Triple(int value)
+    {
+        return Resident(value) * 3;
+    }
+
+    public static void Fail()
+    {
+        defer MarkCleanup();
+        throw new Exception("library overlay failure");
+    }
+
+    [Resident]
+    public static int Resident(int value)
+    {
+        return value + 1;
+    }
+
+    [Resident]
+    private static void MarkCleanup()
+    {
+        cleanupCount++;
+    }
+
+    [Resident]
+    public static int CleanupCount()
+    {
+        return cleanupCount;
+    }
+}

@@ -1,0 +1,241 @@
+using System;
+
+namespace System.Ssh;
+
+public struct SshServerOptions
+{
+    public string UserName;
+    public string ConfigurationPath;
+    public string HostKeyPath;
+    public string AuthorizedKeysPath;
+    public string SftpRoot;
+    public int Port;
+    public int MaximumPacketBytes;
+    public int MaximumChannels;
+}
+
+public struct SshServerStatus
+{
+    public bool Listening;
+    public bool Connected;
+    public bool Authenticated;
+    public uint SessionsAccepted;
+    public uint AuthenticationFailures;
+    public long BytesReceived;
+    public long BytesSent;
+}
+
+public struct SshPtyInfo
+{
+    public string Terminal;
+    public int Columns;
+    public int Rows;
+    public int PixelWidth;
+    public int PixelHeight;
+}
+
+public interface ISshApplication
+{
+    int Run(SshChannel channel);
+}
+
+public interface ISshChannelHandler
+{
+    void OnData(SshChannel channel, byte[] data);
+
+    void OnClosed(SshChannel channel);
+}
+
+public sealed class SshChannel
+{
+    private uint identifier;
+    private uint remoteWindow;
+    private uint remoteMaximumPacket;
+
+    internal SshChannel(uint identifier, uint remoteWindow, uint remoteMaximumPacket)
+    {
+        this.identifier = identifier;
+        this.remoteWindow = remoteWindow;
+        this.remoteMaximumPacket = remoteMaximumPacket;
+    }
+
+    public uint Id
+    {
+        get
+        {
+            return identifier;
+        }
+    }
+
+    public uint RemoteWindow
+    {
+        get
+        {
+            return remoteWindow;
+        }
+    }
+
+    public uint RemoteMaximumPacket
+    {
+        get
+        {
+            return remoteMaximumPacket;
+        }
+    }
+}
+
+public static class SshWire
+{
+    internal const int MaximumPacketBytes = 35000;
+    internal const int MaximumTransferBytes = 32768;
+
+    public static uint ReadUInt32(byte[] data, int offset)
+    {
+        Require(data, offset, 4);
+        return(uint)data[offset] << 24 | (uint)data[offset + 1] << 16 | (uint)data[offset
+            + 2] << 8 | data[offset + 3];
+    }
+
+    public static void WriteUInt32(byte[] data, int offset, uint value)
+    {
+        Require(data, offset, 4);
+        data[offset] = (byte)(value >> 24);
+        data[offset + 1] = (byte)(value >> 16);
+        data[offset + 2] = (byte)(value >> 8);
+        data[offset + 3] = (byte)value;
+    }
+
+    public static bool IsSupportedAlgorithm(string category, string name)
+    {
+        if (category == "kex")
+            return name == "curve25519-sha256" || name == "kex-strict-c-v00@openssh.com";
+        if (category == "host-key")
+            return name == "ecdsa-sha2-nistp256";
+        if (category == "cipher")
+            return name == "aes128-gcm@openssh.com";
+        if (category == "compression")
+            return name == "none";
+        return false;
+    }
+
+    public static bool TryNormalizeSftpPath(string path, out string normalized)
+    {
+        normalized = null;
+        if (path == null || path.Length == 0 || path[0] != '/')
+            return false;
+        string[] parts = path.Split('/');
+        string result = "/sftp";
+        for (int index = 0; index < parts.Length; index++)
+        {
+            string part = parts[index];
+            if (part.Length == 0 || part == ".")
+                continue;
+            if (part == ".." || part.IndexOf('\0') >= 0)
+                return false;
+            result = result + "/" + part;
+        }
+        normalized = result;
+        return true;
+    }
+
+    public static bool IsAuthorizedP256Line(string line)
+    {
+        if (line == null)
+            return false;
+        string value = line.Trim(' ');
+        if (!value.StartsWith("ecdsa-sha2-nistp256 "))
+            return false;
+        int second = value.IndexOf(' ', 21);
+        string payload;
+        if (second < 0)
+            payload = value.Substring(21);
+        else
+            payload = value.Substring(21, second - 21);
+        if (payload.Length < 32)
+            return false;
+        for (int index = 0; index < payload.Length; index++)
+        {
+            char current = payload[index];
+            bool valid = current >= 'A' && current <= 'Z' || current >= 'a' && current
+                <= 'z' || current >= '0' && current <= '9' || current == '+' || current
+                == '/' || current == '=';
+            if (!valid)
+                return false;
+        }
+        return true;
+    }
+
+    private static void Require(byte[] data, int offset, int count)
+    {
+        if (data == null)
+            throw new ArgumentNullException();
+        if (offset < 0 || count < 0 || offset > data.Length - count)
+            throw new ArgumentOutOfRangeException();
+    }
+}
+
+public sealed class SshServer
+{
+    private SshServerOptions options;
+    private SshServerStatus status;
+
+    private SshServer(SshServerOptions options)
+    {
+        this.options = options;
+        status = new SshServerStatus();
+    }
+
+    public static SshServer Create(SshServerOptions options)
+    {
+        if (options.UserName == null || options.UserName.Length == 0)
+            throw new ArgumentException();
+        if (options.Port <= 0 || options.Port > 65535)
+            throw new ArgumentOutOfRangeException();
+        if (options.MaximumPacketBytes <= 0 || options.MaximumPacketBytes > SshWire.MaximumPacketBytes)
+            throw new ArgumentOutOfRangeException();
+        return new SshServer(options);
+    }
+
+    public SshServerStatus Status()
+    {
+        return status;
+    }
+
+    public int Run()
+    {
+        bool listening;
+        bool connected;
+        bool authenticated;
+        uint accepted;
+        uint failures;
+        long received;
+        long sent;
+        int result = SshServerHost.Run(options.Port, options.MaximumPacketBytes,
+            options.MaximumChannels, out listening, out connected, out authenticated,
+            out accepted, out failures, out received, out sent);
+        status.Listening = listening;
+        status.Connected = connected;
+        status.Authenticated = authenticated;
+        status.SessionsAccepted = accepted;
+        status.AuthenticationFailures = failures;
+        status.BytesReceived = received;
+        status.BytesSent = sent;
+        return result;
+    }
+
+    public void Stop()
+    {
+        SshServerHost.Stop();
+    }
+}
+
+internal static class SshServerHost
+{
+    [Extern("ct_managed_sshd_run")]
+    internal static int Run(int port, int maximumPacketBytes, int maximumChannels,
+        out bool listening, out bool connected, out bool authenticated, out uint sessionsAccepted,
+        out uint authenticationFailures, out long bytesReceived, out long bytesSent);
+
+    [Extern("ct_managed_sshd_stop")]
+    internal static void Stop();
+}

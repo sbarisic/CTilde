@@ -99,6 +99,7 @@ int32_t ct_storage_monitor_release(uintptr_t monitor);
 /* The managed runtime supplies this hook. It is intentionally weak so the
    storage component can also be used by ordinary ESP-IDF firmware. */
 void ctilde_managed_storage_invalidate_prefix(const char *prefix, uint64_t generation);
+bool ctilde_managed_storage_prefix_busy(const char *prefix);
 
 #ifdef __cplusplus
 }

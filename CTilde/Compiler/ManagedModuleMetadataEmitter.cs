@@ -10,7 +10,8 @@ internal static class ManagedModuleMetadataEmitter
 {
     private static readonly Regex LocalInclude = new("^\\s*#\\s*include\\s*\"([^\"]+)\"", RegexOptions.CultureInvariant);
 
-    public static ManagedModuleMetadata Emit(Compilation compilation, BoundProgram program, ManagedModuleConfiguration configuration)
+    public static ManagedModuleMetadata Emit(Compilation compilation, BoundProgram program, ManagedModuleConfiguration configuration,
+        IEnumerable<IrFunction> reachableFunctions)
     {
         if (compilation.Options.ManagedModuleKind != configuration.Kind)
             throw new ArgumentException("The managed-module build configuration does not match the compilation kind.", nameof(configuration));
@@ -36,6 +37,41 @@ internal static class ManagedModuleMetadataEmitter
             .SelectMany(Exports)
             .OrderBy(export => export.Identity, StringComparer.Ordinal)
             .ToImmutableArray();
+        var declarations = model.ProjectTypes.Where(type => type.Accessibility == Accessibility.Public)
+            .OrderBy(type => type.FullName, StringComparer.Ordinal)
+            .Select(type => new ManagedModuleDeclarationMetadata(type.Namespace,
+                RenderDeclaration(configuration.Name, type)))
+            .ToImmutableArray();
+        var userSources = model.UserSyntaxTrees.Select(tree => tree.Text).ToHashSet(ReferenceEqualityComparer.Instance);
+        var overlayFunctions = reachableFunctions.Select(function =>
+            {
+                var method = function.Method;
+                var callable = method.IsConstructor && method.ContainingType.Kind == DeclaredTypeKind.Class
+                    ? CEmitter.ConstructorInitializerName(method)
+                    : function.Property is null ? method.CName : function.IsGetter
+                        ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+                return (Method: method, Callable: callable);
+            })
+            .Where(item => item.Method.OverlayName is not null && item.Method.Syntax is not null && userSources.Contains(item.Method.Syntax.Source))
+            .DistinctBy(item => item.Callable, StringComparer.Ordinal)
+            .OrderBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
+            .ToArray();
+        var overlayTargetIndices = overlayFunctions.OrderBy(item => item.Method.OverlayName, StringComparer.Ordinal)
+            .ThenBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
+            .ThenBy(item => item.Callable, StringComparer.Ordinal)
+            .Select((item, index) => (item.Callable, index))
+            .ToDictionary(item => item.Callable, item => item.index, StringComparer.Ordinal);
+        var overlays = overlayFunctions.GroupBy(item => item.Method.OverlayName!, StringComparer.Ordinal)
+            .OrderBy(group => group.Key, StringComparer.Ordinal)
+            .Select(group => new ManagedModuleOverlayMetadata(group.Key, 0, 16,
+                [.. group.OrderBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
+                    .ThenBy(item => item.Callable, StringComparer.Ordinal).Select(item =>
+                {
+                    return new ManagedModuleOverlayFunctionMetadata(
+                        ManagedModuleMetadata.HashIdentity(NameMangler.MethodIdentity(item.Method)),
+                        CEmitter.OverlayBodyName(item.Method, item.Callable),
+                        overlayTargetIndices[item.Callable]);
+                })])).ToImmutableArray();
         var apiText = string.Join('\n', types.Select(type => $"{type.Fingerprint}:{type.Layout}:{type.Size}:{type.Alignment}")
             .Concat(exports.Select(export => $"{export.Identity}:{export.Signature}:{export.Ownership}:{export.Effects}")));
         var apiHash = ManagedModuleMetadata.HashIdentity(apiText);
@@ -55,12 +91,131 @@ internal static class ManagedModuleMetadataEmitter
             $"api={apiHash}",
             sourceIdentity,
             nativeIdentity,
+            string.Join('\n', overlayFunctions.Select(item =>
+                $"overlay={item.Method.OverlayName}:{NameMangler.MethodIdentity(item.Method)}:{item.Callable}")),
             string.Join('\n', dependencies.Select(dependency => $"dep={dependency.Name}:{dependency.Version}:{dependency.BuildIdentity}:{dependency.ApiHash}")));
 
-        return new ManagedModuleMetadata(1, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
+        return new ManagedModuleMetadata(3, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
             CompilerContract.ManagedModuleAbiVersion, configuration.Kind.ToString().ToLowerInvariant(), configuration.Name,
-            configuration.Version, ManagedModuleMetadata.HashIdentity(buildText), apiHash, dependencies, types, exports);
+            configuration.Version, ManagedModuleMetadata.HashIdentity(buildText), apiHash, dependencies, types, exports, declarations,
+            overlays.Length != 0, 0, overlays);
     }
+
+    private static string RenderDeclaration(string moduleName, TypeSymbol type)
+    {
+        var writer = new StringBuilder();
+        writer.AppendLine("using System;");
+        if (!string.IsNullOrEmpty(type.Namespace))
+            writer.Append("namespace ").Append(type.Namespace).AppendLine(";").AppendLine();
+
+        var typeModifiers = type.Kind switch
+        {
+            DeclaredTypeKind.StaticClass => "public static class ",
+            DeclaredTypeKind.Interface => "public interface ",
+            DeclaredTypeKind.Struct => "public struct ",
+            DeclaredTypeKind.Enum => "public enum ",
+            DeclaredTypeKind.Delegate => "public delegate ",
+            DeclaredTypeKind.Newtype => "public newtype ",
+            _ when type.IsAbstract => "public abstract class ",
+            _ when type.IsSealed => "public sealed class ",
+            _ => "public class ",
+        };
+        if (type.Kind == DeclaredTypeKind.Delegate)
+        {
+            writer.Append(typeModifiers).Append(TypeText(type.DelegateReturnType!)).Append(' ').Append(type.Name)
+                .Append('(').Append(string.Join(", ", type.DelegateParameters.Select(ParameterText))).AppendLine(");");
+            return writer.ToString();
+        }
+        if (type.Kind == DeclaredTypeKind.Newtype)
+        {
+            writer.Append(typeModifiers).Append(type.Name).Append(" : ").Append(TypeText(type.UnderlyingType!)).AppendLine(";");
+            return writer.ToString();
+        }
+
+        writer.Append(typeModifiers).Append(type.Name);
+        var bases = new List<string>();
+        if (type.BaseType is not null && !type.BaseType.IsObject)
+            bases.Add(type.BaseType.FullName);
+        bases.AddRange(type.Interfaces.Select(contract => contract.FullName));
+        if (bases.Count != 0)
+            writer.Append(" : ").Append(string.Join(", ", bases));
+        writer.AppendLine().AppendLine("{");
+        if (type.Kind == DeclaredTypeKind.Enum)
+        {
+            foreach (var value in type.EnumValues)
+                writer.Append("    ").Append(value.Name).Append(" = ").Append(value.Value.ToString(CultureInfo.InvariantCulture)).AppendLine(",");
+            writer.AppendLine("}");
+            return writer.ToString();
+        }
+
+        foreach (var field in type.Fields.Where(field => field.Name != "<underlying>" && !field.IsBitView))
+        {
+            if (field.Offset is { } offset)
+                writer.Append("    [FieldOffset(").Append(offset.ToString(CultureInfo.InvariantCulture)).AppendLine(")]");
+            writer.Append("    ").Append(field.Accessibility == Accessibility.Public ? "public " : "private ");
+            if (field.IsStatic) writer.Append("static ");
+            if (field.IsReadonly) writer.Append("readonly ");
+            writer.Append(TypeText(field.Type)).Append(' ').Append(field.Accessibility == Accessibility.Public ? field.Name : "__layout_" + NameMangler.Identifier(field.Name)).AppendLine(";");
+        }
+
+        foreach (var method in type.Methods.Where(method => method.Accessibility == Accessibility.Public && !method.IsEntryPoint && !method.IsGenericDefinition))
+            RenderMethod(writer, moduleName, type, method);
+        writer.AppendLine("}");
+        return writer.ToString();
+    }
+
+    private static void RenderMethod(StringBuilder writer, string moduleName, TypeSymbol type, MethodSymbol method)
+    {
+        var identity = ManagedModuleMetadata.HashIdentity(NameMangler.MethodIdentity(method));
+        var external = ManagedImportName(moduleName, identity);
+        foreach (var effect in EffectFacts.IndividualContracts(method.DeclaredEffects).Select(EffectFacts.ContractName))
+            writer.Append("    [").Append(effect).AppendLine("]");
+        if (method.IsStatic)
+        {
+            writer.Append("    [Extern(\"").Append(external).AppendLine("\")]");
+            writer.Append("    public static ").Append(TypeText(method.ReturnType)).Append(' ').Append(method.Name)
+                .Append('(').Append(string.Join(", ", method.Parameters.Select(ParameterText))).AppendLine(");");
+            return;
+        }
+        if (type.Kind == DeclaredTypeKind.Interface || method.IsAbstract)
+        {
+            writer.Append("    public ").Append(method.IsAbstract ? "abstract " : string.Empty)
+                .Append(TypeText(method.ReturnType)).Append(' ').Append(method.Name)
+                .Append('(').Append(string.Join(", ", method.Parameters.Select(ParameterText))).AppendLine(");");
+            return;
+        }
+
+        var helper = "__ManagedImport_" + identity[..16];
+        writer.Append("    public ").Append(method.IsVirtual ? "virtual " : string.Empty)
+            .Append(TypeText(method.ReturnType)).Append(' ').Append(method.Name)
+            .Append('(').Append(string.Join(", ", method.Parameters.Select(ParameterText))).AppendLine(")");
+        writer.AppendLine("    {");
+        writer.Append("        ");
+        if (method.ReturnType != CType.Void) writer.Append("return ");
+        writer.Append(helper).Append("(this");
+        foreach (var parameter in method.Parameters)
+            writer.Append(", ").Append(ArgumentText(parameter));
+        writer.AppendLine(");");
+        writer.AppendLine("    }");
+        writer.Append("    [Extern(\"").Append(external).AppendLine("\")]");
+        writer.Append("    private static ").Append(TypeText(method.ReturnType)).Append(' ').Append(helper)
+            .Append('(').Append(type.FullName).Append(" self");
+        foreach (var parameter in method.Parameters)
+            writer.Append(", ").Append(ParameterText(parameter));
+        writer.AppendLine(");");
+    }
+
+    internal static string ManagedImportName(string moduleName, string identity) =>
+        "ct_managed_import_" + ManagedModuleMetadata.HashIdentity(moduleName)[..16] + "_" + identity;
+
+    private static string ParameterText(ParameterSymbol parameter) =>
+        (parameter.PassingKind == ParameterPassingKind.Value ? string.Empty : parameter.PassingKind.ToString().ToLowerInvariant() + " ") +
+        TypeText(parameter.Type) + " " + parameter.Name;
+
+    private static string ArgumentText(ParameterSymbol parameter) =>
+        (parameter.PassingKind == ParameterPassingKind.Value ? string.Empty : parameter.PassingKind.ToString().ToLowerInvariant() + " ") + parameter.Name;
+
+    private static string TypeText(CType type) => type.DisplayName;
 
     private static string NativeIdentity(ManagedModuleConfiguration configuration)
     {
@@ -100,7 +255,8 @@ internal static class ManagedModuleMetadataEmitter
     {
         foreach (var constructor in type.Constructors.Where(member => member.Accessibility == Accessibility.Public))
             yield return MethodExport(constructor);
-        foreach (var method in type.Methods.Where(member => member.Accessibility == Accessibility.Public && !member.IsEntryPoint))
+        foreach (var method in type.Methods.Where(member => member.Accessibility == Accessibility.Public && !member.IsEntryPoint &&
+                     !member.IsAbstract && type.Kind != DeclaredTypeKind.Interface))
             yield return MethodExport(method);
         foreach (var field in type.Fields.Where(member => member.Accessibility == Accessibility.Public))
         {
@@ -121,6 +277,8 @@ internal static class ManagedModuleMetadataEmitter
             $"{parameter.PassingKind.ToString().ToLowerInvariant()}:{(parameter.Type.ContainsManagedReferences ? "managed" : "value")}:retained={parameter.IsRetained}"));
         if (method.ReturnType.ContainsManagedReferences)
             ownership += ";result=managed";
+        if (ownership.Length == 0)
+            ownership = "none";
         return Export(signature, method.ContainingType.FullName, method.IsConstructor ? ".ctor" : method.Name, signature, ownership, EffectText(method.DeclaredEffects));
     }
 

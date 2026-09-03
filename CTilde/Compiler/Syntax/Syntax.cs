@@ -278,6 +278,9 @@ public sealed record SyntaxTree
 
     internal static SyntaxTree ParseStandardLibrary(SourceText text) => Parse(text) with { Origin = SyntaxTreeOrigin.StandardLibrary, SourceOwner = null };
 
+    internal static SyntaxTree ParseManagedModuleReference(SourceText text, SourceOwnerIdentity sourceOwner) =>
+        Parse(text, sourceOwner) with { Origin = SyntaxTreeOrigin.ManagedModuleReference };
+
     public static SyntaxTree ParseText(string text, string filePath = "<memory>") => Parse(SourceText.From(text, filePath));
 
     public static SyntaxTree ParseText(string text, string filePath, SourceOwnerIdentity sourceOwner) => Parse(SourceText.From(text, filePath), sourceOwner);
@@ -316,6 +319,7 @@ internal enum SyntaxTreeOrigin
     User,
     EspIdfBinding,
     StandardLibrary,
+    ManagedModuleReference,
 }
 
 public sealed record CompilationUnitSyntax(

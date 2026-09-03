@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.46 surface remains in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements remain in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.49 surface is in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements are in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -55,21 +55,32 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 
 ## Managed modules
 
-Draft 0.46 advances managed applications to Runtime ABI 19 while retaining Managed Module ABI 1. The compiler emits deterministic public metadata, a fixed ELF manifest, per-process static schemas, runtime/API binding accessors, hidden module-local definitions, and stable 128-bit type fingerprints. The ESP-IDF runtime preflights, loads, executes, waits for, and immediately unloads trusted application modules; it owns process filesystem handles and current directories, registers fingerprinted descriptors, reuses compatible registrations, and removes provider registrations before unload. A manual Draft 0.45 ManagedShell serial session completed 100 load/run/unload cycles with stable current free heap and no stale module registrations. Remaining work is:
+Draft 0.49 advances managed modules to Runtime ABI 22, Module ABI 3, and schema-3 metadata. Provider-owned resident stubs make ordinary and exceptional managed calls cleanup-safe, and ESP32/Xtensa applications and libraries can package named process-local code overlays behind those stubs. Draft 0.48 redirected streams, stable process identities, exact dependency imports, and Draft 0.47 metadata references remain available. Remaining work is:
 
 - [ ] Make the canonical descriptor returned by runtime registration authoritative in generated object, interface, delegate, cast, and dispatch metadata; validate its complete ABI shape rather than only name, size, alignment, and value/reference kind.
 - [ ] Add runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.
-- [ ] Compile `.ctmeta.json` references as semantic dependencies without adding provider source, enforce binary-module-local `internal`, and generate checked managed import slots and concrete cross-module calls.
-- [ ] Turn the structural dependency loader into a supported managed-library surface, then exercise concrete classes, structures, interfaces, arrays, and delegates across a module boundary. Public managed APIs remain non-generic.
+- [ ] Complete the supported managed-library surface for fields and richer descriptor-sharing scenarios. Constructors, properties, concrete classes, structures, interfaces, arrays, delegates, and exceptions use cleanup-safe provider stubs for the currently supported concrete non-generic surface.
 - [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component once canonical operations and callable imports are available. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
 - [ ] Make source-created child threads inherit process ownership, finish the native-resource ledger, and translate an unhandled managed exception into process failure instead of firmware panic.
 - [ ] Extend the implemented main-task cancellation/forced-termination and reaper cleanup to source-created child tasks and the complete native-resource ledger; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
-- [ ] Make managed console input cancellable without deleting a task inside a blocking VFS/newlib read, and define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
-- [ ] Replace the fixed lifetime process-handle table with reclaimable generation-checked handles so repeated starts are not bounded by one boot-time slot count.
-- [ ] Audit every dynamic symbol and relocation against the loader allowlist, then prove modules contain no private runtime or standard-library implementation.
+- [ ] Finish redirected stderr selection, make every pipe/native handle participate in process cleanup, and define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
+- [ ] Move more private runtime and standard-library implementation out of modules; Draft 0.49 audits the Xtensa overlay relocation subset but ordinary resident module relocation coverage remains a separate loader concern.
+- [ ] Add optional overlay compression, prefetching, pinning, more than one executable window, or RAM-backed source caching only after measured transition and memory evidence. Raw overlay-body breakpoints, disassembly-aware stepping, and hot replacement also remain deferred.
+- [ ] Extend overlays beyond ESP32/Xtensa only with backend-specific executable-memory, relocation, and cache-coherency evidence. ESP32-C3/RISC-V, hosted, Cosmopolitan, freestanding, and resident firmware deliberately reject `[Overlay]`.
 - [ ] Add corrupt, wrong-architecture, stale-ABI, dependency-cycle, version-conflict, signature-mismatch, heap-quota, child-thread, exception, cancellation, forced-termination, and cross-process reference rejection tests.
 - [ ] Extend the ManagedShell hardware runner to execute the lifecycle loop and persist a machine-readable report so the manual 2026-09-02 measurements become a replayable acceptance gate.
 - [ ] Design a separate hosted Managed Module ABI host only if desktop shared-runtime modules are required. The current [HostedNativeImport example](examples/HostedNativeImport/README.md) intentionally exercises native C ABI loading and cannot substitute for managed descriptors, canonical types, process instances, or `.ctmeta.json` references.
+
+## SSH and remote administration
+
+The Draft 0.48 development slice provides `net.ctm`, a resident Wi-Fi state owner, the metadata-linked `system.ssh.ctm` library, `sshd.ctm`, socket/crypto accessors, the isolated `/sftp` partition, and SSH framing/key/path helpers. The current transport accepts one TCP client and exchanges identification only. Remaining work is:
+
+- [ ] Implement Curve25519 key exchange, P-256 host signatures and public-key authentication, AES-128-GCM packet protection, rekeying, strict limits, and secure configuration/key reload.
+- [ ] Extract the reusable shell-session router and connect PTY, exec, window-change, stream backpressure, and connection-owned process cleanup to Runtime ABI 21 pipes.
+- [ ] Complete SFTP v3 request parsing and generation-tagged handles rooted exclusively beneath `/sftp`.
+- [ ] Add runtime-accounted native sockets, cryptographic contexts, Nano output storage, files, and forced-session cleanup to the resource ledger.
+- [ ] Add the provisioning/package target that requires local host keys, authorized keys, and Wi-Fi profiles without recording secrets.
+- [ ] Run OpenSSH interoperability, malformed-packet, cancellation, memory, and connected-board acceptance only after the protocol and resource ledger are complete.
 
 ## Example coverage
 

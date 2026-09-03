@@ -245,7 +245,7 @@ public static class Program
 
     private static void Help()
     {
-        Console.WriteLine("commands: ls, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("commands: ls [path], modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
         Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
         Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help, nano.ctm <path>");
     }
@@ -263,10 +263,26 @@ public static class Program
         return null;
     }
 
-    private static void ListFiles()
+    private static void ListFiles(string[] words)
     {
-        if (Directory.Exists("/sd/modules"))
-            ListFilesAt("/sd/modules", "SD");
+        if (words.Length > 2)
+        {
+            Console.WriteLine("usage: ls [path]");
+            return;
+        }
+        if (words.Length == 2)
+        {
+            if (!Directory.Exists(words[1]))
+            {
+                Console.Write("ls: directory not found: ");
+                Console.WriteLine(words[1]);
+                return;
+            }
+            ListFilesAt(words[1], words[1]);
+            return;
+        }
+        if (Directory.Exists("/sd"))
+            ListFilesAt("/sd", "SD");
         ListFilesAt("/storage/modules", "LittleFS");
     }
 
@@ -427,7 +443,7 @@ public static class Program
         if (command == "help")
             Help();
         else if (command == "ls")
-            ListFiles();
+            ListFiles(words);
         else if (command == "modules")
             ShellPlatform.PrintModules();
         else if (command == "ps")
@@ -457,7 +473,7 @@ public static class Program
             Console.Write("LED initialization failed: ");
             Console.WriteLine(ledResult.GetName());
         }
-        Console.WriteLine("CTilde managed shell - Runtime ABI 19 / Module ABI 1");
+        Console.WriteLine("CTilde managed shell - Runtime ABI 22 / Module ABI 3");
         Help();
         while (true)
         {

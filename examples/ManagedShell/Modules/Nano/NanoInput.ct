@@ -2,9 +2,9 @@ using System;
 
 internal enum NanoKeyKind : byte
 {
-    None=0, Insert=1, Left=2, Right=3, Up=4, Down=5, Home=6, End=7,
-    PageUp=8, PageDown=9, Backspace=10, Delete=11, Enter=12, Tab=13,
-    Save=14, Exit=15, Refresh=16, Resize=17, PasteStart=18, PasteEnd=19
+    None=0, Insert=1, Left=2, Right=3, Up=4, Down=5, Home=6, End=7, PageUp=8, PageDown=9,
+        Backspace=10, Delete=11, Enter=12, Tab=13, Save=14, Exit=15, Refresh=16,
+        Resize=17, PasteStart=18, PasteEnd=19
 }
 
 internal struct NanoKey
@@ -46,14 +46,18 @@ internal sealed class NanoInput
             sequenceLength = 1;
             return false;
         }
-        if (value == (byte)15) return SetKind(NanoKeyKind.Save, out key);
-        if (value == (byte)24) return SetKind(NanoKeyKind.Exit, out key);
-        if (value == (byte)12) return SetKind(NanoKeyKind.Refresh, out key);
+        if (value == (byte)15)
+            return SetKind(NanoKeyKind.Save, out key);
+        if (value == (byte)24)
+            return SetKind(NanoKeyKind.Exit, out key);
+        if (value == (byte)12)
+            return SetKind(NanoKeyKind.Refresh, out key);
         if (value == (byte)8 || value == (byte)127)
             return SetKind(NanoKeyKind.Backspace, out key);
         if (value == (byte)13 || value == (byte)10)
             return SetKind(NanoKeyKind.Enter, out key);
-        if (value == (byte)9) return SetKind(NanoKeyKind.Tab, out key);
+        if (value == (byte)9)
+            return SetKind(NanoKeyKind.Tab, out key);
         if (value >= (byte)32 && value < (byte)127)
             return SetInsert(value, (byte)0, (byte)0, (byte)0, 1, out key);
         if (value >= (byte)0xc2 && value <= (byte)0xdf)
@@ -82,9 +86,12 @@ internal sealed class NanoInput
             utf8Expected = 0;
             return false;
         }
-        if (utf8Length == 1) u1 = value;
-        else if (utf8Length == 2) u2 = value;
-        else u3 = value;
+        if (utf8Length == 1)
+            u1 = value;
+        else if (utf8Length == 2)
+            u2 = value;
+        else
+            u3 = value;
         utf8Length++;
         if (utf8Length < utf8Expected)
             return false;
@@ -113,32 +120,45 @@ internal sealed class NanoInput
         byte final = sequence[sequenceLength - 1];
         if (sequenceLength == 3)
         {
-            if (final == (byte)'A') return Complete(NanoKeyKind.Up, out key);
-            if (final == (byte)'B') return Complete(NanoKeyKind.Down, out key);
-            if (final == (byte)'C') return Complete(NanoKeyKind.Right, out key);
-            if (final == (byte)'D') return Complete(NanoKeyKind.Left, out key);
-            if (final == (byte)'H') return Complete(NanoKeyKind.Home, out key);
-            if (final == (byte)'F') return Complete(NanoKeyKind.End, out key);
+            if (final == (byte)'A')
+                return Complete(NanoKeyKind.Up, out key);
+            if (final == (byte)'B')
+                return Complete(NanoKeyKind.Down, out key);
+            if (final == (byte)'C')
+                return Complete(NanoKeyKind.Right, out key);
+            if (final == (byte)'D')
+                return Complete(NanoKeyKind.Left, out key);
+            if (final == (byte)'H')
+                return Complete(NanoKeyKind.Home, out key);
+            if (final == (byte)'F')
+                return Complete(NanoKeyKind.End, out key);
         }
         if (final != (byte)'~' && final != (byte)'t')
             return false;
         if (final == (byte)'~')
         {
             int number = ParseNumber(2, sequenceLength - 1);
-            if (number == 1 || number == 7) return Complete(NanoKeyKind.Home, out key);
-            if (number == 3) return Complete(NanoKeyKind.Delete, out key);
-            if (number == 4 || number == 8) return Complete(NanoKeyKind.End, out key);
-            if (number == 5) return Complete(NanoKeyKind.PageUp, out key);
-            if (number == 6) return Complete(NanoKeyKind.PageDown, out key);
-            if (number == 200) return Complete(NanoKeyKind.PasteStart, out key);
-            if (number == 201) return Complete(NanoKeyKind.PasteEnd, out key);
+            if (number == 1 || number == 7)
+                return Complete(NanoKeyKind.Home, out key);
+            if (number == 3)
+                return Complete(NanoKeyKind.Delete, out key);
+            if (number == 4 || number == 8)
+                return Complete(NanoKeyKind.End, out key);
+            if (number == 5)
+                return Complete(NanoKeyKind.PageUp, out key);
+            if (number == 6)
+                return Complete(NanoKeyKind.PageDown, out key);
+            if (number == 200)
+                return Complete(NanoKeyKind.PasteStart, out key);
+            if (number == 201)
+                return Complete(NanoKeyKind.PasteEnd, out key);
         }
         else
         {
             int firstSemicolon = Find((byte)';', 2);
             int secondSemicolon = Find((byte)';', firstSemicolon + 1);
-            if (firstSemicolon > 2 && secondSemicolon > firstSemicolon &&
-                ParseNumber(2, firstSemicolon) == 8)
+            if (firstSemicolon > 2 && secondSemicolon > firstSemicolon && ParseNumber(2,
+                firstSemicolon) == 8)
             {
                 int rows = ParseNumber(firstSemicolon + 1, secondSemicolon);
                 int columns = ParseNumber(secondSemicolon + 1, sequenceLength - 1);
@@ -161,7 +181,7 @@ internal sealed class NanoInput
     {
         for (int index = start; index < sequenceLength; index++)
             if (sequence[index] == value)
-                return index;
+            return index;
         return -1;
     }
 
@@ -202,7 +222,10 @@ internal sealed class NanoInput
     {
         key = new NanoKey();
         key.Kind = NanoKeyKind.Insert;
-        key.B0 = b0; key.B1 = b1; key.B2 = b2; key.B3 = b3;
+        key.B0 = b0;
+        key.B1 = b1;
+        key.B2 = b2;
+        key.B3 = b3;
         key.Length = count;
         return true;
     }

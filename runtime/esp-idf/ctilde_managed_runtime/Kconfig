@@ -13,8 +13,8 @@ config CTILDE_MANAGED_MAX_MODULES
     default 16
 
 config CTILDE_MANAGED_MAX_PROCESSES
-    int "Maximum retained process records"
+    int "Maximum concurrent managed process slots"
     range 16 256
-    default 128
+    default 16
 
 endmenu

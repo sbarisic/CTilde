@@ -28,12 +28,14 @@ internal sealed partial class CompilationModel
     public CompilationModel(ImmutableArray<SyntaxTree> syntaxTrees, ImmutableArray<SyntaxTree> userSyntaxTrees, DiagnosticBag diagnostics, CompilationTarget target, CompilationArchitecture architecture,
         ImmutableArray<CpuFeature> cpuFeatures = default, TargetEnvironment environment = TargetEnvironment.Native,
         bool simdOptimizations = false,
-        bool requireEntryPoint = true, bool requireRuntimeImplementations = true, ManagedModuleKind? managedModuleKind = null)
+        bool requireEntryPoint = true, bool requireRuntimeImplementations = true, ManagedModuleKind? managedModuleKind = null,
+        bool dependencyHasOverlays = false)
     {
         _target = target;
         _architecture = architecture;
         _environment = environment;
         _managedModuleKind = managedModuleKind;
+        DependencyHasOverlays = dependencyHasOverlays;
         RequireRuntimeImplementations = requireRuntimeImplementations;
         CpuFeatures = (cpuFeatures.IsDefault ? ImmutableArray<CpuFeature>.Empty : cpuFeatures).ToImmutableHashSet();
         SimdOptimizations = simdOptimizations;
@@ -65,6 +67,10 @@ internal sealed partial class CompilationModel
     public CompilationArchitecture Architecture => _architecture;
     public TargetEnvironment Environment => _environment;
     public ManagedModuleKind? ManagedModuleKind => _managedModuleKind;
+    public bool DependencyHasOverlays { get; }
+    public bool HasOverlays => DependencyHasOverlays || ProjectTypes.Any(type => type.OverlayName is not null) ||
+        ProjectTypes.SelectMany(type => type.Methods.Concat(type.Constructors)).Any(method => method.IsOverlay) ||
+        ProjectTypes.SelectMany(type => type.Properties).Any(property => property.OverlayName is not null);
     internal bool RequireRuntimeImplementations { get; }
     public ImmutableHashSet<CpuFeature> CpuFeatures { get; }
     public bool SimdOptimizations { get; }
@@ -325,6 +331,8 @@ internal sealed partial class CompilationModel
             BitFieldBackingType = definition.BitFieldBackingType,
             IsSealed = definition.IsSealed,
             IsAbstract = definition.IsAbstract,
+            OverlayName = definition.OverlayName,
+            IsExplicitlyResident = definition.IsExplicitlyResident,
             TypeArguments = arguments,
             GenericDefinition = definition,
         };
@@ -429,6 +437,8 @@ internal sealed partial class CompilationModel
             IsInterrupt = method.IsInterrupt,
             IsInterruptSafe = method.IsInterruptSafe,
             IsInterruptCode = method.IsInterruptCode,
+            OverlayName = method.OverlayName,
+            IsExplicitlyResident = method.IsExplicitlyResident,
             TaskStackSize = method.TaskStackSize,
             StackUsage = method.StackUsage,
             IsTrustedExtern = method.IsTrustedExtern,
@@ -587,6 +597,8 @@ internal sealed partial class CompilationModel
                 GetterDeclaredEffects = property.GetterDeclaredEffects,
                 SetterDeclaredEffects = property.SetterDeclaredEffects,
                 IsNoRecursion = property.IsNoRecursion,
+                OverlayName = property.OverlayName,
+                IsExplicitlyResident = property.IsExplicitlyResident,
             };
             cloned.ImplementedInterfaceProperties.AddRange(property.ImplementedInterfaceProperties);
             type.Properties.Add(cloned);
@@ -686,6 +698,8 @@ internal sealed partial class CompilationModel
             IsInterrupt = method.IsInterrupt,
             IsInterruptSafe = method.IsInterruptSafe,
             IsInterruptCode = method.IsInterruptCode,
+            OverlayName = method.OverlayName,
+            IsExplicitlyResident = method.IsExplicitlyResident,
             TaskStackSize = method.TaskStackSize,
             StackUsage = method.StackUsage,
             IsTrustedExtern = method.IsTrustedExtern,
@@ -838,10 +852,14 @@ internal sealed partial class CompilationModel
                     Diagnostics.Add("CT1270", "abstract applies only to classes and their members.", declaration.Source, declaration.Span);
                 foreach (var invalidModifier in declaration.Modifiers.Where(modifier => modifier is "const" or "unsafe" or "virtual" or "override" or "volatile" || modifier == "readonly" && declaration.Kind is not TypeDeclarationKind.Struct and not TypeDeclarationKind.Union))
                     Diagnostics.Add("CT1219", $"Modifier '{invalidModifier}' is not valid on a type declaration.", declaration.Source, declaration.Span);
-                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed", "Align", "BitField"] : declaration.Kind == TypeDeclarationKind.Newtype ? ["Align"] : []);
+                ValidateAttributes(declaration.Attributes, declaration, declaration.Kind == TypeDeclarationKind.Opaque ? ["NativeType"] : declaration.Kind is TypeDeclarationKind.Struct or TypeDeclarationKind.Union ? ["Packed", "Align", "BitField", "Overlay"] : declaration.Kind == TypeDeclarationKind.Class ? ["Overlay"] : declaration.Kind == TypeDeclarationKind.Newtype ? ["Align"] : []);
                 string? nativeTypeName = null;
                 string? nativeHeader = null;
                 int? pack = null;
+                var overlayAttribute = FindAttribute(declaration.Attributes, "Overlay");
+                var overlayName = ParseOverlayName(overlayAttribute);
+                if (overlayAttribute is not null && (declaration.Kind is not (TypeDeclarationKind.Class or TypeDeclarationKind.Struct) || declaration.Modifiers.Contains("abstract", StringComparer.Ordinal)))
+                    Diagnostics.Add("CT6230", "Overlay is valid only on a concrete class or struct.", overlayAttribute.Source, overlayAttribute.Span);
                 var declaredTypeParameters = declaration.TypeParameters.IsDefault ? [] : declaration.TypeParameters;
                 var alignment = ParseAlignment(FindAttribute(declaration.Attributes, "Align"),
                     declaredTypeParameters.Where(parameter => parameter.IsConstant).Select(parameter => parameter.Name).ToHashSet(StringComparer.Ordinal), out var alignmentParameter);
@@ -906,6 +924,7 @@ internal sealed partial class CompilationModel
                     IsSealed = declaration.Modifiers.Contains("sealed", StringComparer.Ordinal) || kind is DeclaredTypeKind.StaticClass or DeclaredTypeKind.Delegate,
                     IsAbstract = declaration.Modifiers.Contains("abstract", StringComparer.Ordinal) || kind == DeclaredTypeKind.Interface,
                     TypeParameters = typeParameters,
+                    OverlayName = overlayName,
                 });
             }
         }
@@ -1547,10 +1566,16 @@ internal sealed partial class CompilationModel
             case PropertyDeclarationSyntax property:
                 {
                     ValidateAllowedModifiers(property.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], property);
-                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "Section"]);
+                    ValidateAttributes(property.Attributes, property, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "Section", "Overlay", "Resident"]);
                     var propertyEffects = ParseEffectContracts(property.Attributes);
                     var noRecursion = FindAttribute(property.Attributes, "NoRecursion");
                     var propertySection = FindAttribute(property.Attributes, "Section");
+                    var propertyOverlayAttribute = FindAttribute(property.Attributes, "Overlay");
+                    var propertyResidentAttribute = FindAttribute(property.Attributes, "Resident");
+                    var propertyOverlay = ParseOverlayName(propertyOverlayAttribute);
+                    ValidateOverlayOverride(propertyOverlayAttribute, propertyResidentAttribute, property);
+                    if (propertyResidentAttribute is not null && type.OverlayName is null)
+                        Diagnostics.Add("CT6230", "Resident is valid only when overriding an enclosing type's Overlay placement.", propertyResidentAttribute.Source, propertyResidentAttribute.Span);
                     _ = ParseSectionName(propertySection);
                     if (propertySection is not null)
                         Diagnostics.Add("CT1287", "Section is not valid on a property.", propertySection.Source, propertySection.Span);
@@ -1640,6 +1665,8 @@ internal sealed partial class CompilationModel
                         GetterDeclaredEffects = getterEffects,
                         SetterDeclaredEffects = setterEffects,
                         IsNoRecursion = noRecursion is not null,
+                        OverlayName = propertyResidentAttribute is null ? propertyOverlay ?? type.OverlayName : null,
+                        IsExplicitlyResident = propertyResidentAttribute is not null,
                     };
                     if (noRecursion is not null && isAbstractProperty)
                         Diagnostics.Add("CT1294", "NoRecursion requires body-bearing accessors.", noRecursion.Source, noRecursion.Span);
@@ -1656,9 +1683,15 @@ internal sealed partial class CompilationModel
             case ConstructorDeclarationSyntax constructor:
                 {
                     ValidateAllowedModifiers(constructor.Modifiers, ["public", "internal", "protected", "private", "unsafe"], constructor);
-                    ValidateAttributes(constructor.Attributes, constructor, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "Section", "NoRecursion"]);
+                    ValidateAttributes(constructor.Attributes, constructor, ["NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "Section", "NoRecursion", "Overlay", "Resident"]);
                     var constructorSection = FindAttribute(constructor.Attributes, "Section");
                     var constructorNoRecursion = FindAttribute(constructor.Attributes, "NoRecursion");
+                    var constructorOverlayAttribute = FindAttribute(constructor.Attributes, "Overlay");
+                    var constructorResidentAttribute = FindAttribute(constructor.Attributes, "Resident");
+                    var constructorOverlay = ParseOverlayName(constructorOverlayAttribute);
+                    ValidateOverlayOverride(constructorOverlayAttribute, constructorResidentAttribute, constructor);
+                    if (constructorResidentAttribute is not null && type.OverlayName is null)
+                        Diagnostics.Add("CT6230", "Resident is valid only when overriding an enclosing type's Overlay placement.", constructorResidentAttribute.Source, constructorResidentAttribute.Span);
                     var constructorEffects = ParseEffectContracts(constructor.Attributes);
                     _ = ParseSectionName(constructorSection);
                     if (constructorSection is not null)
@@ -1685,6 +1718,8 @@ internal sealed partial class CompilationModel
                         IsNoRecursion = constructorNoRecursion is not null,
                         IsUnsafe = constructor.Modifiers.Contains("unsafe", StringComparer.Ordinal),
                         ConstructorInitializer = constructor.Initializer,
+                        OverlayName = constructorResidentAttribute is null ? constructorOverlay ?? type.OverlayName : null,
+                        IsExplicitlyResident = constructorResidentAttribute is not null,
                     };
                     AddMethod(type.Constructors, symbol);
                     break;
@@ -1699,7 +1734,7 @@ internal sealed partial class CompilationModel
                     var hasBody = method.Body is not null || method.AssemblyBody is not null;
                     var isAssemblyFunction = method.AssemblyBody is not null;
                     ValidateAllowedModifiers(method.Modifiers, ["public", "internal", "protected", "private", "static", "unsafe", "virtual", "override", "sealed", "abstract"], method);
-                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NativeImport", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "StackUsage", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe"]);
+                    ValidateAttributes(method.Attributes, method, ["EntryPoint", "Extern", "NativeImport", "Export", "NoAlloc", "NoThrow", "NoBlock", "NoRuntime", "NoRecursion", "ReturnsBorrowed", "ReturnsOwned", "ReturnsNullable", "Section", "Used", "TaskEntry", "StackUsage", "RuntimeImpl", "Naked", "Interrupt", "InterruptSafe", "Overlay", "Resident"]);
                     var entry = FindAttribute(method.Attributes, "EntryPoint");
                     var external = FindAttribute(method.Attributes, "Extern");
                     var nativeImport = FindAttribute(method.Attributes, "NativeImport");
@@ -1718,6 +1753,12 @@ internal sealed partial class CompilationModel
                     var nakedAttribute = FindAttribute(method.Attributes, "Naked");
                     var interruptAttribute = FindAttribute(method.Attributes, "Interrupt");
                     var interruptSafeAttribute = FindAttribute(method.Attributes, "InterruptSafe");
+                    var overlayAttribute = FindAttribute(method.Attributes, "Overlay");
+                    var residentAttribute = FindAttribute(method.Attributes, "Resident");
+                    var overlayName = ParseOverlayName(overlayAttribute);
+                    ValidateOverlayOverride(overlayAttribute, residentAttribute, method);
+                    if (residentAttribute is not null && type.OverlayName is null)
+                        Diagnostics.Add("CT6230", "Resident is valid only when overriding an enclosing type's Overlay placement.", residentAttribute.Source, residentAttribute.Span);
                     var runtimeImplementation = ParseRuntimeImplementation(runtimeImplAttribute);
                     uint? taskStackSize = null;
                     uint? stackUsage = null;
@@ -1860,10 +1901,11 @@ internal sealed partial class CompilationModel
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be returned by value.", method.ReturnType.Source, method.ReturnType.Span);
                     var enumIntrinsic = type.FullName == "System.Enum" && externalName?.StartsWith("ct_enum_", StringComparison.Ordinal) == true;
                     var managedProcessIntrinsic = type.FullName == "System.Diagnostics.ProcessRuntime" && externalName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true;
-                    var methodParameters = DeclareParameters(method.Parameters, tree, (external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic);
+                    var managedModuleImport = externalName?.StartsWith("ct_managed_import_", StringComparison.Ordinal) == true;
+                    var methodParameters = DeclareParameters(method.Parameters, tree, (external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic && !managedModuleImport);
                     foreach (var parameter in methodParameters.Where(parameter => parameter.Type.ContainsAtomic && parameter.PassingKind == ParameterPassingKind.Value))
                         Diagnostics.Add("CT1278", "Atomic<T> cannot be passed by value.", parameter.Syntax!.Source, parameter.Syntax.Span);
-                    if ((external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic)
+                    if ((external is not null || nativeImport is not null || export is not null) && !enumIntrinsic && !managedProcessIntrinsic && !managedModuleImport)
                     {
                         if (!method.TypeParameters.IsDefaultOrEmpty || ForbiddenNativeBoundaryType(returnType))
                             Diagnostics.Add("CT1279", "Open generic, interface, SIMD, atomic, and runtime-backed threading types cannot cross a native boundary.", method.ReturnType.Source, method.ReturnType.Span);
@@ -1925,7 +1967,18 @@ internal sealed partial class CompilationModel
                         IsOverride = method.Modifiers.Contains("override", StringComparer.Ordinal),
                         IsSealedOverride = method.Modifiers.Contains("sealed", StringComparer.Ordinal),
                         ExplicitInterfaceType = explicitInterfaceType,
+                        OverlayName = residentAttribute is null ? overlayName ?? type.OverlayName : null,
+                        IsExplicitlyResident = residentAttribute is not null,
                     };
+                    if ((overlayAttribute is not null || symbol.IsOverlay || residentAttribute is not null) &&
+                        (!hasBody || isAbstractMethod || external is not null || nativeImport is not null || entry is not null || export is not null ||
+                         runtimeImplAttribute is not null || nakedAttribute is not null || interruptAttribute is not null || interruptSafeAttribute is not null ||
+                         sectionAttribute is not null || taskEntryAttribute is not null))
+                    {
+                        SyntaxNode placementSyntax = overlayAttribute ?? (SyntaxNode?)residentAttribute ?? method;
+                        Diagnostics.Add("CT6231", "Overlay placement requires an ordinary concrete C~ method body without native, entry, interrupt, runtime, task-entry, or explicit-section attributes.",
+                            placementSyntax.Source, placementSyntax.Span);
+                    }
                     if (isAssemblyFunction &&
                         (!isStatic || !symbol.IsUnsafe || isAbstractMethod || external is not null || symbol.IsVirtual ||
                          !method.TypeParameters.IsDefaultOrEmpty || entry is not null || taskEntryAttribute is not null ||
@@ -2693,6 +2746,27 @@ internal sealed partial class CompilationModel
     }
 
     private static AttributeSyntax? FindAttribute(ImmutableArray<AttributeSyntax> attributes, string name) => attributes.FirstOrDefault(attribute => attribute.Name == name);
+
+    private string? ParseOverlayName(AttributeSyntax? attribute)
+    {
+        if (attribute is null)
+            return null;
+        if (attribute.Arguments is [LiteralExpressionSyntax { LiteralKind: SyntaxKind.StringToken, Value: string value }] &&
+            value.Length is >= 1 and <= 31 && value[0] is >= 'A' and <= 'Z' or >= 'a' and <= 'z' &&
+            value.All(character => character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-'))
+            return value;
+        Diagnostics.Add("CT6230", "Overlay requires one case-sensitive ASCII name of 1 to 31 bytes, starting with a letter and containing only letters, digits, '_' or '-'.",
+            attribute.Source, attribute.Span);
+        return null;
+    }
+
+    private void ValidateOverlayOverride(AttributeSyntax? overlay, AttributeSyntax? resident, SyntaxNode declaration)
+    {
+        if (resident is not null && !resident.Arguments.IsEmpty)
+            Diagnostics.Add("CT6230", "Resident does not accept arguments.", resident.Source, resident.Span);
+        if (overlay is not null && resident is not null)
+            Diagnostics.Add("CT6230", "Overlay and Resident cannot be combined on one declaration.", declaration.Source, declaration.Span);
+    }
 
     private EffectContract ParseEffectContracts(ImmutableArray<AttributeSyntax> attributes)
     {

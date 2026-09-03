@@ -72,6 +72,9 @@ internal sealed partial class CEmitter
             }
             AddSemantics(function.Body.Semantics.Values);
         }
+        if (Model.ManagedModuleKind == ManagedModuleKind.Library)
+            foreach (var type in Model.ProjectTypes.Where(type => type.Accessibility == Accessibility.Public))
+                AddType(type);
         foreach (var initializer in program.ModuleInitializers)
         {
             AddType(initializer.Field.ContainingType);

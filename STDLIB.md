@@ -2,7 +2,7 @@
 
 ## Status
 
-This document is the canonical standard-library reference for C~ Draft 0.46 and Runtime ABI 19. Draft 0.46 adds block devices, FAT mounts, T-CAN485 SDSPI storage, removable-media monitoring, and managed-process filesystem services. Managed Module ABI 1 and debug metadata version 3 remain unchanged.
+This document is the canonical standard-library reference for C~ Draft 0.49 and Runtime ABI 22. Runtime ABI 22 retains the managed-process filesystem, storage, and redirected-stream APIs while adding cleanup-safe managed-call transitions for process-local code overlays. Managed Module ABI 3 and debug metadata version 3 are current.
 
 The physical sources are also a first-class project at `CTilde/StandardLibrary/ctilde.json`, wrapped by `CTilde.StandardLibrary.ctproj` in the focused `CTilde.StandardLibrary.sln`. Its `kind` is `standard-library`: Check and Build validate hosted baseline/full, Cosmopolitan full, ESP-IDF full, and freestanding baseline/full compositions without requiring an application entry point or emitting a binary. Clean is a no-op and Run is unavailable.
 

@@ -20,6 +20,15 @@ internal sealed partial class CEmitter
             : "#define CT_USED");
         writer.WriteLine("#endif");
         writer.WriteLine();
+        if (_reachableMethods.Any(method => method.IsOverlay))
+        {
+            writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
+            writer.WriteLine("#define CT_OVERLAY_BODY(name) __attribute__((section(\".ctilde.overlay.\" name \".text\"), used, noinline))");
+            writer.WriteLine("#else");
+            writer.WriteLine("#define CT_OVERLAY_BODY(name)");
+            writer.WriteLine("#endif");
+            writer.WriteLine();
+        }
         var sections = _reachableMethods.Where(method => method.SectionName is not null)
             .Select(method => (Name: method.SectionName!, Kind: NativeSectionKind.Code))
             .Concat(EmittedTypes.SelectMany(type => type.Fields)

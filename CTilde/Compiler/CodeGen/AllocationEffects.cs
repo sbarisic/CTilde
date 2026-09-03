@@ -173,8 +173,9 @@ internal sealed class EffectAnalysis
         {
             if (!reachable.Add(method))
                 continue;
-            foreach (var target in CallTargets.GetValueOrDefault(method))
-                pending.Enqueue(target);
+            if (CallTargets.TryGetValue(method, out var targets))
+                foreach (var target in targets)
+                    pending.Enqueue(target);
         }
         return reachable;
     }

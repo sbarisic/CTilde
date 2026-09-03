@@ -1164,6 +1164,13 @@ internal sealed partial class TypedIrBodyLowerer
     {
         if (accessibility == Accessibility.Private && member.ContainingType != _method.ContainingType)
             Report("CT1110", $"Member '{member.Name}' is private.", syntax);
+        if (accessibility == Accessibility.Internal && member.Syntax is not null && _method.Syntax is not null)
+        {
+            var declaringOwner = _emitter.Model.SourceOwnerFor(member.Syntax.Source);
+            var usingOwner = _emitter.Model.SourceOwnerFor(_method.Syntax.Source);
+            if (declaringOwner is not null && usingOwner is not null && declaringOwner.ModulePath != usingOwner.ModulePath)
+                Report("CT1110", $"Member '{member.Name}' is internal to module '{declaringOwner.ModulePath}'.", syntax);
+        }
         if (accessibility == Accessibility.Protected && member.ContainingType != _method.ContainingType && !_method.ContainingType.DerivesFrom(member.ContainingType))
             Report("CT1113", $"Member '{member.Name}' is protected.", syntax);
     }

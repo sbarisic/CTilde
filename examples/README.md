@@ -1,6 +1,6 @@
 # C~ examples
 
-`Examples.sln` is the editor/discovery solution for 21 manifest-backed C~ projects. Projects are grouped by responsibility and have `ActiveCfg` mappings only, so opening the solution never builds every native target or requires every optional toolchain at once. Select one project and use its supported manifest-backed command; examples that need a companion native library, module packaging, optional toolchain, or hardware use the runner named in their README.
+`Examples.sln` is the editor/discovery solution for 27 manifest-backed C~ projects. Projects are grouped by responsibility and have `ActiveCfg` mappings only, so opening the solution never builds every native target or requires every optional toolchain at once. Select one project and use its supported manifest-backed command; examples that need a companion native library, module packaging, optional toolchain, or hardware use the runner named in their README.
 
 ## Language and hosted programs
 
@@ -29,17 +29,22 @@
 
 | Project | What it demonstrates | Requirements |
 | --- | --- | --- |
-| [Managed Shell Firmware](ManagedShell/README.md) | Conventional direct `.ctm` invocation, LittleFS plus removable T-CAN485 SD/FAT VFS, Runtime ABI 19 process filesystem services, SD-first module lookup, process/module registry, status LED, and final application unload | ESP-IDF 6 and ESP32 |
+| [Managed Shell Firmware](ManagedShell/README.md) | Direct `.ctm` invocation, LittleFS plus removable SD/FAT VFS, Runtime ABI 22 redirected processes, checked managed-library calls, overlays, status LED, and unload | ESP-IDF 6 and ESP32 |
 | [Managed Hello Module](ManagedShell/Modules/Hello/Program.ct) | A `.ctm` application with arguments, process-local mutable statics, copied-message receive, cooperative cancellation, and safe CPU-load mode | ESP-IDF 6 Xtensa toolchain |
 | [Managed Memory Tool](ManagedShell/Modules/Memory/Program.ct) | A separate `memory.ctm` application with module-local native reporting for RAM, allocator, process, module, task, and LittleFS diagnostics | ESP-IDF 6 Xtensa toolchain |
 | [Managed Task Manager](ManagedShell/Modules/TaskManager/Program.ct) | A separate `taskmgr.ctm` application with module-local native sampling for process CPU, heap, threads, stack headroom, and termination | ESP-IDF 6 Xtensa toolchain |
 | [Managed SD Tool](ManagedShell/Modules/Sd/Program.ct) | A separate `sd.ctm` application for card status, identity, mount selection, explicit formatting, and validated four-entry MBR management through a versioned firmware bridge | ESP-IDF 6 Xtensa toolchain |
 | [Managed Nano Editor](ManagedShell/Modules/Nano/Program.ct) | A standalone `nano.ctm` full-screen ANSI editor with strict UTF-8, a 32 KiB gap buffer, bracketed paste, and recovery-safe file replacement | ESP-IDF 6 Xtensa toolchain |
+| [Managed Network Tool](ManagedShell/Modules/Net/Program.ct) | `net.ctm` Wi-Fi station status, scan, profile-based connection, disconnect, and readiness through a resident state owner | ESP-IDF 6 Xtensa toolchain |
+| [Managed SSH Library](ManagedShell/Modules/SystemSsh/Protocol.ct) | A separately compiled library with public concrete API metadata, checked imports, protocol helpers, and unloadable native transport code | ESP-IDF 6 Xtensa toolchain |
+| [Managed SSH Service](ManagedShell/Modules/Sshd/Program.ct) | `sshd.ctm` consuming `system.ssh.ctmeta.json` without provider source; its current scaffold performs network wait, listen, accept, and SSH identification exchange | ESP-IDF 6 Xtensa toolchain |
+| [Managed Overlay Library](ManagedShell/Modules/OverlayLibrary/Library.ct) | A separately packaged schema-3 library with resident stubs, overlay bodies, process-local state, and a throwing managed export | ESP-IDF 6 Xtensa toolchain |
+| [Managed Overlay Acceptance](ManagedShell/Modules/OverlayFixture/Program.ct) | Nested local and cross-library overlay transitions, same-overlay direct calls, delegates, cleanup, exception propagation, and subsequent-call recovery | ESP-IDF 6 Xtensa toolchain |
 | [T-CAN Hardware](TCan485/README.md) | Physical ESP32 peripherals, generated bindings, runtime services, debugger acceptance, and Wi-Fi opt-in | ESP-IDF 6 and T-CAN485 |
 | [T-CAN QEMU ESP32](TCan485/README.md) | Xtensa ESP-IDF runtime and language fixture under QEMU | ESP-IDF 6 QEMU |
 | [T-CAN QEMU ESP32-C3](TCan485/README.md) | RISC-V ESP-IDF runtime and language fixture under QEMU | ESP-IDF 6 QEMU |
 
-Managed Module ABI 1 is currently ESP-IDF-only. The hosted target loads ordinary native C libraries through `[NativeImport]`; it does not emit or load managed C~ `.ctm` files, share ARC objects across desktop modules, or consume `.ctmeta.json` references.
+Managed Module ABI 3 is ESP-IDF-only. Named overlays are supported only by Xtensa managed applications and libraries. The hosted target loads ordinary native C libraries through `[NativeImport]`; it does not host managed C~ `.ctm` files or share ARC objects across desktop modules.
 
 Repository source modules are covered by conformance tests instead of a normal solution project. Their exact Git revisions and cache/vendor lifecycle are intentionally explicit, and a clean `Examples.sln` checkout must not require network access. A full-service freestanding backend example for file, directory, clock, math, thread, mutex, and TLS roles remains future work; the two current freestanding examples demonstrate the minimum provider subsets they actually use.
 

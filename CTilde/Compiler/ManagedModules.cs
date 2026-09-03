@@ -29,6 +29,21 @@ public sealed record ManagedModuleExportMetadata(
     string Ownership,
     string Effects);
 
+public sealed record ManagedModuleDeclarationMetadata(
+    string Namespace,
+    string Source);
+
+public sealed record ManagedModuleOverlayMetadata(
+    string Name,
+    int PayloadBytes,
+    int Alignment,
+    ImmutableArray<ManagedModuleOverlayFunctionMetadata> Functions = default);
+
+public sealed record ManagedModuleOverlayFunctionMetadata(
+    string Identity,
+    string BodySymbol,
+    int TargetIndex);
+
 public sealed record ManagedModuleMetadata(
     int SchemaVersion,
     string DraftVersion,
@@ -41,7 +56,11 @@ public sealed record ManagedModuleMetadata(
     string ApiHash,
     ImmutableArray<ManagedModuleDependencyMetadata> Dependencies,
     ImmutableArray<ManagedModuleTypeMetadata> Types,
-    ImmutableArray<ManagedModuleExportMetadata> Exports)
+    ImmutableArray<ManagedModuleExportMetadata> Exports,
+    ImmutableArray<ManagedModuleDeclarationMetadata> Declarations = default,
+    bool HasOverlays = false,
+    int MaximumOverlayBytes = 0,
+    ImmutableArray<ManagedModuleOverlayMetadata> Overlays = default)
 {
     internal const int MaximumNameAsciiBytes = 63;
     internal const int MaximumVersionAsciiBytes = 31;
@@ -76,22 +95,30 @@ public sealed record ManagedModuleMetadata(
 
     public string ToDeterministicJson()
     {
+        var dependencies = Dependencies.IsDefault ? ImmutableArray<ManagedModuleDependencyMetadata>.Empty : Dependencies;
+        var types = Types.IsDefault ? ImmutableArray<ManagedModuleTypeMetadata>.Empty : Types;
+        var exports = Exports.IsDefault ? ImmutableArray<ManagedModuleExportMetadata>.Empty : Exports;
+        var declarations = Declarations.IsDefault ? ImmutableArray<ManagedModuleDeclarationMetadata>.Empty : Declarations;
+        var overlays = Overlays.IsDefault ? ImmutableArray<ManagedModuleOverlayMetadata>.Empty : Overlays;
         var canonical = this with
         {
-            Dependencies = [.. Dependencies.OrderBy(item => item.Name, StringComparer.Ordinal)],
-            Types = [.. Types.OrderBy(item => item.Fingerprint, StringComparer.Ordinal)],
-            Exports = [.. Exports.OrderBy(item => item.Identity, StringComparer.Ordinal)],
+            Dependencies = [.. dependencies.OrderBy(item => item.Name, StringComparer.Ordinal)],
+            Types = [.. types.OrderBy(item => item.Fingerprint, StringComparer.Ordinal)],
+            Exports = [.. exports.OrderBy(item => item.Identity, StringComparer.Ordinal)],
+            Declarations = [.. declarations.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Source, StringComparer.Ordinal)],
+            Overlays = [.. overlays.OrderBy(item => item.Name, StringComparer.Ordinal)
+                .Select(item => item with { Functions = item.Functions.IsDefault ? [] : [.. item.Functions.OrderBy(function => function.Identity, StringComparer.Ordinal)] })],
         };
         return JsonSerializer.Serialize(canonical, JsonOptions) + "\n";
     }
 
     public void Validate(string source)
     {
-        if (SchemaVersion != 1 || DraftVersion != CompilerContract.DraftVersion || RuntimeAbi != CompilerContract.RuntimeAbiVersion || ModuleAbi != CompilerContract.ManagedModuleAbiVersion)
+        if (SchemaVersion != 3 || DraftVersion != CompilerContract.DraftVersion || RuntimeAbi != CompilerContract.RuntimeAbiVersion || ModuleAbi != CompilerContract.ManagedModuleAbiVersion)
             throw new CTildeProjectException($"Managed-module metadata '{source}' is incompatible with Draft {CompilerContract.DraftVersion}, Runtime ABI {CompilerContract.RuntimeAbiVersion}, and Module ABI {CompilerContract.ManagedModuleAbiVersion}.", "CT6201");
         if (Kind is not ("application" or "library") || !IsCanonicalName(Name) || !IsExactVersion(Version) || !IsHash(BuildIdentity) || !IsHash(ApiHash))
             throw new CTildeProjectException($"Managed-module metadata '{source}' has an incomplete exact identity.", "CT6201");
-        if (Dependencies.IsDefault || Types.IsDefault || Exports.IsDefault)
+        if (Dependencies.IsDefault || Types.IsDefault || Exports.IsDefault || Declarations.IsDefault || Overlays.IsDefault)
             throw new CTildeProjectException($"Managed-module metadata '{source}' omits a required deterministic array.", "CT6201");
         if (Dependencies.Any(item => !IsCanonicalName(item.Name) || !IsExactVersion(item.Version) || !IsHash(item.BuildIdentity) || !IsHash(item.ApiHash)) ||
             Dependencies.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count() != Dependencies.Length ||
@@ -105,6 +132,17 @@ public sealed record ManagedModuleMetadata(
                 string.IsNullOrWhiteSpace(item.Signature) || string.IsNullOrWhiteSpace(item.Ownership) || string.IsNullOrWhiteSpace(item.Effects)) ||
             Exports.Select(item => item.Identity).Distinct(StringComparer.Ordinal).Count() != Exports.Length)
             throw new CTildeProjectException($"Managed-module metadata '{source}' contains an invalid or duplicate managed export identity.", "CT6201");
+        if (Declarations.Any(item => item.Namespace is null || string.IsNullOrWhiteSpace(item.Source)))
+            throw new CTildeProjectException($"Managed-module metadata '{source}' contains an invalid public declaration.", "CT6201");
+        if (MaximumOverlayBytes < 0 || HasOverlays != (Overlays.Length != 0) ||
+            MaximumOverlayBytes != (Overlays.IsEmpty ? 0 : Overlays.Max(item => item.PayloadBytes)) ||
+            Overlays.Any(item => !IsOverlayName(item.Name) || item.PayloadBytes < 0 || item.Alignment != 16 || item.Functions.IsDefault ||
+                item.Functions.Any(function => string.IsNullOrWhiteSpace(function.Identity) || string.IsNullOrWhiteSpace(function.BodySymbol) || function.TargetIndex < 0) ||
+                item.Functions.Select(function => function.Identity).Distinct(StringComparer.Ordinal).Count() != item.Functions.Length) ||
+            Overlays.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count() != Overlays.Length ||
+            !Overlays.SelectMany(item => item.Functions).Select(function => function.TargetIndex)
+                .Order().SequenceEqual(Enumerable.Range(0, Overlays.Sum(item => item.Functions.Length))))
+            throw new CTildeProjectException($"Managed-module metadata '{source}' contains invalid overlay information.", "CT6201");
 
         var apiText = string.Join('\n', Types.OrderBy(item => item.Fingerprint, StringComparer.Ordinal)
             .Select(item => $"{item.Fingerprint}:{item.Layout}:{item.Size}:{item.Alignment}")
@@ -121,6 +159,9 @@ public sealed record ManagedModuleMetadata(
     internal static bool IsExactVersion(string? value) => value is not null &&
         IsWithinAsciiCapacity(value, MaximumVersionAsciiBytes) &&
         Regex.IsMatch(value, "^(0|[1-9][0-9]*)(?:[.](0|[1-9][0-9]*)){2}(?:-[0-9A-Za-z.-]+)?(?:[+][0-9A-Za-z.-]+)?$", RegexOptions.CultureInvariant);
+
+    internal static bool IsOverlayName(string? value) => value is { Length: >= 1 and <= 31 } &&
+        Regex.IsMatch(value, "^[A-Za-z][A-Za-z0-9_-]*$", RegexOptions.CultureInvariant);
 
     private static bool IsWithinAsciiCapacity(string value, int maximumBytes) =>
         value.Length <= maximumBytes && value.All(character => character <= '\u007f');

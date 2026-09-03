@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.16)
+include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+project(ctilde_net)
+include(elf_loader)
+project_so(ctilde_net)

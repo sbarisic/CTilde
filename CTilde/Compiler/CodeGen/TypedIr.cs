@@ -103,6 +103,17 @@ internal sealed class TypedIrOptimizer(BoundProgram program)
         }
 
         Add(program.Model.EntryPoint);
+        if (program.Model.ManagedModuleKind == ManagedModuleKind.Library)
+        {
+            var publicTypes = program.Model.ProjectTypes
+                .Where(type => type.Accessibility == Accessibility.Public)
+                .ToHashSet();
+            foreach (var function in ir.Functions.Where(function =>
+                         publicTypes.Contains(function.Method.ContainingType) &&
+                         (function.Method.Accessibility == Accessibility.Public ||
+                          function.Property is { Accessibility: Accessibility.Public })))
+                Add(function.Method);
+        }
         foreach (var implementation in program.Model.RuntimeImplementations.Values)
             Add(implementation);
         foreach (var function in ir.Functions.Where(function => function.Method.ExportName is not null ||

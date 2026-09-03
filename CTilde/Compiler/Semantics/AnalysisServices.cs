@@ -120,6 +120,8 @@ internal sealed class AnalysisServices : ILoweringServices
             IsVirtual = property.IsVirtual,
             IsOverride = property.IsOverride,
             IsSealedOverride = property.IsSealedOverride,
+            OverlayName = property.OverlayName,
+            IsExplicitlyResident = property.IsExplicitlyResident,
             TypeSubstitutions = property.ContainingType.GenericDefinition is null
                 ? ImmutableDictionary<string, CType>.Empty
                 : property.ContainingType.GenericDefinition.TypeParameters
@@ -307,6 +309,8 @@ internal sealed class AnalysisServices : ILoweringServices
 
     public string RegisterFunctionPointerTrampoline(CType type, MethodSymbol method)
     {
+        if (method.IsOverlay && method.Syntax is { } syntax)
+            Diagnostics.Add("CT6234", "An overlay method cannot be converted to an unmanaged function pointer; use a managed delegate or synchronous callback.", syntax.Source, syntax.Span);
         var key = (type, method);
         if (_functionPointerTrampolines.TryGetValue(key, out var existing))
             return existing;

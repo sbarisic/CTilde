@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.46 adds `System.Storage`, a T-CAN485 SDSPI/FatFs/VFS backend, removable-media generations, and Runtime ABI 19 filesystem services for ESP-IDF managed applications. Managed Module ABI 1, the firmware-owned process host, deterministic dependency preflight, and per-process mutable state remain unchanged. Debug metadata remains version 3.
+Draft 0.49 uses Runtime ABI 22 and Managed Module ABI 3. ESP32/Xtensa managed applications and libraries can place selected bodies in named, process-local code overlays while stable resident stubs preserve module context and exception cleanup across local and imported calls. Schema-3 metadata records exact overlay capabilities without changing the public API hash. ManagedShell retains the Draft 0.48 redirected streams, networking slice, removable storage, and stable process identities. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -218,7 +218,7 @@ Release builds can select `speed` or `aggressive` optimization, `baseline` or x6
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
-An ESP-IDF managed application selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits a deterministic `.ctmeta.json` reference and an ELF `.ctm` containing the Module ABI 1 preflight manifest. The firmware-side process host searches direct-child module files in `/sd/modules` before `/storage/modules`; only absence selects the LittleFS fallback. ManagedShell invokes applications by their explicit lowercase `.ctm` names and includes standalone memory, task-manager, and SD-management applications. Their small example-owned host protocols are not part of either managed ABI. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 1 is not a hosted artifact format.
+An ESP-IDF managed application or library selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits deterministic schema-3 `.ctmeta.json` declarations and a resident ELF `.ctm` with an optional appended Xtensa overlay container. Consumers compile against exact metadata references without provider source; the loader validates and patches managed import and call-target slots before publication. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 3 remains ESP-IDF-only.
 
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
@@ -247,7 +247,7 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path. The [hosted native-import example](examples/HostedNativeImport/README.md) builds and executes one stateful plug-in under MSVC, WSL GCC, and WSL Clang; it deliberately does not present that C ABI as managed-module loading.
 
-The generated header exposes exported methods and Runtime ABI 19 lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 1 descriptor and bind to the firmware-owned `ct_runtime_api_v19` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
+The generated header exposes exported methods and runtime lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 3 descriptor and bind to the firmware-owned `ct_runtime_api_v22` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
 Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, and managed allocation failure are catchable exceptions on exception-capable targets. Freestanding routes these faults to its panic provider. ABI, runtime lifecycle, thread attachment, ARC corruption, and native-boundary failures are always panics.
 
@@ -263,7 +263,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 - `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
 - `Editors.sln` contains the three Visual Studio extension projects.
-- `Examples.sln` contains 21 projects grouped as language and hosted programs, systems targets, managed modules, and T-CAN variants. It includes separate editor projects for the ManagedShell firmware, Hello application, memory tool, task manager, and SD tool.
+- `Examples.sln` contains 25 projects grouped as language and hosted programs, systems targets, managed modules, and T-CAN variants. ManagedShell applications and libraries are separate editor projects.
 - `CTilde.StandardLibrary.sln` contains the physical standard-library project.
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
@@ -287,9 +287,9 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.46 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.49 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
-- [C_ABI.md](C_ABI.md): generated C, Runtime ABI 19, Managed Module ABI 1, and native interop.
+- [C_ABI.md](C_ABI.md): generated C, Runtime ABI 22, Managed Module ABI 3, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): measured implementation and validation status.
 - [TODO.md](TODO.md): outstanding work only.

@@ -8,8 +8,8 @@
 extern "C" {
 #endif
 
-#define CTILDE_RUNTIME_ABI_VERSION 19u
-#define CTILDE_MANAGED_MODULE_ABI_VERSION 1u
+#define CTILDE_RUNTIME_ABI_VERSION 22u
+#define CTILDE_MANAGED_MODULE_ABI_VERSION 3u
 #define CTILDE_MANAGED_MODULE_SD_ROOT "/sd/modules"
 #define CTILDE_MANAGED_MODULE_FALLBACK_ROOT "/storage/modules"
 #define CTILDE_MANAGED_MODULE_ROOT CTILDE_MANAGED_MODULE_FALLBACK_ROOT
@@ -66,37 +66,72 @@ typedef struct ct_runtime_io_metadata_v19 {
 typedef struct ct_runtime_io_directory_read_v19 { uint32_t Size; uintptr_t Handle; uint8_t *Name; size_t NameCapacity; size_t NameLength; uint8_t Kind; uint32_t Attributes; int64_t Length; } ct_runtime_io_directory_read_v19;
 
 typedef struct ct_type_descriptor ct_type_descriptor;
+typedef struct ct_type_ops {
+    uint32_t Size;
+    size_t ValueSize;
+    size_t ValueAlignment;
+    void (*Copy)(void *destination, const void *source);
+    void (*Drop)(void *value);
+    bool (*Equals)(const void *left, const void *right);
+    uint32_t (*Hash)(const void *value);
+    int32_t (*Compare)(const void *left, const void *right);
+} ct_type_ops;
 typedef struct ct_process_context ct_process_context;
-typedef struct ct_managed_module_descriptor_v1 ct_managed_module_descriptor_v1;
+typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;
 
-typedef struct ct_runtime_api_v19 {
+typedef struct ct_managed_call_target_v3 {
+    uint32_t Size;
+    uint32_t Placement;
+    uint32_t OverlayId;
+    uint32_t Reserved;
+    uintptr_t Body;
+} ct_managed_call_target_v3;
+
+typedef struct ct_managed_call_frame_v22 {
+    uintptr_t Opaque[8];
+} ct_managed_call_frame_v22;
+
+typedef struct ct_runtime_api_v22 {
     uint32_t Size;
     uint32_t AbiVersion;
-    void *(*Allocate)(size_t size, const ct_managed_module_descriptor_v1 *module);
+    void *(*Allocate)(size_t size, const ct_managed_module_descriptor_v3 *module);
     void (*Free)(void *value);
     void (*FinalRelease)(void *value);
     void (*Raise)(void *exception);
     void (*RuntimeFault)(const char *code, const char *file, int32_t line);
     const ct_type_descriptor *(*RegisterType)(const void *descriptor);
-    void (*UnregisterTypes)(const ct_managed_module_descriptor_v1 *module);
+    void (*UnregisterTypes)(const ct_managed_module_descriptor_v3 *module);
     ct_process_context *(*CurrentProcess)(void);
-    void *(*CurrentModuleState)(const ct_managed_module_descriptor_v1 *module);
+    void *(*CurrentModuleState)(const ct_managed_module_descriptor_v3 *module);
     void *(*CurrentThreadState)(void);
     void (*SetThreadState)(void *state);
     bool (*CancellationRequested)(void);
-    void (*EnterCall)(const ct_managed_module_descriptor_v1 *module);
-    void (*LeaveCall)(const ct_managed_module_descriptor_v1 *module);
+    uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3 *module,
+        const ct_managed_call_target_v3 *target, ct_managed_call_frame_v22 *frame);
+    void (*LeaveManagedCall)(ct_managed_call_frame_v22 *frame);
     int32_t (*Service)(uint32_t service, void *payload, size_t size);
-} ct_runtime_api_v19;
+} ct_runtime_api_v22;
 
-typedef struct ct_managed_dependency_v1 {
+typedef struct ct_managed_dependency_v2 {
     const char *Name;
     const char *Version;
     const char *BuildIdentity;
     const char *ApiHash;
-} ct_managed_dependency_v1;
+} ct_managed_dependency_v2;
 
-struct ct_managed_module_descriptor_v1 {
+typedef struct ct_managed_export_v2 {
+    const char *Identity;
+    void *Address;
+} ct_managed_export_v2;
+
+typedef struct ct_managed_import_v3 {
+    const char *Dependency;
+    const char *Identity;
+    void **AddressSlot;
+    const ct_managed_module_descriptor_v3 **ModuleSlot;
+} ct_managed_import_v3;
+
+struct ct_managed_module_descriptor_v3 {
     uint32_t Size;
     uint32_t RuntimeAbi;
     uint32_t ModuleAbi;
@@ -106,7 +141,11 @@ struct ct_managed_module_descriptor_v1 {
     const char *BuildIdentity;
     const char *ApiHash;
     uint32_t DependencyCount;
-    const ct_managed_dependency_v1 *Dependencies;
+    const ct_managed_dependency_v2 *Dependencies;
+    uint32_t ExportCount;
+    const ct_managed_export_v2 *Exports;
+    uint32_t ImportCount;
+    const ct_managed_import_v3 *Imports;
     size_t StaticStateSize;
     size_t StaticStateAlignment;
     uint32_t MainTaskStackBytes;
@@ -116,6 +155,10 @@ struct ct_managed_module_descriptor_v1 {
     int32_t (*Main)(void *arguments);
     void *(*CreateArguments)(int32_t count, const char *const *values, const size_t *lengths);
     void *(*CreateBytes)(const uint8_t *data, size_t length);
+    uint32_t CallTargetCount;
+    ct_managed_call_target_v3 *CallTargets;
+    uint32_t HasOverlays;
+    uint32_t MaximumOverlayBytes;
 };
 
 typedef enum ct_managed_process_state {
@@ -137,6 +180,16 @@ typedef struct ct_managed_process_info {
     char ModuleName[CTILDE_MANAGED_MODULE_NAME_CAPACITY];
 } ct_managed_process_info;
 
+typedef struct ct_managed_overlay_debug_state_v22 {
+    uint32_t Size;
+    uint32_t ProcessId;
+    uintptr_t WindowAddress;
+    size_t WindowSize;
+    uint32_t OverlayId;
+    uint32_t Generation;
+    char ModuleName[CTILDE_MANAGED_MODULE_NAME_CAPACITY];
+} ct_managed_overlay_debug_state_v22;
+
 typedef struct ct_managed_module_info {
     char Name[CTILDE_MANAGED_MODULE_NAME_CAPACITY];
     char Version[CTILDE_MANAGED_MODULE_VERSION_CAPACITY];
@@ -150,13 +203,19 @@ int ctilde_managed_runtime_initialize(void);
 size_t ctilde_managed_processes(ct_managed_process_info *output, size_t capacity);
 size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity);
 uint32_t ctilde_managed_process_for_task(uintptr_t task_handle);
+bool ctilde_managed_overlay_debug_state(uint32_t process_id,
+    ct_managed_overlay_debug_state_v22 *output);
 int ctilde_managed_preflight(const char *path, char *error, size_t error_capacity);
-const ct_runtime_api_v19 *ctilde_runtime_api_v19(void);
+const ct_runtime_api_v22 *ctilde_runtime_api_v22(void);
 
 /* Managed standard-library entry points. The managed layouts are private to ABI 19. */
 
 void ctilde_managed_storage_invalidate_prefix(const char *prefix, uint64_t generation);
+bool ctilde_managed_storage_prefix_busy(const char *prefix);
 uintptr_t ct_managed_process_start(const void *path, const void *arguments);
+uintptr_t ct_managed_process_start_redirected(const void *path, const void *arguments,
+    bool redirect_input, bool redirect_output, bool redirect_error);
+uintptr_t ct_managed_process_try_open(uint32_t id);
 uintptr_t ct_managed_process_current(void);
 uint32_t ct_managed_process_id(uintptr_t handle);
 ct_managed_process_state ct_managed_process_get_state(uintptr_t handle);
@@ -170,6 +229,11 @@ void ct_managed_process_send(uintptr_t handle, const void *payload);
 void *ct_managed_process_receive(uintptr_t handle, const void *type_template);
 bool ct_managed_process_try_receive(uintptr_t handle, uint32_t timeout_milliseconds, const void *type_template, void **payload);
 bool ct_managed_process_cancellation_requested(void);
+bool ct_managed_process_pipe_read(uintptr_t handle, int32_t stream, void *buffer,
+    int32_t offset, int32_t count, uint32_t timeout_milliseconds, int32_t *bytes_read, bool *eof);
+bool ct_managed_process_pipe_write(uintptr_t handle, int32_t stream, const void *buffer,
+    int32_t offset, int32_t count, uint32_t timeout_milliseconds, int32_t *bytes_written);
+void ct_managed_process_pipe_close(uintptr_t handle, int32_t stream);
 
 #ifdef __cplusplus
 }

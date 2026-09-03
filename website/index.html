@@ -44,7 +44,7 @@
       <div class="hero-lines" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span></span> Draft 0.46 experimental systems language</p>
+          <p class="eyebrow"><span></span> Draft 0.49 experimental systems language</p>
           <h1>Familiar syntax.<br><em>Native systems.</em></h1>
           <p class="hero-lede">C~ brings C#-style structure to native systems work. It compiles to deterministic C23 for desktop programs, freestanding images, Cosmopolitan executables, ESP-IDF firmware, and trusted managed applications on ESP32—without the CLR.</p>
           <div class="hero-actions">
@@ -98,8 +98,8 @@
 
         <div class="status-strip" aria-label="Current compatibility versions">
           <div><strong>0.46</strong><span>Language draft</span></div>
-          <div><strong>19</strong><span>Runtime ABI</span></div>
-          <div><strong>1</strong><span>Managed Module ABI</span></div>
+          <div><strong>22</strong><span>Runtime ABI</span></div>
+          <div><strong>3</strong><span>Managed Module ABI</span></div>
           <div><strong>3</strong><span>Debug metadata</span></div>
         </div>
 
@@ -131,8 +131,8 @@
           <article class="capability-card">
             <p class="capability-label">Managed ESP32 apps</p>
             <h3>Load, run, reclaim</h3>
-            <p>Managed Module ABI 1 packages a C~ application as a checked <code>.ctm</code> ELF. ManagedShell demonstrates FreeRTOS-backed processes, RGB status, and loadable memory and task-manager tools whose native C stays inside each module.</p>
-            <ul><li>Independent state and heaps</li><li>Copied-message IPC</li><li>Immediate unload and reload</li></ul>
+            <p>Managed Module ABI 3 packages checked resident ELFs with optional Xtensa code overlays. Schema-3 references compile without provider source, and Runtime ABI 22 keeps managed calls cleanup-safe across returns and exceptions.</p>
+            <ul><li>Checked managed imports</li><li>Independent state and heaps</li><li>Redirected process I/O</li></ul>
           </article>
           <article class="capability-card">
             <p class="capability-label">Tooling</p>
@@ -142,7 +142,7 @@
           </article>
         </div>
 
-        <p class="capability-note">Managed modules are currently ESP-IDF-only trusted native code. Managed-library linking and shared public types across separately compiled C~ modules remain future work.</p>
+        <p class="capability-note">Managed modules are ESP-IDF-only trusted native code. Checked cross-module calls now work; canonical descriptor substitution, shared generic implementations, and complete cross-module exception and resource handling remain in development.</p>
       </div>
     </section>
 
@@ -635,7 +635,7 @@ card.Start();
             <div class="example-copy">
               <p class="example-number">15 / MANAGED ESP32 APPLICATION</p>
               <h3>Run native modules as logical processes.</h3>
-              <p>A <code>.ctm</code> application shares Runtime ABI 19 with firmware while keeping its mutable statics, heap accounting, cancellation state, and copied mailbox process-local.</p>
+              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping its mutable statics, heap accounting, cancellation state, copied mailbox, optional redirected streams, and executable overlay window process-local.</p>
               <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
             </div>
             <div class="code-window">

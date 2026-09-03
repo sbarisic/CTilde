@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.Build.NoTargets/3.7.56">
+  <PropertyGroup>
+    <CTildeProject>ctilde.json</CTildeProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="ctilde.json" />
+    <None Include="Program.ct" />
+  </ItemGroup>
+</Project>

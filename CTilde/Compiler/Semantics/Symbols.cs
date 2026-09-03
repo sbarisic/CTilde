@@ -230,6 +230,8 @@ internal sealed class TypeSymbol
     public bool IsGenericDefinition => !TypeParameters.IsDefaultOrEmpty && TypeArguments.IsDefaultOrEmpty;
     public bool IsOpenConstructed => !TypeArguments.IsDefaultOrEmpty && TypeArguments.Any(ContainsTypeParameter);
     public bool IsObject => FullName == "System.Object";
+    public string? OverlayName { get; init; }
+    public bool IsExplicitlyResident { get; init; }
 
     public IEnumerable<TypeSymbol> BaseTypesAndSelf()
     {
@@ -327,6 +329,8 @@ internal sealed class PropertySymbol : MemberSymbol
         set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoRuntime : DeclaredEffects & ~EffectContract.NoRuntime;
     }
     public bool IsNoRecursion { get; set; }
+    public string? OverlayName { get; init; }
+    public bool IsExplicitlyResident { get; init; }
     public PropertySymbol? OverriddenProperty { get; set; }
     public List<PropertySymbol> ImplementedInterfaceProperties { get; } = [];
 }
@@ -391,6 +395,9 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsInterrupt { get; init; }
     public bool IsInterruptSafe { get; init; }
     public bool IsInterruptCode { get; set; }
+    public string? OverlayName { get; init; }
+    public bool IsExplicitlyResident { get; init; }
+    public bool IsOverlay => OverlayName is not null;
     public uint? TaskStackSize { get; init; }
     public uint? StackUsage { get; init; }
     public bool IsTrustedExtern { get; init; }

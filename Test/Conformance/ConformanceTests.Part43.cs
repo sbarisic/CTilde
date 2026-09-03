@@ -170,12 +170,12 @@ internal static partial class ConformanceTests
             var types = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_types.h").Content;
             var runtimeHeader = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime_internal.h").Content;
             var runtime = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime.c").Content;
-            Assert(combined.Contains("ct_runtime_api_v19", StringComparison.Ordinal) &&
+            Assert(combined.Contains("ct_runtime_api_v22", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(32)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(48)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(53)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(56)", StringComparison.Ordinal),
-                "Managed System.IO did not lower through Runtime ABI 19 filesystem services.");
+                "Managed System.IO did not lower through Runtime ABI 22 filesystem services.");
             Assert(!combined.Contains("fopen(path", StringComparison.Ordinal),
                 "Managed System.IO retained a private libc filesystem implementation.");
             Assert(types.Contains("typedef struct ct_native_utf8_string", StringComparison.Ordinal) &&

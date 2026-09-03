@@ -279,7 +279,22 @@ internal static class CTildeCommand
                     ? moduleOwner
                     : rootOwner;
                 return SyntaxTree.Parse(SourceText.FromFile(fullPath), owner);
-            }).ToArray();
+            }).ToList();
+            if (request.ManagedModule is { References.IsDefaultOrEmpty: false } managedModule)
+            {
+                foreach (var reference in managedModule.References.OrderBy(item => item.Name, StringComparer.Ordinal))
+                {
+                    var metadata = reference.Metadata ?? ManagedModuleMetadata.Load(reference.MetadataPath);
+                    var metadataDirectory = Path.GetDirectoryName(reference.MetadataPath)!;
+                    var owner = new SourceOwnerIdentity(reference.Name, metadataDirectory, metadataDirectory, false, reference.BuildIdentity);
+                    for (var index = 0; index < metadata.Declarations.Length; ++index)
+                    {
+                        var declaration = metadata.Declarations[index];
+                        var syntheticPath = $"{reference.MetadataPath}#declaration-{index + 1}.ct";
+                        trees.Add(SyntaxTree.ParseManagedModuleReference(SourceText.From(declaration.Source, syntheticPath), owner));
+                    }
+                }
+            }
             var compilation = Compilation.Create(trees, new CompilationOptions(request.Target, sourceRoot,
                 request.DebugInformation, request.DebugMemory, request.Architecture, request.NoRecursion,
                 sourceIdentityRoot, request.PanicPolicy, [.. request.CpuFeatures ?? []], request.Environment, request.SimdOptimizations,

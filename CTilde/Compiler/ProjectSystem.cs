@@ -38,7 +38,8 @@ public sealed record ManagedModuleReference(
     string Name,
     string Version,
     string BuildIdentity,
-    string ApiHash);
+    string ApiHash,
+    ManagedModuleMetadata? Metadata = null);
 
 public sealed record ManagedModuleConfiguration(
     ManagedModuleKind Kind,
@@ -642,11 +643,11 @@ public static class CTildeProjectFile
             _ => throw new CTildeProjectException($"Managed module in '{manifestPath}' requires kind application or library.", "CT6202"),
         };
         if (document.Name is { Length: > ManagedModuleMetadata.MaximumNameAsciiBytes })
-            throw new CTildeProjectException($"Managed-module name in '{manifestPath}' exceeds the Managed Module ABI 1 limit of {ManagedModuleMetadata.MaximumNameAsciiBytes} ASCII bytes.", "CT6202");
+            throw new CTildeProjectException($"Managed-module name in '{manifestPath}' exceeds the Managed Module ABI {CompilerContract.ManagedModuleAbiVersion} limit of {ManagedModuleMetadata.MaximumNameAsciiBytes} ASCII bytes.", "CT6202");
         if (string.IsNullOrWhiteSpace(document.Name) || !ManagedModuleMetadata.IsCanonicalName(document.Name))
             throw new CTildeProjectException($"Managed-module name '{document.Name}' in '{manifestPath}' is not canonical.", "CT6202");
         if (document.Version is { Length: > ManagedModuleMetadata.MaximumVersionAsciiBytes })
-            throw new CTildeProjectException($"Managed-module version in '{manifestPath}' exceeds the Managed Module ABI 1 limit of {ManagedModuleMetadata.MaximumVersionAsciiBytes} ASCII bytes.", "CT6202");
+            throw new CTildeProjectException($"Managed-module version in '{manifestPath}' exceeds the Managed Module ABI {CompilerContract.ManagedModuleAbiVersion} limit of {ManagedModuleMetadata.MaximumVersionAsciiBytes} ASCII bytes.", "CT6202");
         if (string.IsNullOrWhiteSpace(document.Version) || !ManagedModuleMetadata.IsExactVersion(document.Version))
             throw new CTildeProjectException($"Managed-module version '{document.Version}' in '{manifestPath}' must be an exact semantic version.", "CT6202");
         var stack = document.MainTaskStackBytes ?? 8192;
@@ -683,7 +684,7 @@ public static class CTildeProjectFile
         var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var value in document.References ?? [])
         {
-            var path = ResolveProjectPath(value, "managedModule.references", root, manifestPath, isDirectory: false);
+            var path = ResolveReferencePath(value, manifestPath);
             if (!path.EndsWith(".ctmeta.json", StringComparison.OrdinalIgnoreCase) || !File.Exists(path))
                 throw new CTildeProjectException($"Managed-module reference '{path}' in '{manifestPath}' must be an existing .ctmeta.json file.", "CT6200");
             var metadata = ManagedModuleMetadata.Load(path);
@@ -691,7 +692,7 @@ public static class CTildeProjectFile
                 throw new CTildeProjectException($"Managed-module references in '{manifestPath}' contain module '{metadata.Name}' more than once.", "CT6202");
             if (metadata.Name == document.Name)
                 throw new CTildeProjectException($"Managed module '{document.Name}' cannot reference itself.", "CT6202");
-            references.Add(new ManagedModuleReference(path, metadata.Name, metadata.Version, metadata.BuildIdentity, metadata.ApiHash));
+            references.Add(new ManagedModuleReference(path, metadata.Name, metadata.Version, metadata.BuildIdentity, metadata.ApiHash, metadata));
             referenceMetadata.Add(metadata);
         }
         ValidateManagedReferenceGraph(document.Name, referenceMetadata.ToImmutable(), manifestPath);
@@ -1125,6 +1126,13 @@ public static class CTildeProjectFile
         if (!isDirectory && Path.EndsInDirectorySeparator(value))
             throw new CTildeProjectException($"Property '{property}' in '{manifestPath}' must name a file.");
         return fullPath;
+    }
+
+    private static string ResolveReferencePath(string value, string manifestPath)
+    {
+        if (string.IsNullOrWhiteSpace(value) || Path.IsPathRooted(value) || Path.EndsInDirectorySeparator(value))
+            throw new CTildeProjectException($"Property 'managedModule.references' in '{manifestPath}' must contain relative file paths.");
+        return Path.GetFullPath(Path.Combine(Path.GetDirectoryName(manifestPath)!, value));
     }
 
     private static bool PathsEqual(string left, string right) =>

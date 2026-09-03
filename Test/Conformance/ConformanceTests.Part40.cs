@@ -43,18 +43,18 @@ internal static partial class ConformanceTests
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var combined = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.RelativePath.EndsWith(".c", StringComparison.Ordinal)).Select(artifact => artifact.Content));
             Assert(!combined.Contains("void app_main(void)", StringComparison.Ordinal), "A managed module emitted the firmware app_main entry.");
-            Assert(combined.Contains("ct_managed_module_v1", StringComparison.Ordinal) &&
+            Assert(combined.Contains("ct_managed_module_v3", StringComparison.Ordinal) &&
                 combined.Contains(".ctilde.manifest", StringComparison.Ordinal) &&
-                combined.Contains("ct_runtime_api_v19", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
+                combined.Contains("ct_runtime_api_v22", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
             Assert(combined.Contains("uint64_t FingerprintHigh; uint64_t FingerprintLow;", StringComparison.Ordinal),
-                "Runtime ABI 19 type descriptors omitted their canonical fingerprint fields.");
+                "Runtime ABI 22 type descriptors omitted their canonical fingerprint fields.");
             Assert(combined.Contains("ct_managed_module_static_state", StringComparison.Ordinal) &&
                 combined.Contains("CurrentModuleState", StringComparison.Ordinal), "Mutable statics were not lowered through per-process module state.");
             Assert(combined.Contains("CT_GENERATED_LOCAL", StringComparison.Ordinal),
                 "Managed module definitions were not hidden from the ELF dynamic symbol table.");
             Assert(combined.Contains("ct_runtime_api->Service(UINT32_C(16)", StringComparison.Ordinal) &&
                 !combined.Contains("fwrite(value->Data, 1u, (size_t)value->Length, stdout)", StringComparison.Ordinal),
-                "Managed Console output did not route through the shared Runtime ABI 19 service table.");
+                "Managed Console output did not route through the shared Runtime ABI 22 service table.");
 
             var currentProcessSource = """
                 using System.Diagnostics;
@@ -94,7 +94,9 @@ internal static partial class ConformanceTests
                 "Managed public metadata emission failed.");
             Assert(first.ToString() == second.ToString(), "Managed public metadata was not deterministic.");
             var metadata = JsonSerializer.Deserialize<JsonElement>(first.ToString());
-            Assert(metadata.GetProperty("runtimeAbi").GetInt32() == 19 && metadata.GetProperty("moduleAbi").GetInt32() == 1 &&
+            Assert(metadata.GetProperty("schemaVersion").GetInt32() == 3 &&
+                metadata.GetProperty("runtimeAbi").GetInt32() == CompilerContract.RuntimeAbiVersion &&
+                metadata.GetProperty("moduleAbi").GetInt32() == CompilerContract.ManagedModuleAbiVersion &&
                 metadata.GetProperty("name").GetString() == "Demo.App" && metadata.GetProperty("apiHash").GetString()!.Length == 64,
                 "Managed public metadata omitted its exact ABI identity.");
 
@@ -131,7 +133,7 @@ internal static partial class ConformanceTests
             {
                 File.WriteAllText(Path.Combine(directory, "Program.ct"), "public static class Program { [EntryPoint] public static int Main(string[] args) { return args.Length; } }");
                 var emptyApiHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-                var dependency = new ManagedModuleMetadata(1, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
+                var dependency = new ManagedModuleMetadata(3, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
                     CompilerContract.ManagedModuleAbiVersion, "library", "Demo.Core", "2.0.0", new string('a', 64), emptyApiHash, [], [], []);
                 File.WriteAllText(Path.Combine(directory, "Demo.Core.ctmeta.json"), dependency.ToDeterministicJson());
                 File.WriteAllText(Path.Combine(directory, "ctilde.json"), """
@@ -233,7 +235,7 @@ internal static partial class ConformanceTests
 
                 var maximumDependency = new ManagedModuleDependencyMetadata(maximumDependencyName, maximumVersion,
                     buildIdentity, emptyApiHash);
-                var maximumReference = new ManagedModuleMetadata(1, CompilerContract.DraftVersion,
+                var maximumReference = new ManagedModuleMetadata(3, CompilerContract.DraftVersion,
                     CompilerContract.RuntimeAbiVersion, CompilerContract.ManagedModuleAbiVersion, "library",
                     maximumReferenceName, maximumVersion, buildIdentity, emptyApiHash, [maximumDependency], [], []);
                 var maximumReferencePath = Path.Combine(directory, "maximum.ctmeta.json");
@@ -246,7 +248,7 @@ internal static partial class ConformanceTests
                     Name.Length: 63,
                     Version.Length: 31,
                     References: [{ Name.Length: 63, Version.Length: 31 }],
-                }, "Managed Module ABI 1 maximum-width identities were not preserved.");
+                }, "Managed Module ABI 3 maximum-width identities were not preserved.");
 
                 var maximumConfiguration = maximumProject.Configuration.ManagedModule!;
                 var maximumCompilation = Compile(File.ReadAllText(programPath), new CompilationOptions(
@@ -273,7 +275,7 @@ internal static partial class ConformanceTests
                     }
                     catch (CTildeProjectException exception)
                     {
-                        Assert(exception.Code == "CT6202" && exception.Message.Contains("ABI 1 limit", StringComparison.Ordinal),
+                        Assert(exception.Code == "CT6202" && exception.Message.Contains("ABI 3 limit", StringComparison.Ordinal),
                             $"An over-capacity project {field} did not report the CT6202 ABI limit diagnostic: {exception}");
                     }
                 }

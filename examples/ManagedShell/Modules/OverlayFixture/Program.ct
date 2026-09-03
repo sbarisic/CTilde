@@ -1,0 +1,85 @@
+using System;
+
+[Overlay("first")]
+public class OverlayWork
+{
+    private static int cleanupCount;
+
+    public static int First(int value)
+    {
+        return SameOverlay(Second(value)) + Resident(value);
+    }
+
+    private static int SameOverlay(int value)
+    {
+        return value + 1;
+    }
+
+    [Overlay("second")]
+    public static int Second(int value)
+    {
+        if (value < 0)
+            throw new Exception("overlay failure");
+        return Resident(value) * 2;
+    }
+
+    public static void FailAcrossOverlay()
+    {
+        defer MarkCleanup();
+        Second(-1);
+    }
+
+    [Resident]
+    public static int Resident(int value)
+    {
+        return value + 10;
+    }
+
+    [Resident]
+    private static void MarkCleanup()
+    {
+        cleanupCount++;
+    }
+
+    [Resident]
+    public static int CleanupCount()
+    {
+        return cleanupCount;
+    }
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        int first = OverlayWork.First(args.Length);
+        try
+        {
+            OverlayWork.FailAcrossOverlay();
+        }
+        catch (Exception error)
+        {
+            Console.WriteLine(error.Message);
+        }
+        int afterFailure = OverlayWork.First(1);
+        int libraryResult = OverlayLibrary.Triple(2);
+        try
+        {
+            OverlayLibrary.Fail();
+        }
+        catch (Exception error)
+        {
+            Console.WriteLine(error.Message);
+        }
+        Console.WriteLine(first);
+        Console.WriteLine(afterFailure);
+        Console.WriteLine(libraryResult);
+        Console.WriteLine(OverlayWork.CleanupCount());
+        Console.WriteLine(OverlayLibrary.CleanupCount());
+        if (OverlayWork.CleanupCount() == 1 && OverlayLibrary.CleanupCount() == 1
+            && libraryResult == 9)
+            return 0;
+        return 1;
+    }
+}

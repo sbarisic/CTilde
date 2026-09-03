@@ -1,0 +1,22 @@
+{
+  "target": "esp-idf",
+  "architecture": "xtensa",
+  "sources": ["Library.ct"],
+  "espIdf": { "artifact": "managed-module" },
+  "managedModule": {
+    "kind": "library",
+    "name": "tests.overlay.library",
+    "version": "1.0.0",
+    "references": [],
+    "mainTaskStackBytes": 8192,
+    "heapLimitBytes": 65536
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

@@ -1,0 +1,35 @@
+using System;
+using System.Ssh;
+
+internal static class Program
+{
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        if (args.Length != 0)
+        {
+            Console.WriteLine("usage: sshd.ctm");
+            return 2;
+        }
+        SshServerOptions options = new SshServerOptions();
+        options.UserName = "ctilde";
+        options.ConfigurationPath = "/storage/ssh/sshd.conf";
+        options.HostKeyPath = "/storage/ssh/ssh_host_ecdsa_key.pem";
+        options.AuthorizedKeysPath = "/storage/ssh/authorized_keys";
+        options.SftpRoot = "/sftp";
+        options.Port = 22;
+        options.MaximumPacketBytes = 35000;
+        options.MaximumChannels = 2;
+        try
+        {
+            SshServer server = SshServer.Create(options);
+            Console.WriteLine("sshd: waiting for network on port 22");
+            return server.Run();
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine("sshd: " + exception.Message);
+            return 1;
+        }
+    }
+}

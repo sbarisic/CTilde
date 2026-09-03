@@ -151,6 +151,29 @@ internal static class ProcessRuntime
     [Extern("ct_managed_process_start")]
     internal static nuint Start(string path, string[] args);
 
+    [Extern("ct_managed_process_start_redirected")]
+    internal static nuint StartRedirected(string path, string[] args, bool redirectInput,
+        bool redirectOutput, bool redirectError);
+
+    [Extern("ct_managed_process_try_open")]
+    [NoAlloc]
+    [NoThrow]
+    [NoBlock]
+    internal static nuint TryOpen(uint id);
+
+    [Extern("ct_managed_process_pipe_read")]
+    internal static bool PipeRead(nuint handle, int stream, byte[] buffer, int offset,
+        int count, uint timeoutMilliseconds, out int bytesRead, out bool eof);
+
+    [Extern("ct_managed_process_pipe_write")]
+    internal static bool PipeWrite(nuint handle, int stream, byte[] buffer, int offset,
+        int count, uint timeoutMilliseconds, out int bytesWritten);
+
+    [Extern("ct_managed_process_pipe_close")]
+    [NoAlloc]
+    [NoThrow]
+    internal static void PipeClose(nuint handle, int stream);
+
     [Extern("ct_managed_process_current")]
     [NoAlloc]
     [NoThrow]
@@ -213,13 +236,100 @@ internal static class ProcessRuntime
     internal static bool CancellationRequested();
 }
 
+public sealed class ProcessStartInfo
+{
+    public string FileName;
+    public string[] Arguments;
+    public bool RedirectStandardInput;
+    public bool RedirectStandardOutput;
+    public bool RedirectStandardError;
+
+    public ProcessStartInfo(string fileName, string[] arguments)
+    {
+        if (fileName == null)
+            throw new ArgumentNullException();
+        if (arguments == null)
+            throw new ArgumentNullException();
+        FileName = fileName;
+        Arguments = arguments;
+        RedirectStandardInput = false;
+        RedirectStandardOutput = false;
+        RedirectStandardError = false;
+    }
+}
+
+public sealed class ProcessPipeReader
+{
+    private nuint handle;
+    private int stream;
+
+    internal ProcessPipeReader(nuint handle, int stream)
+    {
+        this.handle = handle;
+        this.stream = stream;
+    }
+
+    public bool TryRead(byte[] buffer, int offset, int count, uint timeoutMilliseconds,
+        out int bytesRead, out bool eof)
+    {
+        if (buffer == null)
+            throw new ArgumentNullException();
+        if (offset < 0 || count < 0 || offset > buffer.Length - count)
+            throw new ArgumentOutOfRangeException();
+        bytesRead = 0;
+        eof = false;
+        return ProcessRuntime.PipeRead(handle, stream, buffer, offset, count, timeoutMilliseconds,
+            out bytesRead, out eof);
+    }
+
+    public void Close()
+    {
+        ProcessRuntime.PipeClose(handle, stream);
+    }
+}
+
+public sealed class ProcessPipeWriter
+{
+    private nuint handle;
+    private int stream;
+
+    internal ProcessPipeWriter(nuint handle, int stream)
+    {
+        this.handle = handle;
+        this.stream = stream;
+    }
+
+    public bool TryWrite(byte[] buffer, int offset, int count, uint timeoutMilliseconds,
+        out int bytesWritten)
+    {
+        if (buffer == null)
+            throw new ArgumentNullException();
+        if (offset < 0 || count < 0 || offset > buffer.Length - count)
+            throw new ArgumentOutOfRangeException();
+        bytesWritten = 0;
+        return ProcessRuntime.PipeWrite(handle, stream, buffer, offset, count, timeoutMilliseconds,
+            out bytesWritten);
+    }
+
+    public void Close()
+    {
+        ProcessRuntime.PipeClose(handle, stream);
+    }
+}
+
 public sealed class Process
 {
     private nuint handle;
+    private ProcessPipeWriter standardInput;
+    private ProcessPipeReader standardOutput;
+    private ProcessPipeReader standardError;
 
     private Process(nuint handle)
     {
         this.handle = handle;
+        standardInput = null;
+        standardOutput = null;
+        standardError = null;
     }
 
     public static Process Start(string path, string[] args)
@@ -229,6 +339,58 @@ public sealed class Process
         if (args == null)
             throw new ArgumentNullException();
         return new Process(ProcessRuntime.Start(path, args));
+    }
+
+    public static Process Start(ProcessStartInfo startInfo)
+    {
+        if (startInfo == null)
+            throw new ArgumentNullException();
+        nuint value = ProcessRuntime.StartRedirected(startInfo.FileName, startInfo.Arguments,
+            startInfo.RedirectStandardInput, startInfo.RedirectStandardOutput, startInfo.RedirectStandardError);
+        Process process = new Process(value);
+        if (startInfo.RedirectStandardInput)
+            process.standardInput = new ProcessPipeWriter(value, 0);
+        if (startInfo.RedirectStandardOutput)
+            process.standardOutput = new ProcessPipeReader(value, 1);
+        if (startInfo.RedirectStandardError)
+            process.standardError = new ProcessPipeReader(value, 2);
+        return process;
+    }
+
+    public static bool TryOpen(uint id, out Process process)
+    {
+        nuint value = ProcessRuntime.TryOpen(id);
+        if (value == 0U)
+        {
+            process = null;
+            return false;
+        }
+        process = new Process(value);
+        return true;
+    }
+
+    public ProcessPipeWriter StandardInput
+    {
+        get
+        {
+            return standardInput;
+        }
+    }
+
+    public ProcessPipeReader StandardOutput
+    {
+        get
+        {
+            return standardOutput;
+        }
+    }
+
+    public ProcessPipeReader StandardError
+    {
+        get
+        {
+            return standardError;
+        }
     }
 
     public static Process Current

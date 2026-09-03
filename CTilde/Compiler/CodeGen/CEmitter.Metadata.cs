@@ -231,25 +231,25 @@ internal sealed partial class CEmitter
         var stringType = Model.Types["System.String"];
         EmitStringVTable(writer, stringType, virtualMethods, virtualProperties);
         var stringInterfaces = EmitInterfaceTable(writer, "ct_desc_string", "ct_string_vtable", ImplementedInterfaces(stringType));
-        writer.WriteLine($"const ct_type_descriptor ct_desc_string = {{ \"string\", &{DescriptorName(Model.Types["System.Object"])}, &ct_string_vtable, {stringInterfaces.Pointer}, {stringInterfaces.Count}u, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string, {Fingerprint("System.String")} }};");
+        writer.WriteLine($"const ct_type_descriptor ct_desc_string = {{ \"string\", &{DescriptorName(Model.Types["System.Object"])}, &ct_string_vtable, {stringInterfaces.Pointer}, {stringInterfaces.Count}u, 1u, sizeof(ct_string), _Alignof(ct_string), false, ct_drop_string, {Fingerprint("System.String")}, NULL }};");
         uint id = 2;
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Interface).OrderBy(type => type.FullName, StringComparer.Ordinal))
-            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", NULL, &ct_default_vtable, NULL, 0u, {id++}u, 0u, 1u, false, NULL, {Fingerprint(type.FullName)} }};");
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", NULL, &ct_default_vtable, NULL, 0u, {id++}u, 0u, 1u, false, NULL, {Fingerprint(type.FullName)}, NULL }};");
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Class && !type.IsCompilerBackedSurface).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
             EmitClassVTable(writer, type, virtualMethods, virtualProperties);
             var interfaces = EmitInterfaceTable(writer, DescriptorName(type), VTableName(type), ImplementedInterfaces(type));
             var baseDescriptor = type.BaseType is null ? "NULL" : $"&{DescriptorName(type.BaseType)}";
-            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &{VTableName(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)}, {Fingerprint(type.FullName)} }};");
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", {baseDescriptor}, &{VTableName(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {ObjectDropName(type)}, {Fingerprint(type.FullName)}, NULL }};");
         }
         foreach (var type in EmittedTypes.Where(type => type.Kind == DeclaredTypeKind.Delegate).OrderBy(type => type.FullName, StringComparer.Ordinal))
         {
-            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)}, {Fingerprint(type.FullName)} }};");
+            writer.WriteLine($"const ct_type_descriptor {DescriptorName(type)} = {{ \"{EscapeCString(type.FullName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({NameMangler.Type(type)}), _Alignof({NameMangler.Type(type)}), false, {DelegateDropName(type)}, {Fingerprint(type.FullName)}, NULL }};");
         }
         foreach (var array in _arrayTypes.OrderBy(array => NameMangler.TypeCode(array), StringComparer.Ordinal))
         {
             var name = NameMangler.Array(array.ElementType!);
-            writer.WriteLine($"const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({name}), _Alignof({name}), false, {ArrayDropName(array.ElementType!)}, {Fingerprint(NameMangler.CanonicalType(array))} }};");
+            writer.WriteLine($"const ct_type_descriptor {ArrayDescriptorName(array.ElementType!)} = {{ \"{EscapeCString(array.ElementType!.DisplayName)}[]\", &{DescriptorName(Model.Types["System.Object"])}, &ct_default_vtable, NULL, 0u, {id++}u, sizeof({name}), _Alignof({name}), false, {ArrayDropName(array.ElementType!)}, {Fingerprint(NameMangler.CanonicalType(array))}, NULL }};");
         }
         foreach (var type in BoxedTypes)
         {
@@ -257,7 +257,7 @@ internal sealed partial class CEmitter
             var interfaces = type is { Kind: CTypeKind.Struct, Symbol: not null }
                 ? EmitInterfaceTable(writer, BoxDescriptorName(type), $"ct_vtable_box_{NameMangler.TypeCode(type)}", ImplementedInterfaces(type.Symbol))
                 : (Pointer: "NULL", Count: 0);
-            writer.WriteLine($"const ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({BoxName(type)}), _Alignof({BoxName(type)}), true, {BoxDropName(type)}, {Fingerprint("box<" + NameMangler.CanonicalType(type) + ">")} }};");
+            writer.WriteLine($"const ct_type_descriptor {BoxDescriptorName(type)} = {{ \"{EscapeCString(type.DisplayName)}\", &{DescriptorName(Model.Types["System.Object"])}, &ct_vtable_box_{NameMangler.TypeCode(type)}, {interfaces.Pointer}, {interfaces.Count}u, {id++}u, sizeof({BoxName(type)}), _Alignof({BoxName(type)}), true, {BoxDropName(type)}, {Fingerprint("box<" + NameMangler.CanonicalType(type) + ">")}, NULL }};");
         }
         writer.WriteLine("static ct_string* ct_object_default_to_string(ct_object* value) { if (value == NULL) ct_raise_runtime_fault(CT_FAULT_NULL, \"CTN0001\", \"<runtime>\", 0); return ct_string_from_bytes((const uint8_t*)value->Type->Name, (int32_t)strlen(value->Type->Name), \"<runtime>\", 0); }");
         writer.WriteLine("static bool ct_object_default_equals(ct_object* left, ct_object* right) { return left == right; }");

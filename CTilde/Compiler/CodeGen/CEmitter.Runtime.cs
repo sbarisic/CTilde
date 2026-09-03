@@ -194,12 +194,14 @@ internal sealed partial class CEmitter
         writer.WriteLine("typedef struct ct_interface_entry ct_interface_entry;");
         if (IsManagedModule)
         {
-            writer.WriteLine("typedef struct ct_runtime_api_v19 ct_runtime_api_v19;");
-            writer.WriteLine("typedef struct ct_managed_module_descriptor_v1 ct_managed_module_descriptor_v1;");
+            writer.WriteLine("typedef struct ct_runtime_api_v22 ct_runtime_api_v22;");
+            writer.WriteLine("typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;");
             writer.WriteLine("typedef struct ct_process_context ct_process_context;");
-            writer.WriteLine("struct ct_runtime_api_v19 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v1*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v1*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v1*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); void (*EnterCall)(const ct_managed_module_descriptor_v1*); void (*LeaveCall)(const ct_managed_module_descriptor_v1*); int32_t (*Service)(uint32_t, void*, size_t); };");
-            writer.WriteLine("const ct_runtime_api_v19* ct_runtime_api = NULL;");
-            writer.WriteLine("extern const ct_managed_module_descriptor_v1 ct_managed_module_v1;");
+            writer.WriteLine("typedef struct ct_managed_call_target_v3 { uint32_t Size; uint32_t Placement; uint32_t OverlayId; uint32_t Reserved; uintptr_t Body; } ct_managed_call_target_v3;");
+            writer.WriteLine("typedef struct ct_managed_call_frame_v22 { uintptr_t Opaque[8]; } ct_managed_call_frame_v22;");
+            writer.WriteLine("struct ct_runtime_api_v22 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v3*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v3*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v3*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3*, const ct_managed_call_target_v3*, ct_managed_call_frame_v22*); void (*LeaveManagedCall)(ct_managed_call_frame_v22*); int32_t (*Service)(uint32_t, void*, size_t); };");
+            writer.WriteLine("const ct_runtime_api_v22* ct_runtime_api = NULL;");
+            writer.WriteLine("extern const ct_managed_module_descriptor_v3 ct_managed_module_v3;");
             writer.WriteLine("typedef struct ct_runtime_console_transfer_v19 { uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_console_transfer_v19;");
             writer.WriteLine("typedef struct ct_runtime_io_path_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; } ct_runtime_io_path_v19;");
             writer.WriteLine("typedef struct ct_runtime_io_open_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; uint8_t Mode; uint8_t Access; uintptr_t Handle; } ct_runtime_io_open_v19;");
@@ -349,7 +351,8 @@ internal sealed partial class CEmitter
         }
         writer.WriteLine("} ct_thread_state;");
         EmitThreadStorage(writer);
-        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; const ct_interface_entry* Interfaces; uint32_t InterfaceCount; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); uint64_t FingerprintHigh; uint64_t FingerprintLow; };");
+        writer.WriteLine("typedef struct ct_type_ops { uint32_t Size; size_t ValueSize; size_t ValueAlignment; void (*Copy)(void*, const void*); void (*DropValue)(void*); bool (*Equals)(const void*, const void*); uint32_t (*Hash)(const void*); int32_t (*Compare)(const void*, const void*); } ct_type_ops;");
+        writer.WriteLine("struct ct_type_descriptor { const char* Name; const ct_type_descriptor* Base; const ct_vtable* VTable; const ct_interface_entry* Interfaces; uint32_t InterfaceCount; uint32_t TypeId; size_t Size; size_t Alignment; bool IsValue; void (*Drop)(ct_object*); uint64_t FingerprintHigh; uint64_t FingerprintLow; const ct_type_ops* Ops; };");
         writer.WriteLine("extern const ct_type_descriptor ct_desc_string;");
         writer.WriteLine("typedef struct ct_string { ct_object Object; int32_t Length; uint8_t Data[CT_FLEXIBLE_ARRAY]; } ct_string;");
         if (_usesNativeUtf8)
@@ -997,7 +1000,7 @@ internal sealed partial class CEmitter
     {
         if (IsManagedModule)
         {
-            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_runtime_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v1); if (value == NULL) ct_runtime_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
+            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_runtime_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v3); if (value == NULL) ct_runtime_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
             writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_runtime_api->Free(value); }");
             return;
         }
@@ -1413,7 +1416,7 @@ internal sealed partial class CEmitter
             foreach (var field in mutable)
                 writer.WriteLine($"    {CDeclaration(field.Type, field.CName)};");
             writer.WriteLine("} ct_managed_module_static_state;");
-            writer.WriteLine("static CT_INLINE ct_managed_module_static_state* ct_module_state(void) { return (ct_managed_module_static_state*)ct_runtime_api->CurrentModuleState(&ct_managed_module_v1); }");
+            writer.WriteLine("static CT_INLINE ct_managed_module_static_state* ct_module_state(void) { return (ct_managed_module_static_state*)ct_runtime_api->CurrentModuleState(&ct_managed_module_v3); }");
             writer.WriteLine("#define ct_module_phase (ct_module_state()->Phase)");
             foreach (var field in mutable)
                 writer.WriteLine($"#define {field.CName} (ct_module_state()->{field.CName})");

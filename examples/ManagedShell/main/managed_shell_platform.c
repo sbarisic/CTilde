@@ -9,6 +9,8 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "managed_diagnostics_host.h"
+#include "managed_network_host.h"
+#include "managed_ssh_host.h"
 #include "managed_storage_host.h"
 
 #define CTILDE_SHELL_TLS_INDEX 1
@@ -42,6 +44,17 @@ int32_t ct_managed_shell_initialize(void)
         printf("LittleFS mount failed: %s\n", esp_err_to_name(mount_result));
         return (int32_t)mount_result;
     }
+    const esp_vfs_littlefs_conf_t sftp_configuration = {
+        .base_path = "/sftp",
+        .partition_label = "sftp",
+        .format_if_mount_failed = true,
+        .dont_mount = false,
+    };
+    const esp_err_t sftp_mount_result = esp_vfs_littlefs_register(&sftp_configuration);
+    if (sftp_mount_result != ESP_OK) {
+        printf("SFTP LittleFS mount failed: %s\n", esp_err_to_name(sftp_mount_result));
+        return (int32_t)sftp_mount_result;
+    }
     const int runtime_result = ctilde_managed_runtime_initialize();
     if (runtime_result != 0) {
         printf("Managed runtime initialization failed: %d\n", runtime_result);
@@ -56,6 +69,14 @@ int32_t ct_managed_shell_initialize(void)
     if (storage_result != 0) {
         printf("Managed storage initialization failed: %d\n", storage_result);
         return storage_result;
+    }
+    const int network_result = ct_managed_network_host_initialize();
+    if (network_result != 0)
+        printf("Managed network initialization deferred: %d\n", network_result);
+    const int ssh_result = ct_managed_ssh_host_initialize();
+    if (ssh_result != 0) {
+        printf("Managed SSH host initialization failed: %d\n", ssh_result);
+        return ssh_result;
     }
     size_t total = 0u;
     size_t used = 0u;

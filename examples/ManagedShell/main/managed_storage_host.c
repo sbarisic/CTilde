@@ -250,6 +250,11 @@ static int32_t unmount_card_now(uint32_t timeout_milliseconds)
     (void)timeout_milliseconds;
     if (s_gate == NULL) return -EINVAL;
     xSemaphoreTake(s_gate, portMAX_DELAY);
+    if (ctilde_managed_storage_prefix_busy(SD_MOUNT_PATH)) {
+        s_last_error = -EBUSY;
+        xSemaphoreGive(s_gate);
+        return -EBUSY;
+    }
     int32_t result = stop_monitor_locked();
     if (result == 0) {
         s_timeout_fault = false;

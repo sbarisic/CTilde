@@ -5,7 +5,6 @@ internal sealed class NanoBuffer
 {
     public const int MaximumLength = 32768;
     private const int SpareBytes = 64;
-
     private byte[] data;
     private int gapStart;
     private int gapEnd;
@@ -17,8 +16,8 @@ internal sealed class NanoBuffer
         if (source == null)
             throw new ArgumentNullException();
         int start = 0;
-        if (source.Length >= 3 && source[0] == (byte)0xef &&
-            source[1] == (byte)0xbb && source[2] == (byte)0xbf)
+        if (source.Length >= 3 && source[0] == (byte)0xef && source[1] == (byte)0xbb
+            && source[2] == (byte)0xbf)
         {
             hasBom = true;
             start = 3;
@@ -26,7 +25,6 @@ internal sealed class NanoBuffer
         if (source.Length - start > MaximumLength || !ValidateUtf8(source, start,
             source.Length - start))
             throw new FormatException();
-
         // Compact into the loaded array itself. Keeping a second full-size
         // allocation here would exceed the module's 64 KiB heap for a file
         // near the 32 KiB editor limit.
@@ -50,10 +48,37 @@ internal sealed class NanoBuffer
         gapEnd = data.Length;
     }
 
-    public int Length { get { return data.Length - (gapEnd - gapStart); } }
-    public int Cursor { get { return gapStart; } }
-    public bool HasBom { get { return hasBom; } }
-    public bool WasNormalized { get { return normalized; } }
+    public int Length
+    {
+        get
+        {
+            return data.Length - (gapEnd - gapStart);
+        }
+    }
+
+    public int Cursor
+    {
+        get
+        {
+            return gapStart;
+        }
+    }
+
+    public bool HasBom
+    {
+        get
+        {
+            return hasBom;
+        }
+    }
+
+    public bool WasNormalized
+    {
+        get
+        {
+            return normalized;
+        }
+    }
 
     public byte GetByte(int index)
     {
@@ -88,9 +113,12 @@ internal sealed class NanoBuffer
             return false;
         byte[] scalar = new byte[count];
         scalar[0] = b0;
-        if (count > 1) scalar[1] = b1;
-        if (count > 2) scalar[2] = b2;
-        if (count > 3) scalar[3] = b3;
+        if (count > 1)
+            scalar[1] = b1;
+        if (count > 2)
+            scalar[2] = b2;
+        if (count > 3)
+            scalar[3] = b3;
         if (!ValidateUtf8(scalar, 0, count) || !EnsureGap(count))
             return false;
         for (int index = 0; index < count; index++)
@@ -214,7 +242,7 @@ internal sealed class NanoBuffer
         int line = 1;
         for (int index = 0; index < position; index++)
             if (GetByte(index) == (byte)10)
-                line++;
+            line++;
         return line;
     }
 
@@ -223,7 +251,9 @@ internal sealed class NanoBuffer
         if (hasBom)
         {
             byte[] bom = new byte[3];
-            bom[0] = (byte)0xef; bom[1] = (byte)0xbb; bom[2] = (byte)0xbf;
+            bom[0] = (byte)0xef;
+            bom[1] = (byte)0xbb;
+            bom[2] = (byte)0xbf;
             stream.Write(bom, 0, 3);
         }
         if (gapStart > 0)
@@ -259,14 +289,17 @@ internal sealed class NanoBuffer
 
     private static bool IsContinuation(byte value)
     {
-        return (value & (byte)0xc0) == (byte)0x80;
+        return(value & (byte)0xc0) == (byte)0x80;
     }
 
     private static int ScalarLength(byte value)
     {
-        if (value < (byte)0x80) return 1;
-        if (value < (byte)0xe0) return 2;
-        if (value < (byte)0xf0) return 3;
+        if (value < (byte)0x80)
+            return 1;
+        if (value < (byte)0xe0)
+            return 2;
+        if (value < (byte)0xf0)
+            return 3;
         return 4;
     }
 
@@ -307,9 +340,9 @@ internal sealed class NanoBuffer
                     return false;
                 scalar = (scalar << 6) | (uint)(next & (byte)0x3f);
             }
-            if ((continuation == 2 && scalar < 0x800u) ||
-                (continuation == 3 && scalar < 0x10000u) ||
-                scalar > 0x10ffffu || (scalar >= 0xd800u && scalar <= 0xdfffu))
+            if ((continuation == 2 && scalar < 0x800u) || (continuation == 3 && scalar
+                < 0x10000u) || scalar > 0x10ffffu || (scalar >= 0xd800u && scalar
+                <= 0xdfffu))
                 return false;
         }
         return true;

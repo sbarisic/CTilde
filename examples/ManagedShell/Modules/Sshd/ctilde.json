@@ -1,0 +1,28 @@
+{
+  "target": "esp-idf",
+  "architecture": "xtensa",
+  "sources": [
+    "Program.ct"
+  ],
+  "espIdf": {
+    "artifact": "managed-module"
+  },
+  "managedModule": {
+    "kind": "application",
+    "name": "sshd",
+    "version": "1.0.0",
+    "references": [
+      "../SystemSsh/build/managed-modules/system.ssh.ctmeta.json"
+    ],
+    "mainTaskStackBytes": 16384,
+    "heapLimitBytes": 196608
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

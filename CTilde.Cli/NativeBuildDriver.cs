@@ -995,7 +995,16 @@ internal static class EspIdfBuildDriver
         var temporary = request.ManagedModuleArtifactPath + ".tmp-" + Guid.NewGuid().ToString("N");
         try
         {
-            File.Copy(candidates[0], temporary, overwrite: false);
+            var metadata = ManagedModuleMetadata.Load(request.ManagedModuleMetadataPath!);
+            if (metadata.HasOverlays)
+            {
+                BuildReporter.Current?.Phase("Extracting managed overlays and relinking resident ELF...");
+                metadata = ManagedOverlayPackager.Package(request, candidates[0], temporary);
+                AtomicFile.WriteTextIfChanged(request.ManagedModuleMetadataPath!, metadata.ToDeterministicJson());
+                BuildReporter.Current?.Detail($"Resident executable and {metadata.Overlays.Length} overlay payload(s); largest window {metadata.MaximumOverlayBytes} bytes");
+            }
+            else
+                File.Copy(candidates[0], temporary, overwrite: false);
             File.Move(temporary, request.ManagedModuleArtifactPath!, overwrite: true);
         }
         finally
@@ -1021,9 +1030,9 @@ internal static class EspIdfBuildDriver
         };
         if (type != 3 || expectedMachine == 0 || machine != expectedMachine)
             throw new NativeBuildException($"Managed-module output '{path}' has ELF type {type} and machine {machine}; expected ET_DYN for {architecture}.");
-        ReadOnlySpan<byte> magic = [(byte)'C', (byte)'T', (byte)'M', (byte)'O', (byte)'D', 1, 0, 0];
+        ReadOnlySpan<byte> magic = [(byte)'C', (byte)'T', (byte)'M', (byte)'O', (byte)'D', (byte)CompilerContract.ManagedModuleAbiVersion, 0, 0];
         if (bytes.AsSpan().IndexOf(magic) < 0)
-            throw new NativeBuildException($"Managed-module output '{path}' does not contain the Module ABI 1 preflight manifest.");
+            throw new NativeBuildException($"Managed-module output '{path}' does not contain the Module ABI {CompilerContract.ManagedModuleAbiVersion} preflight manifest.");
     }
 
     private static void AddStackInstrumentationCMakeArguments(BuildRequest request, List<string> arguments)

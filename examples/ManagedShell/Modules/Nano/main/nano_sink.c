@@ -1,10 +1,12 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <stdlib.h>
-#include <unistd.h>
 
-typedef struct ct_runtime_api_v19 {
+typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;
+typedef struct ct_managed_call_target_v3 ct_managed_call_target_v3;
+typedef struct ct_managed_call_frame_v22 ct_managed_call_frame_v22;
+
+typedef struct ct_runtime_api_v22 {
     uint32_t Size;
     uint32_t AbiVersion;
     void *(*Allocate)(size_t, const void *);
@@ -13,16 +15,17 @@ typedef struct ct_runtime_api_v19 {
     void (*Raise)(void *);
     void (*RuntimeFault)(const char *, const char *, int32_t);
     const void *(*RegisterType)(const void *);
-    void (*UnregisterTypes)(const void *);
+    void (*UnregisterTypes)(const ct_managed_module_descriptor_v3 *);
     void *(*CurrentProcess)(void);
     void *(*CurrentModuleState)(const void *);
     void *(*CurrentThreadState)(void);
     void (*SetThreadState)(void *);
     bool (*CancellationRequested)(void);
-    void (*EnterCall)(const void *);
-    void (*LeaveCall)(const void *);
+    uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3 *,
+        const ct_managed_call_target_v3 *, ct_managed_call_frame_v22 *);
+    void (*LeaveManagedCall)(ct_managed_call_frame_v22 *);
     int32_t (*Service)(uint32_t, void *, size_t);
-} ct_runtime_api_v19;
+} ct_runtime_api_v22;
 
 typedef struct ct_console_transfer_v19 {
     uint8_t *Data;
@@ -37,15 +40,17 @@ typedef struct nano_sink {
     size_t Capacity;
 } nano_sink;
 
-extern const ct_runtime_api_v19 *ct_runtime_api;
+extern const ct_runtime_api_v22 *ct_runtime_api;
+extern const ct_managed_module_descriptor_v3 ct_managed_module_v3;
 
 uintptr_t ct_nano_sink_create(uint32_t capacity)
 {
     if (capacity == 0 || capacity > 32768 || ct_runtime_api == NULL) return 0;
-    nano_sink *sink = calloc(1, sizeof(*sink));
+    nano_sink *sink = (nano_sink *)ct_runtime_api->Allocate(sizeof(*sink) + capacity,
+        &ct_managed_module_v3);
     if (sink == NULL) return 0;
-    sink->Data = malloc(capacity);
-    if (sink->Data == NULL) { free(sink); return 0; }
+    sink->Data = (uint8_t *)(sink + 1);
+    sink->Length = 0;
     sink->Capacity = capacity;
     return (uintptr_t)sink;
 }
@@ -54,8 +59,7 @@ void ct_nano_sink_destroy(uintptr_t handle)
 {
     nano_sink *sink = (nano_sink *)handle;
     if (sink == NULL) return;
-    free(sink->Data);
-    free(sink);
+    ct_runtime_api->Free(sink);
 }
 
 void ct_nano_sink_reset(uintptr_t handle)
@@ -99,9 +103,4 @@ int32_t ct_nano_query_size(void)
     if (result != 0 || transfer.Count != transfer.Length)
         return result == 0 ? -1 : result;
     return ct_runtime_api->Service(UINT32_C(18), NULL, 0u);
-}
-
-void ct_nano_sleep(uint32_t milliseconds)
-{
-    (void)usleep((useconds_t)milliseconds * 1000u);
 }

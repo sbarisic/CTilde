@@ -47,6 +47,8 @@ internal static class TargetValidator
                 earlier.Syntax?.Source.GetLocation(earlier.Syntax.Span));
         }
 
+        ValidateManagedOverlays(model);
+
         var dynamicSymbols = emitter.DynamicGeneratedSymbols.ToHashSet(StringComparer.Ordinal);
         foreach (var method in model.Types.Values.SelectMany(type => type.Methods)
                      .Where(method => method.ExternName?.StartsWith("ct_idf_", StringComparison.Ordinal) == true && !method.IsTrustedExtern))
@@ -79,7 +81,7 @@ internal static class TargetValidator
                 foreach (var operation in model.Effects.Operations.GetValueOrDefault(caller).Where(operation =>
                              operation.Target?.ContainingType.FullName == "System.Diagnostics.ProcessRuntime" &&
                              operation.Target.ExternName?.StartsWith("ct_managed_process_", StringComparison.Ordinal) == true))
-                    model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 19.", operation.Syntax.Source, operation.Syntax.Span);
+                    model.Diagnostics.Add("CT6206", "System.Diagnostics.Process is available only to ESP-IDF firmware and managed modules that link Runtime ABI 21.", operation.Syntax.Source, operation.Syntax.Span);
             }
         }
 
@@ -101,6 +103,50 @@ internal static class TargetValidator
                 VisitLayout(dependency);
             active.Remove(type);
             complete.Add(type);
+        }
+    }
+
+    private static void ValidateManagedOverlays(CompilationModel model)
+    {
+        var declaredOverlaySyntax = model.ProjectDeclaredTypes
+            .Where(type => type.OverlayName is not null)
+            .Select(type => type.Syntax!)
+            .Concat(model.ProjectTypes.SelectMany(type => type.Methods.Concat(type.Constructors))
+                .Where(method => method.IsOverlay).Select(method => method.Syntax!).Where(syntax => syntax is not null))
+            .Concat(model.ProjectTypes.SelectMany(type => type.Properties)
+                .Where(property => property.OverlayName is not null).Select(property => property.Syntax!).Where(syntax => syntax is not null))
+            .Distinct()
+            .ToArray();
+        if (declaredOverlaySyntax.Length != 0 &&
+            (model.Target != CompilationTarget.EspIdf || model.Architecture != CompilationArchitecture.Xtensa || model.ManagedModuleKind is null))
+        {
+            foreach (var syntax in declaredOverlaySyntax)
+                model.Diagnostics.Add("CT6232", "Overlay code is supported only by ESP-IDF Xtensa managed applications and libraries.", syntax.Source, syntax.Span);
+        }
+
+        foreach (var property in model.ProjectTypes.SelectMany(type => type.Properties)
+                     .Where(property => property.OverlayName is not null && property.IsAbstract))
+            model.Diagnostics.Add("CT6231", "Overlay placement requires concrete property accessors.", property.Syntax!.Source, property.Syntax.Span);
+
+        if (!model.HasOverlays)
+            return;
+
+        var roots = model.ProjectTypes.SelectMany(type => type.Methods.Concat(type.Constructors));
+        var reachable = model.Effects.ReachableMethods(roots);
+        foreach (var operation in reachable.SelectMany(method => model.Effects.Operations.TryGetValue(method, out var operations)
+                         ? operations : [])
+                     .Where(operation => operation.Target is { ContainingType.FullName: "System.Threading.Thread", Name: "Start" }))
+            model.Diagnostics.Add("CT6233", "An overlay-enabled managed application or dependency closure cannot create C~ threads.", operation.Syntax.Source, operation.Syntax.Span);
+
+        foreach (var interrupt in model.ProjectTypes.SelectMany(type => type.Methods).Where(method => method.IsInterrupt))
+        {
+            var interruptClosure = model.Effects.ReachableMethods([interrupt]);
+            foreach (var overlay in interruptClosure.Where(method => method.IsOverlay))
+            {
+                var syntax = overlay.Syntax ?? interrupt.Syntax;
+                if (syntax is not null)
+                    model.Diagnostics.Add("CT6235", "An interrupt call closure cannot enter managed overlay code.", syntax.Source, syntax.Span);
+            }
         }
     }
 }

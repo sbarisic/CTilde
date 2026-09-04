@@ -12,8 +12,10 @@ internal static class ManagedOverlayPackager
     private static readonly byte[] DirectoryMagic = "CTOVLD3\0"u8.ToArray();
     private static readonly byte[] FooterMagic = "CTOVLF3\0"u8.ToArray();
     private const uint RelocationWindow = 1;
-    private const uint RelocationResident = 2;
-    private const uint RelocationResidentIndirect = 3;
+    private const uint RelocationResidentExecutable = 2;
+    private const uint RelocationResidentData = 3;
+    private const uint RelocationResidentExecutableIndirect = 4;
+    private const uint RelocationResidentDataIndirect = 5;
 
     public static ManagedModuleMetadata Package(BuildRequest request, string linkedModule, string output)
     {
@@ -54,6 +56,15 @@ internal static class ManagedOverlayPackager
             var descriptorSymbol = linkedImage.NamedSymbols.SingleOrDefault(symbol =>
                 symbol.Name == "ct_managed_module_v3" && symbol.SectionIndex != 0)
                 ?? throw new NativeBuildException("Resident ELF does not retain the Module ABI 3 descriptor symbol.");
+            var textAnchorSymbols = linkedImage.NamedSymbols.Where(symbol =>
+                    symbol.Name == "ct_managed_module_text_anchor" && symbol.SectionIndex != 0)
+                .DistinctBy(symbol => (symbol.SectionIndex, symbol.Value, symbol.Size)).ToArray();
+            if (textAnchorSymbols.Length != 1)
+                throw new NativeBuildException("Resident ELF does not uniquely retain the managed-module text anchor.");
+            var textAnchorSymbol = textAnchorSymbols[0];
+            if (linkedImage.ClassifyResidentAddress(descriptorSymbol.Value) != ResidentAddressKind.Data ||
+                linkedImage.ClassifyResidentAddress(textAnchorSymbol.Value) != ResidentAddressKind.Executable)
+                throw new NativeBuildException("Managed-module descriptor and text anchor are not in the expected resident load segments.");
             var residentElf = Path.Combine(working, "resident.so");
             FilterOverlayRelocations(linkedImage, linkedResident, working, tools.Objcopy);
             var removable = linkedImage.Sections.Where(section => TryOverlayName(section.Name, out _) ||
@@ -72,7 +83,7 @@ internal static class ManagedOverlayPackager
             var maximumOverlayBytes = checked((uint)layouts.Max(item => item.Payload.Length));
             PatchDescriptorMaximumOverlayBytes(residentElf, descriptorSymbol.Value,
                 descriptorSymbol.Size, maximumOverlayBytes);
-            WriteContainer(residentElf, output, layouts, descriptorSymbol.Value);
+            WriteContainer(residentElf, output, layouts, descriptorSymbol.Value, textAnchorSymbol.Value);
             BuildReporter.Current?.Detail($"Resident executable memory: {ExecutableLoadBytes(residentElf)} bytes; " +
                 $"resident ELF file: {new FileInfo(residentElf).Length} bytes");
             foreach (var layout in layouts)
@@ -154,7 +165,12 @@ internal static class ManagedOverlayPackager
                 {
                     if (!residentImportSlots.TryGetValue(symbol.Name, out targetAddress))
                         throw new NativeBuildException($"Overlay import '{symbol.Name}' has no resident relocation slot.");
-                    kind = RelocationResidentIndirect;
+                    kind = linkedImage.ClassifyResidentAddress(targetAddress) switch
+                    {
+                        ResidentAddressKind.Executable => RelocationResidentExecutableIndirect,
+                        ResidentAddressKind.Data => RelocationResidentDataIndirect,
+                        _ => throw new NativeBuildException($"Overlay import slot for '{symbol.Name}' is in an unsupported resident segment."),
+                    };
                 }
                 else
                 {
@@ -171,7 +187,12 @@ internal static class ManagedOverlayPackager
                         targetAddress -= layout.LinkedStart;
                     }
                     else
-                        kind = RelocationResident;
+                        kind = linkedImage.ClassifyResidentAddress(targetAddress) switch
+                        {
+                            ResidentAddressKind.Executable => RelocationResidentExecutable,
+                            ResidentAddressKind.Data => RelocationResidentData,
+                            _ => throw new NativeBuildException($"Overlay '{layout.Name}' references an unsupported resident address."),
+                        };
                 }
                 layout.Relocations.Add(new OverlayRelocation(patchOffset, kind, targetAddress, addend));
             }
@@ -261,7 +282,8 @@ internal static class ManagedOverlayPackager
     private static bool IsOverlayAddress(ElfFile image, uint address) => image.Sections.Any(section =>
         TryOverlayName(section.Name, out _) && address >= section.Address && address - section.Address < section.Size);
 
-    private static void WriteContainer(string residentElf, string output, ImmutableArray<OverlayLayout> layouts, uint descriptorVma)
+    private static void WriteContainer(string residentElf, string output, ImmutableArray<OverlayLayout> layouts,
+        uint descriptorVma, uint textAnchorVma)
     {
         var resident = File.ReadAllBytes(residentElf);
         using var result = new MemoryStream();
@@ -282,6 +304,7 @@ internal static class ManagedOverlayPackager
         WriteU32(directory, checked((uint)layouts.Max(item => item.Payload.Length)));
         WriteU32(directory, checked((uint)resident.Length));
         WriteU32(directory, descriptorVma);
+        WriteU32(directory, textAnchorVma);
         var relocationStart = 0u;
         var functionStart = 0u;
         foreach (var layout in layouts)
@@ -448,11 +471,13 @@ internal static class ManagedOverlayPackager
 
     private sealed class ElfFile
     {
-        private ElfFile(string path, byte[] bytes, ImmutableArray<ElfSection> sections, ImmutableArray<ElfSymbol> symbols)
-        { Path = path; Bytes = bytes; Sections = sections; NamedSymbols = symbols; }
+        private ElfFile(string path, byte[] bytes, ImmutableArray<ElfSection> sections,
+            ImmutableArray<ElfProgramHeader> programHeaders, ImmutableArray<ElfSymbol> symbols)
+        { Path = path; Bytes = bytes; Sections = sections; ProgramHeaders = programHeaders; NamedSymbols = symbols; }
         public string Path { get; }
         public byte[] Bytes { get; }
         public ImmutableArray<ElfSection> Sections { get; }
+        public ImmutableArray<ElfProgramHeader> ProgramHeaders { get; }
         public ImmutableArray<ElfSymbol> NamedSymbols { get; }
 
         public static ElfFile Read(string path, bool requireRelocatable)
@@ -462,6 +487,19 @@ internal static class ManagedOverlayPackager
                 throw new NativeBuildException($"'{path}' is not a 32-bit little-endian ELF file.");
             var type = U16(bytes, 16);
             if (requireRelocatable && type != 1) throw new NativeBuildException($"'{path}' is not an ELF relocatable object.");
+            var programOffset = U32(bytes, 28);
+            var programEntrySize = U16(bytes, 42);
+            var programCount = U16(bytes, 44);
+            if (programCount != 0 && (programEntrySize < 32 ||
+                (ulong)programOffset + (ulong)programEntrySize * programCount > (ulong)bytes.Length))
+                throw new NativeBuildException($"'{path}' has a malformed ELF program-header table.");
+            var programHeaders = ImmutableArray.CreateBuilder<ElfProgramHeader>(programCount);
+            for (var i = 0; i < programCount; ++i)
+            {
+                var p = checked((int)(programOffset + (uint)i * programEntrySize));
+                programHeaders.Add(new ElfProgramHeader(U32(bytes, p), U32(bytes, p + 8), U32(bytes, p + 20),
+                    U32(bytes, p + 24)));
+            }
             var sectionOffset = U32(bytes, 32);
             var entrySize = U16(bytes, 46);
             var count = U16(bytes, 48);
@@ -479,7 +517,19 @@ internal static class ManagedOverlayPackager
             var allSymbols = ImmutableArray.CreateBuilder<ElfSymbol>();
             foreach (var table in sections.Where(section => section.Type is 2 or 11 && section.EntrySize >= 16 && section.Link < sections.Length))
                 allSymbols.AddRange(ReadSymbols(bytes, table, sections[checked((int)table.Link)]));
-            return new ElfFile(path, bytes, sections, allSymbols.ToImmutable());
+            return new ElfFile(path, bytes, sections, programHeaders.ToImmutable(), allSymbols.ToImmutable());
+        }
+
+        public ResidentAddressKind ClassifyResidentAddress(uint address)
+        {
+            var matches = ProgramHeaders.Where(header => header.Type == 1u && header.Contains(address)).ToArray();
+            if (matches.Length != 1)
+                throw new NativeBuildException($"Resident address 0x{address:x8} does not belong to exactly one load segment in '{Path}'.");
+            var executable = (matches[0].Flags & 1u) != 0u;
+            var writable = (matches[0].Flags & 2u) != 0u;
+            if (executable == writable)
+                throw new NativeBuildException($"Resident address 0x{address:x8} belongs to an unsupported load segment in '{Path}'.");
+            return executable ? ResidentAddressKind.Executable : ResidentAddressKind.Data;
         }
 
         public ImmutableArray<ElfSymbol> SymbolsFor(uint sectionIndex)
@@ -526,6 +576,11 @@ internal static class ManagedOverlayPackager
     }
 
     private sealed record ElfSection(int Index, string Name, uint Type, uint Flags, uint Address, uint Offset, uint Size, uint Link, uint Info, uint Alignment, uint EntrySize);
+    private sealed record ElfProgramHeader(uint Type, uint Address, uint MemorySize, uint Flags)
+    {
+        public bool Contains(uint address) => address >= Address && address - Address < MemorySize;
+    }
     private sealed record ElfSymbol(string Name, uint Value, uint Size, byte Info, int SectionIndex);
     private sealed record ElfRelocation(uint Offset, uint SymbolIndex, uint Type, int Addend);
+    private enum ResidentAddressKind { Executable, Data }
 }

@@ -71,8 +71,10 @@ static_assert(CTILDE_MANAGED_MODULE_VERSION_CAPACITY == 32u,
 #define CT_INITIALIZATION_READY UINT32_C(2)
 #define CT_OVERLAY_NAME_CAPACITY 32u
 #define CT_OVERLAY_RELOCATION_WINDOW 1u
-#define CT_OVERLAY_RELOCATION_RESIDENT 2u
-#define CT_OVERLAY_RELOCATION_RESIDENT_INDIRECT 3u
+#define CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE 2u
+#define CT_OVERLAY_RELOCATION_RESIDENT_DATA 3u
+#define CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE_INDIRECT 4u
+#define CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT 5u
 
 static const char *TAG = "ctilde.modules";
 
@@ -242,7 +244,9 @@ struct ct_module {
     uint32_t OverlayRelocationCount;
     uint32_t MaximumOverlayBytes;
     uint32_t DescriptorVma;
-    uintptr_t LoadBias;
+    uint32_t TextAnchorVma;
+    uintptr_t ExecutableLoadBias;
+    uintptr_t DataLoadBias;
     bool OverlayUnavailable;
 };
 
@@ -819,7 +823,7 @@ static int load_overlay_directory(ct_module *module, const char *path)
     const uint32_t directory_size = overlay_read_u32(footer + 12);
     const uint32_t resident_size = overlay_read_u32(footer + 16);
     const uint32_t footer_overlay_count = overlay_read_u32(footer + 20);
-    if (directory_size < 36u || directory_offset < resident_size ||
+    if (directory_size < 40u || directory_offset < resident_size ||
         (uint64_t)directory_offset + directory_size + sizeof(footer) != (uint64_t)file_size) {
         fclose(stream);
         return -ENOEXEC;
@@ -836,11 +840,12 @@ static int load_overlay_directory(ct_module *module, const char *path)
     const uint32_t maximum_size = overlay_read_u32(directory + 24);
     const uint32_t directory_resident_size = overlay_read_u32(directory + 28);
     const uint32_t descriptor_vma = overlay_read_u32(directory + 32);
-    const uint64_t expected = 36u + (uint64_t)overlay_count * 100u + (uint64_t)function_count * 12u +
+    const uint32_t text_anchor_vma = overlay_read_u32(directory + 36);
+    const uint64_t expected = 40u + (uint64_t)overlay_count * 100u + (uint64_t)function_count * 12u +
         (uint64_t)relocation_count * 16u;
     if (overlay_count == 0u || overlay_count > 256u || function_count == 0u || function_count > 4096u ||
         relocation_count > 65536u || overlay_count != footer_overlay_count || expected != directory_size ||
-        directory_resident_size != resident_size || maximum_size == 0u || descriptor_vma == 0u) {
+        directory_resident_size != resident_size || maximum_size == 0u || descriptor_vma == 0u || text_anchor_vma == 0u) {
         free(directory); fclose(stream); return -ENOEXEC;
     }
     ct_overlay_entry_v3 *overlays = calloc(overlay_count, sizeof(*overlays));
@@ -849,7 +854,7 @@ static int load_overlay_directory(ct_module *module, const char *path)
     if (overlays == NULL || (function_count != 0u && functions == NULL) || (relocation_count != 0u && relocations == NULL)) {
         free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOMEM;
     }
-    size_t position = 36u;
+    size_t position = 40u;
     uint32_t previous_file_end = resident_size;
     uint32_t expected_relocation_start = 0u;
     uint32_t expected_function_start = 0u;
@@ -909,7 +914,8 @@ static int load_overlay_directory(ct_module *module, const char *path)
         relocations[index] = (ct_overlay_relocation_v3){ overlay_read_u32(directory + position),
             overlay_read_u32(directory + position + 4), overlay_read_u32(directory + position + 8),
             (int32_t)overlay_read_u32(directory + position + 12) };
-        if (relocations[index].Kind < CT_OVERLAY_RELOCATION_WINDOW || relocations[index].Kind > CT_OVERLAY_RELOCATION_RESIDENT_INDIRECT) {
+        if (relocations[index].Kind < CT_OVERLAY_RELOCATION_WINDOW ||
+            relocations[index].Kind > CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
             free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
         }
         bool owned = false;
@@ -940,6 +946,7 @@ static int load_overlay_directory(ct_module *module, const char *path)
     module->OverlayRelocationCount = relocation_count;
     module->MaximumOverlayBytes = maximum_size;
     module->DescriptorVma = descriptor_vma;
+    module->TextAnchorVma = text_anchor_vma;
     if (module->OverlayLock == NULL) return -ENOMEM;
     return 0;
 }
@@ -1012,9 +1019,10 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v22 *runtime);
     descriptor_function get_descriptor = (descriptor_function)dlsym(module->DynamicHandle, "ct_managed_module_descriptor");
     bind_runtime_function bind_runtime = (bind_runtime_function)dlsym(module->DynamicHandle, "ct_managed_module_bind_runtime");
+    void *text_anchor = module->OverlayCount == 0u ? NULL : dlsym(module->DynamicHandle, "ct_managed_module_text_anchor");
     const ct_managed_module_descriptor_v3 *descriptor = get_descriptor == NULL ? NULL : get_descriptor();
-    if (descriptor == NULL || bind_runtime == NULL) {
-        ESP_LOGE(TAG, "Module '%s' does not export the Module ABI 3 descriptor/bind functions", manifest->Name);
+    if (descriptor == NULL || bind_runtime == NULL || (module->OverlayCount != 0u && text_anchor == NULL)) {
+        ESP_LOGE(TAG, "Module '%s' does not export the Module ABI 3 descriptor, bind, or text-anchor functions", manifest->Name);
         result = -ENOEXEC;
         goto fail;
     }
@@ -1034,7 +1042,9 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         goto fail;
     }
     module->Descriptor = descriptor;
-    module->LoadBias = (uintptr_t)(const void *)descriptor - (uintptr_t)module->DescriptorVma;
+    module->DataLoadBias = (uintptr_t)(const void *)descriptor - (uintptr_t)module->DescriptorVma;
+    module->ExecutableLoadBias = module->OverlayCount == 0u ? 0u :
+        (uintptr_t)text_anchor - (uintptr_t)module->TextAnchorVma;
     if ((descriptor->HasOverlays != 0u) != (module->OverlayCount != 0u) ||
         descriptor->MaximumOverlayBytes != module->MaximumOverlayBytes) {
         ESP_LOGE(TAG, "Module '%s' overlay descriptor/container mismatch", manifest->Name);
@@ -1350,10 +1360,15 @@ static int load_process_overlay(ct_process *process, ct_module *module, uint32_t
         if (relocation->Kind == CT_OVERLAY_RELOCATION_WINDOW) {
             if (relocation->Target >= entry->MemorySize) return -ENOEXEC;
             base = (uintptr_t)(process->OverlayWindow + relocation->Target);
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT) {
-            base = module->LoadBias + relocation->Target;
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_INDIRECT) {
-            const uintptr_t slot = module->LoadBias + relocation->Target;
+        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE) {
+            base = module->ExecutableLoadBias + relocation->Target;
+        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA) {
+            base = module->DataLoadBias + relocation->Target;
+        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE_INDIRECT) {
+            const uintptr_t slot = module->ExecutableLoadBias + relocation->Target;
+            (void)memcpy(&base, (const void *)slot, sizeof(base));
+        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
+            const uintptr_t slot = module->DataLoadBias + relocation->Target;
             (void)memcpy(&base, (const void *)slot, sizeof(base));
         } else return -ENOEXEC;
         const int64_t relocated = (int64_t)(uint32_t)base + (int64_t)relocation->Addend;

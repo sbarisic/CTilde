@@ -42,7 +42,8 @@ internal static partial class ConformanceTests
                 generated.Contains("ct_managed_call_target_v3", StringComparison.Ordinal) &&
                 generated.Contains("EnterManagedCall", StringComparison.Ordinal) &&
                 generated.Contains("ct_leave_managed_call_cleanup", StringComparison.Ordinal) &&
-                generated.Contains("ct_cleanup_push(&ct_call_cleanup", StringComparison.Ordinal),
+                generated.Contains("ct_cleanup_push(&ct_call_cleanup", StringComparison.Ordinal) &&
+                generated.Contains("ct_managed_module_text_anchor", StringComparison.Ordinal),
                 "Overlay bodies were not separated behind cleanup-safe resident stubs.");
 
             using var metadataWriter = new StringWriter();

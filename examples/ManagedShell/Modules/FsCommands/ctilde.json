@@ -1,0 +1,26 @@
+{
+  "target": "esp-idf",
+  "architecture": "xtensa",
+  "sources": [
+    "Program.ct"
+  ],
+  "espIdf": {
+    "artifact": "managed-module"
+  },
+  "managedModule": {
+    "kind": "application",
+    "name": "commands.fs",
+    "version": "1.0.0",
+    "references": [],
+    "mainTaskStackBytes": 6144,
+    "heapLimitBytes": 32768
+  },
+  "build": {
+    "cLayout": "modules",
+    "generatedDirectory": "main/generated",
+    "generatedHeader": "main/generated/ctilde_exports.h",
+    "espIdfProjectDirectory": ".",
+    "optimization": "speed",
+    "floatingPoint": "precise"
+  }
+}

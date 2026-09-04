@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 
+[Overlay("buffer")]
 internal sealed class NanoBuffer
 {
     public const int MaximumLength = 32768;

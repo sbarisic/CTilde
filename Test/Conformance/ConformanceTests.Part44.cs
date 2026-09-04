@@ -7,6 +7,39 @@ internal static partial class ConformanceTests
 {
     public static void RegisterPart44(ConformanceSuite suite)
     {
+        suite.Run("draft 0.49 managed runtime faults initialize before process entry", () =>
+        {
+            const string source = """
+                using System;
+                public static class Program
+                {
+                    [EntryPoint]
+                    public static int Main(string[] args)
+                    {
+                        try
+                        {
+                            int[] values = new int[1];
+                            return values[2];
+                        }
+                        catch (IndexOutOfRangeException)
+                        {
+                            return 0;
+                        }
+                    }
+                }
+                """;
+            var module = new ManagedModuleConfiguration(
+                ManagedModuleKind.Application, "Demo.RuntimeFault", "1.0.0", [], 4096, 16384);
+            var compilation = Compile(source, new CompilationOptions(
+                CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                ManagedModuleKind: module.Kind, ManagedModule: module));
+            var bundle = compilation.EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
+            Assert(generated.Contains("ct_runtime_api = runtime; ct_runtime_faults_init(); return 0;", StringComparison.Ordinal),
+                "Managed modules did not initialize catchable runtime faults while binding the resident runtime.");
+        });
+
         suite.Run("draft 0.49 managed library metadata and checked imports", () =>
         {
             const string providerSource = """

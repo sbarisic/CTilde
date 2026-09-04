@@ -64,7 +64,8 @@ internal static class NetHost
     internal static unsafe byte* ErrorName(int code);
 }
 
-internal static class Program
+[Overlay("network")]
+internal static class NetCommand
 {
     private static void Help()
     {
@@ -109,6 +110,31 @@ internal static class Program
         return true;
     }
 
+    private static bool SegmentEquals(string text, int start, int length,
+        string expected)
+    {
+        if (length != expected.Length)
+            return false;
+        for (int index = 0; index < length; index++)
+            if (text[start + index] != expected[index])
+                return false;
+        return true;
+    }
+
+    private static int TrimStart(string text, int start, int end)
+    {
+        while (start < end && text[start] == ' ')
+            start++;
+        return start;
+    }
+
+    private static int TrimEnd(string text, int start, int end)
+    {
+        while (end > start && text[end - 1] == ' ')
+            end--;
+        return end;
+    }
+
     private static bool TryProfile(string name, out string ssid, out string password,
         out string hostname)
     {
@@ -117,39 +143,70 @@ internal static class Program
         hostname = "";
         if (!SafeProfileName(name))
             return false;
-        string[] lines = File.ReadAllLines("/storage/net/profiles/" + name + ".conf");
-        for (int index = 0; index < lines.Length; index++)
+        string profilePath = "/sd/wifi_profile/" + name + ".conf";
+        if (!File.Exists(profilePath))
         {
-            string line = lines[index].Trim(' ');
-            if (line.Length == 0 || line[0] == '#')
-                continue;
-            int equals = line.IndexOf('=');
-            if (equals <= 0)
+            profilePath = "/storage/net/profiles/" + name + ".conf";
+            if (!File.Exists(profilePath))
                 return false;
-            string key = line.Substring(0, equals).Trim(' ');
-            string value = line.Substring(equals + 1).Trim(' ');
-            if (key == "ssid")
+        }
+        byte[] bytes = File.ReadAllBytes(profilePath);
+        if (bytes.Length > 2048)
+            return false;
+        string text = Encoding.UTF8.GetString(bytes);
+        bool hasSsid = false;
+        bool hasPassword = false;
+        bool hasHostname = false;
+        int position = 0;
+        while (position < text.Length)
+        {
+            int lineStart = position;
+            while (position < text.Length && text[position] != '\n')
+                position++;
+            int lineEnd = position;
+            if (position < text.Length)
+                position++;
+            if (lineEnd > lineStart && text[lineEnd - 1] == '\r')
+                lineEnd--;
+            lineStart = TrimStart(text, lineStart, lineEnd);
+            lineEnd = TrimEnd(text, lineStart, lineEnd);
+            if (lineStart == lineEnd || text[lineStart] == '#')
+                continue;
+            int equals = lineStart;
+            while (equals < lineEnd && text[equals] != '=')
+                equals++;
+            if (equals == lineStart || equals == lineEnd)
+                return false;
+            int keyEnd = TrimEnd(text, lineStart, equals);
+            int valueStart = TrimStart(text, equals + 1, lineEnd);
+            int valueEnd = TrimEnd(text, valueStart, lineEnd);
+            string value = text.Substring(valueStart, valueEnd - valueStart);
+            if (SegmentEquals(text, lineStart, keyEnd - lineStart, "ssid"))
             {
-                if (ssid != null)
+                if (hasSsid)
                     return false;
+                hasSsid = true;
                 ssid = value;
             }
-            else if (key == "password")
+            else if (SegmentEquals(text, lineStart, keyEnd - lineStart, "password"))
             {
-                if (password != null)
+                if (hasPassword)
                     return false;
+                hasPassword = true;
                 password = value;
             }
-            else if (key == "hostname")
+            else if (SegmentEquals(text, lineStart, keyEnd - lineStart, "hostname"))
             {
-                if (hostname.Length != 0)
+                if (hasHostname)
                     return false;
+                hasHostname = true;
                 hostname = value;
             }
             else
                 return false;
         }
-        return ssid != null && password != null && ssid.Length > 0 && ssid.Length
+        return hasSsid && hasPassword && ssid != null && password != null
+            && ssid.Length > 0 && ssid.Length
             <= 32 && password.Length <= 63 && hostname.Length <= 63;
     }
 
@@ -199,8 +256,7 @@ internal static class Program
         return 0;
     }
 
-    [EntryPoint]
-    public static unsafe int Main(string[] args)
+    public static unsafe int Run(string[] args)
     {
         if (args.Length == 1 && args[0] == "status")
             return Status();
@@ -246,5 +302,14 @@ internal static class Program
         }
         Help();
         return 2;
+    }
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static unsafe int Main(string[] args)
+    {
+        return NetCommand.Run(args);
     }
 }

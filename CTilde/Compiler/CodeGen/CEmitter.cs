@@ -1594,7 +1594,10 @@ internal sealed partial class CEmitter : ILoweringServices
         writer.WriteLine("CT_MANAGED_EXPORT void ct_managed_module_text_anchor(void) { }");
         writer.WriteLine($"CT_MANAGED_LOCAL const ct_managed_module_descriptor_v3 ct_managed_module_v3 = {{ sizeof(ct_managed_module_descriptor_v3), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), \"{EscapeCString(configuration.Name)}\", \"{EscapeCString(configuration.Version)}\", \"{metadata.BuildIdentity}\", \"{metadata.ApiHash}\", UINT32_C({metadata.Dependencies.Length}), {dependenciesPointer}, UINT32_C({exports.Length}), {exportsPointer}, UINT32_C({imports.Length}), {importsPointer}, sizeof(ct_managed_module_static_state), _Alignof(ct_managed_module_static_state), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}), ct_module_init, ct_module_fini, {mainPointer}, {argumentsFactory}, ct_managed_create_bytes, UINT32_C({callTargets.Length}), {callTargetsPointer}, UINT32_C({(metadata.HasOverlays ? 1 : 0)}), UINT32_C({metadata.MaximumOverlayBytes}) }};");
         writer.WriteLine("CT_MANAGED_EXPORT const ct_managed_module_descriptor_v3* ct_managed_module_descriptor(void) { return &ct_managed_module_v3; }");
-        writer.WriteLine($"CT_MANAGED_EXPORT int32_t ct_managed_module_bind_runtime(const ct_runtime_api_v22* runtime) {{ if (runtime == NULL || runtime->Size < sizeof(ct_runtime_api_v22) || runtime->AbiVersion != UINT32_C({CompilerContract.RuntimeAbiVersion})) return -1; ct_runtime_api = runtime; return 0; }}");
+        if (_usesExceptions)
+            writer.WriteLine("CT_GENERATED_LOCAL void ct_runtime_faults_init(void);");
+        var runtimeFaultInitialization = _usesExceptions ? " ct_runtime_faults_init();" : string.Empty;
+        writer.WriteLine($"CT_MANAGED_EXPORT int32_t ct_managed_module_bind_runtime(const ct_runtime_api_v22* runtime) {{ if (runtime == NULL || runtime->Size < sizeof(ct_runtime_api_v22) || runtime->AbiVersion != UINT32_C({CompilerContract.RuntimeAbiVersion})) return -1; ct_runtime_api = runtime;{runtimeFaultInitialization} return 0; }}");
         EmitManagedBinaryManifest(writer, configuration, metadata);
     }
 

@@ -29,6 +29,7 @@ internal static class NanoSinkRuntime
     internal static int QuerySize();
 }
 
+[Overlay("buffer")]
 internal sealed class NanoTerminal
 {
     private const int MaximumRows = 50;
@@ -305,6 +306,7 @@ internal sealed class NanoTerminal
     }
 }
 
+[Overlay("editor")]
 internal static class NanoFiles
 {
     public static byte[] Load(string path, out bool exists)
@@ -369,6 +371,7 @@ internal static class NanoFiles
 
 public static class Program
 {
+    [Overlay("editor")]
     private static bool QuerySize(NanoInput input, out int rows, out int columns)
     {
         rows = 24;
@@ -395,6 +398,7 @@ public static class Program
         return false;
     }
 
+    [Overlay("buffer")]
     private static void EnsureVisible(NanoBuffer buffer, NanoTerminal terminal, ref int topLine,
         ref int leftColumn)
     {
@@ -410,6 +414,7 @@ public static class Program
             leftColumn = column - terminal.Columns + 1;
     }
 
+    [Overlay("buffer")]
     private static void MoveVertical(NanoBuffer buffer, int direction, ref int goal)
     {
         if (goal < 0)
@@ -428,6 +433,7 @@ public static class Program
         buffer.MoveTo(buffer.PositionAtColumn(target, goal));
     }
 
+    [Overlay("buffer")]
     private static bool ApplyKey(NanoBuffer buffer, NanoKey key, NanoTerminal terminal,
         ref bool dirty, ref int goal, ref string message)
     {
@@ -476,6 +482,25 @@ public static class Program
         return changed;
     }
 
+    [Overlay("buffer")]
+    private static bool PaintVisible(NanoBuffer buffer, NanoTerminal terminal, string path,
+        bool dirty, string message, bool confirming, ref int topLine, ref int leftColumn)
+    {
+        EnsureVisible(buffer, terminal, ref topLine, ref leftColumn);
+        return terminal.Paint(buffer, path, dirty, message, confirming, topLine, leftColumn);
+    }
+
+    [Overlay("buffer")]
+    private static bool ApplyAndPaint(NanoBuffer buffer, NanoKey key, NanoTerminal terminal,
+        string path, ref bool dirty, ref int goal, ref string message, ref int topLine,
+        ref int leftColumn)
+    {
+        ApplyKey(buffer, key, terminal, ref dirty, ref goal, ref message);
+        return PaintVisible(buffer, terminal, path, dirty, message, false, ref topLine,
+            ref leftColumn);
+    }
+
+    [Overlay("editor")]
     private static int Run(string path)
     {
         byte[] source;
@@ -529,9 +554,8 @@ public static class Program
         {
             if (repaint)
             {
-                EnsureVisible(buffer, terminal, ref topLine, ref leftColumn);
-                if (!terminal.Paint(buffer, path, dirty, message, confirming, topLine,
-                    leftColumn))
+                if (!PaintVisible(buffer, terminal, path, dirty, message, confirming,
+                    ref topLine, ref leftColumn))
                     return 1;
                 repaint = false;
             }
@@ -606,8 +630,15 @@ public static class Program
             if (pasting && key.Kind != NanoKeyKind.Insert && key.Kind != NanoKeyKind.Enter
                 && key.Kind != NanoKeyKind.Tab)
                 continue;
-            ApplyKey(buffer, key, terminal, ref dirty, ref goalColumn, ref message);
-            repaint = true;
+            if (pasting)
+            {
+                ApplyKey(buffer, key, terminal, ref dirty, ref goalColumn, ref message);
+                continue;
+            }
+            if (!ApplyAndPaint(buffer, key, terminal, path, ref dirty, ref goalColumn,
+                ref message, ref topLine, ref leftColumn))
+                return 1;
+            repaint = false;
         }
         return 1;
     }
@@ -622,6 +653,14 @@ public static class Program
                 return 0;
             return 2;
         }
-        return Run(args[0]);
+        try
+        {
+            return Run(args[0]);
+        }
+        catch (Exception)
+        {
+            Console.WriteLine("nano: unexpected failure");
+            return 1;
+        }
     }
 }

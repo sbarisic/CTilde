@@ -1,0 +1,71 @@
+using System;
+using System.IO;
+
+public static class Program
+{
+    private static void Usage()
+    {
+        Console.WriteLine("usage: mkdir <path> [path ...]");
+        Console.WriteLine("       cat <path> [path ...]");
+    }
+
+    private static int MakeDirectories(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.WriteLine("usage: mkdir <path> [path ...]");
+            return 2;
+        }
+        for (int index = 1; index < args.Length; index++)
+            Directory.CreateDirectory(args[index]);
+        return 0;
+    }
+
+    private static int Concatenate(string[] args)
+    {
+        if (args.Length < 2)
+        {
+            Console.WriteLine("usage: cat <path> [path ...]");
+            return 2;
+        }
+        bool wroteText = false;
+        bool endsWithNewLine = true;
+        for (int index = 1; index < args.Length; index++)
+        {
+            string text = File.ReadAllText(args[index]);
+            Console.Write(text);
+            if (text.Length != 0)
+            {
+                wroteText = true;
+                endsWithNewLine = text[text.Length - 1] == '\n';
+            }
+        }
+        if (wroteText && !endsWithNewLine)
+            Console.WriteLine();
+        return 0;
+    }
+
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        try
+        {
+            if (args.Length > 0 && args[0] == "mkdir")
+                return MakeDirectories(args);
+            if (args.Length > 0 && args[0] == "cat")
+                return Concatenate(args);
+            Usage();
+            return 2;
+        }
+        catch (Exception error)
+        {
+            if (args.Length == 0)
+                Console.Write("filesystem");
+            else
+                Console.Write(args[0]);
+            Console.Write(": ");
+            Console.WriteLine(error.Message);
+            return 1;
+        }
+    }
+}

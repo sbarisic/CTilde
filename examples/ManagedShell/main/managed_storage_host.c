@@ -608,6 +608,7 @@ const ct_managed_storage_host_api_v1 *ct_managed_storage_host_v1(void)
 
 static const struct esp_elfsym s_host_symbols[] = {
     ESP_ELFSYM_EXPORT(ct_managed_storage_host_v1),
+    ESP_ELFSYM_END
 };
 
 int ct_managed_storage_host_initialize(void)

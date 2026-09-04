@@ -19,6 +19,7 @@ internal struct NanoKey
     public int Columns;
 }
 
+[Overlay("editor")]
 internal sealed class NanoInput
 {
     private byte[] sequence = new byte[24];

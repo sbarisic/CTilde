@@ -43,6 +43,7 @@ internal sealed partial class CEmitter
         ("CT_FAULT_THREAD_STATE", "System.ThreadStateException", "ct_fault_thread_state"),
         ("CT_FAULT_SYNCHRONIZATION_LOCK", "System.SynchronizationLockException", "ct_fault_synchronization_lock"),
         ("CT_FAULT_DECODER", "System.DecoderFallbackException", "ct_fault_decoder"),
+        ("CT_FAULT_IO", "System.IO.IOException", "ct_fault_io"),
     ];
 
     private IEnumerable<(string Kind, string TypeName, string StorageName)> ActiveRuntimeFaultTypes =>
@@ -52,6 +53,7 @@ internal sealed partial class CEmitter
             "System.ArgumentOutOfRangeException" => _usesRandomRangeFailure ||
                 _externUses.Any(use => use.Method.ExternName == "ct_string_argument_out_of_range"),
             "System.DecoderFallbackException" => _externUses.Any(use => use.Method.ExternName == "ct_encoding_get_string"),
+            "System.IO.IOException" => _usesHostedIo,
             _ => true,
         });
 

@@ -1,7 +1,7 @@
 <Project ToolsVersion="Current" DefaultTargets="Build">
   <Import Project="$(MSBuildExtensionsPath)\$(MSBuildToolsVersion)\Microsoft.Common.props" />
   <PropertyGroup>
-    <ProjectGuid>{60D4C356-4FB7-4D80-9F11-3A2A754C4902}</ProjectGuid>
+    <ProjectGuid>{40E4869D-F83D-46F0-9AEC-029DAF90F200}</ProjectGuid>
     <CTildeManifest>ctilde.json</CTildeManifest>
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
     <Platform Condition="'$(Platform)' == ''">AnyCPU</Platform>

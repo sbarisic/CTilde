@@ -245,7 +245,7 @@ public static class Program
 
     private static void Help()
     {
-        Console.WriteLine("commands: ls [path], modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("commands: ls [path], mkdir <path>, cat <path>, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
         Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
         Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help, nano.ctm <path>");
     }
@@ -364,6 +364,20 @@ public static class Program
         }
     }
 
+    private static void ExecuteFileSystemCommand(string[] words)
+    {
+        string[] invocation = new string[words.Length + 1];
+        invocation[0] = "commands.fs.ctm";
+        invocation[1] = words[0];
+        int index = 1;
+        while (index < words.Length)
+        {
+            invocation[index + 1] = words[index];
+            index++;
+        }
+        Execute(invocation, false);
+    }
+
     private static void Kill(string[] words)
     {
         uint id;
@@ -456,6 +470,8 @@ public static class Program
             Send(words);
         else if (command == "free")
             ShellPlatform.PrintFreeHeap();
+        else if (command == "mkdir" || command == "cat")
+            ExecuteFileSystemCommand(words);
         else if (command.EndsWith(".ctm"))
             Execute(words, background);
         else

@@ -15,6 +15,7 @@ $modules = @(
     [pscustomobject]@{ Name = "Task manager"; Directory = "TaskManager"; Artifact = "taskmgr.ctm" },
     [pscustomobject]@{ Name = "SD manager"; Directory = "Sd"; Artifact = "sd.ctm" },
     [pscustomobject]@{ Name = "Nano editor"; Directory = "Nano"; Artifact = "nano.ctm" },
+    [pscustomobject]@{ Name = "Filesystem commands"; Directory = "FsCommands"; Artifact = "commands.fs.ctm" },
     [pscustomobject]@{ Name = "Network administration"; Directory = "Net"; Artifact = "net.ctm" },
     [pscustomobject]@{ Name = "Managed SSH library"; Directory = "SystemSsh"; Artifact = "system.ssh.ctm" },
     [pscustomobject]@{ Name = "SSH administration service"; Directory = "Sshd"; Artifact = "sshd.ctm" },
@@ -34,6 +35,10 @@ if ($shellSource -notmatch 'command\.EndsWith\("\.ctm"\)' -or
 if ($shellSource -notmatch 'ListFilesAt\("/sd", "SD"\)' -or
     $shellSource -notmatch 'usage: ls \[path\]') {
     throw "ManagedShell ls must expose the SD root and accept an explicit directory path."
+}
+if ($shellSource -notmatch 'ExecuteFileSystemCommand' -or
+    $shellSource -notmatch 'command == "mkdir"' -or $shellSource -notmatch 'command == "cat"') {
+    throw "ManagedShell must route extensionless filesystem commands through commands.fs.ctm."
 }
 $parserSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "ShellCommandLine.ct") -Raw
 foreach ($requiredParserMarker in @('TryEscape', 'wasQuoted', 'background', 'inQuotes')) {
@@ -68,6 +73,15 @@ if ((Get-Content -LiteralPath $networkApiHeaders[0] -Raw) -cne
     (Get-Content -LiteralPath $networkApiHeaders[1] -Raw)) {
     throw "Managed network host API headers must remain byte-identical."
 }
+$networkSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Modules\Net\Program.ct") -Raw
+if ($networkSource -notmatch [regex]::Escape('/sd/wifi_profile/') -or
+    $networkSource -notmatch [regex]::Escape('/storage/net/profiles/')) {
+    throw "Managed network profiles must prefer persistent SD storage and retain the LittleFS fallback."
+}
+if ($networkSource -notmatch [regex]::Escape('[Overlay("network")]') -or
+    $networkSource -match [regex]::Escape('File.ReadAllLines')) {
+    throw "The network application must retain its compact overlay and bounded profile parser."
+}
 $sshApiHeaders = @(
     (Join-Path $PSScriptRoot "main\managed_ssh_host_api.h"),
     (Join-Path $PSScriptRoot "Modules\SystemSsh\main\managed_ssh_host_api.h")
@@ -78,7 +92,8 @@ if ((Get-Content -LiteralPath $sshApiHeaders[0] -Raw) -cne
 }
 $storageHostSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "main\managed_storage_host.c") -Raw
 foreach ($requiredHostMarker in @('storage_control', 'submit_operation',
-        'ct_managed_storage_host_v1', 'validate_layout_locked', 'ct_storage_fat_format')) {
+        'ct_managed_storage_host_v1', 'validate_layout_locked', 'ct_storage_fat_format',
+        'ESP_ELFSYM_END')) {
     if ($storageHostSource -notmatch [regex]::Escape($requiredHostMarker)) {
         throw "Managed storage host is missing '$requiredHostMarker'."
     }
@@ -105,6 +120,11 @@ $nanoSources = Get-Content -LiteralPath @(
 foreach ($forbiddenNanoHelper in @('String.Format', '.Split(', '.ToString(')) {
     if ($nanoSources -match [regex]::Escape($forbiddenNanoHelper)) {
         throw "Nano must not pull allocation-heavy helper '$forbiddenNanoHelper' into nano.ctm."
+    }
+}
+foreach ($requiredNanoOverlay in @('[Overlay("buffer")]', '[Overlay("editor")]')) {
+    if ($nanoSources -notmatch [regex]::Escape($requiredNanoOverlay)) {
+        throw "Nano must retain the '$requiredNanoOverlay' executable partition."
     }
 }
 $managedRuntimePath = Join-Path $root "..\runtime\esp-idf\ctilde_managed_runtime\ctilde_managed_runtime.c"

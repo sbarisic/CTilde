@@ -16,6 +16,11 @@ internal static class ManagedOverlayPackager
     private const uint RelocationResidentData = 3;
     private const uint RelocationResidentExecutableIndirect = 4;
     private const uint RelocationResidentDataIndirect = 5;
+    private const uint XtensaRelocationOp0 = 8;
+    private const uint XtensaRelocationOp2 = 10;
+    private const uint XtensaRelocation32PcRelative = 14;
+    private const uint XtensaRelocationSlot0Op = 20;
+    private const uint XtensaRelocationSlot14Alt = 49;
 
     public static ManagedModuleMetadata Package(BuildRequest request, string linkedModule, string output)
     {
@@ -52,6 +57,8 @@ internal static class ManagedOverlayPackager
             var packagingObjects = PrepareOverlayObjects(tools.Objcopy, objects, working);
             Link(tools.Compiler, packagingObjects, linkedResident, stripAtLink: false, garbageCollect: true, placementScript);
             var linkedImage = ElfFile.Read(linkedResident, requireRelocatable: false);
+            var auditedInstructionRelocations = AuditOverlayInstructionRelocations(linkedImage);
+            BuildReporter.Current?.Detail($"Overlay instruction audit: {auditedInstructionRelocations} relocation(s); Xtensa relaxation disabled");
             var residentImportSlots = ResidentImportSlots(linkedImage);
             var descriptorSymbol = linkedImage.NamedSymbols.SingleOrDefault(symbol =>
                 symbol.Name == "ct_managed_module_v3" && symbol.SectionIndex != 0)
@@ -68,6 +75,7 @@ internal static class ManagedOverlayPackager
             var residentElf = Path.Combine(working, "resident.so");
             FilterOverlayRelocations(linkedImage, linkedResident, working, tools.Objcopy);
             var removable = linkedImage.Sections.Where(section => TryOverlayName(section.Name, out _) ||
+                    IsAuditOnlyStaticRelocation(section) ||
                     section.Name is ".xt.lit" or ".xt.prop" or ".rela.xt.lit" or ".rela.xt.prop")
                 .OrderByDescending(section => section.Name.StartsWith(".rela", StringComparison.Ordinal))
                 .Select(section => section.Name).Distinct(StringComparer.Ordinal).ToArray();
@@ -78,6 +86,7 @@ internal static class ManagedOverlayPackager
                 ["--strip-unneeded", "--remove-section=.comment", "--remove-section=.got.loc", "--remove-section=.dynamic",
                  "--remove-section=.xt.lit", "--remove-section=.xt.prop", "--remove-section=.xtensa.info", residentElf]);
             ValidateNoOverlayLoadSections(residentElf);
+            ValidateResidentRelocationTargets(residentElf);
 
             var layouts = BuildLayouts(metadata, linkedImage, residentImportSlots);
             var maximumOverlayBytes = checked((uint)layouts.Max(item => item.Payload.Length));
@@ -147,7 +156,8 @@ internal static class ManagedOverlayPackager
             layouts.Add(new OverlayLayout((uint)overlayIndex + 1u, overlay.Name, payload, [], [], start, end, linkedRanges));
         }
 
-        foreach (var relocationSection in linkedImage.Sections.Where(section => section.Type == 4 && section.Link < linkedImage.Sections.Length))
+        foreach (var relocationSection in linkedImage.Sections.Where(section => IsRuntimeRelocationSection(section) &&
+                     section.Link < linkedImage.Sections.Length))
         {
             var symbols = linkedImage.SymbolsFor(relocationSection.Link);
             foreach (var relocation in linkedImage.ReadRelocations(relocationSection))
@@ -157,6 +167,9 @@ internal static class ManagedOverlayPackager
                 if (relocation.SymbolIndex >= symbols.Length || relocation.Type is not (1u or 4u or 5u))
                     throw new NativeBuildException($"Unsupported or malformed linked Xtensa overlay relocation {relocation.Type}.");
                 var patchOffset = checked(relocation.Offset - layout.LinkedStart);
+                if ((patchOffset & 3u) != 0u || patchOffset > layout.Payload.Length ||
+                    layout.Payload.Length - patchOffset < sizeof(uint))
+                    throw new NativeBuildException($"Overlay '{layout.Name}' has an unaligned or out-of-range runtime relocation.");
                 var symbol = symbols[checked((int)relocation.SymbolIndex)];
                 uint targetAddress;
                 uint kind;
@@ -245,12 +258,14 @@ internal static class ManagedOverlayPackager
     private static Dictionary<string, uint> ResidentImportSlots(ElfFile linkedImage)
     {
         var result = new Dictionary<string, uint>(StringComparer.Ordinal);
-        foreach (var relocationSection in linkedImage.Sections.Where(section => section.Type == 4 && section.Link < linkedImage.Sections.Length))
+        foreach (var relocationSection in linkedImage.Sections.Where(section => IsRuntimeRelocationSection(section) &&
+                     section.Link < linkedImage.Sections.Length))
         {
             var symbols = linkedImage.SymbolsFor(relocationSection.Link);
             foreach (var relocation in linkedImage.ReadRelocations(relocationSection))
             {
-                if (relocation.SymbolIndex >= symbols.Length || IsOverlayAddress(linkedImage, relocation.Offset)) continue;
+                if (relocation.SymbolIndex >= symbols.Length ||
+                    !IsResidentPatchAddress(linkedImage, relocation.Offset)) continue;
                 var symbol = symbols[checked((int)relocation.SymbolIndex)];
                 if (symbol.SectionIndex == 0 && symbol.Name.Length != 0)
                     result.TryAdd(symbol.Name, relocation.Offset);
@@ -262,14 +277,14 @@ internal static class ManagedOverlayPackager
     private static void FilterOverlayRelocations(ElfFile linkedImage, string linkedResident,
         string workingDirectory, string objcopy)
     {
-        foreach (var section in linkedImage.Sections.Where(section => section.Type == 4 && section.EntrySize == 12u))
+        foreach (var section in linkedImage.Sections.Where(IsRuntimeRelocationSection))
         {
             using var filtered = new MemoryStream();
             for (uint offset = 0; offset + 12u <= section.Size; offset += 12u)
             {
                 var source = checked((int)(section.Offset + offset));
                 var target = BinaryPrimitives.ReadUInt32LittleEndian(linkedImage.Bytes.AsSpan(source, 4));
-                if (!IsOverlayAddress(linkedImage, target))
+                if (IsResidentPatchAddress(linkedImage, target))
                     filtered.Write(linkedImage.Bytes, source, 12);
             }
             if (filtered.Length == section.Size) continue;
@@ -281,6 +296,77 @@ internal static class ManagedOverlayPackager
 
     private static bool IsOverlayAddress(ElfFile image, uint address) => image.Sections.Any(section =>
         TryOverlayName(section.Name, out _) && address >= section.Address && address - section.Address < section.Size);
+
+    private static bool IsResidentPatchAddress(ElfFile image, uint address) => image.Sections.Any(section =>
+        (section.Flags & 2u) != 0u && !TryOverlayName(section.Name, out _) && section.Contains(address));
+
+    private static bool IsRuntimeRelocationSection(ElfSection section) =>
+        section.Type == 4u && section.EntrySize == 12u && (section.Flags & 2u) != 0u;
+
+    private static bool IsOverlayAuditRelocation(ElfFile image, ElfSection section) =>
+        section.Type == 4u && section.EntrySize == 12u && section.Info < image.Sections.Length &&
+        IsOverlayTextSection(image.Sections[checked((int)section.Info)]);
+
+    private static bool IsOverlayStaticRelocation(ElfSection section) =>
+        section.Type == 4u && section.Name.StartsWith(".rela.ctilde.overlay.", StringComparison.Ordinal);
+
+    private static bool IsAuditOnlyStaticRelocation(ElfSection section) =>
+        section.Type == 4u && (section.Flags & 2u) == 0u;
+
+    private static bool IsOverlayTextSection(ElfSection section) =>
+        TryOverlayName(section.Name, out _) && section.Name.EndsWith(".text", StringComparison.Ordinal);
+
+    internal static bool IsAuditedXtensaInstructionRelocation(uint type) =>
+        type is >= XtensaRelocationOp0 and <= XtensaRelocationOp2 ||
+        type == XtensaRelocation32PcRelative ||
+        type is >= XtensaRelocationSlot0Op and <= XtensaRelocationSlot14Alt;
+
+    internal static void ValidateAuditedXtensaInstructionRelocation(string overlayName, uint type,
+        bool originContainsRelocation, bool targetDefined, string? targetOverlay, bool targetContainsAddress)
+    {
+        if (!originContainsRelocation || !IsAuditedXtensaInstructionRelocation(type))
+            throw new NativeBuildException($"Overlay '{overlayName}' contains unsupported Xtensa instruction relocation {type}.");
+        if (!targetDefined)
+            throw new NativeBuildException($"Overlay '{overlayName}' contains an unresolved instruction target.");
+        if (targetOverlay != overlayName || !targetContainsAddress)
+            throw new NativeBuildException($"Overlay '{overlayName}' contains a direct instruction reference outside its own payload.");
+    }
+
+    private static int AuditOverlayInstructionRelocations(ElfFile image)
+    {
+        var audited = 0;
+        foreach (var relocationSection in image.Sections.Where(section => IsOverlayAuditRelocation(image, section)))
+        {
+            var origin = image.Sections[checked((int)relocationSection.Info)];
+            if (!TryOverlayName(origin.Name, out var overlayName) || relocationSection.Link >= image.Sections.Length ||
+                relocationSection.Size % relocationSection.EntrySize != 0u)
+                throw new NativeBuildException($"Overlay instruction relocation section '{relocationSection.Name}' is malformed.");
+            var symbols = image.SymbolsFor(relocationSection.Link);
+            foreach (var relocation in image.ReadRelocations(relocationSection))
+            {
+                var targetDefined = relocation.SymbolIndex < symbols.Length &&
+                    symbols[checked((int)relocation.SymbolIndex)].SectionIndex > 0 &&
+                    symbols[checked((int)relocation.SymbolIndex)].SectionIndex < image.Sections.Length;
+                if (!targetDefined)
+                {
+                    ValidateAuditedXtensaInstructionRelocation(overlayName, relocation.Type,
+                        origin.Contains(relocation.Offset), false, null, false);
+                    continue;
+                }
+                var symbol = symbols[checked((int)relocation.SymbolIndex)];
+                var targetValue = (long)symbol.Value + relocation.Addend;
+                if (targetValue < 0 || targetValue > uint.MaxValue)
+                    throw new NativeBuildException($"Overlay '{overlayName}' contains an overflowing instruction target.");
+                var target = image.Sections[checked(symbol.SectionIndex)];
+                var hasTargetOverlay = TryOverlayName(target.Name, out var targetOverlay);
+                ValidateAuditedXtensaInstructionRelocation(overlayName, relocation.Type,
+                    origin.Contains(relocation.Offset), true, hasTargetOverlay ? targetOverlay : null,
+                    target.Contains((uint)targetValue));
+                audited++;
+            }
+        }
+        return audited;
+    }
 
     private static void WriteContainer(string residentElf, string output, ImmutableArray<OverlayLayout> layouts,
         uint descriptorVma, uint textAnchorVma)
@@ -400,6 +486,7 @@ internal static class ManagedOverlayPackager
         bool garbageCollect = false, string? linkerScript = null)
     {
         var arguments = new List<string> { "-shared", "-fPIC", "-static-libgcc", "-nostdlib", "-nostartfiles", "-fdata-sections", "-ffunction-sections", "-fvisibility=hidden" };
+        arguments.AddRange(["-Wl,--no-relax", "-Wl,--emit-relocs"]);
         if (garbageCollect)
             arguments.Add("-Wl,--gc-sections");
         if (stripAtLink)
@@ -427,8 +514,19 @@ internal static class ManagedOverlayPackager
     private static void ValidateNoOverlayLoadSections(string path)
     {
         var elf = ElfFile.Read(path, requireRelocatable: false);
-        if (elf.Sections.Any(section => TryOverlayName(section.Name, out _)))
-            throw new NativeBuildException("Resident ELF still contains overlay sections after extraction.");
+        if (elf.Sections.Any(section => TryOverlayName(section.Name, out _) ||
+                IsOverlayStaticRelocation(section) || IsAuditOnlyStaticRelocation(section)))
+            throw new NativeBuildException("Resident ELF still contains overlay sections or audit-only relocations after extraction.");
+    }
+
+    private static void ValidateResidentRelocationTargets(string path)
+    {
+        var elf = ElfFile.Read(path, requireRelocatable: false);
+        foreach (var section in elf.Sections.Where(IsRuntimeRelocationSection))
+            foreach (var relocation in elf.ReadRelocations(section))
+                if (!IsResidentPatchAddress(elf, relocation.Offset))
+                    throw new NativeBuildException(
+                        $"Resident relocation 0x{relocation.Offset:x8} does not target retained loadable storage.");
     }
 
     private static bool TryOverlayName(string section, out string name)
@@ -575,7 +673,11 @@ internal static class ManagedOverlayPackager
         private static int I32(byte[] bytes, int offset) => BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(offset, 4));
     }
 
-    private sealed record ElfSection(int Index, string Name, uint Type, uint Flags, uint Address, uint Offset, uint Size, uint Link, uint Info, uint Alignment, uint EntrySize);
+    private sealed record ElfSection(int Index, string Name, uint Type, uint Flags, uint Address, uint Offset,
+        uint Size, uint Link, uint Info, uint Alignment, uint EntrySize)
+    {
+        public bool Contains(uint address) => address >= Address && address - Address < Size;
+    }
     private sealed record ElfProgramHeader(uint Type, uint Address, uint MemorySize, uint Flags)
     {
         public bool Contains(uint address) => address >= Address && address - Address < MemorySize;

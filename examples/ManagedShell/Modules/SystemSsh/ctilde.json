@@ -2,7 +2,12 @@
   "target": "esp-idf",
   "architecture": "xtensa",
   "sources": [
-    "Protocol.ct"
+    "Protocol.ct",
+    "SshNative.ct",
+    "Transport.ct",
+    "Configuration.ct",
+    "Server.ct",
+    "Sftp.ct"
   ],
   "espIdf": {
     "artifact": "managed-module"

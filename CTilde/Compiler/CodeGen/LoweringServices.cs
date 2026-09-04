@@ -45,6 +45,7 @@ internal interface ILoweringServices
     void RegisterExceptions();
     void RegisterExternUse(MethodSymbol method, SyntaxNode syntax);
     string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax);
+    string DirectCallableName(MethodSymbol caller, MethodSymbol target, string callableName, bool virtualDispatch = false);
     void RegisterType(CType type);
     void RegisterBox(CType type);
     string RegisterEnumParser(TypeSymbol type);

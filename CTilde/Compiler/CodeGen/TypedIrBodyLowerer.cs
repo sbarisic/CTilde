@@ -52,6 +52,7 @@ internal sealed partial class TypedIrBodyLowerer
     private readonly DiagnosticBag _diagnostics;
     private readonly MethodSymbol _method;
     private readonly string? _nameOverride;
+    private readonly string? _overlayDefinitionName;
     private readonly PropertySymbol? _property;
     private readonly bool _isGetter;
     private readonly string _temporaryPrefix;
@@ -129,13 +130,14 @@ internal sealed partial class TypedIrBodyLowerer
         property.IsVirtual && !property.IsSealedOverride &&
         (receiverType.Kind != CTypeKind.Class || receiverType.Symbol?.IsSealed != true);
 
-    public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null, IrOptimizationFacts? optimizationFacts = null)
+    public TypedIrBodyLowerer(ILoweringServices emitter, MethodSymbol method, string? nameOverride = null, PropertySymbol? property = null, bool isGetter = false, string temporaryPrefix = "", bool analysisOnly = false, ImmutableDictionary<SyntaxNode, BoundSemanticEntry>? semanticHints = null, IrOptimizationFacts? optimizationFacts = null, string? overlayDefinitionName = null)
     {
         _emitter = emitter;
         _model = emitter.Model;
         _diagnostics = emitter.Diagnostics;
         _method = method;
         _nameOverride = nameOverride;
+        _overlayDefinitionName = overlayDefinitionName;
         _property = property;
         _isGetter = isGetter;
         _temporaryPrefix = temporaryPrefix;
@@ -816,7 +818,7 @@ internal sealed partial class TypedIrBodyLowerer
             body.WriteLine("ct_cleanup_unwind_to(ct_cleanup_method);");
             body.WriteLine("return;");
         }
-        writer.WriteBlock(RenderFunction($"static void {CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})", body).TrimEnd().Split('\n'));
+        writer.WriteBlock(RenderFunction($"static void {_overlayDefinitionName ?? CEmitter.ConstructorInitializerName(_method)}({string.Join(", ", initializerParameters)})", body).TrimEnd().Split('\n'));
         return writer.ToString() ?? string.Empty;
     }
 
@@ -827,6 +829,14 @@ internal sealed partial class TypedIrBodyLowerer
             _emitter.RegisterDirectDeferState(_method, _durableSlots, _directDefers);
         if (EmitDebugInformation && _method.Syntax is not null)
             writer.WriteLine(_emitter.DebugSourceDirective(_method.Syntax));
+        if (_overlayDefinitionName is not null)
+        {
+            var storage = signature.IndexOf("static ", StringComparison.Ordinal);
+            if (storage < 0)
+                throw new InvalidOperationException($"Overlay body '{_overlayDefinitionName}' does not have static storage.");
+            signature = signature.Insert(storage + "static ".Length,
+                $"CT_OVERLAY_BODY(\"{_method.OverlayName}\") ");
+        }
         writer.WriteLine($"{(EmitDebugInstrumentation ? "CT_DEBUG_USER_NOINLINE " : string.Empty)}{signature}");
         using (writer.Block())
         {
@@ -1041,7 +1051,8 @@ internal sealed partial class TypedIrBodyLowerer
         var self = syntax?.Kind == ConstructorInitializerKind.This
             ? "ct_self"
             : $"({NameMangler.Type(targetType)}*)(void*)ct_self";
-        writer.WriteLine($"{CEmitter.ConstructorInitializerName(target)}({self}{(lowered.Codes.Count == 0 ? string.Empty : ", " + string.Join(", ", lowered.Codes))});");
+        var initializer = _emitter.DirectCallableName(_method, target, CEmitter.ConstructorInitializerName(target));
+        writer.WriteLine($"{initializer}({self}{(lowered.Codes.Count == 0 ? string.Empty : ", " + string.Join(", ", lowered.Codes))});");
         EmitPrelude(writer, lowered.Postlude);
         return syntax?.Kind == ConstructorInitializerKind.This;
     }

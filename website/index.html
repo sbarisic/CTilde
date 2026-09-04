@@ -635,7 +635,7 @@ card.Start();
             <div class="example-copy">
               <p class="example-number">15 / MANAGED ESP32 APPLICATION</p>
               <h3>Run native modules as logical processes.</h3>
-              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping its mutable statics, heap accounting, cancellation state, copied mailbox, optional redirected streams, and executable overlay window process-local.</p>
+              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
               <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
             </div>
             <div class="code-window">

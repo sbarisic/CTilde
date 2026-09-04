@@ -17,4 +17,12 @@ config CTILDE_MANAGED_MAX_PROCESSES
     range 16 256
     default 16
 
+config CTILDE_MANAGED_MAX_CALL_DEPTH
+    int "Maximum nested managed cross-module calls"
+    range 16 256
+    default 64
+    help
+        Maximum number of provider-owned managed call frames retained by one
+        execution context. This is independent from the loaded-module limit.
+
 endmenu

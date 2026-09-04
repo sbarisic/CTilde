@@ -197,6 +197,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("typedef struct ct_runtime_api_v22 ct_runtime_api_v22;");
             writer.WriteLine("typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;");
             writer.WriteLine("typedef struct ct_process_context ct_process_context;");
+            writer.WriteLine("typedef struct ct_runtime_thread_attach_v22 { uint32_t Size; ct_process_context* Process; } ct_runtime_thread_attach_v22;");
             writer.WriteLine("typedef struct ct_managed_call_target_v3 { uint32_t Size; uint32_t Placement; uint32_t OverlayId; uint32_t Reserved; uintptr_t Body; } ct_managed_call_target_v3;");
             writer.WriteLine("typedef struct ct_managed_call_frame_v22 { uintptr_t Opaque[8]; } ct_managed_call_frame_v22;");
             writer.WriteLine("struct ct_runtime_api_v22 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v3*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v3*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v3*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3*, const ct_managed_call_target_v3*, ct_managed_call_frame_v22*); void (*LeaveManagedCall)(ct_managed_call_frame_v22*); int32_t (*Service)(uint32_t, void*, size_t); };");
@@ -1171,7 +1172,8 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("static ct_thread_state* ct_thread_require_attached(void) { ct_thread_state* state = ct_thread_current(); if (state == NULL) ct_fail(\"CTT0001\", \"<managed-entry>\", 0); return state; }");
             writer.WriteLine("static void ct_runtime_require_ready(void) { (void)ct_thread_require_attached(); if (ct_runtime_api->CurrentProcess() == NULL) ct_fail(\"CTT0002\", \"<managed-entry>\", 0); }");
-            writer.WriteLine("void ct_thread_attach(void) { if (ct_runtime_api->Service(UINT32_C(1), NULL, 0u) != 0) ct_fail(\"CTT0002\", \"<thread-attach>\", 0); }");
+            writer.WriteLine("static void ct_thread_attach_to(ct_process_context* process) { ct_runtime_thread_attach_v22 request = { sizeof(request), process }; if (ct_runtime_api->Service(UINT32_C(1), &request, sizeof(request)) != 0) ct_fail(\"CTT0002\", \"<thread-attach>\", 0); }");
+            writer.WriteLine("void ct_thread_attach(void) { ct_thread_attach_to(ct_runtime_api->CurrentProcess()); }");
             writer.WriteLine("void ct_thread_detach(void) { if (ct_runtime_api->Service(UINT32_C(2), NULL, 0u) != 0) ct_fail(\"CTT0002\", \"<thread-detach>\", 0); }");
             return;
         }

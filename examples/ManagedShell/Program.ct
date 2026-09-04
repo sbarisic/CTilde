@@ -11,21 +11,6 @@ internal static class ShellPlatform
 {
     [Extern("ct_managed_shell_initialize")]
     internal static int Initialize();
-
-    [Extern("ct_managed_shell_print_modules")]
-    [NoAlloc]
-    [NoThrow]
-    internal static void PrintModules();
-
-    [Extern("ct_managed_shell_print_processes")]
-    [NoAlloc]
-    [NoThrow]
-    internal static void PrintProcesses();
-
-    [Extern("ct_managed_shell_print_free_heap")]
-    [NoAlloc]
-    [NoThrow]
-    internal static void PrintFreeHeap();
 }
 
 internal enum ShellLedColor
@@ -113,6 +98,15 @@ public static class ShellLed
         }
     }
 
+    public static void ProcessStarted(uint processId)
+    {
+        Process process;
+        if (Process.TryOpen(processId, out process))
+            ProcessStarted(process);
+        else
+            ProcessStartFailed();
+    }
+
     public static void ProcessStartFailed()
     {
         if (started.Load(MemoryOrder.Acquire) == 0)
@@ -124,6 +118,44 @@ public static class ShellLed
             batchFailed = true;
             UpdateBaseColor();
         }
+    }
+
+    public static void SupervisorFailed()
+    {
+        if (started.Load(MemoryOrder.Acquire) == 0)
+            return;
+        lock (processGate)
+        {
+            batchFailed = true;
+            UpdateBaseColor();
+        }
+    }
+
+    [Export("ct_managed_shell_led_prompt_started")]
+    [NoAlloc]
+    public static void ExportPromptStarted()
+    {
+        PromptStarted();
+    }
+
+    [Export("ct_managed_shell_led_process_starting")]
+    [NoAlloc]
+    public static void ExportProcessStarting()
+    {
+        ProcessStarting();
+    }
+
+    [Export("ct_managed_shell_led_process_started")]
+    public static void ExportProcessStarted(uint processId)
+    {
+        ProcessStarted(processId);
+    }
+
+    [Export("ct_managed_shell_led_process_start_failed")]
+    [NoAlloc]
+    public static void ExportProcessStartFailed()
+    {
+        ProcessStartFailed();
     }
 
     [Export("ct_managed_shell_input_activity")]
@@ -240,244 +272,6 @@ public static class ShellLed
 
 public static class Program
 {
-    private static Process[] processes = new Process[16];
-    private static int processCount;
-
-    private static void Help()
-    {
-        Console.WriteLine("commands: ls [path], mkdir <path>, cat <path>, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
-        Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
-        Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help, nano.ctm <path>");
-    }
-
-    private static Process FindProcess(uint id)
-    {
-        int index = 0;
-        while (index < processCount)
-        {
-            Process process = processes[index];
-            if (process != null && process.Id == id)
-                return process;
-            index++;
-        }
-        return null;
-    }
-
-    private static void ListFiles(string[] words)
-    {
-        if (words.Length > 2)
-        {
-            Console.WriteLine("usage: ls [path]");
-            return;
-        }
-        if (words.Length == 2)
-        {
-            if (!Directory.Exists(words[1]))
-            {
-                Console.Write("ls: directory not found: ");
-                Console.WriteLine(words[1]);
-                return;
-            }
-            ListFilesAt(words[1], words[1]);
-            return;
-        }
-        if (Directory.Exists("/sd"))
-            ListFilesAt("/sd", "SD");
-        ListFilesAt("/storage/modules", "LittleFS");
-    }
-
-    private static void ListFilesAt(string path, string label)
-    {
-        if (!Directory.Exists(path))
-            return;
-        Console.Write(label);
-        Console.WriteLine(":");
-        string[] entries = Directory.GetFileSystemEntries(path);
-        int index = 0;
-        while (index < entries.Length)
-        {
-            Console.WriteLine(entries[index]);
-            index++;
-        }
-    }
-
-    private static string[] Arguments(string[] words, int start)
-    {
-        string[] result = new string[words.Length - start];
-        int index = start;
-        while (index < words.Length)
-        {
-            result[index - start] = words[index];
-            index++;
-        }
-        return result;
-    }
-
-    private static bool TryId(string text, out uint id)
-    {
-        id = 0u;
-        return uint.TryParse(text, out id);
-    }
-
-    private static void Execute(string[] words, bool background)
-    {
-        int slot = -1;
-        if (background)
-        {
-            slot = processCount;
-            if (slot == processes.Length)
-            {
-                slot = 0;
-                while (slot < processCount && !processes[slot].HasExited)
-                    slot++;
-                if (slot == processCount)
-                {
-                    Console.WriteLine("process handle table is full");
-                    return;
-                }
-            }
-        }
-        string path = words[0];
-        ShellLed.ProcessStarting();
-        Process process = Process.Start(path, Arguments(words, 1));
-        if (process.Id == 0u)
-        {
-            ShellLed.ProcessStartFailed();
-            Console.WriteLine("module load failed");
-            return;
-        }
-        ShellLed.ProcessStarted(process);
-        if (background)
-        {
-            processes[slot] = process;
-            if (processCount < processes.Length)
-                processCount++;
-            Console.Write("started process ");
-            Console.WriteLine(process.Id);
-            return;
-        }
-        int exitCode = process.Wait();
-        if (exitCode != 0)
-        {
-            Console.Write("exit code: ");
-            Console.WriteLine(exitCode);
-        }
-    }
-
-    private static void ExecuteFileSystemCommand(string[] words)
-    {
-        string[] invocation = new string[words.Length + 1];
-        invocation[0] = "commands.fs.ctm";
-        invocation[1] = words[0];
-        int index = 1;
-        while (index < words.Length)
-        {
-            invocation[index + 1] = words[index];
-            index++;
-        }
-        Execute(invocation, false);
-    }
-
-    private static void Kill(string[] words)
-    {
-        uint id;
-        if (words.Length != 2 || !TryId(words[1], out id))
-        {
-            Console.WriteLine("usage: kill <id>");
-            return;
-        }
-        Process process = FindProcess(id);
-        if (process == null)
-        {
-            Console.WriteLine("process not found");
-            return;
-        }
-        process.Terminate(1000u);
-    }
-
-    private static void Wait(string[] words)
-    {
-        uint id;
-        if (words.Length != 2 || !TryId(words[1], out id))
-        {
-            Console.WriteLine("usage: wait <id>");
-            return;
-        }
-        Process process = FindProcess(id);
-        if (process == null)
-        {
-            Console.WriteLine("process not found");
-            return;
-        }
-        Console.Write("exit code: ");
-        Console.WriteLine(process.Wait());
-    }
-
-    private static void Send(string[] words)
-    {
-        uint id;
-        if (words.Length < 3 || !TryId(words[1], out id))
-        {
-            Console.WriteLine("usage: send <id> <text>");
-            return;
-        }
-        Process process = FindProcess(id);
-        if (process == null)
-        {
-            Console.WriteLine("process not found");
-            return;
-        }
-        string payload = words[2];
-        int index = 3;
-        while (index < words.Length)
-        {
-            payload = payload + " " + words[index];
-            index++;
-        }
-        process.Send(Encoding.UTF8.GetBytes(payload));
-    }
-
-    private static void Dispatch(string line)
-    {
-        string[] words;
-        bool background;
-        if (!ShellCommandLine.TryParse(line, out words, out background))
-        {
-            Console.WriteLine("syntax error: malformed quoting or escape");
-            return;
-        }
-        if (words.Length == 0)
-            return;
-        string command = words[0];
-        if (background && !command.EndsWith(".ctm"))
-        {
-            Console.WriteLine("syntax error: '&' is valid only for applications");
-            return;
-        }
-        if (command == "help")
-            Help();
-        else if (command == "ls")
-            ListFiles(words);
-        else if (command == "modules")
-            ShellPlatform.PrintModules();
-        else if (command == "ps")
-            ShellPlatform.PrintProcesses();
-        else if (command == "kill")
-            Kill(words);
-        else if (command == "wait")
-            Wait(words);
-        else if (command == "send")
-            Send(words);
-        else if (command == "free")
-            ShellPlatform.PrintFreeHeap();
-        else if (command == "mkdir" || command == "cat")
-            ExecuteFileSystemCommand(words);
-        else if (command.EndsWith(".ctm"))
-            Execute(words, background);
-        else
-            Console.WriteLine("unknown command");
-    }
-
     [EntryPoint]
     public static void Main()
     {
@@ -489,21 +283,24 @@ public static class Program
             Console.Write("LED initialization failed: ");
             Console.WriteLine(ledResult.GetName());
         }
-        Console.WriteLine("CTilde managed shell - Runtime ABI 22 / Module ABI 3");
-        Help();
         while (true)
         {
-            ShellLed.PromptStarted();
-            int ledFailure = ShellLed.TakeUpdateFailureCode();
-            if (ledFailure != 0)
+            string[] shellArguments = new string[1];
+            shellArguments[0] = "--uart";
+            Process shell = Process.Start("/storage/modules/shell.ctm", shellArguments);
+            if (shell.Id == 0u)
             {
-                Console.Write("LED update failed: ");
-                Console.WriteLine(ledFailure);
+                ShellLed.SupervisorFailed();
+                Console.WriteLine("Managed shell module failed to start; retrying");
+                Thread.Sleep(2000u);
+                continue;
             }
-            string line = Console.ReadLine("ct> ");
-            if (line == null)
-                return;
-            Dispatch(line);
+            int exitCode = shell.Wait();
+            if (exitCode != 0)
+                ShellLed.SupervisorFailed();
+            Console.Write("Managed shell exited with code ");
+            Console.WriteLine(exitCode);
+            Thread.Sleep(2000u);
         }
     }
 }

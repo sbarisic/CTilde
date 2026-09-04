@@ -649,7 +649,7 @@ internal sealed partial class TypedIrBodyLowerer
             ? _emitter.DefaultValue(property.Type)
             : virtualDispatch
                 ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(property)}({objectReceiver})"
-                : $"{NameMangler.Getter(property)}({typedReceiver})";
+                : $"{_emitter.DirectCallableName(_method, selectedAccessor!, NameMangler.Getter(property))}({typedReceiver})";
         var result = new IrExpressionValue
         {
             Type = property.Type,
@@ -660,7 +660,7 @@ internal sealed partial class TypedIrBodyLowerer
             {
                 Store = value => virtualDispatch
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(property)}({objectReceiver}, {value})"
-                    : $"{NameMangler.Setter(property)}({(property.IsStatic ? string.Empty : typedReceiver + ", ")}{value})",
+                    : $"{_emitter.DirectCallableName(_method, _emitter.GetAccessorMethod(property, getter: false), NameMangler.Setter(property))}({(property.IsStatic ? string.Empty : typedReceiver + ", ")}{value})",
                 Field = property.BackingField,
                 Property = property,
                 IsBaseReceiver = baseReceiver,
@@ -712,7 +712,7 @@ internal sealed partial class TypedIrBodyLowerer
                 ? _emitter.DefaultValue(indexer.Type)
                 : virtualDispatch
                     ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualGetterSlotName(indexer)}({objectReceiver}, {index.Code})"
-                    : $"{NameMangler.Getter(indexer)}({typedReceiver}, {index.Code})";
+                    : $"{_emitter.DirectCallableName(_method, accessor!, NameMangler.Getter(indexer))}({typedReceiver}, {index.Code})";
             var result = new IrExpressionValue
             {
                 Type = indexer.Type,
@@ -723,7 +723,7 @@ internal sealed partial class TypedIrBodyLowerer
                 {
                     Store = value => virtualDispatch
                         ? $"{objectReceiver}->Type->VTable->{CEmitter.VirtualSetterSlotName(indexer)}({objectReceiver}, {index.Code}, {value})"
-                        : $"{NameMangler.Setter(indexer)}({typedReceiver}, {index.Code}, {value})",
+                        : $"{_emitter.DirectCallableName(_method, _emitter.GetAccessorMethod(indexer, getter: false), NameMangler.Setter(indexer))}({typedReceiver}, {index.Code}, {value})",
                     Property = indexer,
                     UsesVirtualDispatch = virtualDispatch,
                 },
@@ -878,7 +878,8 @@ internal sealed partial class TypedIrBodyLowerer
         if (type.Kind == CTypeKind.Class)
             _emitter.Effects.RecordAllocation(_method, syntax, $"construction of class '{type.DisplayName}'");
         var lowered = LowerArguments(arguments, constructor.Parameters, syntax.Arguments);
-        var construction = $"{constructor.CName}({string.Join(", ", lowered.Codes)})";
+        var callable = _emitter.DirectCallableName(_method, constructor, constructor.CName);
+        var construction = $"{callable}({string.Join(", ", lowered.Codes)})";
         return type.ContainsManagedReferences ? OwnResult(type, construction, lowered.Prelude, symbol: constructor) : new IrExpressionValue { Type = type, Code = construction, Prelude = lowered.Prelude, Symbol = constructor };
     }
 
@@ -1180,7 +1181,8 @@ internal sealed partial class TypedIrBodyLowerer
                     : selected.ContainingType.FullName == "Esp.Idf.EspError"
                     ? $"(esp_err_t*)(void*){receiverCode}"
                     : $"({NameMangler.Type(selected.ContainingType)}*)(void*){receiverCode}";
-            call = $"{nativeImportSlot ?? selected.CName}({string.Join(", ", callArguments)})";
+            var callable = nativeImportSlot ?? _emitter.DirectCallableName(_method, selected, selected.CName);
+            call = $"{callable}({string.Join(", ", callArguments)})";
         }
         if (captureForDefer)
             _deferId++;

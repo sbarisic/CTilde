@@ -77,6 +77,10 @@ typedef struct ct_type_ops {
     int32_t (*Compare)(const void *left, const void *right);
 } ct_type_ops;
 typedef struct ct_process_context ct_process_context;
+typedef struct ct_runtime_thread_attach_v22 {
+    uint32_t Size;
+    ct_process_context *Process;
+} ct_runtime_thread_attach_v22;
 typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;
 
 typedef struct ct_managed_call_target_v3 {
@@ -199,12 +203,21 @@ typedef struct ct_managed_module_info {
     bool Stopping;
 } ct_managed_module_info;
 
+typedef void (*ct_managed_native_resource_release_fn)(uintptr_t value);
+
 int ctilde_managed_runtime_initialize(void);
 size_t ctilde_managed_processes(ct_managed_process_info *output, size_t capacity);
 size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity);
 uint32_t ctilde_managed_process_for_task(uintptr_t task_handle);
 bool ctilde_managed_overlay_debug_state(uint32_t process_id,
     ct_managed_overlay_debug_state_v22 *output);
+bool ctilde_managed_process_set_foreground(uint32_t process_id);
+void ctilde_managed_process_terminate_descendants(uint32_t process_id,
+    uint32_t grace_milliseconds);
+uintptr_t ctilde_managed_native_resource_register(uintptr_t value,
+    ct_managed_native_resource_release_fn release);
+bool ctilde_managed_native_resource_release(uintptr_t token);
+void ctilde_managed_console_set_uart_activity_hook(void (*hook)(void));
 int ctilde_managed_preflight(const char *path, char *error, size_t error_capacity);
 const ct_runtime_api_v22 *ctilde_runtime_api_v22(void);
 

@@ -832,7 +832,8 @@ internal sealed partial class TypedIrBodyLowerer
         RecordIteratorDependency("list-constructor", constructor, _iteratorListType);
         writer.WriteLine($"{_emitter.CDeclaration(_iteratorListType, IteratorBuilderName)} = {_emitter.DefaultValue(_iteratorListType)};");
         EmitActivateOwnedSlot(writer, _iteratorListType, IteratorBuilderName, "ct_cleanup_iterator_values");
-        EmitInitializeOwnedSlot(writer, _iteratorListType, IteratorBuilderName, $"{constructor.CName}()");
+        EmitInitializeOwnedSlot(writer, _iteratorListType, IteratorBuilderName,
+            $"{_emitter.DirectCallableName(_method, constructor, constructor.CName)}()");
     }
 
     private FlowResult EmitYield(ILoweringWriter writer, YieldStatementSyntax syntax)
@@ -854,7 +855,7 @@ internal sealed partial class TypedIrBodyLowerer
         _emitter.Effects.RecordCall(_method, add, syntax, requiresContract: false);
         var value = Convert(LowerExpression(syntax.Expression), _iteratorElementType, syntax.Expression, false);
         EmitPrelude(writer, value.Prelude);
-        writer.WriteLine($"{add.CName}(({NameMangler.Type(_iteratorListType.Symbol)}*)(void*){IteratorBuilderName}, {value.Code});");
+        writer.WriteLine($"{_emitter.DirectCallableName(_method, add, add.CName)}(({NameMangler.Type(_iteratorListType.Symbol)}*)(void*){IteratorBuilderName}, {value.Code});");
         return FlowResult.None;
     }
 
@@ -870,7 +871,7 @@ internal sealed partial class TypedIrBodyLowerer
         var created = new IrExpressionValue
         {
             Type = _iteratorEnumerableType,
-            Code = $"{constructor.CName}({IteratorBuilderName})",
+            Code = $"{_emitter.DirectCallableName(_method, constructor, constructor.CName)}({IteratorBuilderName})",
             Ownership = OwnershipKind.Owned,
             IsKnownNonNull = true,
             Symbol = constructor,
@@ -941,7 +942,7 @@ internal sealed partial class TypedIrBodyLowerer
         var enumeratorStorage = $"ct_state.{enumeratorName}";
         var getCall = getEnumeratorVirtual
             ? $"{collectionArgument}->Type->VTable->{CEmitter.VirtualSlotName(getEnumerator)}({collectionArgument})"
-            : $"{getEnumerator.CName}({collectionArgument})";
+            : $"{_emitter.DirectCallableName(_method, getEnumerator, getEnumerator.CName)}({collectionArgument})";
         writer.WriteLine($"{enumeratorStorage} = {_emitter.DefaultValue(enumeratorType)};");
         if (enumeratorType.ContainsManagedReferences)
         {
@@ -957,7 +958,7 @@ internal sealed partial class TypedIrBodyLowerer
             : $"({NameMangler.Type(enumeratorSymbol)}*)(void*){enumeratorStorage}";
         var disposeCall = disposeVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(dispose)}({enumeratorArgument})"
-            : $"{dispose.CName}({enumeratorArgument})";
+            : $"{_emitter.DirectCallableName(_method, dispose, dispose.CName)}({enumeratorArgument})";
         var disposeId = _deferId++;
         var disposeRecord = $"ct_cleanup_foreach_dispose_{disposeId}";
         var disposeThunk = _emitter.DirectDeferThunkName(_method, disposeId);
@@ -988,7 +989,7 @@ internal sealed partial class TypedIrBodyLowerer
         writer.WriteLine($"{start}:;");
         var moveNextCall = moveNextVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualSlotName(moveNext)}({enumeratorArgument})"
-            : $"{moveNext.CName}({enumeratorArgument})";
+            : $"{_emitter.DirectCallableName(_method, moveNext, moveNext.CName)}({enumeratorArgument})";
         writer.WriteLine($"if (!{moveNextCall}) goto {@break};");
         if (local.IsDurable)
             RegisterDurableSlot(local.StorageName, declaredType);
@@ -996,7 +997,7 @@ internal sealed partial class TypedIrBodyLowerer
             writer.WriteLine($"{_emitter.CDeclaration(declaredType, local.CName)} = {_emitter.DefaultValue(declaredType)};");
         var currentCode = currentVirtual
             ? $"{enumeratorArgument}->Type->VTable->{CEmitter.VirtualGetterSlotName(current)}({enumeratorArgument})"
-            : $"{NameMangler.Getter(current)}({enumeratorArgument})";
+            : $"{_emitter.DirectCallableName(_method, _emitter.GetAccessorMethod(current, getter: true), NameMangler.Getter(current))}({enumeratorArgument})";
         if (declaredType.ContainsManagedReferences)
         {
             EmitActivateOwnedSlot(writer, declaredType, local.CName, $"ct_cleanup_local_{local.Id}");

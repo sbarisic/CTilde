@@ -61,9 +61,8 @@ Draft 0.49 advances managed modules to Runtime ABI 22, Module ABI 3, and schema-
 - [ ] Add runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.
 - [ ] Complete the supported managed-library surface for fields and richer descriptor-sharing scenarios. Constructors, properties, concrete classes, structures, interfaces, arrays, delegates, and exceptions use cleanup-safe provider stubs for the currently supported concrete non-generic surface.
 - [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component once canonical operations and callable imports are available. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
-- [ ] Make source-created child threads inherit process ownership, finish the native-resource ledger, and translate an unhandled managed exception into process failure instead of firmware panic.
-- [ ] Extend the implemented main-task cancellation/forced-termination and reaper cleanup to source-created child tasks and the complete native-resource ledger; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
-- [ ] Finish redirected stderr selection, make every pipe/native handle participate in process cleanup, and define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
+- [ ] Extend the resident native-resource ledger beyond the current ManagedShell socket/crypto users as additional firmware accessors are added; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
+- [ ] Define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
 - [ ] Move more private runtime and standard-library implementation out of modules; Draft 0.49 audits the Xtensa overlay relocation subset but ordinary resident module relocation coverage remains a separate loader concern.
 - [ ] Add optional overlay compression, prefetching, pinning, more than one executable window, or RAM-backed source caching only after measured transition and memory evidence. Raw overlay-body breakpoints, disassembly-aware stepping, and hot replacement also remain deferred.
 - [ ] Extend overlays beyond ESP32/Xtensa only with backend-specific executable-memory, relocation, and cache-coherency evidence. ESP32-C3/RISC-V, hosted, Cosmopolitan, freestanding, and resident firmware deliberately reject `[Overlay]`.
@@ -73,14 +72,13 @@ Draft 0.49 advances managed modules to Runtime ABI 22, Module ABI 3, and schema-
 
 ## SSH and remote administration
 
-The Draft 0.48 development slice provides `net.ctm`, a resident Wi-Fi state owner, the metadata-linked `system.ssh.ctm` library, `sshd.ctm`, socket/crypto accessors, the isolated `/sftp` partition, and SSH framing/key/path helpers. The current transport accepts one TCP client and exchanges identification only. Remaining work is:
+Draft 0.49 implements the common `shell.ctm` environment, opaque resident socket/crypto tokens, Curve25519/P-256/AES-GCM transport, public-key authentication, rekey limits, redirected shell and exec channels, SFTP v3 rooted beneath `/sftp`, and an explicit secrets-aware packaging target. These components have focused build coverage but not external or hardware acceptance. Remaining work is:
 
-- [ ] Implement Curve25519 key exchange, P-256 host signatures and public-key authentication, AES-128-GCM packet protection, rekeying, strict limits, and secure configuration/key reload.
-- [ ] Extract the reusable shell-session router and connect PTY, exec, window-change, stream backpressure, and connection-owned process cleanup to Runtime ABI 21 pipes.
-- [ ] Complete SFTP v3 request parsing and generation-tagged handles rooted exclusively beneath `/sftp`.
-- [ ] Add runtime-accounted native sockets, cryptographic contexts, Nano output storage, files, and forced-session cleanup to the resource ledger.
-- [ ] Add the provisioning/package target that requires local host keys, authorized keys, and Wi-Fi profiles without recording secrets.
-- [ ] Run OpenSSH interoperability, malformed-packet, cancellation, memory, and connected-board acceptance only after the protocol and resource ledger are complete.
+- [ ] Run connected ESP32 Wi-Fi, UART-shell supervision, remote shell/exec, resize, Nano-over-SSH, service-control, cancellation, and complete descendant cleanup scenarios.
+- [ ] Run OpenSSH and libssh interoperability for transport, public-key authentication, PTY/exec, exit status, and SFTP operations.
+- [ ] Add malformed-packet and parser fuzzing, interrupted/full-filesystem transfers, rekey and network-loss endurance, and 100-cycle connection/module load-unload soaks.
+- [ ] Measure stable heap, tasks, socket/crypto/file handles, module registrations, resident segments, and overlay transitions across those acceptance runs.
+- [ ] Obtain an independent protocol and cryptographic-composition security review before describing the server as production-ready.
 
 ## Example coverage
 

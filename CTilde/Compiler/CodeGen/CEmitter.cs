@@ -1450,34 +1450,19 @@ internal sealed partial class CEmitter : ILoweringServices
 
     private string RenderFunction(IrFunction function)
     {
-        var definition = function.Emission?.Definition ??
+        return function.Emission?.Definition ??
             throw new InvalidOperationException($"Typed IR for '{function.Method.CName}' has no emission plan.");
-        var caller = function.Property is null ? function.Method : GetAccessorMethod(function.Property, function.IsGetter);
-        if (!caller.IsOverlay)
-            return definition;
-        var rewriteStart = 0;
-        if (caller.IsConstructor && caller.ContainingType.Kind == DeclaredTypeKind.Class)
-        {
-            var bodyName = OverlayBodyName(caller, ConstructorInitializerName(caller));
-            rewriteStart = definition.IndexOf(bodyName + "(", StringComparison.Ordinal);
-            if (rewriteStart < 0)
-                throw new InvalidOperationException($"Overlay constructor body '{bodyName}' was not emitted.");
-        }
-        var residentPrefix = definition[..rewriteStart];
-        var overlayBody = definition[rewriteStart..];
-        foreach (var targetFunction in _irFunctions)
-        {
-            var target = targetFunction.Property is null
-                ? targetFunction.Method
-                : GetAccessorMethod(targetFunction.Property, targetFunction.IsGetter);
-            if (target.OverlayName != caller.OverlayName || target.IsConstructor && target.ContainingType.Kind == DeclaredTypeKind.Class)
-                continue;
-            var callable = targetFunction.Property is null
-                ? target.CName
-                : targetFunction.IsGetter ? NameMangler.Getter(targetFunction.Property) : NameMangler.Setter(targetFunction.Property);
-            overlayBody = overlayBody.Replace(callable + "(", OverlayBodyName(target, callable) + "(", StringComparison.Ordinal);
-        }
-        return residentPrefix + overlayBody;
+    }
+
+    public string DirectCallableName(MethodSymbol caller, MethodSymbol target, string callableName,
+        bool virtualDispatch = false)
+    {
+        if (virtualDispatch || !caller.IsOverlay || target.OverlayName != caller.OverlayName ||
+            target.IsConstructor && target.ContainingType.Kind == DeclaredTypeKind.Class)
+            return callableName;
+        var emittedLocally = target.Syntax is not null &&
+            Model.UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, target.Syntax.Source));
+        return emittedLocally ? OverlayBodyName(target, callableName) : callableName;
     }
 
     private string RenderModuleLifecycle(ImmutableArray<IrStaticInitializer> initializers)
@@ -1566,7 +1551,30 @@ internal sealed partial class CEmitter : ILoweringServices
         if (Model.EntryPoint is { } entry)
         {
             var argumentType = CTypeName(entry.Parameters[0].Type);
-            writer.WriteLine($"static int32_t ct_managed_main(void* arguments) {{ return {entry.CName}(({argumentType})arguments); }}");
+            if (_usesExceptions)
+            {
+                writer.WriteLine("static int32_t ct_managed_main(void* arguments)");
+                writer.WriteLine("{");
+                writer.WriteLine("    jmp_buf ct_main_target;");
+                writer.WriteLine("    ct_exception_frame ct_main_frame = { &ct_main_target, ct_exception_top, ct_cleanup_top };");
+                writer.WriteLine("    if (setjmp(ct_main_target) != 0)");
+                writer.WriteLine("    {");
+                writer.WriteLine("        ct_object* exception = ct_current_exception;");
+                writer.WriteLine("        ct_current_exception = NULL;");
+                writer.WriteLine("        ct_exception_top = ct_main_frame.Previous;");
+                writer.WriteLine("        static const uint8_t diagnostic[] = \"C~ unhandled module exception\\n\";");
+                writer.WriteLine("        ct_runtime_console_write(diagnostic, sizeof(diagnostic) - 1u);");
+                writer.WriteLine("        ct_release_fast(exception);");
+                writer.WriteLine("        return -2;");
+                writer.WriteLine("    }");
+                writer.WriteLine("    ct_exception_top = &ct_main_frame;");
+                writer.WriteLine($"    int32_t result = {entry.CName}(({argumentType})arguments);");
+                writer.WriteLine("    ct_exception_top = ct_main_frame.Previous;");
+                writer.WriteLine("    return result;");
+                writer.WriteLine("}");
+            }
+            else
+                writer.WriteLine($"static int32_t ct_managed_main(void* arguments) {{ return {entry.CName}(({argumentType})arguments); }}");
             var arrayName = NameMangler.Array(CType.String);
             writer.WriteLine($"static void* ct_managed_create_arguments(int32_t count, const char* const* values, const size_t* lengths) {{ {arrayName}* result = ct_new_{arrayName}(count, \"<process-args>\", 0); for (int32_t index = 0; index < count; ++index) result->Data[index] = ct_string_from_bytes((const uint8_t*)values[index], (int32_t)lengths[index], \"<process-args>\", 0); return result; }}");
         }

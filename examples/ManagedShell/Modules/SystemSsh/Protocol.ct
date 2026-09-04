@@ -9,6 +9,7 @@ public struct SshServerOptions
     public string HostKeyPath;
     public string AuthorizedKeysPath;
     public string SftpRoot;
+    public string ShellPath;
     public int Port;
     public int MaximumPacketBytes;
     public int MaximumChannels;
@@ -16,9 +17,12 @@ public struct SshServerOptions
 
 public struct SshServerStatus
 {
+    public bool NetworkReady;
     public bool Listening;
     public bool Connected;
     public bool Authenticated;
+    public int ActiveChannels;
+    public int LastHostError;
     public uint SessionsAccepted;
     public uint AuthenticationFailures;
     public long BytesReceived;
@@ -108,7 +112,9 @@ public static class SshWire
     public static bool IsSupportedAlgorithm(string category, string name)
     {
         if (category == "kex")
-            return name == "curve25519-sha256" || name == "kex-strict-c-v00@openssh.com";
+            return name == "curve25519-sha256";
+        if (category == "kex-marker")
+            return name == "ext-info-c" || name == "kex-strict-c-v00@openssh.com";
         if (category == "host-key")
             return name == "ecdsa-sha2-nistp256";
         if (category == "cipher")
@@ -123,6 +129,8 @@ public static class SshWire
         normalized = null;
         if (path == null || path.Length == 0 || path[0] != '/')
             return false;
+        for (int index = 0; index < path.Length; index++)
+            if (path[index] == '\0' || path[index] == '\\') return false;
         string[] parts = path.Split('/');
         string result = "/sftp";
         for (int index = 0; index < parts.Length; index++)
@@ -140,29 +148,20 @@ public static class SshWire
 
     public static bool IsAuthorizedP256Line(string line)
     {
-        if (line == null)
-            return false;
-        string value = line.Trim(' ');
-        if (!value.StartsWith("ecdsa-sha2-nistp256 "))
-            return false;
-        int second = value.IndexOf(' ', 21);
-        string payload;
-        if (second < 0)
-            payload = value.Substring(21);
-        else
-            payload = value.Substring(21, second - 21);
-        if (payload.Length < 32)
-            return false;
-        for (int index = 0; index < payload.Length; index++)
+        try
         {
-            char current = payload[index];
-            bool valid = current >= 'A' && current <= 'Z' || current >= 'a' && current
-                <= 'z' || current >= '0' && current <= '9' || current == '+' || current
-                == '/' || current == '=';
-            if (!valid)
-                return false;
+            if (line == null) return false;
+            string value = line.Trim(' ');
+            if (!value.StartsWith("ecdsa-sha2-nistp256 ")) return false;
+            int second = value.IndexOf(' ', 21);
+            string payload;
+            if (second < 0) payload = value.Substring(21);
+            else payload = value.Substring(21, second - 21);
+            byte[] blob = SshConfigurationLoader.DecodeBase64(payload);
+            SshConfigurationLoader.ValidatePublicBlob(blob);
+            return true;
         }
-        return true;
+        catch (Exception) { return false; }
     }
 
     private static void Require(byte[] data, int offset, int count)
@@ -172,70 +171,4 @@ public static class SshWire
         if (offset < 0 || count < 0 || offset > data.Length - count)
             throw new ArgumentOutOfRangeException();
     }
-}
-
-public sealed class SshServer
-{
-    private SshServerOptions options;
-    private SshServerStatus status;
-
-    private SshServer(SshServerOptions options)
-    {
-        this.options = options;
-        status = new SshServerStatus();
-    }
-
-    public static SshServer Create(SshServerOptions options)
-    {
-        if (options.UserName == null || options.UserName.Length == 0)
-            throw new ArgumentException();
-        if (options.Port <= 0 || options.Port > 65535)
-            throw new ArgumentOutOfRangeException();
-        if (options.MaximumPacketBytes <= 0 || options.MaximumPacketBytes > SshWire.MaximumPacketBytes)
-            throw new ArgumentOutOfRangeException();
-        return new SshServer(options);
-    }
-
-    public SshServerStatus Status()
-    {
-        return status;
-    }
-
-    public int Run()
-    {
-        bool listening;
-        bool connected;
-        bool authenticated;
-        uint accepted;
-        uint failures;
-        long received;
-        long sent;
-        int result = SshServerHost.Run(options.Port, options.MaximumPacketBytes,
-            options.MaximumChannels, out listening, out connected, out authenticated,
-            out accepted, out failures, out received, out sent);
-        status.Listening = listening;
-        status.Connected = connected;
-        status.Authenticated = authenticated;
-        status.SessionsAccepted = accepted;
-        status.AuthenticationFailures = failures;
-        status.BytesReceived = received;
-        status.BytesSent = sent;
-        return result;
-    }
-
-    public void Stop()
-    {
-        SshServerHost.Stop();
-    }
-}
-
-internal static class SshServerHost
-{
-    [Extern("ct_managed_sshd_run")]
-    internal static int Run(int port, int maximumPacketBytes, int maximumChannels,
-        out bool listening, out bool connected, out bool authenticated, out uint sessionsAccepted,
-        out uint authenticationFailures, out long bytesReceived, out long bytesSent);
-
-    [Extern("ct_managed_sshd_stop")]
-    internal static void Stop();
 }

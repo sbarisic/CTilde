@@ -487,7 +487,8 @@ public static class Program
         bool dirty, string message, bool confirming, ref int topLine, ref int leftColumn)
     {
         EnsureVisible(buffer, terminal, ref topLine, ref leftColumn);
-        return terminal.Paint(buffer, path, dirty, message, confirming, topLine, leftColumn);
+        return terminal.Paint(buffer, path, dirty, message, confirming, topLine,
+            leftColumn);
     }
 
     [Overlay("buffer")]

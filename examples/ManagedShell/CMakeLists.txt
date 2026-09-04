@@ -20,3 +20,9 @@ endif()
 littlefs_create_partition_image(storage "${CTILDE_STORAGE_IMAGE_ROOT}" FLASH_IN_PROJECT)
 add_dependencies(littlefs_storage_bin ctilde_storage_stage)
 littlefs_create_partition_image(sftp sftp FLASH_IN_PROJECT)
+add_custom_target(ctilde_ssh_package
+    COMMAND "${CMAKE_COMMAND}"
+        -DPROVISIONING_ROOT=${CMAKE_CURRENT_LIST_DIR}/provisioning.local
+        -P "${CMAKE_CURRENT_LIST_DIR}/cmake/VerifySshProvisioning.cmake"
+    DEPENDS littlefs_storage_bin littlefs_sftp_bin
+    VERBATIM)

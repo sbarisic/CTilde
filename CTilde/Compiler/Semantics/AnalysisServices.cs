@@ -141,6 +141,9 @@ internal sealed class AnalysisServices : ILoweringServices
     public string RegisterNativeImportUse(MethodSymbol method, SyntaxNode syntax) =>
         NameMangler.Artifact("ct_ni_", NameMangler.NativeImportIdentity(method));
 
+    public string DirectCallableName(MethodSymbol caller, MethodSymbol target, string callableName,
+        bool virtualDispatch = false) => callableName;
+
     public string CTypeName(CType type) => type.Kind switch
     {
         CTypeKind.Void => "void",

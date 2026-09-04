@@ -10,10 +10,13 @@
 #include "freertos/task.h"
 #include "managed_diagnostics_host.h"
 #include "managed_network_host.h"
+#include "managed_shell_host.h"
 #include "managed_ssh_host.h"
 #include "managed_storage_host.h"
 
 #define CTILDE_SHELL_TLS_INDEX 1
+
+extern void ct_managed_shell_input_activity(void);
 
 static_assert(CTILDE_SHELL_TLS_INDEX < CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS,
     "The managed shell requires a FreeRTOS TLS slot for firmware C~ state");
@@ -65,6 +68,12 @@ int32_t ct_managed_shell_initialize(void)
         printf("Managed diagnostics initialization failed: %d\n", diagnostics_result);
         return diagnostics_result;
     }
+    const int shell_host_result = ct_managed_shell_host_initialize();
+    if (shell_host_result != 0) {
+        printf("Managed shell host initialization failed: %d\n", shell_host_result);
+        return shell_host_result;
+    }
+    ctilde_managed_console_set_uart_activity_hook(ct_managed_shell_input_activity);
     const int storage_result = ct_managed_storage_host_initialize();
     if (storage_result != 0) {
         printf("Managed storage initialization failed: %d\n", storage_result);
@@ -84,36 +93,4 @@ int32_t ct_managed_shell_initialize(void)
         printf("LittleFS mounted at %s (%u/%u bytes used)\n", CTILDE_MANAGED_MODULE_ROOT,
             (unsigned)used, (unsigned)total);
     return 0;
-}
-
-void ct_managed_shell_print_modules(void)
-{
-    ct_managed_module_info modules[16];
-    const size_t count = ctilde_managed_modules(modules, 16u);
-    printf("modules: %u\n", (unsigned)count);
-    for (size_t index = 0u; index < count && index < 16u; ++index) {
-        const ct_managed_module_info *module = &modules[index];
-        printf("  %s %s load-refs=%" PRIu32 " calls=%" PRIu32 " objects=%" PRIu32 "%s\n",
-            module->Name, module->Version, module->LoadReferences, module->ActiveCalls,
-            module->LiveAllocations, module->Stopping ? " stopping" : "");
-    }
-}
-
-void ct_managed_shell_print_processes(void)
-{
-    ct_managed_process_info processes[16];
-    const size_t count = ctilde_managed_processes(processes, 16u);
-    printf("processes: %u\n", (unsigned)count);
-    for (size_t index = 0u; index < count && index < 16u; ++index) {
-        const ct_managed_process_info *process = &processes[index];
-        printf("  id=%" PRIu32 " state=%u exit=%" PRId32 " heap=%u/%u tasks=%" PRIu32 " module=%s\n",
-            process->Id, (unsigned)process->State, process->ExitCode, (unsigned)process->HeapBytes,
-            (unsigned)process->HeapLimit, process->TaskCount, process->ModuleName);
-    }
-}
-
-void ct_managed_shell_print_free_heap(void)
-{
-    printf("free heap: %u, minimum: %u\n", (unsigned)esp_get_free_heap_size(),
-        (unsigned)esp_get_minimum_free_heap_size());
 }

@@ -1,5 +1,7 @@
 using System;
 
+public delegate int OverlayReentry(int depth);
+
 [Overlay("library")]
 public static class OverlayLibrary
 {
@@ -14,6 +16,13 @@ public static class OverlayLibrary
     {
         defer MarkCleanup();
         throw new Exception("library overlay failure");
+    }
+
+    public static int Reenter(OverlayReentry callback, int depth)
+    {
+        if (depth == 0)
+            return 0;
+        return callback(depth - 1) + 1;
     }
 
     [Resident]

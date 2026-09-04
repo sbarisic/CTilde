@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using System.Ssh;
+using System.Text;
 
 internal static class Program
 {
@@ -17,6 +19,7 @@ internal static class Program
         options.HostKeyPath = "/storage/ssh/ssh_host_ecdsa_key.pem";
         options.AuthorizedKeysPath = "/storage/ssh/authorized_keys";
         options.SftpRoot = "/sftp";
+        options.ShellPath = "/storage/modules/shell.ctm";
         options.Port = 22;
         options.MaximumPacketBytes = 35000;
         options.MaximumChannels = 2;
@@ -24,7 +27,31 @@ internal static class Program
         {
             SshServer server = SshServer.Create(options);
             Console.WriteLine("sshd: waiting for network on port 22");
-            return server.Run();
+            server.Start();
+            Process current = Process.Current;
+            while (server.Poll(250u))
+            {
+                byte[] payload;
+                if (current == null || !current.TryReceive(0u, out payload)) continue;
+                string command = Encoding.UTF8.GetString(payload);
+                if (command == "status")
+                {
+                    SshServerStatus status = server.Status();
+                    Console.Write("network="); Console.Write(status.NetworkReady);
+                    Console.Write(" listening="); Console.Write(status.Listening);
+                    Console.Write(" connected="); Console.Write(status.Connected);
+                    Console.Write(" authenticated="); Console.Write(status.Authenticated);
+                    Console.Write(" channels="); Console.Write(status.ActiveChannels);
+                    Console.Write(" error="); Console.WriteLine(status.LastHostError);
+                }
+                else if (command == "reload-keys") server.ReloadKeys();
+                else if (command == "disconnect") server.Disconnect();
+                else if (command == "stop") server.Stop();
+                else Console.WriteLine("sshd: mailbox commands: status, reload-keys, disconnect, stop");
+            }
+            server.Stop();
+            if (Process.IsCancellationRequested) return -1;
+            return 0;
         }
         catch (Exception exception)
         {

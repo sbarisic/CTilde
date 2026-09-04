@@ -110,14 +110,13 @@ internal static class NetCommand
         return true;
     }
 
-    private static bool SegmentEquals(string text, int start, int length,
-        string expected)
+    private static bool SegmentEquals(string text, int start, int length, string expected)
     {
         if (length != expected.Length)
             return false;
         for (int index = 0; index < length; index++)
             if (text[start + index] != expected[index])
-                return false;
+            return false;
         return true;
     }
 
@@ -205,9 +204,9 @@ internal static class NetCommand
             else
                 return false;
         }
-        return hasSsid && hasPassword && ssid != null && password != null
-            && ssid.Length > 0 && ssid.Length
-            <= 32 && password.Length <= 63 && hostname.Length <= 63;
+        return hasSsid && hasPassword && ssid != null && password != null && ssid.Length
+            > 0 && ssid.Length <= 32 && password.Length <= 63 && hostname.Length
+            <= 63;
     }
 
     private static unsafe int Status()

@@ -1,0 +1,166 @@
+using System;
+using System.Diagnostics;
+using System.Text;
+
+namespace Examples.ManagedShell;
+
+internal sealed class ShellEditor
+{
+    private const int HistoryCapacity = 32;
+    private string[] history = new string[HistoryCapacity];
+    private int historyCount;
+    private int historyIndex;
+    private string savedLine = "";
+
+    private static int PreviousRune(string value, int position)
+    {
+        if (position <= 0) return 0;
+        int result = position - 1;
+        while (result > 0 && ((uint)value[result] & 192u) == 128u) result--;
+        return result;
+    }
+
+    private static int NextRune(string value, int position)
+    {
+        if (position >= value.Length) return value.Length;
+        rune ignored;
+        int bytes;
+        if (Utf8.TryDecode(value, position, out ignored, out bytes)) return position + bytes;
+        return position + 1;
+    }
+
+    private static void Redraw(string prompt, string line, int cursor)
+    {
+        Console.Write('\r');
+        Console.Write((char)27);
+        Console.Write("[2K");
+        Console.Write(prompt);
+        Console.Write(line);
+        int tail = line.Length - cursor;
+        if (tail > 0)
+        {
+            Console.Write((char)27);
+            Console.Write("[");
+            Console.Write(tail);
+            Console.Write("D");
+        }
+    }
+
+    private void AddHistory(string line)
+    {
+        if (line.Length == 0) return;
+        if (historyCount > 0 && history[historyCount - 1] == line) return;
+        if (historyCount == HistoryCapacity)
+        {
+            for (int index = 1; index < HistoryCapacity; index++) history[index - 1] = history[index];
+            historyCount--;
+        }
+        history[historyCount++] = line;
+    }
+
+    private string NavigateHistory(int direction, string current)
+    {
+        if (historyCount == 0) return current;
+        if (historyIndex == historyCount) savedLine = current;
+        historyIndex += direction;
+        if (historyIndex < 0) historyIndex = 0;
+        if (historyIndex > historyCount) historyIndex = historyCount;
+        if (historyIndex == historyCount) return savedLine;
+        return history[historyIndex];
+    }
+
+    private static bool ReadEscape(out int code)
+    {
+        code = 0;
+        int second = Console.Read();
+        if (second != '[') return false;
+        int value = Console.Read();
+        if (value == 'A' || value == 'B' || value == 'C' || value == 'D' || value == 'H' || value == 'F')
+        {
+            code = value;
+            return true;
+        }
+        int number = 0;
+        while (value >= '0' && value <= '9')
+        {
+            number = number * 10 + value - '0';
+            value = Console.Read();
+        }
+        if (value != '~') return false;
+        code = 256 + number;
+        return true;
+    }
+
+    public string ReadLine(string prompt)
+    {
+        string line = "";
+        int cursor = 0;
+        historyIndex = historyCount;
+        savedLine = "";
+        bool bracketedPaste = false;
+        Console.Write(prompt);
+        while (!Process.IsCancellationRequested)
+        {
+            int value = Console.Read();
+            if (value < 0) continue;
+            if (value == 27)
+            {
+                int code;
+                if (!ReadEscape(out code)) continue;
+                if (code == 456) { bracketedPaste = true; continue; }
+                if (code == 457) { bracketedPaste = false; Redraw(prompt, line, cursor); continue; }
+                if (bracketedPaste) continue;
+                if (code == 'C') cursor = NextRune(line, cursor);
+                else if (code == 'D') cursor = PreviousRune(line, cursor);
+                else if (code == 'H' || code == 257 || code == 263) cursor = 0;
+                else if (code == 'F' || code == 260 || code == 264) cursor = line.Length;
+                else if (code == 'A') { line = NavigateHistory(-1, line); cursor = line.Length; }
+                else if (code == 'B') { line = NavigateHistory(1, line); cursor = line.Length; }
+                else if (code == 259 && cursor < line.Length) line = line.Remove(cursor, NextRune(line, cursor) - cursor);
+                Redraw(prompt, line, cursor);
+                continue;
+            }
+            if (value == '\r' || value == '\n')
+            {
+                if (bracketedPaste)
+                {
+                    if (line.Length == 0 || line[line.Length - 1] != ' ')
+                    {
+                        line = line.Insert(cursor, " ");
+                        cursor++;
+                    }
+                    continue;
+                }
+                Console.WriteLine();
+                AddHistory(line);
+                return line;
+            }
+            if (value == 3)
+            {
+                Console.Write("^C");
+                Console.WriteLine();
+                return "";
+            }
+            if (value == 4 && line.Length == 0) return null;
+            if (value == 8 || value == 127)
+            {
+                if (cursor > 0)
+                {
+                    int previous = PreviousRune(line, cursor);
+                    line = line.Remove(previous, cursor - previous);
+                    cursor = previous;
+                }
+                Redraw(prompt, line, cursor);
+                continue;
+            }
+            if (value >= 32 || value >= 128)
+            {
+                string inserted = ((char)value).ToString();
+                line = line.Insert(cursor, inserted);
+                cursor++;
+                Redraw(prompt, line, cursor);
+            }
+        }
+        return null;
+    }
+}

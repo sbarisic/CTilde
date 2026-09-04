@@ -7,10 +7,11 @@
     "kind": "application",
     "name": "tests.overlay",
     "version": "1.0.0",
+    "nativeSources": ["main/overlay_probe.c"],
     "references": [
       "../OverlayLibrary/build/managed-modules/tests.overlay.library.ctmeta.json"
     ],
-    "mainTaskStackBytes": 8192,
+    "mainTaskStackBytes": 32768,
     "heapLimitBytes": 65536
   },
   "build": {

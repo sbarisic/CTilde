@@ -1,4 +1,6 @@
+using System.Text.RegularExpressions;
 using CTilde;
+using CTilde.Cli;
 
 namespace CTilde.Tests;
 
@@ -49,11 +51,50 @@ internal static partial class ConformanceTests
             using var metadataWriter = new StringWriter();
             Assert(compilation.EmitManagedModuleMetadata(metadataWriter, module).Success,
                 "Overlay metadata emission failed.");
-            Assert(metadataWriter.ToString().Contains("\"hasOverlays\": true", StringComparison.Ordinal) &&
-                metadataWriter.ToString().Contains("\"name\": \"render\"", StringComparison.Ordinal) &&
-                metadataWriter.ToString().Contains("\"targetIndex\": 0", StringComparison.Ordinal) &&
-                !metadataWriter.ToString().Contains("\"name\": \"unused\"", StringComparison.Ordinal),
+            var metadataText = metadataWriter.ToString();
+            Assert(metadataText.Contains("\"hasOverlays\": true", StringComparison.Ordinal) &&
+                metadataText.Contains("\"name\": \"render\"", StringComparison.Ordinal) &&
+                metadataText.Contains("\"targetIndex\": 0", StringComparison.Ordinal) &&
+                !metadataText.Contains("\"name\": \"unused\"", StringComparison.Ordinal),
                 "Schema-3 metadata omitted deterministic reachable placement or retained an unreachable overlay.");
+            var bodySymbols = Regex.Matches(metadataText, "\\\"bodySymbol\\\": \\\"([^\\\"]+)\\\"")
+                .Select(match => match.Groups[1].Value).ToArray();
+            Assert(bodySymbols.Length == 2 && bodySymbols.Sum(symbol =>
+                    Regex.Matches(generated, $@"\b{Regex.Escape(symbol)}\s*\(").Count) > bodySymbols.Length * 3,
+                "A proven same-overlay call did not target its typed overlay body directly.");
+        });
+
+        suite.Run("draft 0.49 Xtensa overlay instruction relocation audit", () =>
+        {
+            Assert(ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(8u) &&
+                ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(10u) &&
+                ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(14u) &&
+                ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(20u) &&
+                ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(49u) &&
+                !ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(11u) &&
+                !ManagedOverlayPackager.IsAuditedXtensaInstructionRelocation(50u),
+                "The audited Xtensa instruction-relocation allowlist changed unexpectedly.");
+            ManagedOverlayPackager.ValidateAuditedXtensaInstructionRelocation(
+                "render", 20u, true, true, "render", true);
+            AssertRejected(20u, true, true, "other", true);
+            AssertRejected(20u, true, true, null, true);
+            AssertRejected(20u, true, false, null, false);
+            AssertRejected(11u, true, true, "render", true);
+            AssertRejected(20u, false, true, "render", true);
+
+            static void AssertRejected(uint type, bool originContains, bool targetDefined,
+                string? targetOverlay, bool targetContains)
+            {
+                try
+                {
+                    ManagedOverlayPackager.ValidateAuditedXtensaInstructionRelocation(
+                        "render", type, originContains, targetDefined, targetOverlay, targetContains);
+                    throw new InvalidOperationException("Unsafe Xtensa overlay relocation was accepted.");
+                }
+                catch (NativeBuildException)
+                {
+                }
+            }
         });
 
         suite.Run("draft 0.49 overlay constructors properties and delegates use stable stubs", () =>
@@ -268,6 +309,63 @@ internal static partial class ConformanceTests
             {
                 File.Delete(metadataPath);
             }
+        });
+
+        suite.Run("draft 0.49 managed application exception boundary", () =>
+        {
+            const string source = """
+                public static class Program
+                {
+                    [EntryPoint]
+                    public static int Main(string[] args)
+                    {
+                        throw new System.InvalidOperationException();
+                    }
+                }
+                """;
+            var module = new ManagedModuleConfiguration(
+                ManagedModuleKind.Application, "Demo.ExceptionBoundary", "1.0.0", [], 4096, 16384);
+            var compilation = Compile(source, new CompilationOptions(
+                CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                ManagedModuleKind: module.Kind, ManagedModule: module));
+            var bundle = compilation.EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
+            Assert(generated.Contains("C~ unhandled module exception\\n", StringComparison.Ordinal) &&
+                generated.Contains("return -2;", StringComparison.Ordinal) &&
+                generated.Contains("setjmp(ct_main_target)", StringComparison.Ordinal),
+                "Managed application Main lacks its process-level exception boundary.");
+        });
+
+        suite.Run("draft 0.49 managed child tasks inherit process context", () =>
+        {
+            const string source = """
+                using System.Threading;
+                public static class Program
+                {
+                    private static void Worker() { Thread.Yield(); }
+                    [EntryPoint]
+                    public static int Main(string[] args)
+                    {
+                        Thread thread = new Thread(Worker);
+                        thread.Start();
+                        thread.Join();
+                        return 0;
+                    }
+                }
+                """;
+            var module = new ManagedModuleConfiguration(
+                ManagedModuleKind.Application, "Demo.ChildTask", "1.0.0", [], 4096, 16384);
+            var compilation = Compile(source, new CompilationOptions(
+                CompilationTarget.EspIdf, Architecture: CompilationArchitecture.Xtensa,
+                ManagedModuleKind: module.Kind, ManagedModule: module));
+            var bundle = compilation.EmitCBundle();
+            Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
+            var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
+            Assert(generated.Contains("ct_runtime_thread_attach_v22", StringComparison.Ordinal) &&
+                generated.Contains("payload->Process = ct_runtime_api->CurrentProcess()", StringComparison.Ordinal) &&
+                generated.Contains("ct_thread_attach_to(payload->Process)", StringComparison.Ordinal),
+                "Generated managed workers do not inherit the creating process context.");
         });
     }
 }

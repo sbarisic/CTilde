@@ -1,0 +1,249 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Runtime;
+using System.Text;
+
+namespace Examples.ManagedShell;
+
+internal static class ShellHost
+{
+    [Extern("ct_shell_process_count")] internal static uint ProcessCount();
+    [Extern("ct_shell_process_get")]
+    internal static unsafe int ProcessGet(uint index, out uint id, out uint state,
+        out int exitCode, out nuint heapBytes, out nuint heapLimit, out uint tasks,
+        NativeBuffer<byte> name);
+    [Extern("ct_shell_module_count")] internal static uint ModuleCount();
+    [Extern("ct_shell_module_get")]
+    internal static unsafe int ModuleGet(uint index, out uint references, out uint calls,
+        out uint allocations, out bool stopping, NativeBuffer<byte> name,
+        NativeBuffer<byte> version);
+    [Extern("ct_shell_free_heap")] internal static nuint FreeHeap();
+    [Extern("ct_shell_minimum_free_heap")] internal static nuint MinimumFreeHeap();
+    [Extern("ct_shell_set_foreground")] internal static bool SetForeground(uint id);
+    [Extern("ct_shell_terminate_descendants")] internal static void TerminateDescendants(uint id, uint grace);
+    [Extern("ct_shell_prompt_started")] internal static void PromptStarted();
+    [Extern("ct_shell_process_starting")] internal static void ProcessStarting();
+    [Extern("ct_shell_process_started")] internal static void ProcessStarted(uint id);
+    [Extern("ct_shell_process_start_failed")] internal static void ProcessStartFailed();
+}
+
+internal static class ShellCommands
+{
+    private static string[] Arguments(string[] words, int start)
+    {
+        string[] result = new string[words.Length - start];
+        for (int index = start; index < words.Length; index++) result[index - start] = words[index];
+        return result;
+    }
+
+    [Overlay("help")]
+    public static void Help()
+    {
+        Console.WriteLine("commands: ls [path], mkdir <path>, cat <path>, modules, ps, kill <id>, wait <id>, send <id> <text>, free, help");
+        Console.WriteLine("applications: program.ctm [args] or program.ctm [args] &");
+        Console.WriteLine("examples: memory.ctm, taskmgr.ctm [kill <id>], sd.ctm help, nano.ctm <path>, net.ctm status");
+    }
+
+    [Overlay("filesystem")]
+    private static void ListFilesAt(string path, string label)
+    {
+        if (!Directory.Exists(path)) return;
+        Console.Write(label); Console.WriteLine(":");
+        string[] entries = Directory.GetFileSystemEntries(path);
+        for (int index = 0; index < entries.Length; index++) Console.WriteLine(entries[index]);
+    }
+
+    [Overlay("filesystem")]
+    private static int ListFiles(string[] words)
+    {
+        if (words.Length > 2) { Console.WriteLine("usage: ls [path]"); return 2; }
+        if (words.Length == 2)
+        {
+            if (!Directory.Exists(words[1]))
+            {
+                Console.Write("ls: directory not found: "); Console.WriteLine(words[1]); return 1;
+            }
+            ListFilesAt(words[1], words[1]); return 0;
+        }
+        if (Directory.Exists("/sd")) ListFilesAt("/sd", "SD");
+        ListFilesAt("/storage/modules", "LittleFS");
+        return 0;
+    }
+
+    private static unsafe string Text(NativeBuffer<byte> value)
+    {
+        string result;
+        if (!Utf8.TryGetString(value.Pointer, value.Length, out result)) return "";
+        return result;
+    }
+
+    [Overlay("process-admin")]
+    private static unsafe int PrintProcesses()
+    {
+        uint count = ShellHost.ProcessCount();
+        Console.Write("processes: "); Console.WriteLine(count);
+        NativeBuffer<byte> name = stackalloc byte[64];
+        for (uint index = 0u; index < count && index < 16u; index++)
+        {
+            uint id; uint state; int exitCode; nuint heap; nuint limit; uint tasks;
+            if (ShellHost.ProcessGet(index, out id, out state, out exitCode, out heap,
+                out limit, out tasks, name) != 0) continue;
+            Console.Write("  id="); Console.Write(id); Console.Write(" state="); Console.Write(state);
+            Console.Write(" exit="); Console.Write(exitCode); Console.Write(" heap="); Console.Write((ulong)heap);
+            Console.Write("/"); Console.Write((ulong)limit); Console.Write(" tasks="); Console.Write(tasks);
+            Console.Write(" module="); Console.WriteLine(Text(name));
+        }
+        return 0;
+    }
+
+    [Overlay("process-admin")]
+    private static unsafe int PrintModules()
+    {
+        uint count = ShellHost.ModuleCount();
+        Console.Write("modules: "); Console.WriteLine(count);
+        NativeBuffer<byte> name = stackalloc byte[64];
+        NativeBuffer<byte> version = stackalloc byte[32];
+        for (uint index = 0u; index < count && index < 16u; index++)
+        {
+            uint references; uint calls; uint allocations; bool stopping;
+            if (ShellHost.ModuleGet(index, out references, out calls, out allocations,
+                out stopping, name, version) != 0) continue;
+            Console.Write("  "); Console.Write(Text(name)); Console.Write(" "); Console.Write(Text(version));
+            Console.Write(" load-refs="); Console.Write(references); Console.Write(" calls="); Console.Write(calls);
+            Console.Write(" objects="); Console.Write(allocations);
+            if (stopping) Console.Write(" stopping");
+            Console.WriteLine();
+        }
+        return 0;
+    }
+
+    [Overlay("process-admin")]
+    private static Process Open(string text)
+    {
+        uint id;
+        Process process;
+        if (!uint.TryParse(text, out id) || !Process.TryOpen(id, out process)) return null;
+        return process;
+    }
+
+    private static int Execute(string[] words, bool background)
+    {
+        ShellHost.ProcessStarting();
+        Process process;
+        if (background)
+        {
+            ProcessStartInfo info = new ProcessStartInfo(words[0], Arguments(words, 1));
+            info.RedirectStandardInput = true;
+            process = Process.Start(info);
+        }
+        else
+            process = Process.Start(words[0], Arguments(words, 1));
+        if (process.Id == 0u)
+        {
+            ShellHost.ProcessStartFailed(); Console.WriteLine("module load failed"); return 1;
+        }
+        ShellHost.ProcessStarted(process.Id);
+        if (background)
+        {
+            process.StandardInput.Close();
+            Console.Write("started process "); Console.WriteLine(process.Id); return 0;
+        }
+        Process current = Process.Current;
+        if (!ShellHost.SetForeground(process.Id))
+        {
+            process.Terminate(0u); ShellHost.ProcessStartFailed();
+            Console.WriteLine("could not assign terminal foreground process"); return 1;
+        }
+        int exitCode;
+        try { exitCode = process.Wait(); }
+        finally { ShellHost.SetForeground(current.Id); }
+        if (exitCode != 0) { Console.Write("exit code: "); Console.WriteLine(exitCode); }
+        return exitCode;
+    }
+
+    [Overlay("filesystem")]
+    private static int FileSystemCommand(string[] words)
+    {
+        string[] invocation = new string[words.Length + 1];
+        invocation[0] = "commands.fs.ctm"; invocation[1] = words[0];
+        for (int index = 1; index < words.Length; index++) invocation[index + 1] = words[index];
+        return Execute(invocation, false);
+    }
+
+    [Overlay("process-admin")]
+    private static unsafe int ProcessAdministration(string command, string[] words)
+    {
+        if (command == "modules") return PrintModules();
+        if (command == "ps") return PrintProcesses();
+        if (command == "free")
+        {
+            Console.Write("free heap: "); Console.Write((ulong)ShellHost.FreeHeap());
+            Console.Write(", minimum: "); Console.WriteLine((ulong)ShellHost.MinimumFreeHeap()); return 0;
+        }
+        if (command == "kill" || command == "wait")
+        {
+            if (words.Length != 2) { Console.Write("usage: "); Console.Write(command); Console.WriteLine(" <id>"); return 2; }
+            Process process = Open(words[1]);
+            if (process == null) { Console.WriteLine("process not found"); return 1; }
+            if (command == "kill") { process.Terminate(1000u); return 0; }
+            int code = process.Wait(); Console.Write("exit code: "); Console.WriteLine(code); return code;
+        }
+        if (command == "send")
+        {
+            if (words.Length < 3) { Console.WriteLine("usage: send <id> <text>"); return 2; }
+            Process process = Open(words[1]);
+            if (process == null) { Console.WriteLine("process not found"); return 1; }
+            string payload = words[2];
+            for (int index = 3; index < words.Length; index++) payload = payload + " " + words[index];
+            process.Send(Encoding.UTF8.GetBytes(payload)); return 0;
+        }
+        return 127;
+    }
+
+    public static unsafe int Dispatch(string line, bool allowBackground)
+    {
+        string[] words; bool background;
+        if (!ShellCommandLine.TryParse(line, out words, out background))
+        { Console.WriteLine("syntax error: malformed quoting or escape"); return 2; }
+        if (words.Length == 0) return 0;
+        if (background && (!allowBackground || !words[0].EndsWith(".ctm")))
+        { Console.WriteLine("syntax error: background execution is not allowed here"); return 2; }
+        string command = words[0];
+        if (command == "help") { Help(); return 0; }
+        if (command == "ls") return ListFiles(words);
+        if (command == "modules" || command == "ps" || command == "free" ||
+            command == "kill" || command == "wait" || command == "send")
+            return ProcessAdministration(command, words);
+        if (command == "mkdir" || command == "cat") return FileSystemCommand(words);
+        if (command.EndsWith(".ctm")) return Execute(words, background);
+        Console.WriteLine("unknown command"); return 127;
+    }
+}
+
+public static class Program
+{
+    [EntryPoint]
+    public static unsafe int Main(string[] args)
+    {
+        if (args.Length == 2 && args[0] == "--exec") return ShellCommands.Dispatch(args[1], false);
+        if (args.Length != 1 || (args[0] != "--uart" && args[0] != "--ssh"))
+        {
+            Console.WriteLine("usage: shell.ctm --uart | --ssh | --exec <command>"); return 2;
+        }
+        Console.WriteLine("CTilde managed shell - Runtime ABI 22 / Module ABI 3");
+        ShellCommands.Help();
+        ShellEditor editor = new ShellEditor();
+        while (!Process.IsCancellationRequested)
+        {
+            ShellHost.PromptStarted();
+            string line = editor.ReadLine("ct> ");
+            if (line == null) break;
+            ShellCommands.Dispatch(line, true);
+        }
+        Process current = Process.Current;
+        if (current != null) ShellHost.TerminateDescendants(current.Id, 1000u);
+        if (Process.IsCancellationRequested) return -1;
+        return 0;
+    }
+}

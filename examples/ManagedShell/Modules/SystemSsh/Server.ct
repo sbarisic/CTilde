@@ -1,0 +1,1071 @@
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
+
+namespace System.Ssh;
+
+internal sealed class SshChannelState
+{
+    internal uint LocalId;
+    internal uint RemoteId;
+    internal uint RemoteWindow;
+    internal uint RemoteMaximumPacket;
+    internal Process Process;
+    internal bool HasPty;
+    internal uint Columns;
+    internal uint Rows;
+    internal bool Open;
+    internal bool Started;
+    internal bool SentClose;
+    internal SftpSession Sftp;
+}
+
+internal sealed class SshConnection
+{
+    private SshServerOptions options;
+    private AuthorizedKeySet authorizedKeys;
+    private uint hostKey;
+    private SshTransport transport;
+    private byte[] sessionIdentifier;
+    private SshChannelState[] channels;
+    private int channelCount;
+    private bool authenticated;
+    private int authenticationFailures;
+    private bool closed;
+    private long rekeyAt;
+    private long rekeyReceivedBase;
+    private long rekeySentBase;
+    private long handshakeDeadline;
+    private bool clientExtInfo;
+    private bool strictKex;
+
+    internal SshConnection(uint socket, SshServerOptions options, AuthorizedKeySet authorizedKeys,
+        uint hostKey)
+    {
+        this.options = options;
+        this.authorizedKeys = authorizedKeys;
+        this.hostKey = hostKey;
+        transport = new SshTransport(socket, options.MaximumPacketBytes);
+        channels = new SshChannelState[2];
+    }
+
+    internal bool Authenticated { get { return authenticated; } }
+    internal int ChannelCount { get { return channelCount; } }
+    internal int AuthenticationFailures { get { return authenticationFailures; } }
+    internal long BytesReceived { get { return transport.BytesReceived; } }
+    internal long BytesSent { get { return transport.BytesSent; } }
+    internal bool Closed { get { return closed; } }
+
+    internal void Handshake()
+    {
+        handshakeDeadline = SshNative.MonotonicMilliseconds() + 10000L;
+        transport.ExchangeIdentification(handshakeDeadline);
+        ExchangeKeys(null);
+        Authenticate();
+        authenticated = true;
+    }
+
+    internal bool Poll(uint timeout)
+    {
+        if (closed) return false;
+        if (SshNative.MonotonicMilliseconds() >= rekeyAt ||
+            transport.BytesReceived - rekeyReceivedBase >= 1073741824L ||
+            transport.BytesSent - rekeySentBase >= 1073741824L)
+            ExchangeKeys(null);
+        uint ready;
+        int wait = SshNative.Wait(transport.Socket, 1u, timeout, out ready);
+        if (wait == 0 && (ready & 1u) != 0u)
+        {
+            byte[] payload = transport.ReceivePacket(5000u);
+            Dispatch(payload);
+        }
+        else if (wait < 0 && wait != -116) throw new InvalidOperationException();
+        PumpChannels();
+        return !closed;
+    }
+
+    internal void Close()
+    {
+        if (closed) return;
+        closed = true;
+        for (int index = 0; index < channels.Length; index++)
+            if (channels[index] != null)
+            {
+                try { CloseChannel(channels[index], true); }
+                catch (Exception) { }
+            }
+        transport.Close();
+    }
+
+    [Overlay("handshake")]
+    private void ExchangeKeys(byte[] offeredClientKex)
+    {
+        if (authenticated) handshakeDeadline = SshNative.MonotonicMilliseconds() + 10000L;
+        bool initialExchange = sessionIdentifier == null;
+        byte[] serverKex = CreateKexInit();
+        transport.SendPacket(serverKex);
+        byte[] clientKex = offeredClientKex;
+        if (clientKex == null) clientKex = transport.ReceivePacket(HandshakeTimeout());
+        bool discardGuess = ValidateKexInit(clientKex);
+        if (discardGuess) transport.ReceivePacket(HandshakeTimeout());
+
+        byte[] request = transport.ReceivePacket(HandshakeTimeout());
+        SshPacketReader requestReader = new SshPacketReader(request);
+        if (requestReader.ReadByte() != 30) throw new InvalidOperationException();
+        byte[] clientPublic = requestReader.ReadBytes();
+        requestReader.RequireEnd();
+        if (clientPublic.Length != 32) throw new InvalidOperationException();
+
+        uint exchangeKey;
+        byte[] serverPublic = new byte[32];
+        byte[] secret = new byte[32];
+        SshNative.Require(SshNative.X25519Create(out exchangeKey, serverPublic));
+        try
+        {
+            SshNative.Require(SshNative.X25519Shared(exchangeKey, clientPublic, secret));
+        }
+        finally
+        {
+            SshNative.Close(exchangeKey);
+        }
+
+        byte[] publicPoint = new byte[65];
+        SshNative.Require(SshNative.P256Public(hostKey, publicPoint));
+        byte[] hostBlob = HostKeyBlob(publicPoint);
+        byte[] exchangeHashInput = ExchangeHashInput(clientKex, serverKex, hostBlob,
+            clientPublic, serverPublic, secret);
+        byte[] exchangeHash = new byte[32];
+        SshNative.Require(SshNative.Sha256(exchangeHashInput, 0, exchangeHashInput.Length, exchangeHash));
+        if (sessionIdentifier == null) sessionIdentifier = exchangeHash;
+
+        byte[] fixedSignature = new byte[64];
+        SshNative.Require(SshNative.P256Sign(hostKey, exchangeHash, fixedSignature));
+        byte[] signatureBlob = SignatureBlob(fixedSignature);
+        SshPacketWriter reply = new SshPacketWriter(512);
+        reply.WriteByte((byte)31);
+        reply.WriteBytes(hostBlob);
+        reply.WriteBytes(serverPublic);
+        reply.WriteBytes(signatureBlob);
+        transport.SendPacket(reply.ToArray());
+
+        byte[] receiveIv = Derive(secret, exchangeHash, (byte)'A', 12);
+        byte[] sendIv = Derive(secret, exchangeHash, (byte)'B', 12);
+        byte[] receiveKey = Derive(secret, exchangeHash, (byte)'C', 16);
+        byte[] sendKey = Derive(secret, exchangeHash, (byte)'D', 16);
+
+        SshPacketWriter newKeys = new SshPacketWriter(1);
+        newKeys.WriteByte((byte)21);
+        transport.SendPacket(newKeys.ToArray());
+        byte[] clientNewKeys = transport.ReceivePacket(HandshakeTimeout());
+        if (clientNewKeys.Length != 1 || clientNewKeys[0] != 21) throw new InvalidOperationException();
+        transport.Activate(receiveKey, receiveIv, sendKey, sendIv);
+        if (strictKex) transport.ResetSequences();
+        if (initialExchange && clientExtInfo)
+        {
+            SshPacketWriter extension = new SshPacketWriter(96);
+            extension.WriteByte((byte)7);
+            extension.WriteUInt32(1u);
+            extension.WriteString("server-sig-algs");
+            extension.WriteString("ecdsa-sha2-nistp256");
+            transport.SendPacket(extension.ToArray());
+        }
+        SshNative.Zeroize(secret);
+        SshNative.Zeroize(receiveKey);
+        SshNative.Zeroize(sendKey);
+        rekeyAt = SshNative.MonotonicMilliseconds() + 3600000L;
+        rekeyReceivedBase = transport.BytesReceived;
+        rekeySentBase = transport.BytesSent;
+    }
+
+    [Overlay("handshake")]
+    private byte[] CreateKexInit()
+    {
+        SshPacketWriter writer = new SshPacketWriter(512);
+        writer.WriteByte((byte)20);
+        unsafe
+        {
+            NativeBuffer<byte> cookie = stackalloc byte[16];
+            SshNative.Require(SshNative.Random(cookie));
+            for (int index = 0; index < 16; index++) writer.WriteByte(cookie[(nuint)index]);
+        }
+        writer.WriteString("curve25519-sha256,ext-info-s,kex-strict-s-v00@openssh.com");
+        writer.WriteString("ecdsa-sha2-nistp256");
+        writer.WriteString("aes128-gcm@openssh.com");
+        writer.WriteString("aes128-gcm@openssh.com");
+        writer.WriteString("hmac-sha2-256");
+        writer.WriteString("hmac-sha2-256");
+        writer.WriteString("none");
+        writer.WriteString("none");
+        writer.WriteString("");
+        writer.WriteString("");
+        writer.WriteBoolean(false);
+        writer.WriteUInt32(0u);
+        return writer.ToArray();
+    }
+
+    [Overlay("handshake")]
+    private bool ValidateKexInit(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        if (reader.ReadByte() != 20) throw new InvalidOperationException();
+        reader.ReadFixed(16);
+        string kex = reader.ReadString();
+        string host = reader.ReadString();
+        string receiveCipher = reader.ReadString();
+        string sendCipher = reader.ReadString();
+        string receiveMac = reader.ReadString();
+        string sendMac = reader.ReadString();
+        string receiveCompression = reader.ReadString();
+        string sendCompression = reader.ReadString();
+        reader.ReadString();
+        reader.ReadString();
+        bool follows = reader.ReadBoolean();
+        reader.ReadUInt32();
+        reader.RequireEnd();
+        if (!HasName(kex, "curve25519-sha256") ||
+            !HasName(host, "ecdsa-sha2-nistp256") ||
+            !HasName(receiveCipher, "aes128-gcm@openssh.com") ||
+            !HasName(sendCipher, "aes128-gcm@openssh.com") ||
+            !HasName(receiveMac, "hmac-sha2-256") ||
+            !HasName(sendMac, "hmac-sha2-256") ||
+            !HasName(receiveCompression, "none") || !HasName(sendCompression, "none"))
+            throw new InvalidOperationException();
+        if (sessionIdentifier == null)
+        {
+            clientExtInfo = HasName(kex, "ext-info-c");
+            strictKex = HasName(kex, "kex-strict-c-v00@openssh.com");
+        }
+        return follows && (FirstName(kex) != "curve25519-sha256" ||
+            FirstName(host) != "ecdsa-sha2-nistp256");
+    }
+
+    [Overlay("handshake")]
+    private static string FirstName(string list)
+    {
+        int comma = list.IndexOf(',');
+        if (comma < 0) return list;
+        return list.Substring(0, comma);
+    }
+
+    [Overlay("handshake")]
+    private static bool HasName(string list, string name)
+    {
+        string[] values = list.Split(',');
+        for (int index = 0; index < values.Length; index++)
+            if (values[index] == name) return true;
+        return false;
+    }
+
+    [Overlay("handshake")]
+    private byte[] ExchangeHashInput(byte[] clientKex, byte[] serverKex, byte[] hostBlob,
+        byte[] clientPublic, byte[] serverPublic, byte[] secret)
+    {
+        SshPacketWriter writer = new SshPacketWriter(2048);
+        writer.WriteString(transport.ClientVersion);
+        writer.WriteString(transport.ServerVersion);
+        writer.WriteBytes(clientKex);
+        writer.WriteBytes(serverKex);
+        writer.WriteBytes(hostBlob);
+        writer.WriteBytes(clientPublic);
+        writer.WriteBytes(serverPublic);
+        writer.WriteBytes(MpintLittleEndian(secret));
+        return writer.ToArray();
+    }
+
+    [Overlay("handshake")]
+    private byte[] Derive(byte[] secret, byte[] exchangeHash, byte letter, int count)
+    {
+        SshPacketWriter writer = new SshPacketWriter(256);
+        writer.WriteBytes(MpintLittleEndian(secret));
+        writer.WriteRaw(exchangeHash);
+        writer.WriteByte(letter);
+        writer.WriteRaw(sessionIdentifier);
+        byte[] hash = new byte[32];
+        byte[] input = writer.ToArray();
+        SshNative.Require(SshNative.Sha256(input, 0, input.Length, hash));
+        byte[] result = new byte[count];
+        for (int index = 0; index < count; index++) result[index] = hash[index];
+        return result;
+    }
+
+    [Overlay("handshake")]
+    private static byte[] MpintLittleEndian(byte[] value)
+    {
+        int end = value.Length - 1;
+        while (end >= 0 && value[end] == 0) end--;
+        if (end < 0) return new byte[0];
+        bool leading = (value[end] & 128) != 0;
+        int extra = 0;
+        if (leading) extra = 1;
+        byte[] result = new byte[end + 1 + extra];
+        for (int index = 0; index <= end; index++) result[extra + index] = value[end - index];
+        return result;
+    }
+
+    [Overlay("handshake")]
+    private static byte[] HostKeyBlob(byte[] point)
+    {
+        SshPacketWriter writer = new SshPacketWriter(128);
+        writer.WriteString("ecdsa-sha2-nistp256");
+        writer.WriteString("nistp256");
+        writer.WriteBytes(point);
+        return writer.ToArray();
+    }
+
+    [Overlay("handshake")]
+    private static byte[] SignatureBlob(byte[] fixedSignature)
+    {
+        SshPacketWriter inner = new SshPacketWriter(80);
+        byte[] left = MpintFixed(fixedSignature, 0);
+        byte[] right = MpintFixed(fixedSignature, 32);
+        inner.WriteBytes(left);
+        inner.WriteBytes(right);
+        SshPacketWriter outer = new SshPacketWriter(128);
+        outer.WriteString("ecdsa-sha2-nistp256");
+        outer.WriteBytes(inner.ToArray());
+        return outer.ToArray();
+    }
+
+    [Overlay("handshake")]
+    private static byte[] MpintFixed(byte[] value, int offset)
+    {
+        int first = offset;
+        while (first < offset + 31 && value[first] == 0) first++;
+        bool leading = (value[first] & 128) != 0;
+        int extra = 0;
+        if (leading) extra = 1;
+        byte[] result = new byte[offset + 32 - first + extra];
+        for (int index = first; index < offset + 32; index++)
+            result[extra + index - first] = value[index];
+        return result;
+    }
+
+    [Overlay("authentication")]
+    private void Authenticate()
+    {
+        byte[] service = transport.ReceivePacket(HandshakeTimeout());
+        SshPacketReader serviceReader = new SshPacketReader(service);
+        if (serviceReader.ReadByte() != 5 || serviceReader.ReadString() != "ssh-userauth")
+            throw new InvalidOperationException();
+        serviceReader.RequireEnd();
+        SshPacketWriter accepted = new SshPacketWriter(32);
+        accepted.WriteByte((byte)6);
+        accepted.WriteString("ssh-userauth");
+        transport.SendPacket(accepted.ToArray());
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            byte[] request = transport.ReceivePacket(HandshakeTimeout());
+            SshPacketReader reader = new SshPacketReader(request);
+            if (reader.ReadByte() != 50) throw new InvalidOperationException();
+            string user = reader.ReadString();
+            string serviceName = reader.ReadString();
+            string method = reader.ReadString();
+            if (method == "none")
+            {
+                SendAuthenticationFailure();
+                authenticationFailures++;
+                continue;
+            }
+            if (method != "publickey" || user != options.UserName ||
+                serviceName != "ssh-connection")
+            {
+                SendAuthenticationFailure();
+                authenticationFailures++;
+                continue;
+            }
+            bool signed = reader.ReadBoolean();
+            string algorithm = reader.ReadString();
+            byte[] publicBlob = reader.ReadBytes();
+            if (algorithm != "ecdsa-sha2-nistp256" || !authorizedKeys.Contains(publicBlob))
+            {
+                SendAuthenticationFailure();
+                authenticationFailures++;
+                continue;
+            }
+            if (!signed)
+            {
+                reader.RequireEnd();
+                SshPacketWriter probe = new SshPacketWriter(256);
+                probe.WriteByte((byte)60);
+                probe.WriteString(algorithm);
+                probe.WriteBytes(publicBlob);
+                transport.SendPacket(probe.ToArray());
+                attempt--;
+                continue;
+            }
+            int signedPrefixLength = reader.Position;
+            byte[] signatureBlob = reader.ReadBytes();
+            reader.RequireEnd();
+            if (!VerifyAuthentication(request, signedPrefixLength, publicBlob, signatureBlob))
+            {
+                SendAuthenticationFailure();
+                authenticationFailures++;
+                continue;
+            }
+            SshPacketWriter success = new SshPacketWriter(1);
+            success.WriteByte((byte)52);
+            transport.SendPacket(success.ToArray());
+            return;
+        }
+        throw new InvalidOperationException();
+    }
+
+    private uint HandshakeTimeout()
+    {
+        long left = handshakeDeadline - SshNative.MonotonicMilliseconds();
+        if (left <= 0L) throw new InvalidOperationException();
+        uint result = (uint)left;
+        if (result > 5000u) result = 5000u;
+        return result;
+    }
+
+    [Overlay("authentication")]
+    private bool VerifyAuthentication(byte[] request, int prefixLength, byte[] publicBlob,
+        byte[] signatureBlob)
+    {
+        SshPacketReader signatureReader = new SshPacketReader(signatureBlob);
+        if (signatureReader.ReadString() != "ecdsa-sha2-nistp256") return false;
+        byte[] encoded = signatureReader.ReadBytes();
+        signatureReader.RequireEnd();
+        SshPacketReader values = new SshPacketReader(encoded);
+        byte[] left = values.ReadBytes();
+        byte[] right = values.ReadBytes();
+        values.RequireEnd();
+        byte[] fixedSignature = new byte[64];
+        if (!CopyMpint(left, fixedSignature, 0) || !CopyMpint(right, fixedSignature, 32)) return false;
+
+        SshPacketWriter signed = new SshPacketWriter(prefixLength + 64);
+        signed.WriteBytes(sessionIdentifier);
+        signed.WriteRaw(Prefix(request, prefixLength));
+        byte[] signedBytes = signed.ToArray();
+        byte[] hash = new byte[32];
+        SshNative.Require(SshNative.Sha256(signedBytes, 0, signedBytes.Length, hash));
+
+        SshPacketReader keyReader = new SshPacketReader(publicBlob);
+        keyReader.ReadString();
+        keyReader.ReadString();
+        byte[] point = keyReader.ReadBytes();
+        keyReader.RequireEnd();
+        uint key;
+        if (SshNative.P256PublicImport(point, out key) != 0) return false;
+        try
+        {
+            return SshNative.P256Verify(key, hash, fixedSignature) == 1;
+        }
+        finally
+        {
+            SshNative.Close(key);
+        }
+    }
+
+    [Overlay("authentication")]
+    private static byte[] Prefix(byte[] value, int count)
+    {
+        byte[] result = new byte[count];
+        for (int index = 0; index < count; index++) result[index] = value[index];
+        return result;
+    }
+
+    [Overlay("authentication")]
+    private static bool CopyMpint(byte[] value, byte[] target, int offset)
+    {
+        int first = 0;
+        if (value.Length == 33 && value[0] == 0) first = 1;
+        if (value.Length - first > 32 || value.Length == 0) return false;
+        int padding = 32 - (value.Length - first);
+        for (int index = first; index < value.Length; index++)
+            target[offset + padding + index - first] = value[index];
+        return true;
+    }
+
+    [Overlay("authentication")]
+    private void SendAuthenticationFailure()
+    {
+        SshPacketWriter failure = new SshPacketWriter(32);
+        failure.WriteByte((byte)51);
+        failure.WriteString("publickey");
+        failure.WriteBoolean(false);
+        transport.SendPacket(failure.ToArray());
+    }
+
+    private void Dispatch(byte[] payload)
+    {
+        if (payload.Length == 0) throw new InvalidOperationException();
+        byte message = payload[0];
+        if (message == 1) { closed = true; return; }
+        if (message == 20) { ExchangeKeys(payload); return; }
+        if (message == 80) { RejectGlobal(payload); return; }
+        if (message == 90) { OpenChannel(payload); return; }
+        if (message == 93) { AdjustWindow(payload); return; }
+        if (message == 94) { ChannelData(payload); return; }
+        if (message == 96) { ChannelEof(payload); return; }
+        if (message == 97) { ChannelClosed(payload); return; }
+        if (message == 98) { ChannelRequest(payload); return; }
+        throw new InvalidOperationException();
+    }
+
+    private void RejectGlobal(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        reader.ReadString();
+        bool reply = reader.ReadBoolean();
+        if (reply)
+        {
+            SshPacketWriter failure = new SshPacketWriter(1);
+            failure.WriteByte((byte)82);
+            transport.SendPacket(failure.ToArray());
+        }
+    }
+
+    private void OpenChannel(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        string type = reader.ReadString();
+        uint remote = reader.ReadUInt32();
+        uint window = reader.ReadUInt32();
+        uint maximum = reader.ReadUInt32();
+        reader.RequireEnd();
+        if (type != "session" || channelCount >= options.MaximumChannels)
+        {
+            SshPacketWriter failure = new SshPacketWriter(64);
+            failure.WriteByte((byte)92);
+            failure.WriteUInt32(remote);
+            failure.WriteUInt32(1u);
+            failure.WriteString("administratively prohibited");
+            failure.WriteString("");
+            transport.SendPacket(failure.ToArray());
+            return;
+        }
+        int slot = FreeChannel();
+        SshChannelState state = new SshChannelState();
+        state.LocalId = (uint)slot;
+        state.RemoteId = remote;
+        state.RemoteWindow = window;
+        state.RemoteMaximumPacket = maximum;
+        if (state.RemoteMaximumPacket > 32768u) state.RemoteMaximumPacket = 32768u;
+        if (state.RemoteMaximumPacket == 0u) state.RemoteMaximumPacket = 1u;
+        state.Open = true;
+        channels[slot] = state;
+        channelCount++;
+        SshPacketWriter accepted = new SshPacketWriter(17);
+        accepted.WriteByte((byte)91);
+        accepted.WriteUInt32(remote);
+        accepted.WriteUInt32((uint)slot);
+        accepted.WriteUInt32(65536u);
+        accepted.WriteUInt32(32768u);
+        transport.SendPacket(accepted.ToArray());
+    }
+
+    private int FreeChannel()
+    {
+        for (int index = 0; index < channels.Length; index++)
+            if (channels[index] == null) return index;
+        throw new InvalidOperationException();
+    }
+
+    private SshChannelState Channel(uint localId)
+    {
+        if (localId >= (uint)channels.Length || channels[(int)localId] == null)
+            throw new InvalidOperationException();
+        return channels[(int)localId];
+    }
+
+    private void AdjustWindow(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        SshChannelState channel = Channel(reader.ReadUInt32());
+        channel.RemoteWindow += reader.ReadUInt32();
+        reader.RequireEnd();
+    }
+
+    private void ChannelData(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        SshChannelState channel = Channel(reader.ReadUInt32());
+        byte[] data = reader.ReadBytes();
+        reader.RequireEnd();
+        if (data.Length > 32768) throw new InvalidOperationException();
+        if (channel.Sftp != null) channel.Sftp.Input(data);
+        else if (channel.Process != null)
+        {
+            int written;
+            channel.Process.StandardInput.TryWrite(data, 0, data.Length, 1000u, out written);
+            if (written != data.Length) CloseChannel(channel, true);
+        }
+        SendWindowAdjust(channel, (uint)data.Length);
+    }
+
+    private void ChannelEof(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        SshChannelState channel = Channel(reader.ReadUInt32());
+        reader.RequireEnd();
+        if (channel.Process != null) channel.Process.StandardInput.Close();
+    }
+
+    private void ChannelClosed(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        SshChannelState channel = Channel(reader.ReadUInt32());
+        CloseChannel(channel, true);
+    }
+
+    private void ChannelRequest(byte[] payload)
+    {
+        SshPacketReader reader = new SshPacketReader(payload);
+        reader.ReadByte();
+        SshChannelState channel = Channel(reader.ReadUInt32());
+        string type = reader.ReadString();
+        bool reply = reader.ReadBoolean();
+        bool success = false;
+        if (type == "pty-req" && !channel.Started && !channel.HasPty)
+        {
+            reader.ReadString();
+            uint columns = reader.ReadUInt32();
+            uint rows = reader.ReadUInt32();
+            reader.ReadUInt32();
+            reader.ReadUInt32();
+            reader.ReadBytes();
+            reader.RequireEnd();
+            success = columns > 0u && rows > 0u;
+            if (success)
+            {
+                channel.HasPty = true;
+                channel.Columns = columns;
+                channel.Rows = rows;
+            }
+        }
+        else if (type == "window-change" && channel.Process != null)
+        {
+            uint columns = reader.ReadUInt32();
+            uint rows = reader.ReadUInt32();
+            reader.ReadUInt32();
+            reader.ReadUInt32();
+            reader.RequireEnd();
+            SendResize(channel, rows, columns);
+            success = true;
+        }
+        else if (type == "shell" && !channel.Started)
+        {
+            reader.RequireEnd();
+            StartShell(channel, "--ssh", "");
+            success = true;
+        }
+        else if (type == "exec" && !channel.Started)
+        {
+            string command = reader.ReadString();
+            reader.RequireEnd();
+            StartShell(channel, "--exec", command);
+            success = true;
+        }
+        else if (type == "subsystem" && !channel.Started)
+        {
+            string subsystem = reader.ReadString();
+            reader.RequireEnd();
+            if (subsystem == "sftp")
+            {
+                channel.Sftp = new SftpSession(options.SftpRoot);
+                channel.Started = true;
+                success = true;
+            }
+        }
+        if (reply)
+        {
+            SshPacketWriter response = new SshPacketWriter(5);
+            if (success) response.WriteByte((byte)99);
+            else response.WriteByte((byte)100);
+            response.WriteUInt32(channel.RemoteId);
+            transport.SendPacket(response.ToArray());
+        }
+    }
+
+    private void StartShell(SshChannelState channel, string mode, string command)
+    {
+        string[] arguments;
+        if (mode == "--exec")
+        {
+            arguments = new string[2];
+            arguments[0] = mode;
+            arguments[1] = command;
+        }
+        else
+        {
+            arguments = new string[1];
+            arguments[0] = mode;
+        }
+        ProcessStartInfo info = new ProcessStartInfo(options.ShellPath, arguments);
+        info.RedirectStandardInput = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        Process process = Process.Start(info);
+        if (process.Id == 0u) throw new InvalidOperationException();
+        channel.Process = process;
+        channel.Started = true;
+        if (channel.HasPty) SendResize(channel, channel.Rows, channel.Columns);
+    }
+
+    private void PumpChannels()
+    {
+        byte[] buffer = new byte[4096];
+        for (int index = 0; index < channels.Length; index++)
+        {
+            SshChannelState channel = channels[index];
+            if (channel == null) continue;
+            if (channel.Sftp != null)
+            {
+                byte[] output = channel.Sftp.Output();
+                if (output != null) SendChannelData(channel, output, false);
+                continue;
+            }
+            if (channel.Process == null) continue;
+            PumpReader(channel, channel.Process.StandardOutput, buffer, false);
+            PumpReader(channel, channel.Process.StandardError, buffer, true);
+            if (channel.Process.HasExited)
+            {
+                int code = channel.Process.ExitCode;
+                SendExitStatus(channel, code);
+                CloseChannel(channel, false);
+            }
+        }
+    }
+
+    private void PumpReader(SshChannelState channel, ProcessPipeReader reader, byte[] buffer,
+        bool error)
+    {
+        if (reader == null || channel.RemoteWindow == 0u) return;
+        int maximum = (int)channel.RemoteWindow;
+        if (maximum > buffer.Length) maximum = buffer.Length;
+        if (maximum > (int)channel.RemoteMaximumPacket) maximum = (int)channel.RemoteMaximumPacket;
+        int read;
+        bool eof;
+        if (reader.TryRead(buffer, 0, maximum, 0u, out read, out eof) && read > 0)
+        {
+            byte[] data = new byte[read];
+            for (int index = 0; index < read; index++) data[index] = buffer[index];
+            SendChannelData(channel, data, error);
+        }
+    }
+
+    private void SendChannelData(SshChannelState channel, byte[] data, bool error)
+    {
+        if ((uint)data.Length > channel.RemoteWindow) return;
+        SshPacketWriter writer = new SshPacketWriter(data.Length + 16);
+        if (error)
+        {
+            writer.WriteByte((byte)95);
+            writer.WriteUInt32(channel.RemoteId);
+            writer.WriteUInt32(1u);
+        }
+        else
+        {
+            writer.WriteByte((byte)94);
+            writer.WriteUInt32(channel.RemoteId);
+        }
+        writer.WriteBytes(data);
+        transport.SendPacket(writer.ToArray());
+        channel.RemoteWindow -= (uint)data.Length;
+    }
+
+    private void SendWindowAdjust(SshChannelState channel, uint count)
+    {
+        SshPacketWriter writer = new SshPacketWriter(9);
+        writer.WriteByte((byte)93);
+        writer.WriteUInt32(channel.RemoteId);
+        writer.WriteUInt32(count);
+        transport.SendPacket(writer.ToArray());
+    }
+
+    private void SendResize(SshChannelState channel, uint rows, uint columns)
+    {
+        string sequence = ((char)27).ToString() + "[8;" + rows.ToString() + ";" +
+            columns.ToString() + "t";
+        byte[] bytes = Encoding.UTF8.GetBytes(sequence);
+        int written;
+        channel.Process.StandardInput.TryWrite(bytes, 0, bytes.Length, 1000u, out written);
+    }
+
+    private void SendExitStatus(SshChannelState channel, int code)
+    {
+        SshPacketWriter status = new SshPacketWriter(13);
+        status.WriteByte((byte)98);
+        status.WriteUInt32(channel.RemoteId);
+        status.WriteString("exit-status");
+        status.WriteBoolean(false);
+        status.WriteUInt32((uint)code);
+        transport.SendPacket(status.ToArray());
+    }
+
+    private void CloseChannel(SshChannelState channel, bool terminate)
+    {
+        if (channel == null || !channel.Open) return;
+        channel.Open = false;
+        if (channel.Sftp != null) channel.Sftp.Close();
+        if (channel.Process != null)
+        {
+            channel.Process.StandardInput.Close();
+            channel.Process.StandardOutput.Close();
+            channel.Process.StandardError.Close();
+            if (terminate && !channel.Process.HasExited)
+            {
+                SshNative.TerminateDescendants(channel.Process.Id, 1000u);
+                channel.Process.Terminate(1000u);
+            }
+        }
+        try
+        {
+            if (!channel.SentClose)
+            {
+                SshPacketWriter eof = new SshPacketWriter(5);
+                eof.WriteByte((byte)96);
+                eof.WriteUInt32(channel.RemoteId);
+                transport.SendPacket(eof.ToArray());
+                SshPacketWriter close = new SshPacketWriter(5);
+                close.WriteByte((byte)97);
+                close.WriteUInt32(channel.RemoteId);
+                transport.SendPacket(close.ToArray());
+                channel.SentClose = true;
+            }
+        }
+        finally
+        {
+            channels[(int)channel.LocalId] = null;
+            channelCount--;
+        }
+    }
+}
+
+public sealed class SshServer
+{
+    private SshServerOptions options;
+    private SshServerStatus status;
+    private object authorizedKeys;
+    private uint hostKey;
+    private object pendingAuthorizedKeys;
+    private uint pendingHostKey;
+    private uint listener;
+    private object connection;
+    private bool started;
+    private bool stopping;
+
+    private SshServer(SshServerOptions options)
+    {
+        this.options = options;
+        status = new SshServerStatus();
+    }
+
+    public static SshServer Create(SshServerOptions options)
+    {
+        if (options.UserName == null || options.UserName.Length == 0 ||
+            options.ShellPath == null || options.ShellPath.Length == 0 ||
+            options.SftpRoot != "/sftp")
+            throw new ArgumentException();
+        if (options.Port <= 0 || options.Port > 65535)
+            throw new ArgumentOutOfRangeException();
+        if (options.MaximumPacketBytes <= 0 ||
+            options.MaximumPacketBytes > SshWire.MaximumPacketBytes)
+            throw new ArgumentOutOfRangeException();
+        if (options.MaximumChannels < 1 || options.MaximumChannels > 2)
+            throw new ArgumentOutOfRangeException();
+        return new SshServer(options);
+    }
+
+    public void Start()
+    {
+        if (started) return;
+        SshConfiguration configuration = SshConfigurationLoader.Load(options.ConfigurationPath,
+            options.UserName, options.Port);
+        options.UserName = configuration.UserName;
+        options.Port = configuration.Port;
+        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(
+            options.AuthorizedKeysPath);
+        byte[] privateKey = File.ReadAllBytes(options.HostKeyPath);
+        uint replacementHostKey;
+        try { SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey)); }
+        finally { SshNative.Zeroize(privateKey); }
+        authorizedKeys = replacement;
+        hostKey = replacementHostKey;
+        started = true;
+    }
+
+    public bool Poll(uint timeoutMilliseconds)
+    {
+        if (!started) Start();
+        if (stopping || Process.IsCancellationRequested) return false;
+        status.NetworkReady = SshNative.NetworkReady() != 0;
+        if (!status.NetworkReady)
+        {
+            Disconnect();
+            CloseListener();
+            SshNative.Delay(timeoutMilliseconds);
+            return true;
+        }
+        if (listener == 0u)
+        {
+            int listenResult = SshNative.Listen(options.Port, 1, out listener);
+            if (listenResult < 0)
+            {
+                status.LastHostError = listenResult;
+                SshNative.Delay(timeoutMilliseconds);
+                return true;
+            }
+            status.Listening = true;
+        }
+        if (connection == null)
+        {
+            uint client;
+            int accept = SshNative.Accept(listener, timeoutMilliseconds, out client);
+            if (accept == -116) return true;
+            if (accept < 0)
+            {
+                status.LastHostError = accept;
+                CloseListener();
+                return true;
+            }
+            SshConnection accepted = null;
+            try
+            {
+                accepted = new SshConnection(client, options,
+                    (AuthorizedKeySet)authorizedKeys, hostKey);
+                accepted.Handshake();
+                connection = accepted;
+                status.Connected = true;
+                status.Authenticated = accepted.Authenticated;
+                status.SessionsAccepted++;
+                status.AuthenticationFailures += (uint)accepted.AuthenticationFailures;
+            }
+            catch (Exception)
+            {
+                if (accepted != null)
+                {
+                    status.AuthenticationFailures += (uint)accepted.AuthenticationFailures;
+                    accepted.Close();
+                }
+                else SshNative.Close(client);
+                if (accepted == null || accepted.AuthenticationFailures == 0)
+                    status.AuthenticationFailures++;
+                status.LastHostError = -1;
+                connection = null;
+                return true;
+            }
+        }
+        try
+        {
+            SshConnection active = (SshConnection)connection;
+            uint extraClient;
+            if (SshNative.Accept(listener, 0u, out extraClient) == 0)
+                SshNative.Close(extraClient);
+            if (!active.Poll(timeoutMilliseconds)) Disconnect();
+            else UpdateStatus();
+        }
+        catch (Exception)
+        {
+            status.AuthenticationFailures += (uint)((SshConnection)connection).AuthenticationFailures;
+            status.LastHostError = -1;
+            Disconnect();
+        }
+        return true;
+    }
+
+    public int Run()
+    {
+        Start();
+        while (Poll(250u)) { }
+        Stop();
+        if (Process.IsCancellationRequested) return -1;
+        return 0;
+    }
+
+    public void ReloadKeys()
+    {
+        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(
+            options.AuthorizedKeysPath);
+        byte[] privateKey = File.ReadAllBytes(options.HostKeyPath);
+        uint replacementHostKey;
+        try { SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey)); }
+        finally { SshNative.Zeroize(privateKey); }
+        if (connection != null)
+        {
+            if (pendingHostKey != 0u) SshNative.Close(pendingHostKey);
+            pendingAuthorizedKeys = replacement;
+            pendingHostKey = replacementHostKey;
+            return;
+        }
+        if (hostKey != 0u) SshNative.Close(hostKey);
+        authorizedKeys = replacement;
+        hostKey = replacementHostKey;
+    }
+
+    public void Disconnect()
+    {
+        if (connection != null)
+        {
+            UpdateStatus();
+            ((SshConnection)connection).Close();
+            connection = null;
+        }
+        status.Connected = false;
+        status.Authenticated = false;
+        status.ActiveChannels = 0;
+        if (pendingAuthorizedKeys != null)
+        {
+            if (hostKey != 0u) SshNative.Close(hostKey);
+            authorizedKeys = pendingAuthorizedKeys;
+            hostKey = pendingHostKey;
+            pendingAuthorizedKeys = null;
+            pendingHostKey = 0u;
+        }
+    }
+
+    public void Stop()
+    {
+        stopping = true;
+        Disconnect();
+        CloseListener();
+        if (hostKey != 0u)
+        {
+            SshNative.Close(hostKey);
+            hostKey = 0u;
+        }
+        if (pendingHostKey != 0u)
+        {
+            SshNative.Close(pendingHostKey);
+            pendingHostKey = 0u;
+            pendingAuthorizedKeys = null;
+        }
+    }
+
+    public SshServerStatus Status()
+    {
+        UpdateStatus();
+        return status;
+    }
+
+    private void UpdateStatus()
+    {
+        if (connection == null) return;
+        SshConnection active = (SshConnection)connection;
+        status.Connected = !active.Closed;
+        status.Authenticated = active.Authenticated;
+        status.ActiveChannels = active.ChannelCount;
+        status.BytesReceived = active.BytesReceived;
+        status.BytesSent = active.BytesSent;
+    }
+
+    private void CloseListener()
+    {
+        if (listener != 0u)
+        {
+            SshNative.Close(listener);
+            listener = 0u;
+        }
+        status.Listening = false;
+    }
+}

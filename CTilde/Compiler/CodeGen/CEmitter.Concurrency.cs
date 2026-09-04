@@ -80,7 +80,9 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    HANDLE Handle; unsigned NativeId;");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
-        writer.WriteLine("    TaskHandle_t Handle; SemaphoreHandle_t Done;");
+        writer.WriteLine(IsManagedModule
+            ? "    TaskHandle_t Handle; SemaphoreHandle_t Done; ct_process_context* Process;"
+            : "    TaskHandle_t Handle; SemaphoreHandle_t Done;");
         writer.WriteLine("#else");
         writer.WriteLine("    pthread_t Handle; bool Joined;");
         writer.WriteLine("#endif");
@@ -104,7 +106,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         writer.WriteLine($"    {typeName}* thread = ({typeName}*)context;");
         writer.WriteLine($"    ct_managed_thread_payload* payload = (ct_managed_thread_payload*)(uintptr_t)thread->{handle};");
-        writer.WriteLine("    ct_thread_attach();");
+        if (IsManagedModule)
+            writer.WriteLine("    ct_thread_attach_to(payload->Process);");
+        else
+            writer.WriteLine("    ct_thread_attach();");
         writer.WriteLine("    while (ct_atomic_load_acquire(&payload->Ready) == 0u) {");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("        SwitchToThread();");
@@ -122,10 +127,26 @@ internal sealed partial class CEmitter
             writer.WriteLine("        jmp_buf worker_jump;");
             writer.WriteLine("        ct_exception_frame worker_frame = { &worker_jump, worker_state->ExceptionTop, worker_state->CleanupTop };");
             writer.WriteLine("        worker_state->ExceptionTop = &worker_frame;");
-            writer.WriteLine("        if (setjmp(worker_jump) != 0) { ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_unhandled_exception(exception); }");
+            if (IsManagedModule)
+            {
+                writer.WriteLine("        bool worker_failed = false;");
+                writer.WriteLine("        if (setjmp(worker_jump) != 0) { static const uint8_t diagnostic[] = \"C~ unhandled child-thread exception\\n\"; ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_runtime_console_write(diagnostic, sizeof(diagnostic) - 1u); ct_release_fast(exception); worker_failed = true; }");
+            }
+            else
+                writer.WriteLine("        if (setjmp(worker_jump) != 0) { ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_unhandled_exception(exception); }");
         }
-        writer.WriteLine($"        (void)ct_require_nonnull(thread->{start}, \"<thread-start>\", 0);");
-        writer.WriteLine($"        thread->{start}->ct_invoke(thread->{start}->ct_target);");
+        if (_usesExceptions && IsManagedModule)
+        {
+            writer.WriteLine("        if (!worker_failed) {");
+            writer.WriteLine($"            (void)ct_require_nonnull(thread->{start}, \"<thread-start>\", 0);");
+            writer.WriteLine($"            thread->{start}->ct_invoke(thread->{start}->ct_target);");
+            writer.WriteLine("        }");
+        }
+        else
+        {
+            writer.WriteLine($"        (void)ct_require_nonnull(thread->{start}, \"<thread-start>\", 0);");
+            writer.WriteLine($"        thread->{start}->ct_invoke(thread->{start}->ct_target);");
+        }
         if (_usesExceptions)
             writer.WriteLine("        worker_state->ExceptionTop = worker_frame.Previous;");
         writer.WriteLine("    }");
@@ -160,6 +181,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("    if (native != 0u) { payload->Handle = (HANDLE)native; created = true; static const int priorities[5] = { THREAD_PRIORITY_LOWEST, THREAD_PRIORITY_BELOW_NORMAL, THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_ABOVE_NORMAL, THREAD_PRIORITY_HIGHEST }; priority_ok = SetThreadPriority(payload->Handle, priorities[(unsigned)thread->" + priority + " < 5u ? (unsigned)thread->" + priority + " : 2u]) != 0; if (priority_ok) { ct_atomic_store_release(&payload->Ready, 1u); (void)ResumeThread(payload->Handle); } }");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
         writer.WriteLine($"    uint32_t stack_bytes = thread->{stack}; uint32_t native_stack_bytes = stack_bytes == 0u ? (uint32_t)configMINIMAL_STACK_SIZE : (stack_bytes + 3u) & ~UINT32_C(3); UBaseType_t native_priority = (UBaseType_t)(tskIDLE_PRIORITY + 1u + (unsigned)thread->{priority});");
+        if (IsManagedModule)
+            writer.WriteLine("    payload->Process = ct_runtime_api->CurrentProcess();");
         writer.WriteLine("    payload->Done = xSemaphoreCreateBinary(); if (payload->Done != NULL) { ct_atomic_store_release(&payload->Ready, 1u); created = xTaskCreate(ct_managed_thread_worker, \"C~ worker\", native_stack_bytes, thread, native_priority, &payload->Handle) == pdPASS; if (!created) ct_atomic_store_relaxed(&payload->Ready, 0u); }");
         writer.WriteLine("#else");
         writer.WriteLine("    pthread_attr_t attributes; if (pthread_attr_init(&attributes) == 0) {");

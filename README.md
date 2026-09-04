@@ -2,7 +2,7 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.49 uses Runtime ABI 22 and Managed Module ABI 3. ESP32/Xtensa managed applications and libraries can place selected bodies in named, process-local code overlays while stable resident stubs preserve module context and exception cleanup across local and imported calls. Schema-3 metadata records exact overlay capabilities without changing the public API hash. ManagedShell retains the Draft 0.48 redirected streams, networking slice, removable storage, and stable process identities. Debug metadata remains version 3.
+Draft 0.49 uses Runtime ABI 22 and Managed Module ABI 3. ESP32/Xtensa managed applications and libraries can place selected bodies in named, process-local code overlays while stable resident stubs preserve module context and exception cleanup across local and imported calls. Schema-3 metadata records exact overlay capabilities without changing the public API hash. ManagedShell now runs its UART, redirected SSH, and single-command environments from a shared `shell.ctm`; its development SSH library supplies encrypted public-key sessions and SFTP through resident opaque socket/crypto tokens. External interoperability, hardware, fuzz, endurance, and security acceptance remain pending. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
@@ -218,7 +218,7 @@ Release builds can select `speed` or `aggressive` optimization, `baseline` or x6
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
-An ESP-IDF managed application or library selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits deterministic schema-3 `.ctmeta.json` declarations and a resident ELF `.ctm` with an optional appended Xtensa overlay container. Consumers compile against exact metadata references without provider source; the loader validates and patches managed import and call-target slots before publication. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 3 remains ESP-IDF-only.
+An ESP-IDF managed application or library selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits deterministic schema-3 `.ctmeta.json` declarations and a resident ELF `.ctm` with an optional appended Xtensa overlay container. Overlay packaging disables linker relaxation and rejects direct instruction targets outside their owning payload. The runtime stages and hashes payload bytes before aligned word-only executable-window writes. Consumers compile against exact metadata references without provider source; the loader validates and patches managed import and call-target slots before publication. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 3 remains ESP-IDF-only.
 
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
@@ -263,7 +263,7 @@ The preview Visual Studio extension supplies TextMate and LSP editor support plu
 
 - `CTilde.sln` contains the compiler, CLI, language server, debug adapter, and managed tests.
 - `Editors.sln` contains the three Visual Studio extension projects.
-- `Examples.sln` contains 25 projects grouped as language and hosted programs, systems targets, managed modules, and T-CAN variants. ManagedShell applications and libraries are separate editor projects.
+- `Examples.sln` contains 29 projects grouped as language and hosted programs, systems targets, managed modules, and T-CAN variants. ManagedShell firmware, shared shell, applications, libraries, and overlay fixtures are separate editor projects.
 - `CTilde.StandardLibrary.sln` contains the physical standard-library project.
 
 The `.ctproj` entries in the example and standard-library solutions have solution configuration mappings but are excluded from Build Solution. Select one in Solution Explorer to use Check, Build, Clean, Rebuild, or Run with its exact manifest. VS Code remains an independent npm workspace under `editors/vscode`.
@@ -299,7 +299,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Validation
 
-`Test/Test-ExampleCatalog.ps1` compares the complete output of the focused hosted tours, checks the ManagedShell firmware plus its Hello, memory, task-manager, and SD module projects, and executes the native-import example. `-IncludeEspIdfBuild` adds all four `.ctm` files, their metadata, and firmware packaging when ESP-IDF is installed; `CTILDE_EXAMPLE_ESP_IDF_BUILD=1` enables that lane through the Release validation tier. The ordinary portable smoke remains ahead of the larger compiler and SIMD matrices.
+`Test/Test-ExampleCatalog.ps1` compares the complete output of the focused hosted tours, checks the ManagedShell firmware and module catalog, and executes the native-import example. `-IncludeEspIdfBuild` adds the managed artifacts, metadata, and firmware packaging when ESP-IDF is installed; `CTILDE_EXAMPLE_ESP_IDF_BUILD=1` enables that lane through the Release validation tier. SSH board/interoperability acceptance remains an explicit later gate. The ordinary portable smoke remains ahead of the larger compiler and SIMD matrices.
 
 The fixed fast gate builds managed projects once, runs every conformance case under MSVC, repeats only toolchain-sensitive cases under WSL GCC and Clang, and reuses those outputs for the managed editor tests:
 

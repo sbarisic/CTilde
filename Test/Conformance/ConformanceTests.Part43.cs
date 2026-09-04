@@ -56,6 +56,10 @@ internal static partial class ConformanceTests
                 "Examples", "ManagedShell", "Nano", "NanoBuffer.ct"));
             var inputSource = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
                 "Examples", "ManagedShell", "Nano", "NanoInput.ct"));
+            bufferSource = bufferSource.Replace("[Overlay(\"buffer\")]\r\n", "", StringComparison.Ordinal)
+                .Replace("[Overlay(\"buffer\")]\n", "", StringComparison.Ordinal);
+            inputSource = inputSource.Replace("[Overlay(\"editor\")]\r\n", "", StringComparison.Ordinal)
+                .Replace("[Overlay(\"editor\")]\n", "", StringComparison.Ordinal);
             const string harness = """
                 using System;
 
@@ -178,13 +182,17 @@ internal static partial class ConformanceTests
                 "Managed System.IO did not lower through Runtime ABI 22 filesystem services.");
             Assert(!combined.Contains("fopen(path", StringComparison.Ordinal),
                 "Managed System.IO retained a private libc filesystem implementation.");
-            Assert(types.Contains("typedef struct ct_native_utf8_string", StringComparison.Ordinal) &&
-                runtime.Contains("ct_runtime_service_fail", StringComparison.Ordinal) &&
-                runtime.Contains("path.Data", StringComparison.Ordinal) &&
-                !runtime.Contains("path.Pointer", StringComparison.Ordinal) &&
-                !types.Contains("freertos/FreeRTOS.h", StringComparison.Ordinal) &&
-                runtimeHeader.Contains("esp_err_to_name(int code)", StringComparison.Ordinal),
-                "Managed System.IO omitted or malformed its native UTF-8 and service-failure bridge.");
+            var hasNativeUtf8 = types.Contains("typedef struct ct_native_utf8_string", StringComparison.Ordinal);
+            var hasServiceResultBridge = runtime.Contains("ct_managed_io_result", StringComparison.Ordinal);
+            var hasDataPath = runtime.Contains("path.Data", StringComparison.Ordinal);
+            var hasLegacyPath = runtime.Contains("path.Pointer", StringComparison.Ordinal);
+            var leaksFreeRtos = types.Contains("freertos/FreeRTOS.h", StringComparison.Ordinal);
+            var hasEspErrorDeclaration = runtimeHeader.Contains("esp_err_to_name(int code)", StringComparison.Ordinal);
+            Assert(hasNativeUtf8 && hasServiceResultBridge && hasDataPath && !hasLegacyPath &&
+                !leaksFreeRtos && hasEspErrorDeclaration,
+                $"Managed System.IO omitted or malformed its native UTF-8 and service-failure bridge " +
+                $"(utf8={hasNativeUtf8}, resultBridge={hasServiceResultBridge}, data={hasDataPath}, " +
+                $"legacy={hasLegacyPath}, freertos={leaksFreeRtos}, espError={hasEspErrorDeclaration}).");
         });
 
         suite.Run("draft 0.46 ESP storage ownership surface", () =>

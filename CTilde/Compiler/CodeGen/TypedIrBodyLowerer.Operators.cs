@@ -33,7 +33,8 @@ internal sealed partial class TypedIrBodyLowerer
         var loweredArguments = LowerOperatorArguments(operands, selected.Parameters, arguments,
             SimdOperation.IsPureFusionKernel(selected));
         var prelude = new List<string>(loweredArguments.Prelude);
-        var call = $"{selected.CName}({string.Join(", ", loweredArguments.Codes)})";
+        var callable = _emitter.DirectCallableName(_method, selected, selected.CName);
+        var call = $"{callable}({string.Join(", ", loweredArguments.Codes)})";
         if (selected.ReturnType.Kind is CTypeKind.Opaque or CTypeKind.Pointer)
             return new IrExpressionValue { Type = selected.ReturnType, Code = call, Prelude = prelude, Ownership = OwnershipKind.Borrowed, Symbol = selected };
         return selected.ReturnType.ContainsManagedReferences

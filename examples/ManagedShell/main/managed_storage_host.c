@@ -14,6 +14,7 @@
 #include "freertos/semphr.h"
 #include "freertos/task.h"
 #include "managed_storage_host_api.h"
+#include "managed_log.h"
 #include "private/elf_symbol.h"
 
 #define SD_MOUNT_PATH "/sd"
@@ -491,7 +492,8 @@ static void storage_control(void *argument)
     (void)start_monitor_locked(-1);
     xSemaphoreGive(s_gate);
     for (;;) {
-        const uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+        ct_managed_log_drain(s_monitor);
+        const uint32_t notified = ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
         if (notified != 0u) {
             int32_t result = -EINVAL;
             switch (s_request.Operation) {
@@ -625,5 +627,6 @@ int ct_managed_storage_host_initialize(void)
     if (symbols != ESP_OK) return -(int32_t)symbols;
     if (xTaskCreate(storage_control, "ct_sd_control", SD_POLL_STACK_BYTES, NULL,
         tskIDLE_PRIORITY + 1, &s_control_task) != pdPASS) return -ENOMEM;
+    ct_managed_log_initialize();
     return 0;
 }

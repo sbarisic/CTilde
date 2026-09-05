@@ -87,6 +87,8 @@ int32_t ct_storage_monitor_add_fat(uintptr_t monitor, int32_t partition_index,
     const char *path, int32_t maximum_open_files);
 int32_t ct_storage_monitor_start(uintptr_t monitor);
 ct_storage_monitor_state_t ct_storage_monitor_state(uintptr_t monitor);
+/* Append firmware logs while excluding monitor-driven unmount. Does not retain an open file. */
+int32_t ct_storage_monitor_append_run_log(uintptr_t monitor, const char *data, size_t length);
 uint64_t ct_storage_monitor_generation(uintptr_t monitor);
 int32_t ct_storage_monitor_last_error(uintptr_t monitor);
 int32_t ct_storage_monitor_remount(uintptr_t monitor);

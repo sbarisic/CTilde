@@ -4,6 +4,10 @@ ManagedShell is the Draft 0.50 ESP-IDF example for Runtime ABI 22 and Managed Mo
 
 Bare `ls` lists the mounted `/sd` root followed by the LittleFS module directory, so files created directly on the card are visible. Use `ls <path>` to inspect a specific directory, for example `ls /sd/modules` or `ls /storage/modules`.
 
+After storage initialization, ESP-IDF diagnostic logs append to `/sd/run.log`. Ordinary command output stays on the console. The existing SD control task drains a 2 KiB queue, normally within 50 ms. It closes the file after each append and excludes unmount during a write.
+
+If the SD log cannot be written, queued text goes to the console. Oversized log records, a full queue, and errors from the log writer also use the console. This fallback preserves diagnostics without blocking driver tasks on SD access. Early boot logs precede this routing.
+
 `mkdir <path> [path ...]` recursively creates one or more directories. `cat <path> [path ...]` writes one or more strict UTF-8 text files to the console without inserting separators. If the combined nonempty output has no final LF, `cat` writes one display newline so the next shell prompt starts on a fresh line. These extensionless commands are thin shell aliases: the filesystem behavior lives in the LittleFS-shipped `commands.fs.ctm` application and is loaded only when needed.
 
 Applications must be invoked with their exact lowercase `.ctm` extension. A bare application name is not inferred and the old `exec` command no longer exists. Applications run in the foreground by default; a final unquoted `&` starts one in the background and prints its process identifier. Double quotes preserve whitespace and may form all or part of an argument. The parser supports `\"`, `\\`, `\t`, `\r`, and `\n`; malformed quotes or escapes execute nothing. A quoted `"&"` remains an ordinary argument. There is no expansion, globbing, piping, redirection, comment syntax, or single-quote syntax.
@@ -44,6 +48,10 @@ The full reporters, their formatting strings, and their private C entry points l
 Run `taskmgr.ctm` to sample for 250 ms between two raw FreeRTOS task snapshots and list only starting, running, or cancelling managed processes. CPU uses a per-core scale: one saturated core is 100%, so this dual-core target can report up to 200% system load. Each row contains PID, state, root module, thread count, attributed heap use and limit, interval CPU, and lifetime minimum task-stack headroom. Tasks are matched by both task number and native handle. If every runtime-published process task cannot be mapped in both samples, that process prints `cpu=n/a stack-min=n/a` instead of a misleading partial measurement. The report includes the short-lived `taskmgr` process itself because it is a normal managed application.
 
 `taskmgr.ctm kill <pid>` resolves the published runtime process identifier and uses the same policy as the shell's `kill <pid>`: cooperative cancellation followed by forced termination after one second. Other application arguments print `usage: taskmgr [kill <pid>]`; arguments to `memory.ctm` print `usage: memory`.
+
+Each task-manager row also shows `mem`, the process's managed allocation payload divided by total byte-addressable RAM, to one decimal place. The heading identifies this basis. Shared module code, task stacks, and native allocations are excluded because the process payload counter does not attribute them. This percentage is independent of CPU sampling and the process heap quota.
+
+See the [logging and SSH memory review](SHELL_LOGGING_REVIEW.md) for the current changes, linked-memory comparison, and pending device checks.
 
 ## SD management
 

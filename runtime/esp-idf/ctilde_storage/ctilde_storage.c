@@ -1,6 +1,8 @@
 #include "ctilde_storage.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -85,6 +87,8 @@ typedef struct ct_monitor {
     TaskHandle_t Task;
     SemaphoreHandle_t Stopped;
     StaticSemaphore_t StoppedStorage;
+    SemaphoreHandle_t AppendGate;
+    StaticSemaphore_t AppendGateStorage;
     volatile bool StopRequested;
     volatile bool RemountRequested;
     volatile ct_storage_monitor_state_t State;
@@ -699,6 +703,7 @@ static void monitor_set_state(ct_monitor *monitor, ct_storage_monitor_state_t st
 static void monitor_unmount(ct_monitor *monitor)
 {
     monitor_set_state(monitor, CT_STORAGE_REMOVING, 0);
+    xSemaphoreTake(monitor->AppendGate, portMAX_DELAY);
     const uint64_t generation = __atomic_add_fetch(&monitor->Generation, 1u,
         __ATOMIC_ACQ_REL);
     for (size_t index = 0; index < monitor->MappingCount; ++index)
@@ -723,6 +728,7 @@ static void monitor_unmount(ct_monitor *monitor)
         monitor->Card = NULL;
     }
     __atomic_store_n(&monitor->CardInfoAvailable, false, __ATOMIC_RELEASE);
+    xSemaphoreGive(monitor->AppendGate);
 }
 
 static int32_t monitor_mount(ct_monitor *monitor)
@@ -803,6 +809,7 @@ int32_t ct_storage_monitor_create(ct_storage_sdspi_configuration configuration,
     monitor->Configuration = configuration;
     monitor->State = CT_STORAGE_NOT_PRESENT;
     monitor->Stopped = xSemaphoreCreateBinaryStatic(&monitor->StoppedStorage);
+    monitor->AppendGate = xSemaphoreCreateMutexStatic(&monitor->AppendGateStorage);
     if (monitor->Stopped == NULL) { free(monitor); return -ENOMEM; }
     *monitor_out = (uintptr_t)monitor;
     return 0;
@@ -836,6 +843,33 @@ ct_storage_monitor_state_t ct_storage_monitor_state(uintptr_t handle)
 {
     ct_monitor *monitor = monitor_from(handle);
     return monitor == NULL ? CT_STORAGE_FAULTED : __atomic_load_n(&monitor->State, __ATOMIC_ACQUIRE);
+}
+
+int32_t ct_storage_monitor_append_run_log(uintptr_t handle, const char *data, size_t length)
+{
+    ct_monitor *monitor = monitor_from(handle);
+    if (monitor == NULL || data == NULL) return -EINVAL;
+    xSemaphoreTake(monitor->AppendGate, portMAX_DELAY);
+    int32_t result = -ENODEV;
+    if (ct_storage_monitor_state(handle) == CT_STORAGE_MOUNTED) {
+        bool sd_mounted = false;
+        for (size_t index = 0; index < monitor->MappingCount; ++index)
+            if (strcmp(monitor->Mappings[index].Path, "/sd") == 0) sd_mounted = true;
+        const int fd = sd_mounted ? open("/sd/run.log", O_WRONLY | O_CREAT | O_APPEND, 0666) : -1;
+        if (fd >= 0) {
+            size_t written = 0;
+            while (written < length) {
+                const ssize_t count = write(fd, data + written, length - written);
+                if (count < 0 && errno == EINTR) continue;
+                if (count <= 0) break;
+                written += (size_t)count;
+            }
+            result = written == length ? 0 : -EIO;
+            if (close(fd) != 0) result = -EIO;
+        }
+    }
+    xSemaphoreGive(monitor->AppendGate);
+    return result;
 }
 
 uint64_t ct_storage_monitor_generation(uintptr_t handle)
@@ -888,6 +922,7 @@ int32_t ct_storage_monitor_release(uintptr_t handle)
         if (xSemaphoreTake(monitor->Stopped, pdMS_TO_TICKS(3000)) != pdTRUE) return -ETIMEDOUT;
     }
     vSemaphoreDelete(monitor->Stopped);
+    vSemaphoreDelete(monitor->AppendGate);
     monitor->Magic = 0;
     free(monitor);
     return 0;

@@ -41,9 +41,10 @@ const taskManagerTranscript = `
 Task manager
   sample-ms=250 cpu-scale=per-core cores=2 maximum=200.0%
   system-cpu=37.4% freertos-tasks=12 active-processes=2
-  PID STATE MODULE THREADS HEAP LIMIT CPU STACK-MIN
-  pid=7 state=running module=examples.hello threads=1 heap=4096 limit=65536 cpu=31.2% stack-min=2048
-  pid=8 state=starting module=examples.hello threads=1 heap=0 limit=65536 cpu=n/a stack-min=n/a
+  memory-basis=managed-payload/total-8bit-ram total-ram=300000 (excludes shared code and stacks)
+  PID STATE MODULE THREADS HEAP LIMIT MEM% CPU STACK-MIN
+  pid=7 state=running module=examples.hello threads=1 heap=4096 limit=65536 mem=1.3% cpu=31.2% stack-min=2048
+  pid=8 state=starting module=examples.hello threads=1 heap=0 limit=65536 mem=0.0% cpu=n/a stack-min=n/a
 ct> `;
 
 test('ManagedShell memory transcript contains consistent diagnostics', () => {
@@ -73,11 +74,14 @@ test('ManagedShell task manager transcript validates per-core CPU and partial ro
   const report = validateManagedShellTaskManager(parseManagedShellTaskManager(taskManagerTranscript));
   assert.equal(report.maximumCpu, 200);
   assert.equal(report.rows[0].cpu, 31.2);
+  assert.equal(report.rows[0].memoryPercent, 1.3);
   assert.equal(report.rows[0].state, 'running');
   assert.equal(report.rows[1].cpu, null);
 });
 
 test('ManagedShell task manager rejects invalid CPU and row counts', () => {
+  assert.throws(() => validateManagedShellTaskManager(parseManagedShellTaskManager(
+    taskManagerTranscript.replace('mem=1.3%', 'mem=40.0%'))), /memory percentage/);
   assert.throws(() => validateManagedShellTaskManager(parseManagedShellTaskManager(
     taskManagerTranscript.replace('system-cpu=37.4%', 'system-cpu=201.0%'))), /System CPU/);
   assert.throws(() => validateManagedShellTaskManager(parseManagedShellTaskManager(

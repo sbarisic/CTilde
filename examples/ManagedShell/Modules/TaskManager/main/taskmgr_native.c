@@ -244,7 +244,9 @@ void ct_managed_diagnostics_print_task_manager(void)
         printf("  system-cpu=%" PRIu64 ".%" PRIu64 "%% freertos-tasks=%zu active-processes=%zu\n",
             system_cpu / 10u, system_cpu % 10u, second.Count, active_count);
     }
-    printf("  PID STATE MODULE THREADS HEAP LIMIT CPU STACK-MIN\n");
+    const size_t total_ram = api->HeapGetTotalSize(CT_DIAGNOSTICS_HEAP_8BIT);
+    printf("  memory-basis=managed-payload/total-8bit-ram total-ram=%zu (excludes shared code and stacks)\n", total_ram);
+    printf("  PID STATE MODULE THREADS HEAP LIMIT MEM%% CPU STACK-MIN\n");
     for (size_t process_index = 0u; process_index < process_count; ++process_index) {
         const ct_diagnostics_process_info *process = &processes[process_index];
         if (!process_is_active(process->State)) continue;
@@ -270,6 +272,11 @@ void ct_managed_diagnostics_print_task_manager(void)
             process->TaskCount, process->HeapBytes);
         if (process->HeapLimit == 0u) printf("limit=unlimited ");
         else printf("limit=%zu ", process->HeapLimit);
+        if (total_ram == 0u) printf("mem=n/a ");
+        else {
+            const uint64_t memory = (uint64_t)process->HeapBytes * 1000u / total_ram;
+            printf("mem=%" PRIu64 ".%" PRIu64 "%% ", memory / 10u, memory % 10u);
+        }
         if (!complete) {
             printf("cpu=n/a stack-min=n/a\n");
         } else {

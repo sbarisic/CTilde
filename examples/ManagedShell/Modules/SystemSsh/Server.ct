@@ -235,7 +235,7 @@ internal sealed class SshConnection
         rekeySentBase = transport.BytesSent;
     }
 
-    [Overlay("handshake")]
+    [Overlay("handshake-negotiation")]
     private byte[] CreateKexInit()
     {
         SshPacketWriter writer = new SshPacketWriter(512);
@@ -622,6 +622,7 @@ internal sealed class SshConnection
         }
     }
 
+    [Overlay("channel-requests")]
     private void OpenChannel(byte[] payload)
     {
         SshPacketReader reader = new SshPacketReader(payload);
@@ -727,6 +728,7 @@ internal sealed class SshConnection
         CloseChannel(channel, true);
     }
 
+    [Overlay("channel-requests")]
     private void ChannelRequest(byte[] payload)
     {
         SshPacketReader reader = new SshPacketReader(payload);
@@ -798,6 +800,7 @@ internal sealed class SshConnection
         }
     }
 
+    [Overlay("channel-requests")]
     private void StartShell(SshChannelState channel, string mode, string command)
     {
         string[] arguments;
@@ -825,6 +828,7 @@ internal sealed class SshConnection
             SendResize(channel, channel.Rows, channel.Columns);
     }
 
+    [Overlay("channel-io")]
     private void PumpChannels()
     {
         byte[] buffer = new byte[4096];
@@ -853,6 +857,7 @@ internal sealed class SshConnection
         }
     }
 
+    [Overlay("channel-io")]
     private void PumpReader(SshChannelState channel, ProcessPipeReader reader, byte[] buffer,
         bool error)
     {
@@ -874,6 +879,7 @@ internal sealed class SshConnection
         }
     }
 
+    [Overlay("channel-io")]
     private void SendChannelData(SshChannelState channel, byte[] data, bool error)
     {
         if ((uint)data.Length > channel.RemoteWindow)
@@ -1239,12 +1245,29 @@ public static class SshDaemon
         try
         {
             SshServer server = SshServer.Create(options);
-            Console.Write("sshd: waiting for network on port ");
-            Console.WriteLine(options.Port);
             server.Start();
             Process current = Process.Current;
+            bool reported = false;
+            bool wasReady = false;
+            bool wasListening = false;
             while (server.Poll(250u))
             {
+                SshServerStatus currentStatus = server.Status();
+                if (!reported || wasReady != currentStatus.NetworkReady || wasListening != currentStatus.Listening)
+                {
+                    Console.Write("sshd: ");
+                    Console.Write("network=");
+                    Console.Write(currentStatus.NetworkReady);
+                    Console.Write(" listening=");
+                    Console.Write(currentStatus.Listening);
+                    Console.Write(" port=");
+                    Console.Write(options.Port);
+                    Console.Write(" error=");
+                    Console.WriteLine(currentStatus.LastHostError);
+                    wasReady = currentStatus.NetworkReady;
+                    wasListening = currentStatus.Listening;
+                    reported = true;
+                }
                 byte[] payload;
                 if (current == null || !current.TryReceive(0u, out payload))
                     continue;

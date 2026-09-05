@@ -170,8 +170,9 @@ export function parseManagedShellTaskManager(text) {
   if (lines.length < 4) throw new Error('Task manager report is incomplete.');
   const configuration = lines.find(line => line.startsWith('sample-ms='));
   const summary = lines.find(line => line.startsWith('system-cpu='));
-  const heading = lines.findIndex(line => line === 'PID STATE MODULE THREADS HEAP LIMIT CPU STACK-MIN');
-  if (!configuration || !summary || heading < 0) throw new Error('Task manager header is incomplete.');
+  const heading = lines.findIndex(line => line === 'PID STATE MODULE THREADS HEAP LIMIT MEM% CPU STACK-MIN');
+  const memory = lines.find(line => line.startsWith('memory-basis=managed-payload/total-8bit-ram '));
+  if (!configuration || !summary || !memory || heading < 0) throw new Error('Task manager header is incomplete.');
   const rows = lines.slice(heading + 1).filter(line => line.startsWith('pid=')).map(line => ({
     pid: numberField(line, 'pid'),
     state: textField(line, 'state'),
@@ -179,12 +180,14 @@ export function parseManagedShellTaskManager(text) {
     threads: numberField(line, 'threads'),
     heap: numberField(line, 'heap'),
     limit: limitField(line),
+    memoryPercent: cpuField(line, 'mem'),
     cpu: cpuField(line, 'cpu'),
     stackMinimum: line.includes('stack-min=n/a') ? null : numberField(line, 'stack-min'),
     line,
   }));
   return {
     sampleMilliseconds: numberField(configuration, 'sample-ms'),
+    totalRam: numberField(memory, 'total-ram'),
     cores: numberField(configuration, 'cores'),
     maximumCpu: cpuField(configuration, 'maximum'),
     systemCpu: cpuField(summary, 'system-cpu'),
@@ -202,6 +205,8 @@ export function validateManagedShellTaskManager(report) {
   if (report.rows.length !== report.activeProcesses) throw new Error('Active process count does not match process rows.');
   const seen = new Set();
   for (const row of report.rows) {
+    const expectedMemory = report.totalRam === 0 ? null : Math.floor(row.heap * 1000 / report.totalRam) / 10;
+    if (row.memoryPercent !== expectedMemory) throw new Error('Process memory percentage does not match managed payload.');
     if (seen.has(row.pid)) throw new Error('Task manager process IDs are not unique.');
     if (!['starting', 'running', 'cancelling'].includes(row.state))
       throw new Error('Task manager contains an inactive process.');

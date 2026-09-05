@@ -14,15 +14,17 @@
     "references": [
       "../SystemSsh/build/managed-modules/system.ssh.ctmeta.json"
     ],
-    "mainTaskStackBytes": 16384,
+    "mainTaskStackBytes": 8192,
     "heapLimitBytes": 196608
   },
   "build": {
+    "configuration": "release",
+    "lto": true,
     "cLayout": "modules",
     "generatedDirectory": "main/generated",
     "generatedHeader": "main/generated/ctilde_exports.h",
     "espIdfProjectDirectory": ".",
-    "optimization": "speed",
+    "optimization": "size",
     "floatingPoint": "precise"
   }
 }

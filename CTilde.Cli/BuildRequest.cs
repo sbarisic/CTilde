@@ -358,10 +358,8 @@ internal static class BuildRequestResolver
             throw new CommandLineException("--idf-project and --idf-path are valid only for ESP-IDF builds.");
         if (target != CompilationTarget.EspIdf && (options.GenerateBindings || options.VerifyBindings || options.EspClangPath is not null))
             throw new CommandLineException("ESP-IDF binding options require an ESP-IDF project.");
-        if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null || options.Configuration is not null))
-            throw new CommandLineException("--compiler, --native-output, and --configuration are valid only for hosted or Cosmopolitan builds.");
-        if (target == CompilationTarget.EspIdf && options.Lto)
-            throw new CommandLineException("--lto is a hosted or Cosmopolitan Release option; configure ESP-IDF LTO through sdkconfig.");
+        if (target == CompilationTarget.EspIdf && (options.Compiler is not null || options.NativeOutput is not null))
+            throw new CommandLineException("--compiler and --native-output are valid only for hosted or Cosmopolitan builds.");
         if (target == CompilationTarget.EspIdf && options.SourceRoot is not null)
             throw new CommandLineException("--source-root is valid only for hosted or Cosmopolitan compilations.");
         if (target != CompilationTarget.Cosmopolitan && options.CosmopolitanModeSpecified)
@@ -417,8 +415,9 @@ internal static class BuildRequestResolver
             throw new CommandLineException("CPU target 'avx2' requires resolved architecture 'x64'.");
         if (optimization is not null && target != CompilationTarget.EspIdf && configuration != CTildeNativeBuildConfiguration.Release)
             throw new CommandLineException("Controlled native optimization requires a Release configuration.");
-        if (target == CompilationTarget.Cosmopolitan && cosmopolitanMode == CosmopolitanRuntimeMode.Tiny && optimization is not null)
-            throw new CommandLineException("Cosmopolitan mode 'tiny' owns -Os and cannot be combined with an explicit speed or aggressive optimization.");
+        if (target == CompilationTarget.Cosmopolitan && cosmopolitanMode == CosmopolitanRuntimeMode.Tiny &&
+            optimization is not null and not NativeOptimization.Size)
+            throw new CommandLineException("Cosmopolitan mode 'tiny' owns -Os and can be combined only with the explicit size optimization profile.");
         if (target == CompilationTarget.EspIdf && layout != GeneratedCLayout.Modules &&
             (optimization is not null || cpuTarget is not null || floatingPoint is not null))
             throw new CommandLineException("Controlled ESP-IDF native settings require modular C output so flags can be scoped to generated sources.");

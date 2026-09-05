@@ -59,8 +59,68 @@ public class OverlayWork
     }
 }
 
+public delegate int OverlayCallback(int value);
+
+internal static class Identity<T>
+{
+    public static T Echo(T value)
+    {
+        return value;
+    }
+}
+
+internal sealed class CallableWorker
+{
+    [Overlay("instance")]
+    private int Work(int value)
+    {
+        return value + 1;
+    }
+
+    public OverlayCallback Create()
+    {
+        return Work;
+    }
+}
+
 public static class Program
 {
+    private static OverlayCallback escaped = PrivateOverlay;
+    private static OverlayCallback constructed = Identity<int>.Echo;
+
+    [Overlay("callable")]
+    private static int PrivateOverlay(int value)
+    {
+        return value + 1;
+    }
+
+    private static int AddressHelper(int value)
+    {
+        return value + 2;
+    }
+
+    [Overlay("callable")]
+    private static int CallAddressHelper(int value)
+    {
+        return AddressHelper(value);
+    }
+
+    [Overlay("callable")]
+    private static OverlayCallback CreateLambda()
+    {
+        return[] value=>value + 1;
+    }
+
+    private static unsafe bool CheckCallables()
+    {
+        delegate* unmanaged<int, int> address = &AddressHelper;
+        CallableWorker worker = new CallableWorker();
+        OverlayCallback instance = worker.Create();
+        OverlayCallback lambda = CreateLambda();
+        return escaped(41) == 42 && CallAddressHelper(address(38)) == 42 && lambda(instance(constructed(40)))
+            == 42;
+    }
+
     private static int ReenterLibrary(int depth)
     {
         if (depth == 0)
@@ -69,8 +129,11 @@ public static class Program
     }
 
     [EntryPoint]
-    public static int Main(string[] args)
+    public static unsafe int Main(string[] args)
     {
+        if (!CheckCallables())
+            return 12;
+        Console.WriteLine("OVERLAY_CALLABLES_OK");
         int firstOnly = OverlayWork.FirstOnly(args.Length);
         uint firstGeneration = OverlayProbe.Generation();
         int secondOnly = OverlayWork.FirstOnly(args.Length + 1);

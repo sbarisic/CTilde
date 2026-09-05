@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased source changes — Draft 0.50
+
+- Refresh source membership after create, delete, and rename; reuse unchanged syntax trees and retain open-buffer precedence.
+- Preserve UNC file-URI authorities and share GDB MI escape fixtures with the managed adapter.
+- Update the source documentation for Runtime ABI 22, Managed Module ABI 3, and the 29-project example solution. Extension package version 0.15.0 is unchanged; no package was published.
+
 - Synchronized the Draft 0.46 documentation with the 20-project example catalog, the standalone managed memory and task-manager modules, canonical type-fingerprint registration, and the example-local diagnostics host protocol. The extension package was intentionally not rebuilt for this documentation revision.
 - Aligned source metadata and standard-library documentation with Draft 0.46, Runtime ABI 19, and the new ESP-IDF storage surface. The extension package was intentionally not rebuilt for this source revision.
 - Aligned the working tree with Draft 0.45 managed-module manifests, Runtime ABI 18 process documentation, fixed module-identity capacities, and the expanded 18-project example catalog. No extension package was produced by this source revision.

@@ -6,6 +6,8 @@ namespace CTilde.LanguageServer;
 internal sealed class WorkspaceState
 {
     private readonly object _gate = new();
+    private readonly object _syntaxGate = new();
+    private readonly Dictionary<string, CachedSyntax> _syntaxTrees = new(PathComparer);
     private readonly Dictionary<string, OpenDocument> _documents = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CachedProject> _projects = new(PathComparer);
     private readonly Dictionary<string, CTildeProject> _projectDefinitions = new(PathComparer);
@@ -126,8 +128,17 @@ internal sealed class WorkspaceState
                     changed = true;
                     continue;
                 }
-                if (!Path.GetExtension(path).Equals(".ct", StringComparison.OrdinalIgnoreCase) ||
-                    _documents.Values.Any(document => PathComparer.Equals(document.Path, path)))
+                if (!Path.GetExtension(path).Equals(".ct", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                if (change.Type is 1 or 3)
+                {
+                    ResetProjectState(clearDefinitions: true, preserveSyntax: true);
+                    if (change.Type == 3)
+                        lock (_syntaxGate) _syntaxTrees.Remove(Path.GetFullPath(path));
+                    changed = true;
+                    continue;
+                }
+                if (_documents.Values.Any(document => PathComparer.Equals(document.Path, path)))
                     continue;
                 InvalidatePath(path);
                 changed = true;
@@ -353,9 +364,11 @@ internal sealed class WorkspaceState
             _projects.Remove(key);
     }
 
-    private void ResetProjectState(bool clearDefinitions)
+    private void ResetProjectState(bool clearDefinitions, bool preserveSyntax = false)
     {
         _projects.Clear();
+        if (!preserveSyntax)
+            lock (_syntaxGate) _syntaxTrees.Clear();
         _fallbackManifests = [];
         _fallbackManifestsDirty = true;
         if (clearDefinitions)
@@ -370,7 +383,7 @@ internal sealed class WorkspaceState
 
     private static string NormalizeSourceIdentity(string path) => Path.GetFullPath(path).Replace('\\', '/');
 
-    private static ProjectSnapshot CreateStandardLibrarySnapshot(CTildeProject project, string documentPath, string key,
+    private ProjectSnapshot CreateStandardLibrarySnapshot(CTildeProject project, string documentPath, string key,
         IReadOnlyDictionary<string, string> overrides, long revision)
     {
         try
@@ -410,7 +423,7 @@ internal sealed class WorkspaceState
         return null;
     }
 
-    private static ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target,
+    private ProjectSnapshot CreateSnapshot(string key, ImmutableArray<string> sourceFiles, CompilationTarget target,
         CompilationArchitecture architecture, TargetEnvironment environment, bool noRecursion, EspIdfPanicPolicy panicPolicy,
         ImmutableArray<CpuFeature> cpuFeatures, bool simdOptimizations,
         string? sourceIdentityRoot, string? projectError, IReadOnlySet<string>? bindingPaths,
@@ -423,7 +436,7 @@ internal sealed class WorkspaceState
             try
             {
                 var text = openText is null ? SourceText.FromFile(path) : SourceText.From(openText, path);
-                trees.Add(bindingPaths?.Contains(path) == true ? SyntaxTree.ParseEspIdfBinding(text) : SyntaxTree.Parse(text));
+                trees.Add(ParseCached(text, bindingPaths?.Contains(path) == true, revision));
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Text.DecoderFallbackException)
             {
@@ -444,6 +457,22 @@ internal sealed class WorkspaceState
         if (handler is not null)
             _ = handler();
     }
+
+    internal SyntaxTree ParseCached(SourceText text, bool binding, long revision)
+    {
+        var path = Path.GetFullPath(text.FilePath);
+        lock (_syntaxGate)
+        {
+            if (_syntaxTrees.TryGetValue(path, out var cached) && cached.Binding == binding && cached.Tree.Text.Text == text.Text)
+                return cached.Tree;
+            var tree = binding ? SyntaxTree.ParseEspIdfBinding(text) : SyntaxTree.Parse(text);
+            if (cached is null || cached.Revision <= revision)
+                _syntaxTrees[path] = new CachedSyntax(tree, binding, revision);
+            return tree;
+        }
+    }
+
+    private sealed record CachedSyntax(SyntaxTree Tree, bool Binding, long Revision);
 
     private static bool IsProjectMetadata(string path) =>
         Path.GetFileName(path).StartsWith("ctilde", StringComparison.OrdinalIgnoreCase) && Path.GetExtension(path).Equals(".json", StringComparison.OrdinalIgnoreCase) ||

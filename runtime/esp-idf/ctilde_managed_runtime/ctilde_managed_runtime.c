@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <limits.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,9 +13,11 @@
 #include <unistd.h>
 
 #include "esp_dlfcn.h"
+#include "esp_cpu.h"
 #include "esp_err.h"
 #include "esp_elf.h"
 #include "esp_heap_caps.h"
+#include "esp_ipc.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -24,6 +27,7 @@
 #include "freertos/task.h"
 #include "private/elf_symbol.h"
 #include "psa/crypto.h"
+#include "soc/soc_caps.h"
 
 #ifdef __getreent
 #undef __getreent
@@ -32,6 +36,12 @@ extern void *__getreent(void);
 extern double __extendsfdf2(float value);
 extern uint64_t __udivdi3(uint64_t dividend, uint64_t divisor);
 extern uint64_t __umoddi3(uint64_t dividend, uint64_t divisor);
+extern uint64_t __ashldi3(uint64_t value, int shift);
+/* Generated Atomic<T> helpers dispatch by width, including 64-bit operations.
+   Use the IDF implementations so modules share the platform's atomic lock. */
+extern uint64_t ct_idf_atomic_load_8(const volatile void *storage, int order) __asm__("__atomic_load_8");
+extern bool ct_idf_atomic_compare_exchange_8(volatile void *storage, void *expected,
+    uint64_t desired, bool weak, int success, int failure) __asm__("__atomic_compare_exchange_8");
 
 #ifndef CONFIG_CTILDE_MANAGED_TLS_INDEX
 #define CONFIG_CTILDE_MANAGED_TLS_INDEX 2
@@ -54,6 +64,55 @@ static_assert(CTILDE_MANAGED_MODULE_NAME_CAPACITY == 64u,
     "Managed Module ABI 3 requires 64-byte name fields");
 static_assert(CTILDE_MANAGED_MODULE_VERSION_CAPACITY == 32u,
     "Managed Module ABI 3 requires 32-byte version fields");
+
+static void publish_executable_memory_on_cpu(void *unused)
+{
+    (void)unused;
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+    /* Xtensa requires ISYNC after a loader or self-modifying code changes
+       instructions, including configurations whose IRAM has no I-cache. */
+    __asm__ __volatile__("memw\n\tisync" ::: "memory");
+#elif CONFIG_IDF_TARGET_ARCH_RISCV
+    __asm__ __volatile__("fence.i" ::: "memory");
+#else
+#error Unsupported managed-module processor architecture
+#endif
+}
+
+static int publish_executable_memory(void)
+{
+    publish_executable_memory_on_cpu(NULL);
+#if SOC_CPU_CORES_NUM > 1 && defined(CONFIG_ESP_IPC_ENABLE)
+    const BaseType_t current_core = xPortGetCoreID();
+    for (uint32_t core = 0; core < SOC_CPU_CORES_NUM; ++core) {
+        if ((BaseType_t)core == current_core) continue;
+        const esp_err_t result = esp_ipc_call_blocking(core, publish_executable_memory_on_cpu, NULL);
+        if (result != ESP_OK) return -EIO;
+    }
+#endif
+    return 0;
+}
+
+bool __attribute__((noinline)) ctilde_managed_atomic_compare_exchange_u32(
+    volatile uint32_t *value, uint32_t *expected, uint32_t desired)
+{
+    if (value == NULL || expected == NULL) return false;
+    const uint32_t requested = *expected;
+    __atomic_thread_fence(__ATOMIC_SEQ_CST);
+    for (;;) {
+        const uint32_t observed = __atomic_load_n(value, __ATOMIC_SEQ_CST);
+        if (observed != requested) {
+            *expected = observed;
+            return false;
+        }
+        if (esp_cpu_compare_and_set(value, requested, desired)) {
+            __atomic_thread_fence(__ATOMIC_SEQ_CST);
+            return true;
+        }
+        /* Retry an intervening write. A later load must not report success for
+           a failed CAS merely because the value changed back to requested. */
+    }
+}
 
 #define CT_MODULE_PATH_MAX 256
 #define CT_MODULE_NAME_MAX CTILDE_MANAGED_MODULE_NAME_CAPACITY
@@ -249,6 +308,10 @@ typedef struct ct_overlay_relocation_v3 {
     int32_t Addend;
 } ct_overlay_relocation_v3;
 
+static_assert(sizeof(ct_overlay_entry_v3) == 100u, "overlay directory entry layout changed");
+static_assert(sizeof(ct_overlay_function_v3) == 12u, "overlay function layout changed");
+static_assert(sizeof(ct_overlay_relocation_v3) == 16u, "overlay relocation layout changed");
+
 struct ct_module {
     bool Used;
     bool Loading;
@@ -267,12 +330,14 @@ struct ct_module {
     uint32_t LiveAllocations;
     FILE *OverlayStream;
     SemaphoreHandle_t OverlayLock;
+    uint8_t *OverlayDirectory;
     ct_overlay_entry_v3 *Overlays;
     ct_overlay_function_v3 *OverlayFunctions;
     ct_overlay_relocation_v3 *OverlayRelocations;
     uint32_t OverlayCount;
     uint32_t OverlayFunctionCount;
     uint32_t OverlayRelocationCount;
+    uint32_t OverlayRelocationFileOffset;
     uint32_t MaximumOverlayBytes;
     uint32_t DescriptorVma;
     uint32_t TextAnchorVma;
@@ -329,6 +394,7 @@ struct ct_process {
     size_t HeapBytes;
     size_t HeapLimit;
     ct_allocation *Allocations;
+    portMUX_TYPE AllocationLock;
     ct_module_instance Instances[CT_MAX_PROCESS_MODULES];
     uint32_t InstanceCount;
     char *Arguments[CT_MAX_ARGUMENTS];
@@ -687,6 +753,12 @@ static int resolve_module_path_bytes(const uint8_t *data, size_t length, char ou
     return written > 0 && written < CT_MODULE_PATH_MAX ? 0 : -ENAMETOOLONG;
 }
 
+static int read_file_range(FILE *file, size_t offset, void *buffer, size_t length)
+{
+    if (offset > LONG_MAX || fseek(file, (long)offset, SEEK_SET) != 0) return -EIO;
+    return fread(buffer, 1, length, file) == length ? 0 : -EIO;
+}
+
 static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8_t **owned, size_t *file_size)
 {
     *result = NULL;
@@ -695,17 +767,17 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     if (file == NULL) return -errno;
     if (fseek(file, 0, SEEK_END) != 0) { fclose(file); return -EIO; }
     const long length = ftell(file);
-    if (length < 52 || length > 4 * 1024 * 1024 || fseek(file, 0, SEEK_SET) != 0) { fclose(file); return -ENOEXEC; }
-    uint8_t *bytes = (uint8_t *)malloc((size_t)length);
-    if (bytes == NULL) { fclose(file); return -ENOMEM; }
-    if (fread(bytes, 1, (size_t)length, file) != (size_t)length) { free(bytes); fclose(file); return -EIO; }
-    fclose(file);
-    if (bytes[0] != 0x7f || bytes[1] != 'E' || bytes[2] != 'L' || bytes[3] != 'F' ||
-        bytes[4] != 1 || bytes[5] != 1 || bytes[6] != 1) {
-        free(bytes); return -ENOEXEC;
+    if (length < 52 || length > 4 * 1024 * 1024) { fclose(file); return -ENOEXEC; }
+
+    uint8_t elf_header[52];
+    int io_result = read_file_range(file, 0, elf_header, sizeof(elf_header));
+    if (io_result != 0) { fclose(file); return io_result; }
+    if (elf_header[0] != 0x7f || elf_header[1] != 'E' || elf_header[2] != 'L' || elf_header[3] != 'F' ||
+        elf_header[4] != 1 || elf_header[5] != 1 || elf_header[6] != 1) {
+        fclose(file); return -ENOEXEC;
     }
-    const uint16_t elf_type = read_u16_le(bytes + 16);
-    const uint16_t machine = read_u16_le(bytes + 18);
+    const uint16_t elf_type = read_u16_le(elf_header + 16);
+    const uint16_t machine = read_u16_le(elf_header + 18);
 #if CONFIG_IDF_TARGET_ARCH_XTENSA
     const uint16_t expected_machine = 94;
     const uint32_t expected_architecture = 1;
@@ -713,56 +785,77 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     const uint16_t expected_machine = 243;
     const uint32_t expected_architecture = 2;
 #endif
-    if (elf_type != 3 || machine != expected_machine || read_u16_le(bytes + 40) != 52) { free(bytes); return -ENOEXEC; }
+    if (elf_type != 3 || machine != expected_machine || read_u16_le(elf_header + 40) != 52) {
+        fclose(file); return -ENOEXEC;
+    }
 
-    const size_t section_table = read_u32_le(bytes + 32);
-    const uint16_t section_entry_size = read_u16_le(bytes + 46);
-    const uint16_t section_count = read_u16_le(bytes + 48);
-    const uint16_t section_names_index = read_u16_le(bytes + 50);
+    const size_t section_table = read_u32_le(elf_header + 32);
+    const uint16_t section_entry_size = read_u16_le(elf_header + 46);
+    const uint16_t section_count = read_u16_le(elf_header + 48);
+    const uint16_t section_names_index = read_u16_le(elf_header + 50);
     if (section_entry_size != 40 || section_count == 0 || section_names_index >= section_count ||
         !byte_range(section_table, (size_t)section_entry_size * section_count, (size_t)length)) {
-        free(bytes); return -ENOEXEC;
-    }
-    const uint8_t *names_header = bytes + section_table + (size_t)section_entry_size * section_names_index;
-    const size_t names_offset = read_u32_le(names_header + 16);
-    const size_t names_size = read_u32_le(names_header + 20);
-    if (read_u32_le(names_header + 4) != 3 || !byte_range(names_offset, names_size, (size_t)length)) {
-        free(bytes); return -ENOEXEC;
+        fclose(file); return -ENOEXEC;
     }
 
-    const uint8_t *manifest_section = NULL;
+    uint8_t section_header[40];
+    io_result = read_file_range(file,
+        section_table + (size_t)section_entry_size * section_names_index,
+        section_header,
+        sizeof(section_header));
+    if (io_result != 0) { fclose(file); return io_result; }
+    const size_t names_offset = read_u32_le(section_header + 16);
+    const size_t names_size = read_u32_le(section_header + 20);
+    if (read_u32_le(section_header + 4) != 3 || !byte_range(names_offset, names_size, (size_t)length)) {
+        fclose(file); return -ENOEXEC;
+    }
+
+    static const char manifest_name[] = ".ctilde.manifest";
+    bool found_manifest = false;
+    size_t manifest_section_offset = 0;
     size_t manifest_section_size = 0;
     for (uint16_t index = 0; index < section_count; ++index) {
-        const uint8_t *section = bytes + section_table + (size_t)section_entry_size * index;
-        const size_t name_offset = read_u32_le(section);
-        if (name_offset >= names_size) { free(bytes); return -ENOEXEC; }
-        const char *name = (const char *)(const void *)(bytes + names_offset + name_offset);
-        if (memchr(name, '\0', names_size - name_offset) == NULL) { free(bytes); return -ENOEXEC; }
-        if (strcmp(name, ".ctilde.manifest") != 0) continue;
-        if (manifest_section != NULL || read_u32_le(section + 4) != 1) { free(bytes); return -ENOEXEC; }
-        const size_t offset = read_u32_le(section + 16);
-        const size_t size = read_u32_le(section + 20);
-        if (!byte_range(offset, size, (size_t)length)) { free(bytes); return -ENOEXEC; }
-        manifest_section = bytes + offset;
+        io_result = read_file_range(file,
+            section_table + (size_t)section_entry_size * index,
+            section_header,
+            sizeof(section_header));
+        if (io_result != 0) { fclose(file); return io_result; }
+        const size_t name_offset = read_u32_le(section_header);
+        if (name_offset >= names_size) { fclose(file); return -ENOEXEC; }
+        if (names_size - name_offset < sizeof(manifest_name)) continue;
+        char name[sizeof(manifest_name)];
+        io_result = read_file_range(file, names_offset + name_offset, name, sizeof(name));
+        if (io_result != 0) { fclose(file); return io_result; }
+        if (memcmp(name, manifest_name, sizeof(manifest_name)) != 0) continue;
+        if (found_manifest || read_u32_le(section_header + 4) != 1) { fclose(file); return -ENOEXEC; }
+        const size_t offset = read_u32_le(section_header + 16);
+        const size_t size = read_u32_le(section_header + 20);
+        if (!byte_range(offset, size, (size_t)length)) { fclose(file); return -ENOEXEC; }
+        found_manifest = true;
+        manifest_section_offset = offset;
         manifest_section_size = size;
     }
 
     const size_t fixed_size = offsetof(ct_binary_manifest_v1, Dependencies);
-    if (manifest_section == NULL || manifest_section_size < fixed_size) { free(bytes); return -ENOEXEC; }
+    if (!found_manifest || manifest_section_size < fixed_size) { fclose(file); return -ENOEXEC; }
     ct_binary_manifest_v1 header;
     (void)memset(&header, 0, sizeof(header));
-    (void)memcpy(&header, manifest_section, fixed_size);
+    io_result = read_file_range(file, manifest_section_offset, &header, fixed_size);
+    if (io_result != 0) { fclose(file); return io_result; }
     static const uint8_t magic[8] = { 'C', 'T', 'M', 'O', 'D', 3, 0, 0 };
     if (memcmp(header.Magic, magic, sizeof(magic)) != 0 || header.HeaderSize != fixed_size ||
         header.DependencyCount > CT_MAX_DEPENDENCIES) {
-        free(bytes); return -ENOEXEC;
+        fclose(file); return -ENOEXEC;
     }
     const size_t required_size = fixed_size + (size_t)header.DependencyCount * sizeof(ct_binary_dependency_v1);
-    if (header.TotalSize != required_size || required_size > manifest_section_size) { free(bytes); return -ENOEXEC; }
+    if (header.TotalSize != required_size || required_size > manifest_section_size) {
+        fclose(file); return -ENOEXEC;
+    }
     ct_binary_manifest_v1 *manifest = (ct_binary_manifest_v1 *)malloc(required_size);
-    if (manifest == NULL) { free(bytes); return -ENOMEM; }
-    (void)memcpy(manifest, manifest_section, required_size);
-    free(bytes);
+    if (manifest == NULL) { fclose(file); return -ENOMEM; }
+    io_result = read_file_range(file, manifest_section_offset, manifest, required_size);
+    fclose(file);
+    if (io_result != 0) { free(manifest); return io_result; }
 
     if (manifest->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION ||
         manifest->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION || manifest->Architecture != expected_architecture ||
@@ -962,38 +1055,41 @@ static int load_overlay_directory(ct_module *module, const char *path)
         fclose(stream);
         return -ENOEXEC;
     }
-    uint8_t *directory = malloc(directory_size);
-    if (directory == NULL) { fclose(stream); return -ENOMEM; }
-    if (fseeko(stream, (off_t)directory_offset, SEEK_SET) != 0 || fread(directory, 1, directory_size, stream) != directory_size ||
-        memcmp(directory, directory_magic, 8) != 0 || overlay_read_u32(directory + 8) != 3u) {
-        free(directory); fclose(stream); return -ENOEXEC;
+    uint8_t header[40];
+    if (fseeko(stream, (off_t)directory_offset, SEEK_SET) != 0 ||
+        fread(header, 1, sizeof(header), stream) != sizeof(header) ||
+        memcmp(header, directory_magic, 8) != 0 || overlay_read_u32(header + 8) != 3u) {
+        fclose(stream); return -ENOEXEC;
     }
-    const uint32_t overlay_count = overlay_read_u32(directory + 12);
-    const uint32_t function_count = overlay_read_u32(directory + 16);
-    const uint32_t relocation_count = overlay_read_u32(directory + 20);
-    const uint32_t maximum_size = overlay_read_u32(directory + 24);
-    const uint32_t directory_resident_size = overlay_read_u32(directory + 28);
-    const uint32_t descriptor_vma = overlay_read_u32(directory + 32);
-    const uint32_t text_anchor_vma = overlay_read_u32(directory + 36);
+    const uint32_t overlay_count = overlay_read_u32(header + 12);
+    const uint32_t function_count = overlay_read_u32(header + 16);
+    const uint32_t relocation_count = overlay_read_u32(header + 20);
+    const uint32_t maximum_size = overlay_read_u32(header + 24);
+    const uint32_t directory_resident_size = overlay_read_u32(header + 28);
+    const uint32_t descriptor_vma = overlay_read_u32(header + 32);
+    const uint32_t text_anchor_vma = overlay_read_u32(header + 36);
     const uint64_t expected = 40u + (uint64_t)overlay_count * 100u + (uint64_t)function_count * 12u +
         (uint64_t)relocation_count * 16u;
     if (overlay_count == 0u || overlay_count > 256u || function_count == 0u || function_count > 4096u ||
         relocation_count > 65536u || overlay_count != footer_overlay_count || expected != directory_size ||
         directory_resident_size != resident_size || maximum_size == 0u || descriptor_vma == 0u || text_anchor_vma == 0u) {
-        free(directory); fclose(stream); return -ENOEXEC;
+        fclose(stream); return -ENOEXEC;
     }
-    ct_overlay_entry_v3 *overlays = calloc(overlay_count, sizeof(*overlays));
-    ct_overlay_function_v3 *functions = function_count == 0u ? NULL : calloc(function_count, sizeof(*functions));
-    ct_overlay_relocation_v3 *relocations = relocation_count == 0u ? NULL : calloc(relocation_count, sizeof(*relocations));
-    if (overlays == NULL || (function_count != 0u && functions == NULL) || (relocation_count != 0u && relocations == NULL)) {
-        free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOMEM;
-    }
-    size_t position = 40u;
+    const size_t index_size = (size_t)overlay_count * sizeof(ct_overlay_entry_v3) +
+        (size_t)function_count * sizeof(ct_overlay_function_v3);
+    uint8_t *directory = calloc(1u, index_size);
+    if (directory == NULL) { fclose(stream); return -ENOMEM; }
+    ct_overlay_entry_v3 *overlays = (ct_overlay_entry_v3 *)(void *)directory;
+    ct_overlay_function_v3 *functions = (ct_overlay_function_v3 *)(void *)(
+        directory + (size_t)overlay_count * sizeof(*overlays));
     uint32_t previous_file_end = resident_size;
     uint32_t expected_relocation_start = 0u;
     uint32_t expected_function_start = 0u;
     for (uint32_t index = 0; index < overlay_count; ++index) {
-        const uint8_t *source = directory + position;
+        uint8_t source[100];
+        if (fread(source, 1u, sizeof(source), stream) != sizeof(source)) {
+            free(directory); fclose(stream); return -ENOEXEC;
+        }
         ct_overlay_entry_v3 *entry = &overlays[index];
         entry->Id = overlay_read_u32(source);
         entry->FileOffset = overlay_read_u32(source + 4);
@@ -1017,70 +1113,79 @@ static int load_overlay_directory(ct_module *module, const char *path)
             entry->RelocationStart != expected_relocation_start ||
             entry->RelocationStart + entry->RelocationCount > relocation_count ||
             entry->FunctionStart != expected_function_start || entry->FunctionStart + entry->FunctionCount > function_count) {
-            free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+            free(directory); fclose(stream); return -ENOEXEC;
         }
         previous_file_end = entry->FileOffset + entry->StoredSize;
         expected_relocation_start += entry->RelocationCount;
         expected_function_start += entry->FunctionCount;
-        position += 100u;
     }
     if (expected_relocation_start != relocation_count || expected_function_start != function_count) {
-        free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+        free(directory); fclose(stream); return -ENOEXEC;
     }
     uint32_t observed_maximum_size = 0u;
     for (uint32_t index = 0; index < overlay_count; ++index)
         if (overlays[index].MemorySize > observed_maximum_size) observed_maximum_size = overlays[index].MemorySize;
     if (observed_maximum_size != maximum_size) {
-        free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+        free(directory); fclose(stream); return -ENOEXEC;
     }
     for (uint32_t index = 0; index < function_count; ++index) {
-        functions[index] = (ct_overlay_function_v3){ overlay_read_u32(directory + position),
-            overlay_read_u32(directory + position + 4), overlay_read_u32(directory + position + 8) };
+        uint8_t source[12];
+        if (fread(source, 1u, sizeof(source), stream) != sizeof(source)) {
+            free(directory); fclose(stream); return -ENOEXEC;
+        }
+        functions[index] = (ct_overlay_function_v3){ overlay_read_u32(source),
+            overlay_read_u32(source + 4), overlay_read_u32(source + 8) };
         if (functions[index].OverlayId == 0u || functions[index].OverlayId > overlay_count ||
             functions[index].BodyOffset >= overlays[functions[index].OverlayId - 1u].MemorySize) {
-            free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+            free(directory); fclose(stream); return -ENOEXEC;
         }
         const ct_overlay_entry_v3 *owner = &overlays[functions[index].OverlayId - 1u];
         if (index < owner->FunctionStart || index >= owner->FunctionStart + owner->FunctionCount) {
-            free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+            free(directory); fclose(stream); return -ENOEXEC;
         }
-        position += 12u;
     }
+    const uint32_t relocation_file_offset = directory_offset + 40u +
+        overlay_count * (uint32_t)sizeof(ct_overlay_entry_v3) +
+        function_count * (uint32_t)sizeof(ct_overlay_function_v3);
     for (uint32_t index = 0; index < relocation_count; ++index) {
-        relocations[index] = (ct_overlay_relocation_v3){ overlay_read_u32(directory + position),
-            overlay_read_u32(directory + position + 4), overlay_read_u32(directory + position + 8),
-            (int32_t)overlay_read_u32(directory + position + 12) };
-        if (relocations[index].Kind < CT_OVERLAY_RELOCATION_WINDOW ||
-            relocations[index].Kind > CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
-            free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+        uint8_t source[16];
+        if (fread(source, 1u, sizeof(source), stream) != sizeof(source)) {
+            free(directory); fclose(stream); return -ENOEXEC;
+        }
+        const ct_overlay_relocation_v3 relocation = { overlay_read_u32(source),
+            overlay_read_u32(source + 4), overlay_read_u32(source + 8),
+            (int32_t)overlay_read_u32(source + 12) };
+        if (relocation.Kind < CT_OVERLAY_RELOCATION_WINDOW ||
+            relocation.Kind > CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
+            free(directory); fclose(stream); return -ENOEXEC;
         }
         bool owned = false;
         for (uint32_t overlay = 0; overlay < overlay_count; ++overlay) {
             const ct_overlay_entry_v3 *entry = &overlays[overlay];
             if (index < entry->RelocationStart || index >= entry->RelocationStart + entry->RelocationCount) continue;
-            if ((relocations[index].Offset & (sizeof(uint32_t) - 1u)) != 0u ||
-                relocations[index].Offset > entry->MemorySize ||
-                entry->MemorySize - relocations[index].Offset < sizeof(uint32_t) ||
-                (relocations[index].Kind == CT_OVERLAY_RELOCATION_WINDOW && relocations[index].Target >= entry->MemorySize)) {
-                free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+            if ((relocation.Offset & (sizeof(uint32_t) - 1u)) != 0u ||
+                relocation.Offset > entry->MemorySize ||
+                entry->MemorySize - relocation.Offset < sizeof(uint32_t) ||
+                (relocation.Kind == CT_OVERLAY_RELOCATION_WINDOW && relocation.Target >= entry->MemorySize)) {
+                free(directory); fclose(stream); return -ENOEXEC;
             }
             owned = true;
             break;
         }
         if (!owned) {
-            free(relocations); free(functions); free(overlays); free(directory); fclose(stream); return -ENOEXEC;
+            free(directory); fclose(stream); return -ENOEXEC;
         }
-        position += 16u;
     }
-    free(directory);
     module->OverlayStream = stream;
     module->OverlayLock = xSemaphoreCreateMutex();
+    module->OverlayDirectory = directory;
     module->Overlays = overlays;
     module->OverlayFunctions = functions;
-    module->OverlayRelocations = relocations;
+    module->OverlayRelocations = NULL;
     module->OverlayCount = overlay_count;
     module->OverlayFunctionCount = function_count;
     module->OverlayRelocationCount = relocation_count;
+    module->OverlayRelocationFileOffset = relocation_file_offset;
     module->MaximumOverlayBytes = maximum_size;
     module->DescriptorVma = descriptor_vma;
     module->TextAnchorVma = text_anchor_vma;
@@ -1092,10 +1197,146 @@ static void close_overlay_directory(ct_module *module)
 {
     if (module->OverlayStream != NULL) { (void)fclose(module->OverlayStream); module->OverlayStream = NULL; }
     if (module->OverlayLock != NULL) { vSemaphoreDelete(module->OverlayLock); module->OverlayLock = NULL; }
-    free(module->OverlayRelocations); module->OverlayRelocations = NULL;
-    free(module->OverlayFunctions); module->OverlayFunctions = NULL;
-    free(module->Overlays); module->Overlays = NULL;
-    module->OverlayCount = module->OverlayFunctionCount = module->OverlayRelocationCount = module->MaximumOverlayBytes = 0u;
+    free(module->OverlayDirectory); module->OverlayDirectory = NULL;
+    module->OverlayRelocations = NULL;
+    module->OverlayFunctions = NULL;
+    module->Overlays = NULL;
+    module->OverlayCount = module->OverlayFunctionCount = module->OverlayRelocationCount = 0u;
+    module->OverlayRelocationFileOffset = module->MaximumOverlayBytes = 0u;
+}
+
+typedef struct ct_elf_load_requirements {
+    size_t ResidentExecutableBytes;
+    size_t LargestExecutableSegmentBytes;
+} ct_elf_load_requirements;
+
+static uint16_t read_elf_u16(const uint8_t *value)
+{
+    return (uint16_t)value[0] | (uint16_t)((uint16_t)value[1] << 8u);
+}
+
+static uint32_t read_elf_u32(const uint8_t *value)
+{
+    return (uint32_t)value[0] | (uint32_t)value[1] << 8u |
+        (uint32_t)value[2] << 16u | (uint32_t)value[3] << 24u;
+}
+
+static int inspect_elf_load_requirements(const char *path, ct_elf_load_requirements *requirements)
+{
+    if (path == NULL || requirements == NULL) return -EINVAL;
+    (void)memset(requirements, 0, sizeof(*requirements));
+    FILE *stream = fopen(path, "rb");
+    if (stream == NULL) return -errno;
+    uint8_t header[52];
+    int result = 0;
+    if (fread(&header, 1u, sizeof(header), stream) != sizeof(header) ||
+        header[0] != 0x7fu || header[1] != 'E' || header[2] != 'L' || header[3] != 'F' ||
+        header[4] != 1u || header[5] != 1u || read_elf_u16(&header[46]) != 40u) {
+        result = -ENOEXEC;
+        goto complete;
+    }
+    if (fseeko(stream, (off_t)read_elf_u32(&header[32]), SEEK_SET) != 0) {
+        result = -errno;
+        goto complete;
+    }
+    const uint16_t section_header_count = read_elf_u16(&header[48]);
+    for (uint16_t index = 0u; index < section_header_count; ++index) {
+        uint8_t section_header[40];
+        if (fread(&section_header, 1u, sizeof(section_header), stream) != sizeof(section_header)) {
+            result = -ENOEXEC;
+            goto complete;
+        }
+        const uint32_t type = read_elf_u32(&section_header[4]);
+        const uint32_t flags = read_elf_u32(&section_header[8]);
+        const uint32_t memory_size = read_elf_u32(&section_header[20]);
+        if (type != 1u || (flags & 6u) != 6u) continue;
+        if (SIZE_MAX - requirements->ResidentExecutableBytes < memory_size) {
+            result = -EOVERFLOW;
+            goto complete;
+        }
+        requirements->ResidentExecutableBytes += memory_size;
+        if (memory_size > requirements->LargestExecutableSegmentBytes)
+            requirements->LargestExecutableSegmentBytes = memory_size;
+    }
+complete:
+    (void)fclose(stream);
+    return result;
+}
+
+static int inspect_module_overlay_requirement(const char *path, size_t *maximum_bytes)
+{
+    static const uint8_t footer_magic[8] = { 'C', 'T', 'O', 'V', 'L', 'F', '3', 0 };
+    static const uint8_t directory_magic[8] = { 'C', 'T', 'O', 'V', 'L', 'D', '3', 0 };
+    if (path == NULL || maximum_bytes == NULL) return -EINVAL;
+    *maximum_bytes = 0u;
+    FILE *stream = fopen(path, "rb");
+    if (stream == NULL) return -errno;
+    int result = 0;
+    uint8_t footer[24];
+    if (fseeko(stream, 0, SEEK_END) != 0) result = -errno;
+    const off_t file_size = result == 0 ? ftello(stream) : -1;
+    if (result == 0 && file_size >= (off_t)sizeof(footer)) {
+        if (fseeko(stream, file_size - (off_t)sizeof(footer), SEEK_SET) != 0 ||
+            fread(footer, 1u, sizeof(footer), stream) != sizeof(footer)) result = -ENOEXEC;
+        else if (memcmp(footer, footer_magic, sizeof(footer_magic)) == 0) {
+            const uint32_t directory_offset = read_elf_u32(footer + 8u);
+            const uint32_t directory_size = read_elf_u32(footer + 12u);
+            uint8_t header[40];
+            if (directory_size < sizeof(header) ||
+                (uint64_t)directory_offset + directory_size + sizeof(footer) != (uint64_t)file_size ||
+                fseeko(stream, (off_t)directory_offset, SEEK_SET) != 0 ||
+                fread(header, 1u, sizeof(header), stream) != sizeof(header) ||
+                memcmp(header, directory_magic, sizeof(directory_magic)) != 0 ||
+                read_elf_u32(header + 8u) != 3u) result = -ENOEXEC;
+            else {
+                const uint32_t value = read_elf_u32(header + 24u);
+                if (value == 0u || value > 1024u * 1024u) result = -ENOEXEC;
+                else *maximum_bytes = value;
+            }
+        }
+    }
+    (void)fclose(stream);
+    return result;
+}
+
+static int inspect_process_overlay_requirement(const char *path, const char *const *chain,
+    size_t depth, size_t *maximum_bytes)
+{
+    if (path == NULL || maximum_bytes == NULL || depth >= CT_MAX_PROCESS_MODULES) return -ELOOP;
+    ct_binary_manifest_v1 *manifest = NULL;
+    uint8_t *manifest_bytes = NULL;
+    int result = read_manifest(path, &manifest, &manifest_bytes, NULL);
+    if (result != 0) return result;
+    for (size_t index = 0; index < depth; ++index) {
+        if (strcmp(chain[index], manifest->Name) == 0) {
+            free(manifest_bytes);
+            return -ELOOP;
+        }
+    }
+    size_t module_maximum = 0u;
+    result = inspect_module_overlay_requirement(path, &module_maximum);
+    if (result != 0) {
+        free(manifest_bytes);
+        return result;
+    }
+    if (module_maximum > *maximum_bytes) *maximum_bytes = module_maximum;
+    const char *next_chain[CT_MAX_PROCESS_MODULES];
+    for (size_t index = 0; index < depth; ++index) next_chain[index] = chain[index];
+    next_chain[depth] = manifest->Name;
+    for (uint32_t index = 0; index < manifest->DependencyCount; ++index) {
+        char dependency_name[CT_MODULE_NAME_MAX + 5];
+        const int written = snprintf(dependency_name, sizeof(dependency_name), "%s.ctm",
+            manifest->Dependencies[index].Name);
+        char dependency_path[CT_MODULE_PATH_MAX];
+        if (written <= 0 || written >= (int)sizeof(dependency_name)) result = -ENAMETOOLONG;
+        else result = resolve_module_path_bytes((const uint8_t *)dependency_name,
+            (size_t)written, dependency_path);
+        if (result == 0) result = inspect_process_overlay_requirement(dependency_path,
+            next_chain, depth + 1u, maximum_bytes);
+        if (result != 0) break;
+    }
+    free(manifest_bytes);
+    return result;
 }
 
 static int load_module_recursive(const char *path, const char *const *chain, size_t depth, ct_module **output)
@@ -1150,8 +1391,32 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     result = load_overlay_directory(module, path);
     if (result != 0) goto fail;
 
+    ct_elf_load_requirements load_requirements;
+    result = inspect_elf_load_requirements(path, &load_requirements);
+    if (result != 0) goto fail;
+    const size_t executable_free_before_load = heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+    const size_t executable_largest_before_load = heap_caps_get_largest_free_block(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+    ESP_LOGI(TAG, "Module '%s' load requirements: resident-executable=%u, largest-executable-segment=%u, "
+        "overlay-window=%u, executable-free=%u, executable-largest=%u",
+        manifest->Name, (unsigned)load_requirements.ResidentExecutableBytes,
+        (unsigned)load_requirements.LargestExecutableSegmentBytes, (unsigned)module->MaximumOverlayBytes,
+        (unsigned)executable_free_before_load, (unsigned)executable_largest_before_load);
+
     module->DynamicHandle = dlopen(path, RTLD_NOW);
-    if (module->DynamicHandle == NULL) { result = -ENOEXEC; goto fail; }
+    if (module->DynamicHandle == NULL) {
+        ESP_LOGE(TAG, "Module '%s' executable allocation failed: requested=%u, resident-total=%u, "
+            "overlay-window=%u, executable-free-before=%u, executable-largest-before=%u",
+            manifest->Name, (unsigned)load_requirements.LargestExecutableSegmentBytes,
+            (unsigned)load_requirements.ResidentExecutableBytes, (unsigned)module->MaximumOverlayBytes,
+            (unsigned)executable_free_before_load, (unsigned)executable_largest_before_load);
+        result = -ENOEXEC;
+        goto fail;
+    }
+    result = publish_executable_memory();
+    if (result != 0) {
+        ESP_LOGE(TAG, "Module '%s' could not publish relocated executable memory on all cores", manifest->Name);
+        goto fail;
+    }
     typedef const ct_managed_module_descriptor_v3 *(*descriptor_function)(void);
     typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v22 *runtime);
     descriptor_function get_descriptor = (descriptor_function)dlsym(module->DynamicHandle, "ct_managed_module_descriptor");
@@ -1232,6 +1497,7 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     return 0;
 
 fail:
+    ESP_LOGE(TAG, "Module '%s' load failed before publication: %d", module->Name, result);
     close_overlay_directory(module);
     if (module->DynamicHandle != NULL) (void)dlclose(module->DynamicHandle);
     for (uint32_t index = module->DependencyCount; index > 0; --index) release_module(module->Dependencies[index - 1]);
@@ -1310,26 +1576,35 @@ static void *api_allocate(size_t size, const ct_managed_module_descriptor_v3 *de
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
         if (process->Instances[index].Module->Descriptor == descriptor) { module = process->Instances[index].Module; break; }
     }
+    portENTER_CRITICAL(&process->AllocationLock);
     const size_t heap_bytes = __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE);
     if (module == NULL || module->Stopping || size > SIZE_MAX - sizeof(ct_allocation) ||
+        size > SIZE_MAX - heap_bytes ||
         (process->HeapLimit != 0 && (heap_bytes > process->HeapLimit ||
             size > process->HeapLimit - heap_bytes))) {
+        portEXIT_CRITICAL(&process->AllocationLock);
         end_runtime_operation(context);
         return NULL;
     }
+    (void)__atomic_add_fetch(&process->HeapBytes, size, __ATOMIC_ACQ_REL);
+    portEXIT_CRITICAL(&process->AllocationLock);
     ct_allocation *allocation = (ct_allocation *)calloc(1, sizeof(ct_allocation) + size);
     if (allocation == NULL) {
+        portENTER_CRITICAL(&process->AllocationLock);
+        (void)__atomic_sub_fetch(&process->HeapBytes, size, __ATOMIC_ACQ_REL);
+        portEXIT_CRITICAL(&process->AllocationLock);
         end_runtime_operation(context);
         return NULL;
     }
     allocation->Process = process;
     allocation->Module = module;
     allocation->Size = size;
+    portENTER_CRITICAL(&process->AllocationLock);
     allocation->Next = process->Allocations;
     if (process->Allocations != NULL) process->Allocations->Previous = allocation;
     process->Allocations = allocation;
-    (void)__atomic_add_fetch(&process->HeapBytes, size, __ATOMIC_ACQ_REL);
     (void)__atomic_add_fetch(&module->LiveAllocations, 1u, __ATOMIC_ACQ_REL);
+    portEXIT_CRITICAL(&process->AllocationLock);
     end_runtime_operation(context);
     return allocation + 1;
 }
@@ -1342,13 +1617,16 @@ static void api_free(void *value)
     if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_allocation *allocation = ((ct_allocation *)value) - 1;
     ct_process *process = allocation->Process;
-    if (process == NULL || process != context->Process || allocation->Module == NULL ||
+    if (process == NULL || process != context->Process) abort();
+    portENTER_CRITICAL(&process->AllocationLock);
+    if (allocation->Module == NULL ||
         allocation->Size > __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE) ||
         __atomic_load_n(&allocation->Module->LiveAllocations, __ATOMIC_ACQUIRE) == 0) abort();
     if (allocation->Previous != NULL) allocation->Previous->Next = allocation->Next; else process->Allocations = allocation->Next;
     if (allocation->Next != NULL) allocation->Next->Previous = allocation->Previous;
     if (__atomic_fetch_sub(&process->HeapBytes, allocation->Size, __ATOMIC_ACQ_REL) < allocation->Size ||
         __atomic_fetch_sub(&allocation->Module->LiveAllocations, 1u, __ATOMIC_ACQ_REL) == 0) abort();
+    portEXIT_CRITICAL(&process->AllocationLock);
     (void)memset(allocation + 1, 0xDD, allocation->Size);
     free(allocation);
     end_runtime_operation(context);
@@ -1468,14 +1746,33 @@ static int load_process_overlay(ct_process *process, ct_module *module, uint32_t
     if (entry == NULL || entry->StoredSize == 0u || entry->StoredSize > entry->MemorySize ||
         entry->MemorySize > process->OverlayWindowSize ||
         (entry->StoredSize & (sizeof(uint32_t) - 1u)) != 0u ||
-        (entry->MemorySize & (sizeof(uint32_t) - 1u)) != 0u) return -ENOEXEC;
+        (entry->MemorySize & (sizeof(uint32_t) - 1u)) != 0u) {
+        ESP_LOGE(TAG, "Module '%s' overlay %" PRIu32 " has invalid bounds: stored=%u, memory=%u, "
+            "window=%u, relocations=%u", module->Name, id,
+            entry == NULL ? 0u : (unsigned)entry->StoredSize,
+            entry == NULL ? 0u : (unsigned)entry->MemorySize,
+            (unsigned)process->OverlayWindowSize,
+            entry == NULL ? 0u : (unsigned)entry->RelocationCount);
+        return -ENOEXEC;
+    }
     if (process->OverlayWindow == NULL) {
         volatile uint32_t *window = heap_caps_aligned_alloc(16u, process->OverlayWindowSize,
             MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
-        if (window == NULL) return -ENOMEM;
+        if (window == NULL) {
+            ESP_LOGE(TAG, "Process %u module '%s' overlay allocation failed: requested=%u, "
+                "executable-free=%u, executable-largest=%u",
+                (unsigned)process->Id, module->Name, (unsigned)process->OverlayWindowSize,
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT));
+            return -ENOMEM;
+        }
         __atomic_store_n(&process->OverlayWindow, window, __ATOMIC_RELEASE);
     }
-    if ((((uintptr_t)process->OverlayWindow) & 15u) != 0u) return -ENOEXEC;
+    if ((((uintptr_t)process->OverlayWindow) & 15u) != 0u) {
+        ESP_LOGE(TAG, "Process %u module '%s' overlay window is not 16-byte aligned: %" PRIuPTR,
+            (unsigned)process->Id, module->Name, (uintptr_t)process->OverlayWindow);
+        return -ENOEXEC;
+    }
     uint32_t staging[CT_OVERLAY_STAGING_WORDS];
     uint8_t digest[32];
     size_t digest_length = 0;
@@ -1487,7 +1784,12 @@ static int load_process_overlay(ct_process *process, ct_module *module, uint32_t
     int result = 0;
     if (hash_status != PSA_SUCCESS) result = -EIO;
     else if (__atomic_load_n(&module->OverlayUnavailable, __ATOMIC_ACQUIRE) || module->OverlayStream == NULL) result = -ENODEV;
-    else if (fseeko(module->OverlayStream, (off_t)entry->FileOffset, SEEK_SET) != 0) result = -errno;
+    else if (fseek(module->OverlayStream, (long)entry->FileOffset, SEEK_SET) != 0) {
+        const int seek_error = errno == 0 ? EIO : errno;
+        ESP_LOGE(TAG, "Module '%s' overlay %" PRIu32 " seek to %u failed: %d",
+            module->Name, id, (unsigned)entry->FileOffset, seek_error);
+        result = -seek_error;
+    }
     else {
         __atomic_store_n(&process->LoadedOverlayModule, NULL, __ATOMIC_RELEASE);
         __atomic_store_n(&process->LoadedOverlayId, 0u, __ATOMIC_RELEASE);
@@ -1526,36 +1828,63 @@ static int load_process_overlay(ct_process *process, ct_module *module, uint32_t
     for (size_t word = entry->StoredSize / sizeof(uint32_t);
          word < entry->MemorySize / sizeof(uint32_t); ++word)
         process->OverlayWindow[word] = 0u;
-    for (uint32_t index = 0; index < entry->RelocationCount; ++index) {
+    xSemaphoreTake(module->OverlayLock, portMAX_DELAY);
+    const uint64_t relocation_offset = (uint64_t)module->OverlayRelocationFileOffset +
+        (uint64_t)entry->RelocationStart * sizeof(ct_overlay_relocation_v3);
+    if (relocation_offset > LONG_MAX || module->OverlayStream == NULL ||
+        fseek(module->OverlayStream, (long)relocation_offset, SEEK_SET) != 0) result = -EIO;
+    for (uint32_t index = 0; result == 0 && index < entry->RelocationCount; ++index) {
         const uint32_t relocation_index = entry->RelocationStart + index;
-        if (relocation_index >= module->OverlayRelocationCount) return -ENOEXEC;
-        const ct_overlay_relocation_v3 *relocation = &module->OverlayRelocations[relocation_index];
-        if ((relocation->Offset & (sizeof(uint32_t) - 1u)) != 0u ||
-            relocation->Offset > entry->MemorySize ||
-            entry->MemorySize - relocation->Offset < sizeof(uint32_t)) return -ENOEXEC;
+        uint8_t source[16];
+        if (relocation_index >= module->OverlayRelocationCount ||
+            fread(source, 1u, sizeof(source), module->OverlayStream) != sizeof(source)) {
+            result = -ENOEXEC;
+            break;
+        }
+        const ct_overlay_relocation_v3 relocation = { overlay_read_u32(source),
+            overlay_read_u32(source + 4), overlay_read_u32(source + 8),
+            (int32_t)overlay_read_u32(source + 12) };
+        if ((relocation.Offset & (sizeof(uint32_t) - 1u)) != 0u ||
+            relocation.Offset > entry->MemorySize ||
+            entry->MemorySize - relocation.Offset < sizeof(uint32_t)) {
+            result = -ENOEXEC;
+            break;
+        }
         uintptr_t base;
-        if (relocation->Kind == CT_OVERLAY_RELOCATION_WINDOW) {
-            if (relocation->Target >= entry->MemorySize) return -ENOEXEC;
-            base = (uintptr_t)process->OverlayWindow + relocation->Target;
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE) {
-            base = module->ExecutableLoadBias + relocation->Target;
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA) {
-            base = module->DataLoadBias + relocation->Target;
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE_INDIRECT) {
-            const uintptr_t slot = module->ExecutableLoadBias + relocation->Target;
-            if ((slot & (sizeof(uint32_t) - 1u)) != 0u) return -ENOEXEC;
-            base = (uintptr_t)*(const volatile uint32_t *)slot;
-        } else if (relocation->Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
-            const uintptr_t slot = module->DataLoadBias + relocation->Target;
-            if ((slot & (sizeof(uint32_t) - 1u)) != 0u) return -ENOEXEC;
-            base = (uintptr_t)*(const volatile uint32_t *)slot;
-        } else return -ENOEXEC;
-        const int64_t relocated = (int64_t)(uint32_t)base + (int64_t)relocation->Addend;
-        if (relocated < 0 || relocated > UINT32_MAX) return -EOVERFLOW;
-        process->OverlayWindow[relocation->Offset / sizeof(uint32_t)] = (uint32_t)relocated;
+        if (relocation.Kind == CT_OVERLAY_RELOCATION_WINDOW) {
+            if (relocation.Target >= entry->MemorySize) { result = -ENOEXEC; break; }
+            base = (uintptr_t)process->OverlayWindow + relocation.Target;
+        } else if (relocation.Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE) {
+            base = esp_dlmap(module->DynamicHandle, relocation.Target);
+            if (base == 0u) { result = -ENOEXEC; break; }
+        } else if (relocation.Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA) {
+            base = esp_dlmap(module->DynamicHandle, relocation.Target);
+            if (base == 0u) { result = -ENOEXEC; break; }
+        } else if (relocation.Kind == CT_OVERLAY_RELOCATION_RESIDENT_EXECUTABLE_INDIRECT) {
+            const uintptr_t slot = module->ExecutableLoadBias + relocation.Target;
+            uint32_t indirect;
+            (void)memcpy(&indirect, (const void *)slot, sizeof(indirect));
+            base = (uintptr_t)indirect;
+        } else if (relocation.Kind == CT_OVERLAY_RELOCATION_RESIDENT_DATA_INDIRECT) {
+            const uintptr_t slot = module->DataLoadBias + relocation.Target;
+            uint32_t indirect;
+            (void)memcpy(&indirect, (const void *)slot, sizeof(indirect));
+            base = (uintptr_t)indirect;
+        } else { result = -ENOEXEC; break; }
+        const int64_t relocated = (int64_t)(uint32_t)base + (int64_t)relocation.Addend;
+        if (relocated < 0 || relocated > UINT32_MAX) { result = -EOVERFLOW; break; }
+        process->OverlayWindow[relocation.Offset / sizeof(uint32_t)] = (uint32_t)relocated;
+    }
+    xSemaphoreGive(module->OverlayLock);
+    if (result != 0) {
+        ESP_LOGE(TAG, "Module '%s' overlay %" PRIu32 " relocation stream failed: %d",
+            module->Name, id, result);
+        return result;
     }
     __builtin___clear_cache((char *)(uintptr_t)process->OverlayWindow,
         (char *)(uintptr_t)((uintptr_t)process->OverlayWindow + entry->MemorySize));
+    result = publish_executable_memory();
+    if (result != 0) return result;
     __atomic_store_n(&process->LoadedOverlayModule, module, __ATOMIC_RELEASE);
     __atomic_store_n(&process->LoadedOverlayId, id, __ATOMIC_RELEASE);
     (void)__atomic_add_fetch(&process->OverlayGeneration, 1u, __ATOMIC_RELEASE);
@@ -1613,8 +1942,12 @@ static uintptr_t api_enter_managed_call(const ct_managed_module_descriptor_v3 *d
     if (call_target->Placement == 1u) {
         if (xTaskGetCurrentTaskHandle() != context->Process->MainTask || context->Process->TaskCount != 1u)
             api_runtime_fault("CTT0020", "<managed-overlay-task>", 0);
-        if (load_process_overlay(context->Process, target, call_target->OverlayId) != 0)
+        const int overlay_result = load_process_overlay(context->Process, target, call_target->OverlayId);
+        if (overlay_result != 0) {
+            ESP_LOGE(TAG, "Module '%s' overlay %" PRIu32 " activation failed: %d",
+                target->Name, call_target->OverlayId, overlay_result);
             terminate_current_overlay_process(context->Process);
+        }
         __atomic_store_n(&context->Process->LogicalOverlayModule, target, __ATOMIC_RELEASE);
         __atomic_store_n(&context->Process->LogicalOverlayId, call_target->OverlayId, __ATOMIC_RELEASE);
     }
@@ -1640,8 +1973,13 @@ static void api_leave_managed_call(ct_managed_call_frame_v22 *public_frame)
     const uint32_t previous_overlay_id = (uint32_t)frame->PreviousOverlayId;
     if ((__atomic_load_n(&process->LoadedOverlayModule, __ATOMIC_ACQUIRE) != previous_overlay_module ||
          __atomic_load_n(&process->LoadedOverlayId, __ATOMIC_ACQUIRE) != previous_overlay_id) &&
-        previous_overlay_module != NULL && load_process_overlay(process, previous_overlay_module, previous_overlay_id) != 0) {
-        terminate_current_overlay_process(process);
+        previous_overlay_module != NULL) {
+        const int overlay_result = load_process_overlay(process, previous_overlay_module, previous_overlay_id);
+        if (overlay_result != 0) {
+            ESP_LOGE(TAG, "Module '%s' overlay %" PRIu32 " restore failed: %d",
+                previous_overlay_module->Name, previous_overlay_id, overlay_result);
+            terminate_current_overlay_process(process);
+        }
     }
     __atomic_store_n(&process->LogicalOverlayModule, previous_overlay_module, __ATOMIC_RELEASE);
     __atomic_store_n(&process->LogicalOverlayId, previous_overlay_id, __ATOMIC_RELEASE);
@@ -2453,6 +2791,7 @@ static ct_process *allocate_process(void)
         if (!s_processes[index].Used) {
             ct_process *process = &s_processes[index];
             (void)memset(process, 0, sizeof(*process));
+            process->AllocationLock = (portMUX_TYPE)portMUX_INITIALIZER_UNLOCKED;
             process->Used = true;
             process->Id = s_next_process_id++;
             process->CurrentDirectory = malloc(2);
@@ -2497,18 +2836,51 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || path == NULL || arguments == NULL || path->Length <= 0 || arguments->Length < 0 || arguments->Length > CT_MAX_ARGUMENTS) return 0;
     char path_buffer[CT_MODULE_PATH_MAX];
     if (resolve_module_path_bytes(path->Data, (size_t)path->Length, path_buffer) != 0) return 0;
+    const char *overlay_chain[1] = { NULL };
+    size_t reserved_overlay_bytes = 0u;
+    const int overlay_result = inspect_process_overlay_requirement(path_buffer, overlay_chain, 0u,
+        &reserved_overlay_bytes);
+    if (overlay_result != 0) {
+        ESP_LOGE(TAG, "Managed process overlay preflight failed: %d", overlay_result);
+        return 0;
+    }
+    volatile uint32_t *reserved_overlay = NULL;
+    if (reserved_overlay_bytes != 0u) {
+        reserved_overlay = heap_caps_aligned_alloc(16u, reserved_overlay_bytes,
+            MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
+        if (reserved_overlay == NULL) {
+            ESP_LOGE(TAG, "Managed process overlay reservation failed: requested=%u, executable-free=%u, "
+                "executable-largest=%u", (unsigned)reserved_overlay_bytes,
+                (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT),
+                (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT));
+            return 0;
+        }
+    }
     ct_module *module = NULL;
     const char *chain[1] = { NULL };
-    if (load_module_recursive(path_buffer, chain, 0, &module) != 0) return 0;
+    const int module_result = load_module_recursive(path_buffer, chain, 0, &module);
+    if (module_result != 0) {
+        heap_caps_free((void *)(uintptr_t)reserved_overlay);
+        ESP_LOGE(TAG, "Managed process module load failed: %d", module_result);
+        return 0;
+    }
     if (module->Descriptor->Kind != 1 || module->Descriptor->Main == NULL || module->Descriptor->CreateArguments == NULL) {
+        heap_caps_free((void *)(uintptr_t)reserved_overlay);
         release_module(module);
         return 0;
     }
     xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_process *process = allocate_process();
     xSemaphoreGive(s_registry);
-    if (process == NULL) { release_module(module); return 0; }
+    if (process == NULL) {
+        ESP_LOGE(TAG, "Managed process allocation failed: no process slot or control resources");
+        heap_caps_free((void *)(uintptr_t)reserved_overlay);
+        release_module(module);
+        return 0;
+    }
     process->Root = module;
+    process->OverlayWindow = reserved_overlay;
+    process->OverlayWindowSize = reserved_overlay_bytes;
     ct_process *parent = current_process();
     process->ParentId = parent == NULL ? 0u : parent->Id;
     (void)snprintf(process->RootName, sizeof(process->RootName), "%s", module->Name);
@@ -2524,7 +2896,11 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
         } else {
             process->Streams[stream] = retain_endpoint(&s_uart_streams[stream]);
         }
-        if (process->Streams[stream] == NULL) return fail_unpublished_process_start(process);
+        if (process->Streams[stream] == NULL) {
+            ESP_LOGE(TAG, "Managed process %u stream %u allocation failed", (unsigned)process->Id,
+                (unsigned)stream);
+            return fail_unpublished_process_start(process);
+        }
     }
     if (__atomic_load_n(&process->Streams[0]->ForegroundProcess, __ATOMIC_ACQUIRE) == 0u)
         __atomic_store_n(&process->Streams[0]->ForegroundProcess, process->Id, __ATOMIC_RELEASE);
@@ -2539,16 +2915,28 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
         process->Arguments[index][length] = '\0';
         process->ArgumentLengths[index] = length;
     }
-    if (add_instance_graph(process, module) != 0) return fail_unpublished_process_start(process);
+    const int instance_result = add_instance_graph(process, module);
+    if (instance_result != 0) {
+        ESP_LOGE(TAG, "Managed process %u instance graph failed: %d", (unsigned)process->Id,
+            instance_result);
+        return fail_unpublished_process_start(process);
+    }
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
         ct_module *instance_module = process->Instances[index].Module;
         process->HasOverlays |= instance_module->Descriptor->HasOverlays != 0u;
-        if (instance_module->MaximumOverlayBytes > process->OverlayWindowSize)
-            process->OverlayWindowSize = instance_module->MaximumOverlayBytes;
+        if (instance_module->MaximumOverlayBytes > process->OverlayWindowSize) {
+            ESP_LOGE(TAG, "Managed process overlay graph changed after preflight: reserved=%u, required=%u",
+                (unsigned)process->OverlayWindowSize, (unsigned)instance_module->MaximumOverlayBytes);
+            return fail_unpublished_process_start(process);
+        }
     }
     process->TaskCount = 1;
     if (xTaskCreate(process_main, module->Name, module->Descriptor->MainTaskStackBytes, process,
             tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
+        ESP_LOGE(TAG, "Managed process %u task creation failed: stack=%u, free=%u, largest=%u",
+            (unsigned)process->Id, (unsigned)module->Descriptor->MainTaskStackBytes,
+            (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
         process->TaskCount = 0;
         return fail_unpublished_process_start(process);
     }
@@ -3050,6 +3438,58 @@ bool ctilde_managed_native_resource_release(uintptr_t token)
     return true;
 }
 
+/* Thread payloads include native semaphores, which forced arena cleanup cannot
+ * discover through managed destructors. Keep their owner resident and register
+ * it before ending the allocation operation. No public ABI layout is involved. */
+typedef struct ct_thread_payload_owner {
+    uintptr_t Token;
+    SemaphoreHandle_t Done;
+    max_align_t Payload[];
+} ct_thread_payload_owner;
+
+static void release_thread_payload(uintptr_t value)
+{
+    ct_thread_payload_owner *owner = (ct_thread_payload_owner *)value;
+    if (owner->Done != NULL) vSemaphoreDelete(owner->Done);
+    free(owner);
+}
+
+void *ctilde_managed_thread_payload_allocate(size_t size, void **done)
+{
+    ct_execution_context *context = current_context();
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
+    ct_thread_payload_owner *owner = size > SIZE_MAX - sizeof(*owner) ? NULL : calloc(1u, sizeof(*owner) + size);
+    if (owner != NULL) {
+        owner->Done = xSemaphoreCreateBinary();
+        if (owner->Done != NULL)
+            owner->Token = ctilde_managed_native_resource_register((uintptr_t)owner, release_thread_payload);
+        if (owner->Token == 0u) { release_thread_payload((uintptr_t)owner); owner = NULL; }
+    }
+    *done = owner == NULL ? NULL : owner->Done;
+    void *payload = owner == NULL ? NULL : (void *)owner->Payload;
+    end_runtime_operation(context);
+    return payload;
+}
+
+void ctilde_managed_thread_payload_free(void *payload)
+{
+    if (payload == NULL) return;
+    ct_execution_context *context = current_context();
+    if (!begin_runtime_operation(context)) await_forced_task_deletion();
+    ct_thread_payload_owner *owner = (ct_thread_payload_owner *)((uint8_t *)payload - offsetof(ct_thread_payload_owner, Payload));
+    (void)ctilde_managed_native_resource_release(owner->Token);
+    end_runtime_operation(context);
+}
+
+__attribute__((noreturn)) void ctilde_managed_thread_exit(void)
+{
+    /* Detachment can let the reaper unload the caller's module immediately.
+     * Complete the final task instructions in resident firmware. */
+    if (api_service(CT_RUNTIME_SERVICE_THREAD_DETACH, NULL, 0u) != 0) abort();
+    vTaskDelete(NULL);
+    abort();
+}
+
 void ctilde_managed_console_set_uart_activity_hook(void (*hook)(void))
 {
     s_uart_activity_hook = hook;
@@ -3080,6 +3520,12 @@ size_t ctilde_managed_modules(ct_managed_module_info *output, size_t capacity)
 }
 
 static const struct esp_elfsym s_symbols[] = {
+    { "__atomic_load_8", (void *)ct_idf_atomic_load_8 },
+    { "__atomic_compare_exchange_8", (void *)ct_idf_atomic_compare_exchange_8 },
+    ESP_ELFSYM_EXPORT(ctilde_managed_atomic_compare_exchange_u32),
+    ESP_ELFSYM_EXPORT(ctilde_managed_thread_payload_allocate),
+    ESP_ELFSYM_EXPORT(ctilde_managed_thread_payload_free),
+    ESP_ELFSYM_EXPORT(ctilde_managed_thread_exit),
     ESP_ELFSYM_EXPORT(ct_managed_process_start), ESP_ELFSYM_EXPORT(ct_managed_process_start_redirected),
     ESP_ELFSYM_EXPORT(ct_managed_process_try_open), ESP_ELFSYM_EXPORT(ct_managed_process_current),
     ESP_ELFSYM_EXPORT(ct_managed_process_id),
@@ -3093,10 +3539,19 @@ static const struct esp_elfsym s_symbols[] = {
     ESP_ELFSYM_EXPORT(ct_managed_process_pipe_read), ESP_ELFSYM_EXPORT(ct_managed_process_pipe_write),
     ESP_ELFSYM_EXPORT(ct_managed_process_pipe_close),
     ESP_ELFSYM_EXPORT(memcpy), ESP_ELFSYM_EXPORT(memset), ESP_ELFSYM_EXPORT(memcmp), ESP_ELFSYM_EXPORT(memchr),
-    ESP_ELFSYM_EXPORT(strlen), ESP_ELFSYM_EXPORT(snprintf), ESP_ELFSYM_EXPORT(fprintf), ESP_ELFSYM_EXPORT(fwrite),
+    ESP_ELFSYM_EXPORT(strlen), ESP_ELFSYM_EXPORT(strnlen), ESP_ELFSYM_EXPORT(snprintf), ESP_ELFSYM_EXPORT(fprintf), ESP_ELFSYM_EXPORT(fwrite),
     ESP_ELFSYM_EXPORT(fputc), ESP_ELFSYM_EXPORT(fputs), ESP_ELFSYM_EXPORT(fflush),
-    ESP_ELFSYM_EXPORT(longjmp), ESP_ELFSYM_EXPORT(esp_err_to_name), ESP_ELFSYM_EXPORT(__getreent),
+    ESP_ELFSYM_EXPORT(setjmp), ESP_ELFSYM_EXPORT(longjmp), ESP_ELFSYM_EXPORT(esp_err_to_name), ESP_ELFSYM_EXPORT(__getreent),
     ESP_ELFSYM_EXPORT(__extendsfdf2), ESP_ELFSYM_EXPORT(__udivdi3), ESP_ELFSYM_EXPORT(__umoddi3),
+    ESP_ELFSYM_EXPORT(__ashldi3),
+    /* Source-created Thread helpers call the same FreeRTOS primitives as firmware. */
+    ESP_ELFSYM_EXPORT(xQueueSemaphoreTake), ESP_ELFSYM_EXPORT(vQueueDelete),
+    ESP_ELFSYM_EXPORT(xQueueGenericSend), ESP_ELFSYM_EXPORT(xQueueGenericCreate),
+    ESP_ELFSYM_EXPORT(vTaskDelete), ESP_ELFSYM_EXPORT(vTaskDelay),
+    ESP_ELFSYM_EXPORT(xTaskCreatePinnedToCore), ESP_ELFSYM_EXPORT(xTaskGetCurrentTaskHandle),
+#if CONFIG_IDF_TARGET_ARCH_XTENSA
+    ESP_ELFSYM_EXPORT(vPortYield),
+#endif
     ESP_ELFSYM_END
 };
 

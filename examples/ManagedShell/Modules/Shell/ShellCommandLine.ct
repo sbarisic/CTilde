@@ -3,6 +3,7 @@ using System.Text;
 
 namespace Examples.ManagedShell;
 
+[Overlay("command")]
 internal static class ShellCommandLine
 {
     private static bool IsWhitespace(char value)
@@ -13,10 +14,23 @@ internal static class ShellCommandLine
     private static bool TryEscape(char value, out char result)
     {
         result = value;
-        if (value == '"' || value == '\\') return true;
-        if (value == 't') { result = '\t'; return true; }
-        if (value == 'r') { result = '\r'; return true; }
-        if (value == 'n') { result = '\n'; return true; }
+        if (value == '"' || value == '\\')
+            return true;
+        if (value == 't')
+        {
+            result = '\t';
+            return true;
+        }
+        if (value == 'r')
+        {
+            result = '\r';
+            return true;
+        }
+        if (value == 'n')
+        {
+            result = '\n';
+            return true;
+        }
         return false;
     }
 
@@ -27,8 +41,10 @@ internal static class ShellCommandLine
         int position = 0;
         while (position < line.Length)
         {
-            while (position < line.Length && IsWhitespace(line[position])) position++;
-            if (position == line.Length) break;
+            while (position < line.Length && IsWhitespace(line[position]))
+                position++;
+            if (position == line.Length)
+                break;
             StringBuilder value = new StringBuilder();
             bool inQuotes = false;
             bool wasQuoted = false;
@@ -36,20 +52,37 @@ internal static class ShellCommandLine
             while (position < line.Length && (inQuotes || !IsWhitespace(line[position])))
             {
                 char current = line[position++];
-                if (current == '"') { inQuotes = !inQuotes; wasQuoted = true; started = true; }
+                if (current == '"')
+                {
+                    inQuotes = !inQuotes;
+                    wasQuoted = true;
+                    started = true;
+                }
                 else if (current == '\\')
                 {
-                    if (position == line.Length) return false;
+                    if (position == line.Length)
+                        return false;
                     char escaped;
-                    if (!TryEscape(line[position++], out escaped)) return false;
-                    value.Append(escaped); started = true;
+                    if (!TryEscape(line[position++], out escaped))
+                        return false;
+                    value.Append(escaped);
+                    started = true;
                 }
-                else { value.Append(current); started = true; }
+                else
+                {
+                    value.Append(current);
+                    started = true;
+                }
             }
-            if (inQuotes) return false;
+            if (inQuotes)
+                return false;
             if (started)
             {
-                if (emit) { values[count] = value.ToString(); quoted[count] = wasQuoted; }
+                if (emit)
+                {
+                    values[count] = value.ToString();
+                    quoted[count] = wasQuoted;
+                }
                 count++;
             }
         }
@@ -61,19 +94,25 @@ internal static class ShellCommandLine
         int count;
         if (!TryParsePass(line, null, null, false, out count))
         {
-            arguments = new string[0]; background = false; return false;
+            arguments = new string[0];
+            background = false;
+            return false;
         }
         string[] values = new string[count];
         bool[] quoted = new bool[count];
         int parsed;
         if (!TryParsePass(line, values, quoted, true, out parsed))
         {
-            arguments = new string[0]; background = false; return false;
+            arguments = new string[0];
+            background = false;
+            return false;
         }
         background = parsed > 0 && values[parsed - 1] == "&" && !quoted[parsed - 1];
-        if (background) parsed--;
+        if (background)
+            parsed--;
         arguments = new string[parsed];
-        for (int index = 0; index < parsed; index++) arguments[index] = values[index];
+        for (int index = 0; index < parsed; index++)
+            arguments[index] = values[index];
         return true;
     }
 }

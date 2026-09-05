@@ -13,7 +13,7 @@ internal static class CTildeCommand
         if (args.Length > 0 && args[0] == "format")
             return FormatCommand.Run(args);
         if (args.Length > 0 && args[0] is "restore" or "update" or "vendor")
-            return RunModuleCommand(args);
+            return await RunModuleCommandAsync(args);
         if (!CommandLineOptions.TryParse(args, out var options, out var parseError, out var showHelp))
             return UsageError(parseError!);
         if (args.Length == 0 || showHelp)
@@ -572,7 +572,7 @@ internal static class CTildeCommand
         Console.Error.WriteLine("       ctilde clean --project <ctilde.json> [--trace]");
         Console.Error.WriteLine("       ctilde format [--check] <file-or-directory>...");
         Console.Error.WriteLine("Native build options: --configuration debug|release --compiler <name|path> --native-output <path> [--lto] [--stack-report <report.json>]");
-        Console.Error.WriteLine("                      --optimization speed|aggressive --cpu-target baseline|avx2 --floating-point precise|fast");
+        Console.Error.WriteLine("                      --optimization size|speed|aggressive --cpu-target baseline|avx2 --floating-point precise|fast");
         Console.Error.WriteLine("                      --pgo off|generate|use [--pgo-directory <project-relative-directory>]");
         Console.Error.WriteLine("                          --idf-project <directory> --idf-path <directory>");
         Console.Error.WriteLine("Freestanding build: --linker-script <file> --entry-symbol <name> --native-source <file> --object <file> --library <file>");
@@ -582,17 +582,20 @@ internal static class CTildeCommand
         Console.Error.WriteLine("Debug preparation: --prepare-debug launch|attach [--debug-target <descriptor.json>] [--debug-memory off|objects|guarded] [--serial-port <port>] [--baud-rate <rate>]");
     }
 
-    private static int RunModuleCommand(string[] args)
+    private static async Task<int> RunModuleCommandAsync(string[] args)
     {
         if (args.Length != 3 || args[1] != "--project" || string.IsNullOrWhiteSpace(args[2]))
             return UsageError($"{args[0]} requires exactly --project <ctilde.json>.");
+        using var cancellation = new CancellationTokenSource();
+        ConsoleCancelEventHandler cancel = (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+        Console.CancelKeyPress += cancel;
         try
         {
             var (root, modules) = CTildeProjectFile.ReadModuleReferences(args[2]);
             if (args[0] == "vendor")
                 RepositoryModules.Vendor(root, modules);
             else
-                RepositoryModules.Restore(root, modules, update: args[0] == "update");
+                await RepositoryModules.RestoreAsync(root, modules, update: args[0] == "update", cancellation.Token);
             Console.WriteLine(args[0] switch
             {
                 "restore" => $"Restored {modules.Length} exact module(s).",
@@ -606,5 +609,11 @@ internal static class CTildeCommand
             Console.Error.WriteLine($"ctilde: {exception.Message}");
             return 1;
         }
+        catch (OperationCanceledException)
+        {
+            Console.Error.WriteLine("ctilde: Module operation cancelled.");
+            return 130;
+        }
+        finally { Console.CancelKeyPress -= cancel; }
     }
 }

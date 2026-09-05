@@ -234,13 +234,14 @@ internal sealed record CommandLineOptions(
                     var optimizationValue = RequireValue();
                     optimization = optimizationValue switch
                     {
+                        "size" => NativeOptimization.Size,
                         "speed" => NativeOptimization.Speed,
                         "aggressive" => NativeOptimization.Aggressive,
                         null => null,
                         _ => (NativeOptimization)(-1),
                     };
                     if (optimization is not null && !Enum.IsDefined(optimization.Value))
-                        parseError = $"Unknown optimization '{optimizationValue}'; expected speed or aggressive.";
+                        parseError = $"Unknown optimization '{optimizationValue}'; expected size, speed, or aggressive.";
                     break;
                 case "--cpu-target":
                     var cpuTargetValue = RequireValue();

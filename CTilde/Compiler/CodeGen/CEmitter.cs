@@ -230,6 +230,12 @@ internal sealed partial class CEmitter : ILoweringServices
         return $"ct_enum_parse_{NameMangler.TypeCode(type.Type)}";
     }
 
+    internal void RegisterAccessorMethods(IEnumerable<IrFunction> functions)
+    {
+        foreach (var function in functions.Where(function => function.Property is not null))
+            _accessorMethods[(function.Property!, function.IsGetter)] = function.Method;
+    }
+
     public MethodSymbol GetAccessorMethod(PropertySymbol property, bool getter)
     {
         if (_accessorMethods.TryGetValue((property, getter), out var method))
@@ -257,6 +263,10 @@ internal sealed partial class CEmitter : ILoweringServices
             IsOverride = property.IsOverride,
             IsSealedOverride = property.IsSealedOverride,
             OverlayName = property.OverlayName,
+            IsInferredOverlay = property.IsInferredOverlay,
+            RequiresOverlayEntry = !property.IsInferredOverlay,
+            OverlayPlacementReason = property.IsInferredOverlay ? "inferred from property accessors" :
+                property.OverlayName is null ? null : "explicit property overlay",
             IsExplicitlyResident = property.IsExplicitlyResident,
             TypeSubstitutions = property.ContainingType.GenericDefinition is null
                 ? ImmutableDictionary<string, CType>.Empty
@@ -343,6 +353,7 @@ internal sealed partial class CEmitter : ILoweringServices
         EmitGlobals(runtimePrefix);
         EmitOwnershipHelpers(runtimePrefix);
         EmitPrototypes(runtimePrefix);
+        EmitOverlayImportRoots(runtimePrefix);
         EmitManagedCallStubs(runtimePrefix);
         EmitManagedImportSupport(runtimePrefix);
         EmitRuntimeImplementationBridges(runtimePrefix);
@@ -379,8 +390,26 @@ internal sealed partial class CEmitter : ILoweringServices
         foreach (var definition in definitions)
             externalRoots.Append('\n').Append(definition.Text);
         const string prefixSplit = "/* CTILDE_TYPES_RUNTIME_SPLIT */";
-        var prunedCombined = MarkUnusedGeneratedFields(PruneRuntimeHelpers(
-            typePrefix.ToString().TrimEnd() + "\n" + prefixSplit + "\n" + runtimePrefix, externalRoots.ToString()));
+        var combinedPrefix = PruneRuntimeHelpers(
+            typePrefix.ToString().TrimEnd() + "\n" + prefixSplit + "\n" + runtimePrefix, externalRoots.ToString());
+        if (IsManagedModule && _managedModuleMetadata?.HasOverlays == true)
+        {
+            var residentRoots = suffix.ToString() + "\n" + string.Join("\n", definitions
+                .Where(definition => !definition.Function.Method.IsOverlay).Select(definition => definition.Text));
+            var overlayRoots = definitions.Where(definition => definition.Function.Method.OverlayName is not null)
+                .GroupBy(definition => definition.Function.Method.OverlayName!, StringComparer.Ordinal)
+                .ToDictionary(group => group.Key, group => string.Join("\n", group.Select(item => item.Text)), StringComparer.Ordinal);
+            var placement = PlacePrivateRuntimeHelpers(combinedPrefix, residentRoots, overlayRoots);
+            combinedPrefix = placement.Prefix;
+            definitions = [.. definitions.Select(definition =>
+            {
+                if (definition.Function.Method.OverlayName is not { } overlay ||
+                    !placement.Replacements.TryGetValue(overlay, out var replacements))
+                    return definition;
+                return (definition.Function, Text: ReplaceRuntimeIdentifiers(definition.Text, replacements));
+            })];
+        }
+        var prunedCombined = MarkUnusedGeneratedFields(combinedPrefix);
         var splitOffset = prunedCombined.IndexOf(prefixSplit, StringComparison.Ordinal);
         if (splitOffset < 0)
             throw new InvalidOperationException("Generated C prefix split marker was removed during runtime pruning.");
@@ -861,6 +890,7 @@ internal sealed partial class CEmitter : ILoweringServices
         declaration = declaration.Replace("DRAM_ATTR ", string.Empty, StringComparison.Ordinal)
             .Replace("IRAM_ATTR ", string.Empty, StringComparison.Ordinal)
             .Replace("CT_USED ", string.Empty, StringComparison.Ordinal)
+            .Replace("CT_MANAGED_OVERLAY_IMPORT ", string.Empty, StringComparison.Ordinal)
             .Replace("CT_UNUSED ", string.Empty, StringComparison.Ordinal);
         foreach (var prefix in new[] { "CT_SECTION_DATA_", "CT_SECTION_READONLYDATA_" })
         {
@@ -1025,6 +1055,9 @@ internal sealed partial class CEmitter : ILoweringServices
             entry["interrupt"] = method.IsInterrupt;
             entry["interruptSafe"] = method.IsInterruptSafe;
             entry["codeResidency"] = method.IsInterruptCode ? "iram" : null;
+            entry["overlay"] = method.OverlayName;
+            entry["overlayInferred"] = method.IsInferredOverlay;
+            entry["overlayPlacementReason"] = method.OverlayPlacementReason;
             entry["entryPoint"] = method.IsEntryPoint;
             entry["export"] = method.ExportName;
             entry["taskStackBytes"] = method.TaskStackSize;
@@ -1148,6 +1181,7 @@ internal sealed partial class CEmitter : ILoweringServices
                     ["name"] = cName,
                     ["residentStub"] = method.OverlayName is null ? null : method.CName,
                     ["overlay"] = method.OverlayName,
+                    ["overlayInferred"] = method.IsInferredOverlay,
                     ["overlayId"] = method.OverlayName is null ? null : overlayIds[method.OverlayName],
                     ["overlayBody"] = method.OverlayName is null ? null : OverlayBodyName(method, cName),
                     ["overlayBodyOffset"] = null,
@@ -1458,9 +1492,9 @@ internal sealed partial class CEmitter : ILoweringServices
         bool virtualDispatch = false)
     {
         if (virtualDispatch || !caller.IsOverlay || target.OverlayName != caller.OverlayName ||
-            target.IsConstructor && target.ContainingType.Kind == DeclaredTypeKind.Class)
+            target.IsConstructor && target.ContainingType.Kind == DeclaredTypeKind.Class && target.RequiresOverlayEntry)
             return callableName;
-        var emittedLocally = target.Syntax is not null &&
+        var emittedLocally = !target.RequiresOverlayEntry || target.Syntax is not null &&
             Model.UserSyntaxTrees.Any(tree => ReferenceEquals(tree.Text, target.Syntax.Source));
         return emittedLocally ? OverlayBodyName(target, callableName) : callableName;
     }
@@ -1564,7 +1598,7 @@ internal sealed partial class CEmitter : ILoweringServices
                 writer.WriteLine("        ct_exception_top = ct_main_frame.Previous;");
                 writer.WriteLine("        static const uint8_t diagnostic[] = \"C~ unhandled module exception\\n\";");
                 writer.WriteLine("        ct_runtime_console_write(diagnostic, sizeof(diagnostic) - 1u);");
-                writer.WriteLine("        ct_release_fast(exception);");
+                writer.WriteLine("        ct_release(exception);");
                 writer.WriteLine("        return -2;");
                 writer.WriteLine("    }");
                 writer.WriteLine("    ct_exception_top = &ct_main_frame;");
@@ -1633,7 +1667,7 @@ internal sealed partial class CEmitter : ILoweringServices
         foreach (var function in _irFunctions)
         {
             var method = function.Property is null ? function.Method : GetAccessorMethod(function.Property, function.IsGetter);
-            if (!method.IsOverlay)
+            if (!method.IsOverlay || !method.RequiresOverlayEntry)
                 continue;
             var constructorInitializer = method.IsConstructor && method.ContainingType.Kind == DeclaredTypeKind.Class;
             var callable = constructorInitializer
@@ -1665,10 +1699,12 @@ internal sealed partial class CEmitter : ILoweringServices
     private void EmitManagedCallStubs(CWriter writer)
     {
         var entries = ManagedCallEntries();
-        if (entries.IsEmpty)
-            return;
+        foreach (var entry in ManagedLocalOverlayEntries())
+            writer.WriteLine(ManagedCallSignature(entry, entry.BodyName, prototype: true));
         foreach (var entry in entries.Where(entry => entry.Placement == 1u))
             writer.WriteLine(ManagedCallSignature(entry, entry.BodyName, prototype: true));
+        if (entries.IsEmpty)
+            return;
         writer.WriteLine("static void ct_leave_managed_call_cleanup(void* value) { ct_runtime_api->LeaveManagedCall((ct_managed_call_frame_v22*)value); }");
         writer.WriteLine("static ct_managed_call_target_v3 ct_managed_call_targets_v3[] = {");
         foreach (var entry in entries)
@@ -1703,10 +1739,78 @@ internal sealed partial class CEmitter : ILoweringServices
         writer.WriteLine();
     }
 
+    private ImmutableArray<ManagedCallEntry> ManagedLocalOverlayEntries()
+    {
+        if (!IsManagedModule)
+            return [];
+        var entries = new Dictionary<string, ManagedCallEntry>(StringComparer.Ordinal);
+        foreach (var function in _irFunctions)
+        {
+            var method = function.Property is null ? function.Method : GetAccessorMethod(function.Property, function.IsGetter);
+            if (!method.IsOverlay || method.RequiresOverlayEntry)
+                continue;
+            var constructorInitializer = method.IsConstructor && method.ContainingType.Kind == DeclaredTypeKind.Class;
+            var callable = constructorInitializer
+                ? ConstructorInitializerName(method)
+                : function.Property is null ? method.CName : function.IsGetter
+                    ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
+            entries[callable] = new ManagedCallEntry(
+                $"inferred:{method.OverlayName}:{NameMangler.MethodIdentity(method)}:{callable}", method, callable,
+                OverlayBodyName(method, callable), constructorInitializer, 1u, 0u, -1);
+        }
+        return [.. entries.Values.OrderBy(entry => entry.Key, StringComparer.Ordinal)];
+    }
+
+    private void EmitOverlayImportRoots(CWriter writer)
+    {
+        if (!IsManagedModule || !_irFunctions.Any(function =>
+                (function.Property is null ? function.Method : GetAccessorMethod(function.Property, function.IsGetter)).IsOverlay))
+            return;
+        var visited = new HashSet<MethodSymbol>();
+        var pending = new Stack<MethodSymbol>(_reachableMethods.Where(method => method.IsOverlay));
+        var nativeImports = new HashSet<string>(StringComparer.Ordinal);
+        while (pending.Count != 0)
+        {
+            var method = pending.Pop();
+            if (!visited.Add(method))
+                continue;
+            foreach (var operation in Model.Effects.Operations.GetValueOrDefault(method, []))
+            {
+                var target = operation.Target;
+                if (target is null)
+                    continue;
+                if (target.IsNativeBoundary && target.ExternName is not null)
+                    nativeImports.Add(target.CName);
+                else if (_reachableMethods.Contains(target))
+                    pending.Push(target);
+            }
+        }
+        var imports = nativeImports
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .Concat(["memcmp", "memcpy", "memset", "snprintf", "strlen"])
+            .Concat(_usesExceptions ? ["setjmp"] : [])
+            .Distinct(StringComparer.Ordinal)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+        if (imports.Length == 0)
+            return;
+        writer.WriteLine("CT_MANAGED_OVERLAY_IMPORT const uintptr_t ct_overlay_import_roots[] = {");
+        foreach (var import in imports)
+            writer.WriteLine($"    (uintptr_t)&{import},");
+        writer.WriteLine("};");
+        writer.WriteLine();
+    }
+
     private string ManagedCallSignature(ManagedCallEntry entry, string name, bool prototype)
     {
         if (!entry.ConstructorInitializer)
-            return MethodSignature(entry.Method, name, prototype);
+        {
+            var methodSignature = MethodSignature(entry.Method, name, prototype);
+            return entry.Placement == 1u && methodSignature.StartsWith("static ", StringComparison.Ordinal)
+                ? methodSignature.Insert("static ".Length, "CT_OVERLAY_STUB ")
+                : methodSignature;
+        }
         var parameters = new List<string> { $"{NameMangler.Type(entry.Method.ContainingType)}* ct_self" };
         foreach (var parameter in entry.Method.Parameters)
         {
@@ -1715,7 +1819,8 @@ internal sealed partial class CEmitter : ILoweringServices
             if (parameter.IsSynchronousCallback)
                 parameters.Add($"void* {parameterName}_context");
         }
-        var signature = "static " + CFunctionDeclaration(CType.Void, name, parameters);
+        var signature = "static " + (entry.Placement == 1u ? "CT_OVERLAY_STUB " : string.Empty) +
+            CFunctionDeclaration(CType.Void, name, parameters);
         return prototype ? signature + ";" : signature;
     }
 

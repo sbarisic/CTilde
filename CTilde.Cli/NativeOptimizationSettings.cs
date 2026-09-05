@@ -11,7 +11,7 @@ internal static class NativeOptimizationSettings
             flags.AddRange(["/Od", "/Zi", "/Oy-"]);
         else
         {
-            flags.Add("/O2");
+            flags.Add(request.Optimization == NativeOptimization.Size ? "/O1" : "/O2");
             if (request.Optimization == NativeOptimization.Aggressive)
                 flags.Add("/Ob3");
             flags.AddRange(["/Gy", "/Gw"]);
@@ -32,7 +32,7 @@ internal static class NativeOptimizationSettings
             flags.AddRange(["-Og", "-g3", "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls"]);
         else
         {
-            flags.Add(request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
+            flags.Add(GnuOptimization(request.Optimization));
             if (includeSections)
                 flags.AddRange(["-ffunction-sections", "-fdata-sections"]);
         }
@@ -44,7 +44,7 @@ internal static class NativeOptimizationSettings
     {
         var flags = new List<string>();
         if (request.Configuration == CTildeNativeBuildConfiguration.Release)
-            flags.Add(request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
+            flags.Add(GnuOptimization(request.Optimization));
         flags.AddRange(GnuCpuAndFloatingPoint(request));
         if (request.Lto)
             flags.Add("-flto");
@@ -57,7 +57,7 @@ internal static class NativeOptimizationSettings
             return ["-Og", "-g3", "-fno-omit-frame-pointer", "-fno-optimize-sibling-calls", .. GnuCpuAndFloatingPoint(request)];
         if (request.CosmopolitanMode == CosmopolitanRuntimeMode.Tiny)
             return ["-Os", .. GnuCpuAndFloatingPoint(request)];
-        return [request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2", .. GnuCpuAndFloatingPoint(request)];
+        return [GnuOptimization(request.Optimization), .. GnuCpuAndFloatingPoint(request)];
     }
 
     public static IReadOnlyList<string> CosmopolitanLink(BuildRequest request)
@@ -66,7 +66,7 @@ internal static class NativeOptimizationSettings
         if (request.Configuration == CTildeNativeBuildConfiguration.Release)
             flags.Add(request.CosmopolitanMode == CosmopolitanRuntimeMode.Tiny
                 ? "-Os"
-                : request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
+                : GnuOptimization(request.Optimization));
         flags.AddRange(GnuCpuAndFloatingPoint(request));
         if (request.Lto)
             flags.Add("-flto");
@@ -82,9 +82,13 @@ internal static class NativeOptimizationSettings
         // arbitrary module object symbols.  Hidden definitions are lowered to
         // module-relative relocations instead.
         if (request.ManagedModule is not null)
+        {
             flags.Add("-fvisibility=hidden");
+        }
         if (request.Optimization is not null)
-            flags.Add(request.Optimization == NativeOptimization.Aggressive ? "-O3" : "-O2");
+            flags.Add(GnuOptimization(request.Optimization));
+        if (request.Lto)
+            flags.Add("-flto");
         flags.AddRange(GnuCpuAndFloatingPoint(request));
         if (request.StackReportPath is not null)
             flags.AddRange(["-fstack-usage", "-fcallgraph-info=su"]);
@@ -97,7 +101,7 @@ internal static class NativeOptimizationSettings
         if (flags.Count == 0)
             return contents;
         var escaped = flags.Select(flag => flag.Replace("\\", "\\\\", StringComparison.Ordinal).Replace("\"", "\\\"", StringComparison.Ordinal));
-        return contents + "\n# Draft 0.41 controlled options apply only to C~-generated sources.\n" +
+        return contents + "\n# Controlled options apply to C~-generated and declared managed-module native sources.\n" +
             "set_property(SOURCE ${CTILDE_GENERATED_SOURCES} APPEND PROPERTY COMPILE_OPTIONS " +
             string.Join(' ', escaped.Select(flag => $"\"{flag}\"")) + ")\n";
     }
@@ -117,6 +121,13 @@ internal static class NativeOptimizationSettings
             flags.Add("-ffast-math");
         return flags;
     }
+
+    private static string GnuOptimization(NativeOptimization? optimization) => optimization switch
+    {
+        NativeOptimization.Size => "-Os",
+        NativeOptimization.Aggressive => "-O3",
+        _ => "-O2",
+    };
 
     private static string Name<T>(T? value, string fallback) where T : struct =>
         value.HasValue ? $"{value.Value}".ToLowerInvariant() : fallback;

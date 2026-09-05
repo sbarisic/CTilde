@@ -18,6 +18,7 @@ const sshRoot = join(root, "examples", "ManagedShell", "Modules", "SystemSsh");
 const server = readFileSync(join(sshRoot, "Server.ct"), "utf8");
 const transport = readFileSync(join(sshRoot, "Transport.ct"), "utf8");
 const sftp = readFileSync(join(sshRoot, "Sftp.ct"), "utf8");
+const configuration = readFileSync(join(sshRoot, "Configuration.ct"), "utf8");
 
 const u32 = value => {
   const result = Buffer.alloc(4);
@@ -57,7 +58,7 @@ test("OpenSSH AES-GCM packet fixture authenticates the clear packet length", () 
   decipher.setAAD(header, { plaintextLength: encrypted.length });
   decipher.setAuthTag(tag);
   assert.deepEqual(Buffer.concat([decipher.update(encrypted), decipher.final()]), body);
-  assert.match(transport, /AesSeal\(outboundCipher, nonce, header, body, cipher, tag\)/);
+  assert.match(transport, /AesSeal\(outboundCipher, nonce, header, body,\s+cipher, tag\)/);
   assert.match(transport, /outboundInvocation = 0UL/);
   assert.match(transport, /Nonce\(outboundIv, outboundInvocation\)/);
   assert.match(transport, /for \(int index = 11; index >= 4; index--\)/);
@@ -90,7 +91,7 @@ test("exchange hash and key derivation use SSH strings and the original session 
     sshString(encodedSecret), exchangeHash, Buffer.from("A"), exchangeHash,
   ])).digest().subarray(0, 16);
   assert.equal(receiveKey.toString("hex"), "981d869136378aa01e8c6de652ab3e1d");
-  assert.match(server, /if \(sessionIdentifier == null\) sessionIdentifier = exchangeHash/);
+  assert.match(server, /if \(sessionIdentifier == null\)\s+sessionIdentifier = exchangeHash/);
   assert.match(server, /writer\.WriteRaw\(sessionIdentifier\)/);
 });
 
@@ -115,6 +116,12 @@ test("authorized-key fixture has the exact P-256 SSH blob shape", () => {
   assert.equal(next().toString(), "nistp256");
   assert.equal(next().length, 65);
   assert.equal(offset, blob.length);
+  const line = `ecdsa-sha2-nistp256 ${blob.toString("base64")} fixture`;
+  const prefix = "ecdsa-sha2-nistp256 ";
+  const end = line.indexOf(" ", prefix.length);
+  assert.deepEqual(Buffer.from(line.slice(prefix.length, end), "base64"), blob);
+  assert.match(configuration, /const string keyPrefix = "ecdsa-sha2-nistp256 "/);
+  assert.match(configuration, /line\.Substring\(keyPrefix\.Length, end - keyPrefix\.Length\)/);
   assert.match(server, /P256Verify\(key, hash, fixedSignature\)/);
 });
 

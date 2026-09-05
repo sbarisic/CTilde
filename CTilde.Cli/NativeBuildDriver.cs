@@ -204,6 +204,7 @@ internal static class HostedBuildDriver
 
     private static async Task<int> CompileMsvcAsync(HostedCompiler compiler, BuildRequest request, PgoContext pgo, CancellationToken cancellationToken)
     {
+        var objectCache = new NativeObjectCache(compiler.Command, [], compiler.Environment, true, null, Path.GetDirectoryName(request.ExecutablePath!)!);
         var common = new List<string> { "/nologo", "/std:clatest", "/W4", "/WX", "/wd4702" };
         common.AddRange(NativeOptimizationSettings.MsvcCompile(request));
         if (request.Lto)
@@ -217,7 +218,8 @@ internal static class HostedBuildDriver
         var objects = new List<string>();
         foreach (var source in request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []))
         {
-            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, source, ".obj") : CachedObjectPath(request, compiler, source, string.Join('\n', common), ".obj");
+            using var cacheEntry = pgo.Enabled ? null : await objectCache.PrepareAsync(request, source, common, ".obj", cancellationToken);
+            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, source, ".obj") : cacheEntry!.ObjectPath;
             objects.Add(objectPath);
             if ((!pgo.Enabled || pgo.ReuseObjects) && File.Exists(objectPath))
             {
@@ -228,14 +230,15 @@ internal static class HostedBuildDriver
             var arguments = new List<string>(common)
             {
                 "/c",
-                $"/Fo:{objectPath}",
-                $"/Fd:{Path.ChangeExtension(objectPath, ".pdb")}",
+                $"/Fo:{cacheEntry?.CompilePath ?? objectPath}",
+                $"/Fd:{Path.ChangeExtension(cacheEntry?.CompilePath ?? objectPath, ".pdb")}",
                 source,
             };
             var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
                 Path.GetDirectoryName(request.ExecutablePath!)!, compiler.Environment), cancellationToken);
             if (result.ExitCode != 0)
                 return result.ExitCode;
+            cacheEntry?.Publish();
         }
 
         var link = new List<string> { "/nologo", $"/Fe:{request.ExecutablePath}" };
@@ -276,6 +279,7 @@ internal static class HostedBuildDriver
         var common = new List<string> { "-std=gnu23" };
         common.AddRange(configuration);
         var hostedSources = request.GeneratedSourcePaths.Concat(request.Hosted?.NativeSources ?? []).ToArray();
+        var objectCache = new NativeObjectCache(compiler.Command, prefix, compiler.Environment, false, compiler.WslCompiler, Path.GetDirectoryName(request.ExecutablePath!)!);
         var usesPthreads = hostedSources.Any(path => File.ReadAllText(path).Contains("pthread_", StringComparison.Ordinal));
         var usesDynamicLoader = request.GeneratedSourcePaths.Any(path => File.ReadAllText(path).Contains("dlopen(", StringComparison.Ordinal));
         if (usesPthreads)
@@ -295,7 +299,8 @@ internal static class HostedBuildDriver
         var objects = new List<string>();
         foreach (var originalSource in hostedSources)
         {
-            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, originalSource, ".o") : CachedObjectPath(request, compiler, originalSource, string.Join('\n', common), ".o");
+            using var cacheEntry = pgo.Enabled ? null : await objectCache.PrepareAsync(request, originalSource, common, ".o", cancellationToken);
+            var objectPath = pgo.Enabled ? PgoObjectPath(pgo, originalSource, ".o") : cacheEntry!.ObjectPath;
             objects.Add(objectPath);
             var hasStackSidecars = request.StackReportPath is null ||
                 (File.Exists(Path.ChangeExtension(objectPath, ".su")) && (request.Lto || File.Exists(Path.ChangeExtension(objectPath, ".ci"))));
@@ -306,7 +311,7 @@ internal static class HostedBuildDriver
                 continue;
             }
             var source = originalSource;
-            var output = objectPath;
+            var output = cacheEntry?.CompilePath ?? objectPath;
             if (compiler.Kind == HostedCompilerKind.WslGnu)
             {
                 source = await WslPathAsync(compiler.Command, source, request.RootDirectory, cancellationToken);
@@ -331,6 +336,7 @@ internal static class HostedBuildDriver
                 Console.Error.Write(first.StandardError);
                 return new GnuCompileResult(first.ExitCode, []);
             }
+            cacheEntry?.Publish();
         }
 
         var linkedObjects = objects.ToArray();
@@ -380,56 +386,6 @@ internal static class HostedBuildDriver
     }
 
     private sealed record GnuCompileResult(int ExitCode, string[] StackUsageFiles);
-
-    private static string CachedObjectPath(BuildRequest request, HostedCompiler compiler, string source, string flags, string extension)
-    {
-        var cache = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
-        Directory.CreateDirectory(cache);
-        var identity = new StringBuilder()
-            .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
-            .Append(compiler.Command).Append('\n')
-            .Append(compiler.WslCompiler).Append('\n')
-            .Append(File.Exists(compiler.Command) ? File.GetLastWriteTimeUtc(compiler.Command).Ticks : 0L).Append('\n')
-            .Append(request.Configuration).Append('\n')
-            .Append(NativeOptimizationSettings.Describe(request)).Append('\n')
-            .Append(flags).Append('\n')
-            .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
-        if (request.CLayout == GeneratedCLayout.Modules)
-        {
-            foreach (var path in GeneratedHeaderClosure(source, request.GeneratedDirectory!))
-                identity.Append(Path.GetRelativePath(request.GeneratedDirectory!, path).Replace('\\', '/')).Append(':')
-                    .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
-        }
-        var key = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
-        return Path.Combine(cache, key + extension);
-    }
-
-    private static IEnumerable<string> GeneratedHeaderClosure(string source, string generatedDirectory)
-    {
-        var root = Path.GetFullPath(generatedDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var pending = new Queue<string>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        pending.Enqueue(Path.GetFullPath(source));
-        while (pending.Count != 0)
-        {
-            var current = pending.Dequeue();
-            foreach (var line in File.ReadLines(current))
-            {
-                var trimmed = line.TrimStart();
-                if (!trimmed.StartsWith("#include \"", StringComparison.Ordinal))
-                    continue;
-                var start = trimmed.IndexOf('"') + 1;
-                var end = trimmed.IndexOf('"', start);
-                if (end <= start)
-                    continue;
-                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, trimmed[start..end]));
-                if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate) || !visited.Add(candidate))
-                    continue;
-                pending.Enqueue(candidate);
-            }
-        }
-        return visited.Order(StringComparer.Ordinal);
-    }
 
     private static string PgoObjectPath(PgoContext pgo, string source, string extension)
     {
@@ -693,6 +649,7 @@ internal static class FreestandingBuildDriver
         }
 
         var sources = request.GeneratedSourcePaths.Concat(settings.NativeSources).ToArray();
+        var objectCache = new NativeObjectCache(compiler.Command, compiler.Prefix, null, false, compiler.WslCompiler, request.RootDirectory);
         var objects = new List<string>();
         var useGnu2x = false;
         foreach (var source in sources)
@@ -703,7 +660,8 @@ internal static class FreestandingBuildDriver
                 for (var index = 0; index < flags.Length; index++)
                     if (flags[index] == "-std=gnu23")
                         flags[index] = "-std=gnu2x";
-            var objectPath = CachedObjectPath(request, compiler, source, flags);
+            using var cacheEntry = await objectCache.PrepareAsync(request, source, flags, ".o", cancellationToken);
+            var objectPath = cacheEntry.ObjectPath;
             objects.Add(objectPath);
             var hasStackSidecars = request.StackReportPath is null ||
                 (File.Exists(Path.ChangeExtension(objectPath, ".su")) && (request.Lto || File.Exists(Path.ChangeExtension(objectPath, ".ci"))));
@@ -718,7 +676,7 @@ internal static class FreestandingBuildDriver
             arguments.Add("-c");
             arguments.Add(await ToolPathAsync(compiler, source, request.RootDirectory, cancellationToken));
             arguments.Add("-o");
-            arguments.Add(await ToolPathAsync(compiler, objectPath, request.RootDirectory, cancellationToken));
+            arguments.Add(await ToolPathAsync(compiler, cacheEntry.CompilePath, request.RootDirectory, cancellationToken));
             var result = await NativeProcessRunner.RunAsync(new NativeProcessRequest(compiler.Command, arguments,
                 request.RootDirectory, ForwardOutput: false), cancellationToken);
             var standardIndex = arguments.IndexOf("-std=gnu23");
@@ -737,6 +695,7 @@ internal static class FreestandingBuildDriver
                 Console.Error.Write(result.StandardError);
                 return new NativeBuildOutcome(result.ExitCode, "freestanding", compiler.Command, compiler.WslCompiler);
             }
+            cacheEntry.Publish();
         }
 
         var link = new List<string>(compiler.Prefix);
@@ -852,53 +811,6 @@ internal static class FreestandingBuildDriver
         CompilationArchitecture.X64 => ["-m64"],
         _ => [],
     };
-
-    private static string CachedObjectPath(BuildRequest request, FreestandingCompiler compiler, string source, IReadOnlyList<string> flags)
-    {
-        var directory = Path.Combine(Path.GetDirectoryName(request.ExecutablePath!)!, ".ctilde-cache");
-        Directory.CreateDirectory(directory);
-        var identity = new StringBuilder()
-            .Append("draft-").Append(CompilerContract.DraftVersion).Append('\n')
-            .Append(compiler.Command).Append('\n').Append(compiler.WslCompiler).Append('\n')
-            .Append(request.Architecture).Append('\n').AppendJoin('\n', flags).Append('\n')
-            .Append(NativeOptimizationSettings.Describe(request)).Append('\n')
-            .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(source)))).Append('\n');
-        if (request.CLayout == GeneratedCLayout.Modules)
-        {
-            foreach (var path in GeneratedHeaderClosure(source, request.GeneratedDirectory!))
-                identity.Append(Path.GetRelativePath(request.GeneratedDirectory!, path).Replace('\\', '/')).Append(':')
-                    .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)))).Append('\n');
-        }
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(identity.ToString()))).ToLowerInvariant();
-        return Path.Combine(directory, hash + ".o");
-    }
-
-    private static IEnumerable<string> GeneratedHeaderClosure(string source, string generatedDirectory)
-    {
-        var root = Path.GetFullPath(generatedDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
-        var pending = new Queue<string>();
-        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        pending.Enqueue(Path.GetFullPath(source));
-        while (pending.Count != 0)
-        {
-            var current = pending.Dequeue();
-            foreach (var line in File.ReadLines(current))
-            {
-                var trimmed = line.TrimStart();
-                if (!trimmed.StartsWith("#include \"", StringComparison.Ordinal))
-                    continue;
-                var start = trimmed.IndexOf('"') + 1;
-                var end = trimmed.IndexOf('"', start);
-                if (end <= start)
-                    continue;
-                var candidate = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(current)!, trimmed[start..end]));
-                if (!candidate.StartsWith(root, StringComparison.OrdinalIgnoreCase) || !File.Exists(candidate) || !visited.Add(candidate))
-                    continue;
-                pending.Enqueue(candidate);
-            }
-        }
-        return visited.Order(StringComparer.Ordinal);
-    }
 
     private static async Task<string> ToolPathAsync(FreestandingCompiler compiler, string path, string workingDirectory, CancellationToken cancellationToken)
     {

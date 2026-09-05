@@ -4,49 +4,83 @@ namespace System.Ssh;
 
 internal static class SshNative
 {
-    [Extern("ct_ssh_network_ready")] internal static int NetworkReady();
-    [Extern("ct_ssh_delay")] internal static void Delay(uint milliseconds);
-    [Extern("ct_ssh_monotonic_milliseconds")] internal static long MonotonicMilliseconds();
+    [Extern("ct_ssh_network_ready")]
+    internal static int NetworkReady();
+
+    [Extern("ct_ssh_delay")]
+    internal static void Delay(uint milliseconds);
+
+    [Extern("ct_ssh_monotonic_milliseconds")]
+    internal static long MonotonicMilliseconds();
+
     [Extern("ct_ssh_terminate_descendants")]
     internal static void TerminateDescendants(uint processId, uint graceMilliseconds);
-    [Extern("ct_ssh_listen")] internal static int Listen(int port, int backlog, out uint token);
-    [Extern("ct_ssh_accept")] internal static int Accept(uint listener, uint timeout, out uint token);
-    [Extern("ct_ssh_wait")] internal static int Wait(uint token, uint events, uint timeout, out uint ready);
+
+    [Extern("ct_ssh_listen")]
+    internal static int Listen(int port, int backlog, out uint token);
+
+    [Extern("ct_ssh_accept")]
+    internal static int Accept(uint listener, uint timeout, out uint token);
+
+    [Extern("ct_ssh_wait")]
+    internal static int Wait(uint token, uint events, uint timeout, out uint ready);
+
     [Extern("ct_ssh_array_receive")]
     internal static int Receive(uint token, byte[] data, int offset, int count, uint timeout);
+
     [Extern("ct_ssh_array_send")]
     internal static int Send(uint token, byte[] data, int offset, int count, uint timeout);
-    [Extern("ct_ssh_shutdown")] internal static int Shutdown(uint token, uint directions);
-    [Extern("ct_ssh_close")] internal static int Close(uint token);
-    [Extern("ct_ssh_random")] internal static unsafe int Random(NativeBuffer<byte> data);
+
+    [Extern("ct_ssh_shutdown")]
+    internal static int Shutdown(uint token, uint directions);
+
+    [Extern("ct_ssh_close")]
+    internal static int Close(uint token);
+
+    [Extern("ct_ssh_random")]
+    internal static unsafe int Random(NativeBuffer<byte> data);
+
     [Extern("ct_ssh_array_sha256")]
     internal static int Sha256(byte[] input, int offset, int count, byte[] output);
+
     [Extern("ct_ssh_array_x25519_create")]
     internal static int X25519Create(out uint token, byte[] publicKey);
+
     [Extern("ct_ssh_array_x25519_shared")]
     internal static int X25519Shared(uint token, byte[] peerPublicKey, byte[] secret);
+
     [Extern("ct_ssh_array_p256_private_import")]
     internal static int P256PrivateImport(byte[] pem, out uint token);
+
     [Extern("ct_ssh_array_p256_public")]
     internal static int P256Public(uint token, byte[] key);
+
     [Extern("ct_ssh_array_p256_sign")]
     internal static int P256Sign(uint token, byte[] hash, byte[] signature);
+
     [Extern("ct_ssh_array_p256_public_import")]
     internal static int P256PublicImport(byte[] key, out uint token);
+
     [Extern("ct_ssh_array_p256_verify")]
     internal static int P256Verify(uint token, byte[] hash, byte[] signature);
+
     [Extern("ct_ssh_array_aes_create")]
     internal static int AesCreate(byte[] key, out uint token);
+
     [Extern("ct_ssh_array_aes_seal")]
-    internal static int AesSeal(uint token, byte[] nonce, byte[] additional,
-        byte[] plain, byte[] cipher, byte[] tag);
+    internal static int AesSeal(uint token, byte[] nonce, byte[] additional, byte[] plain,
+        byte[] cipher, byte[] tag);
+
     [Extern("ct_ssh_array_aes_open")]
-    internal static int AesOpen(uint token, byte[] nonce, byte[] additional,
-        byte[] cipher, byte[] tag, byte[] plain);
-    [Extern("ct_ssh_array_zeroize")] internal static void Zeroize(byte[] data);
+    internal static int AesOpen(uint token, byte[] nonce, byte[] additional, byte[] cipher,
+        byte[] tag, byte[] plain);
+
+    [Extern("ct_ssh_array_zeroize")]
+    internal static void Zeroize(byte[] data);
 
     internal static void Require(int result)
     {
-        if (result < 0) throw new InvalidOperationException();
+        if (result < 0)
+            throw new InvalidOperationException();
     }
 }

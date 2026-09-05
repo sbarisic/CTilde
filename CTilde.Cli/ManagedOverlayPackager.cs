@@ -18,9 +18,13 @@ internal static class ManagedOverlayPackager
     private const uint RelocationResidentDataIndirect = 5;
     private const uint XtensaRelocationOp0 = 8;
     private const uint XtensaRelocationOp2 = 10;
+    private const uint XtensaRelocationAsmExpand = 11;
+    private const uint XtensaRelocationAsmSimplify = 12;
     private const uint XtensaRelocation32PcRelative = 14;
     private const uint XtensaRelocationSlot0Op = 20;
     private const uint XtensaRelocationSlot14Alt = 49;
+    private const uint XtensaRelocationPositiveDiff8 = 57;
+    private const uint XtensaRelocationNegativeDiff32 = 62;
 
     public static ManagedModuleMetadata Package(BuildRequest request, string linkedModule, string output)
     {
@@ -28,6 +32,9 @@ internal static class ManagedOverlayPackager
         if (!metadata.HasOverlays)
         {
             File.Copy(linkedModule, output, overwrite: false);
+            BuildReporter.Current?.Detail($"Resident executable memory: {LoadBytes(output, requiredFlags: 1u)} bytes; " +
+                $"resident data memory: {LoadBytes(output, requiredFlags: 2u)} bytes; " +
+                $"packaged managed module: {new FileInfo(output).Length} bytes");
             return metadata;
         }
         if (request.Architecture != CompilationArchitecture.Xtensa)
@@ -55,8 +62,10 @@ internal static class ManagedOverlayPackager
             var placementScript = Path.Combine(working, "overlay-placement.ld");
             WriteOverlayPlacementScript(placementScript, overlaySections.Select(item => item.Section.Name));
             var packagingObjects = PrepareOverlayObjects(tools.Objcopy, objects, working);
-            Link(tools.Compiler, packagingObjects, linkedResident, stripAtLink: false, garbageCollect: true, placementScript);
+            Link(request, tools.Compiler, packagingObjects, linkedResident, stripAtLink: false, garbageCollect: true,
+                placementScript, ManagedModuleLinkerScript(request));
             var linkedImage = ElfFile.Read(linkedResident, requireRelocatable: false);
+            ReportExecutableContributions(linkedImage);
             var auditedInstructionRelocations = AuditOverlayInstructionRelocations(linkedImage);
             BuildReporter.Current?.Detail($"Overlay instruction audit: {auditedInstructionRelocations} relocation(s); Xtensa relaxation disabled");
             var residentImportSlots = ResidentImportSlots(linkedImage);
@@ -93,7 +102,8 @@ internal static class ManagedOverlayPackager
             PatchDescriptorMaximumOverlayBytes(residentElf, descriptorSymbol.Value,
                 descriptorSymbol.Size, maximumOverlayBytes);
             WriteContainer(residentElf, output, layouts, descriptorSymbol.Value, textAnchorSymbol.Value);
-            BuildReporter.Current?.Detail($"Resident executable memory: {ExecutableLoadBytes(residentElf)} bytes; " +
+            BuildReporter.Current?.Detail($"Resident executable memory: {LoadBytes(residentElf, requiredFlags: 1u)} bytes; " +
+                $"resident data memory: {LoadBytes(residentElf, requiredFlags: 2u)} bytes; " +
                 $"resident ELF file: {new FileInfo(residentElf).Length} bytes");
             foreach (var layout in layouts)
                 BuildReporter.Current?.Detail($"Overlay '{layout.Name}': {layout.Payload.Length} bytes, " +
@@ -164,7 +174,7 @@ internal static class ManagedOverlayPackager
             {
                 var layout = layouts.SingleOrDefault(candidate => candidate.ContainsLinkedAddress(relocation.Offset));
                 if (layout is null) continue;
-                if (relocation.SymbolIndex >= symbols.Length || relocation.Type is not (1u or 4u or 5u))
+                if (relocation.SymbolIndex >= symbols.Length || relocation.Type is not (1u or 3u or 4u or 5u))
                     throw new NativeBuildException($"Unsupported or malformed linked Xtensa overlay relocation {relocation.Type}.");
                 var patchOffset = checked(relocation.Offset - layout.LinkedStart);
                 if ((patchOffset & 3u) != 0u || patchOffset > layout.Payload.Length ||
@@ -195,7 +205,8 @@ internal static class ManagedOverlayPackager
                     if (targetLayout is not null)
                     {
                         if (targetLayout != layout)
-                            throw new NativeBuildException($"Overlay '{layout.Name}' directly references overlay '{targetLayout.Name}'.");
+                            throw new NativeBuildException($"Overlay '{layout.Name}' directly references overlay '{targetLayout.Name}' " +
+                                $"through '{symbol.Name}' at payload offset 0x{patchOffset:x}.");
                         kind = RelocationWindow;
                         targetAddress -= layout.LinkedStart;
                     }
@@ -232,7 +243,7 @@ internal static class ManagedOverlayPackager
 
     private static uint Align(uint value, uint alignment) => checked((value + alignment - 1u) & ~(alignment - 1u));
 
-    private static uint ExecutableLoadBytes(string path)
+    private static uint LoadBytes(string path, uint requiredFlags)
     {
         var bytes = File.ReadAllBytes(path);
         if (bytes.Length < 52)
@@ -249,7 +260,7 @@ internal static class ManagedOverlayPackager
             var type = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset, 4));
             var memorySize = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset + 20, 4));
             var flags = BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(offset + 24, 4));
-            if (type == 1u && (flags & 1u) != 0u)
+            if (type == 1u && (flags & requiredFlags) == requiredFlags)
                 result = checked(result + memorySize);
         }
         return result;
@@ -344,6 +355,20 @@ internal static class ManagedOverlayPackager
             var symbols = image.SymbolsFor(relocationSection.Link);
             foreach (var relocation in image.ReadRelocations(relocationSection))
             {
+                // GNU Xtensa emits these assembler/linker relaxation markers
+                // for long-call sequences. They do not patch an instruction
+                // target and --no-relax keeps the emitted sequence stable.
+                if (relocation.Type is XtensaRelocationAsmExpand or XtensaRelocationAsmSimplify ||
+                    relocation.Type is >= XtensaRelocationPositiveDiff8 and <= XtensaRelocationNegativeDiff32)
+                    continue;
+                if (!IsAuditedXtensaInstructionRelocation(relocation.Type))
+                {
+                    var unsupportedSymbol = relocation.SymbolIndex < symbols.Length
+                        ? symbols[checked((int)relocation.SymbolIndex)].Name : "<invalid>";
+                    throw new NativeBuildException(
+                        $"Overlay '{overlayName}' contains unsupported Xtensa instruction relocation {relocation.Type} " +
+                        $"at 0x{relocation.Offset:x8} for '{unsupportedSymbol}' in '{origin.Name}'.");
+                }
                 var targetDefined = relocation.SymbolIndex < symbols.Length &&
                     symbols[checked((int)relocation.SymbolIndex)].SectionIndex > 0 &&
                     symbols[checked((int)relocation.SymbolIndex)].SectionIndex < image.Sections.Length;
@@ -359,6 +384,10 @@ internal static class ManagedOverlayPackager
                     throw new NativeBuildException($"Overlay '{overlayName}' contains an overflowing instruction target.");
                 var target = image.Sections[checked(symbol.SectionIndex)];
                 var hasTargetOverlay = TryOverlayName(target.Name, out var targetOverlay);
+                if (!hasTargetOverlay || targetOverlay != overlayName || !target.Contains((uint)targetValue))
+                    throw new NativeBuildException(
+                        $"Overlay '{overlayName}' instruction relocation {relocation.Type} references '{symbol.Name}' in section '{target.Name}'" +
+                        (hasTargetOverlay ? $" (overlay '{targetOverlay}')" : " (resident)") + ".");
                 ValidateAuditedXtensaInstructionRelocation(overlayName, relocation.Type,
                     origin.Contains(relocation.Offset), true, hasTargetOverlay ? targetOverlay : null,
                     target.Contains((uint)targetValue));
@@ -482,17 +511,48 @@ internal static class ManagedOverlayPackager
         return null;
     }
 
-    private static void Link(string compiler, IEnumerable<string> objects, string output, bool stripAtLink,
-        bool garbageCollect = false, string? linkerScript = null)
+    private static string ManagedModuleLinkerScript(BuildRequest request)
+    {
+        var path = Path.GetFullPath(Path.Combine(request.RootDirectory, "..", "..", "cmake", "ctilde_managed_module.ld"));
+        if (!File.Exists(path))
+            throw new NativeBuildException($"Managed-module resident linker script was not found at '{path}'.");
+        return path;
+    }
+
+    private static void ReportExecutableContributions(ElfFile image)
+    {
+        var rows = image.NamedSymbols
+            .Where(symbol => (symbol.Info & 0x0fu) == 2u && symbol.Size != 0u &&
+                symbol.SectionIndex > 0 && symbol.SectionIndex < image.Sections.Length)
+            .Select(symbol => (Symbol: symbol, Section: image.Sections[symbol.SectionIndex]))
+            .Where(item => (item.Section.Flags & 6u) == 6u)
+            .DistinctBy(item => (item.Symbol.Name, item.Symbol.Value, item.Symbol.Size, item.Section.Name))
+            .OrderBy(item => TryOverlayName(item.Section.Name, out var overlay) ? overlay : string.Empty, StringComparer.Ordinal)
+            .ThenByDescending(item => item.Symbol.Size)
+            .ThenBy(item => item.Symbol.Name, StringComparer.Ordinal);
+        foreach (var item in rows)
+        {
+            var placement = TryOverlayName(item.Section.Name, out var overlay) ? $"overlay '{overlay}'" : "resident";
+            BuildReporter.Current?.Detail($"Executable contribution: {placement}, {item.Symbol.Size} bytes, " +
+                $"0x{item.Symbol.Value:x8}, {item.Symbol.Name}");
+        }
+    }
+
+    private static void Link(BuildRequest request, string compiler, IEnumerable<string> objects, string output, bool stripAtLink,
+        bool garbageCollect = false, string? linkerScript = null, string? residentScript = null)
     {
         var arguments = new List<string> { "-shared", "-fPIC", "-static-libgcc", "-nostdlib", "-nostartfiles", "-fdata-sections", "-ffunction-sections", "-fvisibility=hidden" };
-        arguments.AddRange(["-Wl,--no-relax", "-Wl,--emit-relocs"]);
+        arguments.AddRange(NativeOptimizationSettings.GnuLink(request));
+        arguments.AddRange(["-fno-inline", "-fno-ipa-cp", "-fno-ipa-sra", "-fno-ipa-icf", "-fno-ipa-ra"]);
+        arguments.AddRange(["-Wl,--no-relax", "-Wl,--emit-relocs", "-Wl,-z,separate-code", "-Wl,--no-rosegment"]);
         if (garbageCollect)
             arguments.Add("-Wl,--gc-sections");
         if (stripAtLink)
             arguments.AddRange(["-Wl,--strip-all", "-Wl,--strip-debug", "-Wl,--strip-discarded"]);
         if (linkerScript is not null)
             arguments.Add($"-Wl,-T,{linkerScript}");
+        if (residentScript is not null)
+            arguments.Add($"-Wl,-T,{residentScript}");
         arguments.AddRange(["-o", output]);
         arguments.AddRange(objects);
         arguments.Add("-Wl,--allow-shlib-undefined");
@@ -626,7 +686,17 @@ internal static class ManagedOverlayPackager
             var executable = (matches[0].Flags & 1u) != 0u;
             var writable = (matches[0].Flags & 2u) != 0u;
             if (executable == writable)
-                throw new NativeBuildException($"Resident address 0x{address:x8} belongs to an unsupported load segment in '{Path}'.");
+            {
+                var containingSections = Sections.Where(section => (section.Flags & 2u) != 0u && section.Contains(address)).ToArray();
+                var executableSections = containingSections.Where(section => (section.Flags & 4u) != 0u).ToArray();
+                var dataSections = containingSections.Where(section => (section.Flags & 4u) == 0u).ToArray();
+                if (executableSections.Length != 0 && dataSections.Length == 0)
+                    return ResidentAddressKind.Executable;
+                if (dataSections.Length != 0 && executableSections.Length == 0)
+                    return ResidentAddressKind.Data;
+                var details = containingSections.Select(section => $"{section.Name}[flags=0x{section.Flags:x}]");
+                throw new NativeBuildException($"Resident address 0x{address:x8} belongs to an unsupported load segment in '{Path}' ({string.Join(", ", details)}).");
+            }
             return executable ? ResidentAddressKind.Executable : ResidentAddressKind.Data;
         }
 

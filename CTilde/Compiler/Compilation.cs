@@ -183,6 +183,7 @@ public sealed class Compilation
         {
             var ir = new TypedIrLowerer(_boundProgram!).Lower();
             var optimizedIr = new TypedIrOptimizer(_boundProgram!).Optimize(ir);
+            ManagedOverlayPlacementInferer.Apply(_boundProgram!.Model, optimizedIr);
             writer.Write(ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, configuration,
                 optimizedIr.Functions).ToDeterministicJson());
         }
@@ -201,6 +202,7 @@ public sealed class Compilation
             return;
         var ir = new TypedIrLowerer(_boundProgram!).Lower();
         var optimizedIr = new TypedIrOptimizer(_boundProgram!).Optimize(ir);
+        ManagedOverlayPlacementInferer.Apply(_boundProgram!.Model, optimizedIr);
         var managedMetadata = Options.ManagedModule is null ? null : ManagedModuleMetadataEmitter.Emit(this, _boundProgram!, Options.ManagedModule,
             optimizedIr.Functions);
         var emitter = new CEmitter(_boundProgram!.Model, Options.Target, ResolveArchitecture(Options.Target, Options.Architecture), ValidatedSourceRoot(), Options.DebugInformation, Options.DebugMemory,

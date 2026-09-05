@@ -947,7 +947,8 @@ internal sealed partial class TypedIrBodyLowerer
         if (enumeratorType.ContainsManagedReferences)
         {
             EmitActivateOwnedSlot(writer, enumeratorType, enumeratorStorage, $"ct_cleanup_foreach_enumerator_{enumeratorName}");
-            EmitInitializeOwnedSlot(writer, enumeratorType, enumeratorStorage, getCall);
+            // Managed calls return an owned value. Transfer it into the cleanup slot.
+            writer.WriteLine($"{enumeratorStorage} = {getCall};");
         }
         else
             writer.WriteLine($"{enumeratorStorage} = {getCall};");
@@ -1001,7 +1002,7 @@ internal sealed partial class TypedIrBodyLowerer
         if (declaredType.ContainsManagedReferences)
         {
             EmitActivateOwnedSlot(writer, declaredType, local.CName, $"ct_cleanup_local_{local.Id}");
-            EmitInitializeOwnedSlot(writer, declaredType, local.CName, currentCode);
+            writer.WriteLine($"{local.CName} = {currentCode};");
         }
         else
             writer.WriteLine($"{local.CName} = {currentCode};");

@@ -42,7 +42,6 @@ internal static class ManagedModuleMetadataEmitter
             .Select(type => new ManagedModuleDeclarationMetadata(type.Namespace,
                 RenderDeclaration(configuration.Name, type)))
             .ToImmutableArray();
-        var userSources = model.UserSyntaxTrees.Select(tree => tree.Text).ToHashSet(ReferenceEqualityComparer.Instance);
         var overlayFunctions = reachableFunctions.Select(function =>
             {
                 var method = function.Method;
@@ -52,11 +51,16 @@ internal static class ManagedModuleMetadataEmitter
                         ? NameMangler.Getter(function.Property) : NameMangler.Setter(function.Property);
                 return (Method: method, Callable: callable);
             })
-            .Where(item => item.Method.OverlayName is not null && item.Method.Syntax is not null && userSources.Contains(item.Method.Syntax.Source))
+            .Where(item => item.Method.OverlayName is not null && item.Method.Syntax is not null)
             .DistinctBy(item => item.Callable, StringComparer.Ordinal)
             .OrderBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
             .ToArray();
-        var overlayTargetIndices = overlayFunctions.OrderBy(item => item.Method.OverlayName, StringComparer.Ordinal)
+        // Private helpers whose callers all live in the same overlay are packaged with
+        // that overlay but deliberately have no resident call target or entry stub.
+        // Public, address-retained, dynamic, resident-called, and cross-overlay methods
+        // keep stable entries.
+        var overlayEntryFunctions = overlayFunctions.Where(item => item.Method.RequiresOverlayEntry).ToArray();
+        var overlayTargetIndices = overlayEntryFunctions.OrderBy(item => item.Method.OverlayName, StringComparer.Ordinal)
             .ThenBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
             .ThenBy(item => item.Callable, StringComparer.Ordinal)
             .Select((item, index) => (item.Callable, index))
@@ -64,7 +68,8 @@ internal static class ManagedModuleMetadataEmitter
         var overlays = overlayFunctions.GroupBy(item => item.Method.OverlayName!, StringComparer.Ordinal)
             .OrderBy(group => group.Key, StringComparer.Ordinal)
             .Select(group => new ManagedModuleOverlayMetadata(group.Key, 0, 16,
-                [.. group.OrderBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
+                [.. group.Where(item => item.Method.RequiresOverlayEntry)
+                    .OrderBy(item => NameMangler.MethodIdentity(item.Method), StringComparer.Ordinal)
                     .ThenBy(item => item.Callable, StringComparer.Ordinal).Select(item =>
                 {
                     return new ManagedModuleOverlayFunctionMetadata(

@@ -13,6 +13,7 @@
 
 #include "esp_err.h"
 #include "esp_elf.h"
+#include "esp_log.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "lwip/inet.h"
@@ -27,6 +28,8 @@
 #include "freertos/task.h"
 
 #define CT_SSH_RESOURCE_CAPACITY 24u
+
+static const char *TAG = "ctilde.ssh";
 
 typedef enum ct_ssh_resource_kind {
     CT_SSH_RESOURCE_NONE,
@@ -418,8 +421,11 @@ static int32_t p256_private_import(const uint8_t *pem, size_t length, uint32_t *
     const int result = mbedtls_pk_parse_key(pk, terminated, length + 1u, NULL, 0u);
     mbedtls_platform_zeroize(terminated, length + 1u);
     free(terminated);
-    if (result != 0 || !mbedtls_pk_can_do_psa(pk, MBEDTLS_PK_ALG_ECDSA(PSA_ALG_SHA_256),
-        PSA_KEY_USAGE_SIGN_HASH)) {
+    const int can_sign = result == 0 ? mbedtls_pk_can_do_psa(pk,
+        MBEDTLS_PK_ALG_ECDSA(PSA_ALG_SHA_256), PSA_KEY_USAGE_SIGN_HASH) : 0;
+    if (result != 0 || !can_sign) {
+        ESP_LOGE(TAG, "P-256 host-key import rejected: parse=%d, bits=%u, sign=%d",
+            result, (unsigned)(result == 0 ? mbedtls_pk_get_bitlen(pk) : 0u), can_sign);
         mbedtls_pk_free(pk);
         free(pk);
         return -EINVAL;
@@ -478,25 +484,20 @@ static int32_t p256_sign(uint32_t token, const uint8_t hash[32], uint8_t signatu
 
 static int32_t p256_public_import(const uint8_t public_key[65], uint32_t *token)
 {
-    static const uint8_t prefix[] = {
-        0x30u,0x59u,0x30u,0x13u,0x06u,0x07u,0x2au,0x86u,0x48u,0xceu,0x3du,0x02u,0x01u,
-        0x06u,0x08u,0x2au,0x86u,0x48u,0xceu,0x3du,0x03u,0x01u,0x07u,0x03u,0x42u,0x00u
-    };
     if (public_key == NULL || token == NULL || public_key[0] != 0x04u) return -EINVAL;
-    uint8_t der[sizeof(prefix) + 65u];
-    (void)memcpy(der, prefix, sizeof(prefix));
-    (void)memcpy(der + sizeof(prefix), public_key, 65u);
-    mbedtls_pk_context *pk = malloc(sizeof(*pk));
-    if (pk == NULL) return -ENOMEM;
-    mbedtls_pk_init(pk);
-    if (mbedtls_pk_parse_public_key(pk, der, sizeof(der)) != 0 ||
-        !mbedtls_pk_can_do_psa(pk, MBEDTLS_PK_ALG_ECDSA(PSA_ALG_SHA_256),
-            PSA_KEY_USAGE_VERIFY_HASH)) {
-        mbedtls_pk_free(pk);
-        free(pk);
+    psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
+    psa_set_key_type(&attributes, PSA_KEY_TYPE_ECC_PUBLIC_KEY(PSA_ECC_FAMILY_SECP_R1));
+    psa_set_key_bits(&attributes, 256u);
+    psa_set_key_usage_flags(&attributes, PSA_KEY_USAGE_VERIFY_HASH);
+    psa_set_key_algorithm(&attributes, PSA_ALG_ECDSA(PSA_ALG_SHA_256));
+    psa_key_id_t key = 0;
+    const psa_status_t status = psa_import_key(&attributes, public_key, 65u, &key);
+    psa_reset_key_attributes(&attributes);
+    if (status != PSA_SUCCESS) {
+        ESP_LOGE(TAG, "P-256 authorized-key import rejected: psa=%d", (int)status);
         return -EINVAL;
     }
-    return register_resource(CT_SSH_RESOURCE_PK, &pk, token);
+    return register_resource(CT_SSH_RESOURCE_PSA_KEY, &key, token);
 }
 
 static size_t encode_der_integer(uint8_t *output, const uint8_t value[32])
@@ -516,16 +517,16 @@ static size_t encode_der_integer(uint8_t *output, const uint8_t value[32])
 static int32_t p256_verify(uint32_t token, const uint8_t hash[32],
     const uint8_t signature[64])
 {
-    ct_ssh_resource *resource = find_resource(token, CT_SSH_RESOURCE_PK);
+    ct_ssh_resource *resource = find_resource(token, CT_SSH_RESOURCE_PSA_KEY);
     if (resource == NULL || hash == NULL || signature == NULL) return -EINVAL;
     uint8_t der[72];
     const size_t left = encode_der_integer(der + 2u, signature);
     const size_t right = encode_der_integer(der + 2u + left, signature + 32u);
     der[0] = 0x30u;
     der[1] = (uint8_t)(left + right);
-    const int result = mbedtls_pk_verify(resource->Value.Pk, MBEDTLS_MD_SHA256,
-        hash, 32u, der, 2u + left + right);
-    return result == 0 ? 1 : result == PSA_ERROR_INVALID_SIGNATURE ? 0 : -EIO;
+    const psa_status_t status = psa_verify_hash(resource->Value.Key,
+        PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, 32u, der, 2u + left + right);
+    return status == PSA_SUCCESS ? 1 : status == PSA_ERROR_INVALID_SIGNATURE ? 0 : -EIO;
 }
 
 static int32_t aes128_gcm_create(const uint8_t key[16], uint32_t *token)

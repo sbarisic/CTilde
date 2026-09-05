@@ -21,6 +21,7 @@ internal sealed class SshChannelState
     internal SftpSession Sftp;
 }
 
+[Overlay("channels")]
 internal sealed class SshConnection
 {
     private SshServerOptions options;
@@ -50,12 +51,53 @@ internal sealed class SshConnection
         channels = new SshChannelState[2];
     }
 
-    internal bool Authenticated { get { return authenticated; } }
-    internal int ChannelCount { get { return channelCount; } }
-    internal int AuthenticationFailures { get { return authenticationFailures; } }
-    internal long BytesReceived { get { return transport.BytesReceived; } }
-    internal long BytesSent { get { return transport.BytesSent; } }
-    internal bool Closed { get { return closed; } }
+    internal bool Authenticated
+    {
+        get
+        {
+            return authenticated;
+        }
+    }
+
+    internal int ChannelCount
+    {
+        get
+        {
+            return channelCount;
+        }
+    }
+
+    internal int AuthenticationFailures
+    {
+        get
+        {
+            return authenticationFailures;
+        }
+    }
+
+    internal long BytesReceived
+    {
+        get
+        {
+            return transport.BytesReceived;
+        }
+    }
+
+    internal long BytesSent
+    {
+        get
+        {
+            return transport.BytesSent;
+        }
+    }
+
+    internal bool Closed
+    {
+        get
+        {
+            return closed;
+        }
+    }
 
     internal void Handshake()
     {
@@ -68,10 +110,11 @@ internal sealed class SshConnection
 
     internal bool Poll(uint timeout)
     {
-        if (closed) return false;
-        if (SshNative.MonotonicMilliseconds() >= rekeyAt ||
-            transport.BytesReceived - rekeyReceivedBase >= 1073741824L ||
-            transport.BytesSent - rekeySentBase >= 1073741824L)
+        if (closed)
+            return false;
+        if (SshNative.MonotonicMilliseconds() >= rekeyAt || transport.BytesReceived
+            - rekeyReceivedBase >= 1073741824L || transport.BytesSent - rekeySentBase
+            >= 1073741824L)
             ExchangeKeys(null);
         uint ready;
         int wait = SshNative.Wait(transport.Socket, 1u, timeout, out ready);
@@ -80,43 +123,53 @@ internal sealed class SshConnection
             byte[] payload = transport.ReceivePacket(5000u);
             Dispatch(payload);
         }
-        else if (wait < 0 && wait != -116) throw new InvalidOperationException();
+        else if (wait < 0 && wait != -116)
+            throw new InvalidOperationException();
         PumpChannels();
         return !closed;
     }
 
     internal void Close()
     {
-        if (closed) return;
+        if (closed)
+            return;
         closed = true;
         for (int index = 0; index < channels.Length; index++)
             if (channels[index] != null)
+        {
+            try
             {
-                try { CloseChannel(channels[index], true); }
-                catch (Exception) { }
+                CloseChannel(channels[index], true);
             }
+            catch (Exception)
+            {
+            }
+        }
         transport.Close();
     }
 
     [Overlay("handshake")]
     private void ExchangeKeys(byte[] offeredClientKex)
     {
-        if (authenticated) handshakeDeadline = SshNative.MonotonicMilliseconds() + 10000L;
+        if (authenticated)
+            handshakeDeadline = SshNative.MonotonicMilliseconds() + 10000L;
         bool initialExchange = sessionIdentifier == null;
         byte[] serverKex = CreateKexInit();
         transport.SendPacket(serverKex);
         byte[] clientKex = offeredClientKex;
-        if (clientKex == null) clientKex = transport.ReceivePacket(HandshakeTimeout());
+        if (clientKex == null)
+            clientKex = transport.ReceivePacket(HandshakeTimeout());
         bool discardGuess = ValidateKexInit(clientKex);
-        if (discardGuess) transport.ReceivePacket(HandshakeTimeout());
-
+        if (discardGuess)
+            transport.ReceivePacket(HandshakeTimeout());
         byte[] request = transport.ReceivePacket(HandshakeTimeout());
         SshPacketReader requestReader = new SshPacketReader(request);
-        if (requestReader.ReadByte() != 30) throw new InvalidOperationException();
+        if (requestReader.ReadByte() != 30)
+            throw new InvalidOperationException();
         byte[] clientPublic = requestReader.ReadBytes();
         requestReader.RequireEnd();
-        if (clientPublic.Length != 32) throw new InvalidOperationException();
-
+        if (clientPublic.Length != 32)
+            throw new InvalidOperationException();
         uint exchangeKey;
         byte[] serverPublic = new byte[32];
         byte[] secret = new byte[32];
@@ -129,16 +182,16 @@ internal sealed class SshConnection
         {
             SshNative.Close(exchangeKey);
         }
-
         byte[] publicPoint = new byte[65];
         SshNative.Require(SshNative.P256Public(hostKey, publicPoint));
         byte[] hostBlob = HostKeyBlob(publicPoint);
         byte[] exchangeHashInput = ExchangeHashInput(clientKex, serverKex, hostBlob,
             clientPublic, serverPublic, secret);
         byte[] exchangeHash = new byte[32];
-        SshNative.Require(SshNative.Sha256(exchangeHashInput, 0, exchangeHashInput.Length, exchangeHash));
-        if (sessionIdentifier == null) sessionIdentifier = exchangeHash;
-
+        SshNative.Require(SshNative.Sha256(exchangeHashInput, 0, exchangeHashInput.Length,
+            exchangeHash));
+        if (sessionIdentifier == null)
+            sessionIdentifier = exchangeHash;
         byte[] fixedSignature = new byte[64];
         SshNative.Require(SshNative.P256Sign(hostKey, exchangeHash, fixedSignature));
         byte[] signatureBlob = SignatureBlob(fixedSignature);
@@ -148,19 +201,19 @@ internal sealed class SshConnection
         reply.WriteBytes(serverPublic);
         reply.WriteBytes(signatureBlob);
         transport.SendPacket(reply.ToArray());
-
         byte[] receiveIv = Derive(secret, exchangeHash, (byte)'A', 12);
         byte[] sendIv = Derive(secret, exchangeHash, (byte)'B', 12);
         byte[] receiveKey = Derive(secret, exchangeHash, (byte)'C', 16);
         byte[] sendKey = Derive(secret, exchangeHash, (byte)'D', 16);
-
         SshPacketWriter newKeys = new SshPacketWriter(1);
         newKeys.WriteByte((byte)21);
         transport.SendPacket(newKeys.ToArray());
         byte[] clientNewKeys = transport.ReceivePacket(HandshakeTimeout());
-        if (clientNewKeys.Length != 1 || clientNewKeys[0] != 21) throw new InvalidOperationException();
+        if (clientNewKeys.Length != 1 || clientNewKeys[0] != 21)
+            throw new InvalidOperationException();
         transport.Activate(receiveKey, receiveIv, sendKey, sendIv);
-        if (strictKex) transport.ResetSequences();
+        if (strictKex)
+            transport.ResetSequences();
         if (initialExchange && clientExtInfo)
         {
             SshPacketWriter extension = new SshPacketWriter(96);
@@ -187,7 +240,8 @@ internal sealed class SshConnection
         {
             NativeBuffer<byte> cookie = stackalloc byte[16];
             SshNative.Require(SshNative.Random(cookie));
-            for (int index = 0; index < 16; index++) writer.WriteByte(cookie[(nuint)index]);
+            for (int index = 0; index < 16; index++)
+                writer.WriteByte(cookie[(nuint)index]);
         }
         writer.WriteString("curve25519-sha256,ext-info-s,kex-strict-s-v00@openssh.com");
         writer.WriteString("ecdsa-sha2-nistp256");
@@ -208,7 +262,8 @@ internal sealed class SshConnection
     private bool ValidateKexInit(byte[] payload)
     {
         SshPacketReader reader = new SshPacketReader(payload);
-        if (reader.ReadByte() != 20) throw new InvalidOperationException();
+        if (reader.ReadByte() != 20)
+            throw new InvalidOperationException();
         reader.ReadFixed(16);
         string kex = reader.ReadString();
         string host = reader.ReadString();
@@ -223,37 +278,47 @@ internal sealed class SshConnection
         bool follows = reader.ReadBoolean();
         reader.ReadUInt32();
         reader.RequireEnd();
-        if (!HasName(kex, "curve25519-sha256") ||
-            !HasName(host, "ecdsa-sha2-nistp256") ||
-            !HasName(receiveCipher, "aes128-gcm@openssh.com") ||
-            !HasName(sendCipher, "aes128-gcm@openssh.com") ||
-            !HasName(receiveMac, "hmac-sha2-256") ||
-            !HasName(sendMac, "hmac-sha2-256") ||
-            !HasName(receiveCompression, "none") || !HasName(sendCompression, "none"))
+        if (!HasName(kex, "curve25519-sha256") || !HasName(host, "ecdsa-sha2-nistp256")
+            || !HasName(receiveCipher, "aes128-gcm@openssh.com") || !HasName(sendCipher,
+            "aes128-gcm@openssh.com") || !HasName(receiveMac, "hmac-sha2-256") || !HasName(sendMac,
+            "hmac-sha2-256") || !HasName(receiveCompression, "none") || !HasName(sendCompression,
+            "none"))
             throw new InvalidOperationException();
         if (sessionIdentifier == null)
         {
             clientExtInfo = HasName(kex, "ext-info-c");
             strictKex = HasName(kex, "kex-strict-c-v00@openssh.com");
         }
-        return follows && (FirstName(kex) != "curve25519-sha256" ||
-            FirstName(host) != "ecdsa-sha2-nistp256");
+        return follows && (FirstName(kex) != "curve25519-sha256" || FirstName(host)
+            != "ecdsa-sha2-nistp256");
     }
 
     [Overlay("handshake")]
     private static string FirstName(string list)
     {
         int comma = list.IndexOf(',');
-        if (comma < 0) return list;
+        if (comma < 0)
+            return list;
         return list.Substring(0, comma);
     }
 
     [Overlay("handshake")]
     private static bool HasName(string list, string name)
     {
-        string[] values = list.Split(',');
-        for (int index = 0; index < values.Length; index++)
-            if (values[index] == name) return true;
+        int position = 0;
+        while (position <= list.Length)
+        {
+            int comma = list.IndexOf(',', position);
+            int end = comma;
+            if (end < 0)
+                end = list.Length;
+            if (end - position == name.Length && list.Substring(position, end - position)
+                == name)
+                return true;
+            if (comma < 0)
+                break;
+            position = comma + 1;
+        }
         return false;
     }
 
@@ -285,7 +350,8 @@ internal sealed class SshConnection
         byte[] input = writer.ToArray();
         SshNative.Require(SshNative.Sha256(input, 0, input.Length, hash));
         byte[] result = new byte[count];
-        for (int index = 0; index < count; index++) result[index] = hash[index];
+        for (int index = 0; index < count; index++)
+            result[index] = hash[index];
         return result;
     }
 
@@ -293,13 +359,17 @@ internal sealed class SshConnection
     private static byte[] MpintLittleEndian(byte[] value)
     {
         int end = value.Length - 1;
-        while (end >= 0 && value[end] == 0) end--;
-        if (end < 0) return new byte[0];
+        while (end >= 0 && value[end] == 0)
+            end--;
+        if (end < 0)
+            return new byte[0];
         bool leading = (value[end] & 128) != 0;
         int extra = 0;
-        if (leading) extra = 1;
+        if (leading)
+            extra = 1;
         byte[] result = new byte[end + 1 + extra];
-        for (int index = 0; index <= end; index++) result[extra + index] = value[end - index];
+        for (int index = 0; index <= end; index++)
+            result[extra + index] = value[end - index];
         return result;
     }
 
@@ -331,10 +401,12 @@ internal sealed class SshConnection
     private static byte[] MpintFixed(byte[] value, int offset)
     {
         int first = offset;
-        while (first < offset + 31 && value[first] == 0) first++;
+        while (first < offset + 31 && value[first] == 0)
+            first++;
         bool leading = (value[first] & 128) != 0;
         int extra = 0;
-        if (leading) extra = 1;
+        if (leading)
+            extra = 1;
         byte[] result = new byte[offset + 32 - first + extra];
         for (int index = first; index < offset + 32; index++)
             result[extra + index - first] = value[index];
@@ -353,12 +425,12 @@ internal sealed class SshConnection
         accepted.WriteByte((byte)6);
         accepted.WriteString("ssh-userauth");
         transport.SendPacket(accepted.ToArray());
-
         for (int attempt = 0; attempt < 3; attempt++)
         {
             byte[] request = transport.ReceivePacket(HandshakeTimeout());
             SshPacketReader reader = new SshPacketReader(request);
-            if (reader.ReadByte() != 50) throw new InvalidOperationException();
+            if (reader.ReadByte() != 50)
+                throw new InvalidOperationException();
             string user = reader.ReadString();
             string serviceName = reader.ReadString();
             string method = reader.ReadString();
@@ -368,8 +440,8 @@ internal sealed class SshConnection
                 authenticationFailures++;
                 continue;
             }
-            if (method != "publickey" || user != options.UserName ||
-                serviceName != "ssh-connection")
+            if (method != "publickey" || user != options.UserName || serviceName
+                != "ssh-connection")
             {
                 SendAuthenticationFailure();
                 authenticationFailures++;
@@ -415,9 +487,11 @@ internal sealed class SshConnection
     private uint HandshakeTimeout()
     {
         long left = handshakeDeadline - SshNative.MonotonicMilliseconds();
-        if (left <= 0L) throw new InvalidOperationException();
+        if (left <= 0L)
+            throw new InvalidOperationException();
         uint result = (uint)left;
-        if (result > 5000u) result = 5000u;
+        if (result > 5000u)
+            result = 5000u;
         return result;
     }
 
@@ -426,7 +500,8 @@ internal sealed class SshConnection
         byte[] signatureBlob)
     {
         SshPacketReader signatureReader = new SshPacketReader(signatureBlob);
-        if (signatureReader.ReadString() != "ecdsa-sha2-nistp256") return false;
+        if (signatureReader.ReadString() != "ecdsa-sha2-nistp256")
+            return false;
         byte[] encoded = signatureReader.ReadBytes();
         signatureReader.RequireEnd();
         SshPacketReader values = new SshPacketReader(encoded);
@@ -434,22 +509,23 @@ internal sealed class SshConnection
         byte[] right = values.ReadBytes();
         values.RequireEnd();
         byte[] fixedSignature = new byte[64];
-        if (!CopyMpint(left, fixedSignature, 0) || !CopyMpint(right, fixedSignature, 32)) return false;
-
+        if (!CopyMpint(left, fixedSignature, 0) || !CopyMpint(right, fixedSignature,
+            32))
+            return false;
         SshPacketWriter signed = new SshPacketWriter(prefixLength + 64);
         signed.WriteBytes(sessionIdentifier);
         signed.WriteRaw(Prefix(request, prefixLength));
         byte[] signedBytes = signed.ToArray();
         byte[] hash = new byte[32];
         SshNative.Require(SshNative.Sha256(signedBytes, 0, signedBytes.Length, hash));
-
         SshPacketReader keyReader = new SshPacketReader(publicBlob);
         keyReader.ReadString();
         keyReader.ReadString();
         byte[] point = keyReader.ReadBytes();
         keyReader.RequireEnd();
         uint key;
-        if (SshNative.P256PublicImport(point, out key) != 0) return false;
+        if (SshNative.P256PublicImport(point, out key) != 0)
+            return false;
         try
         {
             return SshNative.P256Verify(key, hash, fixedSignature) == 1;
@@ -464,7 +540,8 @@ internal sealed class SshConnection
     private static byte[] Prefix(byte[] value, int count)
     {
         byte[] result = new byte[count];
-        for (int index = 0; index < count; index++) result[index] = value[index];
+        for (int index = 0; index < count; index++)
+            result[index] = value[index];
         return result;
     }
 
@@ -472,8 +549,10 @@ internal sealed class SshConnection
     private static bool CopyMpint(byte[] value, byte[] target, int offset)
     {
         int first = 0;
-        if (value.Length == 33 && value[0] == 0) first = 1;
-        if (value.Length - first > 32 || value.Length == 0) return false;
+        if (value.Length == 33 && value[0] == 0)
+            first = 1;
+        if (value.Length - first > 32 || value.Length == 0)
+            return false;
         int padding = 32 - (value.Length - first);
         for (int index = first; index < value.Length; index++)
             target[offset + padding + index - first] = value[index];
@@ -492,17 +571,54 @@ internal sealed class SshConnection
 
     private void Dispatch(byte[] payload)
     {
-        if (payload.Length == 0) throw new InvalidOperationException();
+        if (payload.Length == 0)
+            throw new InvalidOperationException();
         byte message = payload[0];
-        if (message == 1) { closed = true; return; }
-        if (message == 20) { ExchangeKeys(payload); return; }
-        if (message == 80) { RejectGlobal(payload); return; }
-        if (message == 90) { OpenChannel(payload); return; }
-        if (message == 93) { AdjustWindow(payload); return; }
-        if (message == 94) { ChannelData(payload); return; }
-        if (message == 96) { ChannelEof(payload); return; }
-        if (message == 97) { ChannelClosed(payload); return; }
-        if (message == 98) { ChannelRequest(payload); return; }
+        if (message == 1)
+        {
+            closed = true;
+            return;
+        }
+        if (message == 20)
+        {
+            ExchangeKeys(payload);
+            return;
+        }
+        if (message == 80)
+        {
+            RejectGlobal(payload);
+            return;
+        }
+        if (message == 90)
+        {
+            OpenChannel(payload);
+            return;
+        }
+        if (message == 93)
+        {
+            AdjustWindow(payload);
+            return;
+        }
+        if (message == 94)
+        {
+            ChannelData(payload);
+            return;
+        }
+        if (message == 96)
+        {
+            ChannelEof(payload);
+            return;
+        }
+        if (message == 97)
+        {
+            ChannelClosed(payload);
+            return;
+        }
+        if (message == 98)
+        {
+            ChannelRequest(payload);
+            return;
+        }
         throw new InvalidOperationException();
     }
 
@@ -546,8 +662,10 @@ internal sealed class SshConnection
         state.RemoteId = remote;
         state.RemoteWindow = window;
         state.RemoteMaximumPacket = maximum;
-        if (state.RemoteMaximumPacket > 32768u) state.RemoteMaximumPacket = 32768u;
-        if (state.RemoteMaximumPacket == 0u) state.RemoteMaximumPacket = 1u;
+        if (state.RemoteMaximumPacket > 32768u)
+            state.RemoteMaximumPacket = 32768u;
+        if (state.RemoteMaximumPacket == 0u)
+            state.RemoteMaximumPacket = 1u;
         state.Open = true;
         channels[slot] = state;
         channelCount++;
@@ -563,7 +681,8 @@ internal sealed class SshConnection
     private int FreeChannel()
     {
         for (int index = 0; index < channels.Length; index++)
-            if (channels[index] == null) return index;
+            if (channels[index] == null)
+            return index;
         throw new InvalidOperationException();
     }
 
@@ -590,13 +709,16 @@ internal sealed class SshConnection
         SshChannelState channel = Channel(reader.ReadUInt32());
         byte[] data = reader.ReadBytes();
         reader.RequireEnd();
-        if (data.Length > 32768) throw new InvalidOperationException();
-        if (channel.Sftp != null) channel.Sftp.Input(data);
+        if (data.Length > 32768)
+            throw new InvalidOperationException();
+        if (channel.Sftp != null)
+            channel.Sftp.Input(data);
         else if (channel.Process != null)
         {
             int written;
             channel.Process.StandardInput.TryWrite(data, 0, data.Length, 1000u, out written);
-            if (written != data.Length) CloseChannel(channel, true);
+            if (written != data.Length)
+                CloseChannel(channel, true);
         }
         SendWindowAdjust(channel, (uint)data.Length);
     }
@@ -607,7 +729,8 @@ internal sealed class SshConnection
         reader.ReadByte();
         SshChannelState channel = Channel(reader.ReadUInt32());
         reader.RequireEnd();
-        if (channel.Process != null) channel.Process.StandardInput.Close();
+        if (channel.Process != null)
+            channel.Process.StandardInput.Close();
     }
 
     private void ChannelClosed(byte[] payload)
@@ -680,8 +803,10 @@ internal sealed class SshConnection
         if (reply)
         {
             SshPacketWriter response = new SshPacketWriter(5);
-            if (success) response.WriteByte((byte)99);
-            else response.WriteByte((byte)100);
+            if (success)
+                response.WriteByte((byte)99);
+            else
+                response.WriteByte((byte)100);
             response.WriteUInt32(channel.RemoteId);
             transport.SendPacket(response.ToArray());
         }
@@ -706,10 +831,12 @@ internal sealed class SshConnection
         info.RedirectStandardOutput = true;
         info.RedirectStandardError = true;
         Process process = Process.Start(info);
-        if (process.Id == 0u) throw new InvalidOperationException();
+        if (process.Id == 0u)
+            throw new InvalidOperationException();
         channel.Process = process;
         channel.Started = true;
-        if (channel.HasPty) SendResize(channel, channel.Rows, channel.Columns);
+        if (channel.HasPty)
+            SendResize(channel, channel.Rows, channel.Columns);
     }
 
     private void PumpChannels()
@@ -718,14 +845,17 @@ internal sealed class SshConnection
         for (int index = 0; index < channels.Length; index++)
         {
             SshChannelState channel = channels[index];
-            if (channel == null) continue;
+            if (channel == null)
+                continue;
             if (channel.Sftp != null)
             {
                 byte[] output = channel.Sftp.Output();
-                if (output != null) SendChannelData(channel, output, false);
+                if (output != null)
+                    SendChannelData(channel, output, false);
                 continue;
             }
-            if (channel.Process == null) continue;
+            if (channel.Process == null)
+                continue;
             PumpReader(channel, channel.Process.StandardOutput, buffer, false);
             PumpReader(channel, channel.Process.StandardError, buffer, true);
             if (channel.Process.HasExited)
@@ -740,23 +870,28 @@ internal sealed class SshConnection
     private void PumpReader(SshChannelState channel, ProcessPipeReader reader, byte[] buffer,
         bool error)
     {
-        if (reader == null || channel.RemoteWindow == 0u) return;
+        if (reader == null || channel.RemoteWindow == 0u)
+            return;
         int maximum = (int)channel.RemoteWindow;
-        if (maximum > buffer.Length) maximum = buffer.Length;
-        if (maximum > (int)channel.RemoteMaximumPacket) maximum = (int)channel.RemoteMaximumPacket;
+        if (maximum > buffer.Length)
+            maximum = buffer.Length;
+        if (maximum > (int)channel.RemoteMaximumPacket)
+            maximum = (int)channel.RemoteMaximumPacket;
         int read;
         bool eof;
         if (reader.TryRead(buffer, 0, maximum, 0u, out read, out eof) && read > 0)
         {
             byte[] data = new byte[read];
-            for (int index = 0; index < read; index++) data[index] = buffer[index];
+            for (int index = 0; index < read; index++)
+                data[index] = buffer[index];
             SendChannelData(channel, data, error);
         }
     }
 
     private void SendChannelData(SshChannelState channel, byte[] data, bool error)
     {
-        if ((uint)data.Length > channel.RemoteWindow) return;
+        if ((uint)data.Length > channel.RemoteWindow)
+            return;
         SshPacketWriter writer = new SshPacketWriter(data.Length + 16);
         if (error)
         {
@@ -785,8 +920,8 @@ internal sealed class SshConnection
 
     private void SendResize(SshChannelState channel, uint rows, uint columns)
     {
-        string sequence = ((char)27).ToString() + "[8;" + rows.ToString() + ";" +
-            columns.ToString() + "t";
+        string sequence = ((char)27).ToString() + "[8;" + rows.ToString() + ";" + columns.ToString()
+            + "t";
         byte[] bytes = Encoding.UTF8.GetBytes(sequence);
         int written;
         channel.Process.StandardInput.TryWrite(bytes, 0, bytes.Length, 1000u, out written);
@@ -805,9 +940,11 @@ internal sealed class SshConnection
 
     private void CloseChannel(SshChannelState channel, bool terminate)
     {
-        if (channel == null || !channel.Open) return;
+        if (channel == null || !channel.Open)
+            return;
         channel.Open = false;
-        if (channel.Sftp != null) channel.Sftp.Close();
+        if (channel.Sftp != null)
+            channel.Sftp.Close();
         if (channel.Process != null)
         {
             channel.Process.StandardInput.Close();
@@ -842,6 +979,7 @@ internal sealed class SshConnection
     }
 }
 
+[Overlay("service")]
 public sealed class SshServer
 {
     private SshServerOptions options;
@@ -863,14 +1001,12 @@ public sealed class SshServer
 
     public static SshServer Create(SshServerOptions options)
     {
-        if (options.UserName == null || options.UserName.Length == 0 ||
-            options.ShellPath == null || options.ShellPath.Length == 0 ||
-            options.SftpRoot != "/sftp")
+        if (options.UserName == null || options.UserName.Length == 0 || options.ShellPath
+            == null || options.ShellPath.Length == 0 || options.SftpRoot != "/sftp")
             throw new ArgumentException();
         if (options.Port <= 0 || options.Port > 65535)
             throw new ArgumentOutOfRangeException();
-        if (options.MaximumPacketBytes <= 0 ||
-            options.MaximumPacketBytes > SshWire.MaximumPacketBytes)
+        if (options.MaximumPacketBytes <= 0 || options.MaximumPacketBytes > SshWire.MaximumPacketBytes)
             throw new ArgumentOutOfRangeException();
         if (options.MaximumChannels < 1 || options.MaximumChannels > 2)
             throw new ArgumentOutOfRangeException();
@@ -879,17 +1015,23 @@ public sealed class SshServer
 
     public void Start()
     {
-        if (started) return;
+        if (started)
+            return;
         SshConfiguration configuration = SshConfigurationLoader.Load(options.ConfigurationPath,
             options.UserName, options.Port);
         options.UserName = configuration.UserName;
         options.Port = configuration.Port;
-        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(
-            options.AuthorizedKeysPath);
+        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(options.AuthorizedKeysPath);
         byte[] privateKey = File.ReadAllBytes(options.HostKeyPath);
         uint replacementHostKey;
-        try { SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey)); }
-        finally { SshNative.Zeroize(privateKey); }
+        try
+        {
+            SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey));
+        }
+        finally
+        {
+            SshNative.Zeroize(privateKey);
+        }
         authorizedKeys = replacement;
         hostKey = replacementHostKey;
         started = true;
@@ -897,8 +1039,10 @@ public sealed class SshServer
 
     public bool Poll(uint timeoutMilliseconds)
     {
-        if (!started) Start();
-        if (stopping || Process.IsCancellationRequested) return false;
+        if (!started)
+            Start();
+        if (stopping || Process.IsCancellationRequested)
+            return false;
         status.NetworkReady = SshNative.NetworkReady() != 0;
         if (!status.NetworkReady)
         {
@@ -922,7 +1066,8 @@ public sealed class SshServer
         {
             uint client;
             int accept = SshNative.Accept(listener, timeoutMilliseconds, out client);
-            if (accept == -116) return true;
+            if (accept == -116)
+                return true;
             if (accept < 0)
             {
                 status.LastHostError = accept;
@@ -932,8 +1077,8 @@ public sealed class SshServer
             SshConnection accepted = null;
             try
             {
-                accepted = new SshConnection(client, options,
-                    (AuthorizedKeySet)authorizedKeys, hostKey);
+                accepted = new SshConnection(client, options, (AuthorizedKeySet)authorizedKeys,
+                    hostKey);
                 accepted.Handshake();
                 connection = accepted;
                 status.Connected = true;
@@ -948,7 +1093,8 @@ public sealed class SshServer
                     status.AuthenticationFailures += (uint)accepted.AuthenticationFailures;
                     accepted.Close();
                 }
-                else SshNative.Close(client);
+                else
+                    SshNative.Close(client);
                 if (accepted == null || accepted.AuthenticationFailures == 0)
                     status.AuthenticationFailures++;
                 status.LastHostError = -1;
@@ -962,8 +1108,10 @@ public sealed class SshServer
             uint extraClient;
             if (SshNative.Accept(listener, 0u, out extraClient) == 0)
                 SshNative.Close(extraClient);
-            if (!active.Poll(timeoutMilliseconds)) Disconnect();
-            else UpdateStatus();
+            if (!active.Poll(timeoutMilliseconds))
+                Disconnect();
+            else
+                UpdateStatus();
         }
         catch (Exception)
         {
@@ -977,28 +1125,38 @@ public sealed class SshServer
     public int Run()
     {
         Start();
-        while (Poll(250u)) { }
+        while (Poll(250u))
+        {
+        }
         Stop();
-        if (Process.IsCancellationRequested) return -1;
+        if (Process.IsCancellationRequested)
+            return -1;
         return 0;
     }
 
     public void ReloadKeys()
     {
-        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(
-            options.AuthorizedKeysPath);
+        AuthorizedKeySet replacement = SshConfigurationLoader.LoadAuthorizedKeys(options.AuthorizedKeysPath);
         byte[] privateKey = File.ReadAllBytes(options.HostKeyPath);
         uint replacementHostKey;
-        try { SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey)); }
-        finally { SshNative.Zeroize(privateKey); }
+        try
+        {
+            SshNative.Require(SshNative.P256PrivateImport(privateKey, out replacementHostKey));
+        }
+        finally
+        {
+            SshNative.Zeroize(privateKey);
+        }
         if (connection != null)
         {
-            if (pendingHostKey != 0u) SshNative.Close(pendingHostKey);
+            if (pendingHostKey != 0u)
+                SshNative.Close(pendingHostKey);
             pendingAuthorizedKeys = replacement;
             pendingHostKey = replacementHostKey;
             return;
         }
-        if (hostKey != 0u) SshNative.Close(hostKey);
+        if (hostKey != 0u)
+            SshNative.Close(hostKey);
         authorizedKeys = replacement;
         hostKey = replacementHostKey;
     }
@@ -1016,7 +1174,8 @@ public sealed class SshServer
         status.ActiveChannels = 0;
         if (pendingAuthorizedKeys != null)
         {
-            if (hostKey != 0u) SshNative.Close(hostKey);
+            if (hostKey != 0u)
+                SshNative.Close(hostKey);
             authorizedKeys = pendingAuthorizedKeys;
             hostKey = pendingHostKey;
             pendingAuthorizedKeys = null;
@@ -1050,7 +1209,8 @@ public sealed class SshServer
 
     private void UpdateStatus()
     {
-        if (connection == null) return;
+        if (connection == null)
+            return;
         SshConnection active = (SshConnection)connection;
         status.Connected = !active.Closed;
         status.Authenticated = active.Authenticated;
@@ -1067,5 +1227,76 @@ public sealed class SshServer
             listener = 0u;
         }
         status.Listening = false;
+    }
+}
+
+[Overlay("service")]
+public static class SshDaemon
+{
+    public static SshServerOptions ManagedShellDefaults()
+    {
+        SshServerOptions options = new SshServerOptions();
+        options.UserName = "ctilde";
+        options.ConfigurationPath = "/storage/ssh/sshd.conf";
+        options.HostKeyPath = "/storage/ssh/ssh_host_ecdsa_key.pem";
+        options.AuthorizedKeysPath = "/storage/ssh/authorized_keys";
+        options.SftpRoot = "/sftp";
+        options.ShellPath = "/storage/modules/shell.ctm";
+        options.Port = 22;
+        options.MaximumPacketBytes = 35000;
+        options.MaximumChannels = 2;
+        return options;
+    }
+
+    public static int Run(SshServerOptions options)
+    {
+        try
+        {
+            SshServer server = SshServer.Create(options);
+            Console.Write("sshd: waiting for network on port ");
+            Console.WriteLine(options.Port);
+            server.Start();
+            Process current = Process.Current;
+            while (server.Poll(250u))
+            {
+                byte[] payload;
+                if (current == null || !current.TryReceive(0u, out payload))
+                    continue;
+                string command = Encoding.UTF8.GetString(payload);
+                if (command == "status")
+                {
+                    SshServerStatus status = server.Status();
+                    Console.Write("network=");
+                    Console.Write(status.NetworkReady);
+                    Console.Write(" listening=");
+                    Console.Write(status.Listening);
+                    Console.Write(" connected=");
+                    Console.Write(status.Connected);
+                    Console.Write(" authenticated=");
+                    Console.Write(status.Authenticated);
+                    Console.Write(" channels=");
+                    Console.Write(status.ActiveChannels);
+                    Console.Write(" error=");
+                    Console.WriteLine(status.LastHostError);
+                }
+                else if (command == "reload-keys")
+                    server.ReloadKeys();
+                else if (command == "disconnect")
+                    server.Disconnect();
+                else if (command == "stop")
+                    server.Stop();
+                else
+                    Console.WriteLine("sshd: mailbox commands: status, reload-keys, disconnect, stop");
+            }
+            server.Stop();
+            if (Process.IsCancellationRequested)
+                return -1;
+            return 0;
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine("sshd: " + exception.Message);
+            return 1;
+        }
     }
 }

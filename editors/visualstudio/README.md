@@ -1,6 +1,6 @@
 # C~ for Visual Studio
 
-Version 0.15.0 of this preview extension supports the current C~ Draft 0.49 compiler, `System.Storage`, Runtime ABI 22 managed processes, Module ABI 3 metadata references and Xtensa overlays, hosted native imports, ESP-IDF managed-module project manifests, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
+Version 0.15.0 of this preview extension supports the current C~ Draft 0.50 compiler, `System.Storage`, Runtime ABI 22 managed processes, Module ABI 3 metadata references and Xtensa overlays, the native size profile, hosted native imports, ESP-IDF managed-module project manifests, hosted x64 geometry optimization, `Vec3x4` debug presentation, SIMD128, matrices, quaternions, and manifest-backed projects in Visual Studio 2022 17.14 or newer. The same AMD64 VSIX is eligible for Visual Studio 2026 under Microsoft's open-ended VSIX compatibility model, but the 2026 claim remains unverified until the checklist below passes there.
 
 ## Features
 
@@ -21,6 +21,8 @@ Visual Studio's Debug/Release selection is for solution organization only. C~ al
 Hosted manifests can use `hosted.runtimeFiles` to select explicit native runtime assets by OS and architecture. A successful project build stages the selected files beside the executable; Clean removes only unchanged compiler-staged copies.
 
 Completion collapses method overloads into one C#-style row while preserving every overload in signature help. Each source document is analyzed with the loaded manifest that contains it, so completion and navigation use sibling files even when another project is selected as the startup project.
+
+Source creation, deletion, and rename re-expand manifest globs. Open buffers remain authoritative, unchanged parsed trees are reused, and obsolete semantic snapshots cannot publish diagnostics. UNC file URIs retain their server names. The managed GDB adapter decodes octal escapes using the same fixture corpus as the TypeScript adapter. These are source updates; an installed VSIX must be rebuilt to include them.
 
 Syntax colors use Visual Studio's built-in classifications instead of fixed C~ colors. Method declarations and calls therefore follow the active theme's **method name** color, while types follow its **type** color. Light, dark, custom, and high-contrast themes remain authoritative.
 
@@ -75,7 +77,7 @@ The common imports and item schemas are required by CPS for the project hierarch
 
 Visual Studio project Check and Build explicitly request normal compiler verbosity. Canonical C~ diagnostics populate the Error List directly, without a generic `MSB3073` duplicate. The compiler writes `.ctilde/build-diagnostics.json` atomically after project compilation. The extension uses matching saved-source hashes for temporary source squiggles, asks the language server for a fresh project analysis, and uses LSP results as the source authority. Manifest diagnostics are owned by the extension and underline the exact invalid JSON value. Unmapped native compiler and linker failures remain in the Error List rather than being attached to an unrelated C~ span.
 
-The repository exposes 21 ready-to-load C~ projects: the physical standard library in `CTilde.StandardLibrary.sln` and 20 categorized entries in `Examples.sln`. The example solution includes separate ManagedShell firmware, managed Hello application, memory-tool, and task-manager projects plus three T-CAN wrappers that share one directory but reference different manifests. Select the intended project before running a command. Every entry deliberately omits `Build.0`, so **Build Solution** never attempts every optional native toolchain or hardware target at once.
+The repository exposes 30 ready-to-load C~ projects: the physical standard library in `CTilde.StandardLibrary.sln` and 29 categorized entries in `Examples.sln`. The example solution includes separate ManagedShell firmware, managed Hello application, memory-tool, and task-manager projects plus three T-CAN wrappers that share one directory but reference different manifests. Select the intended project before running a command. Every entry deliberately omits `Build.0`, so **Build Solution** never attempts every optional native toolchain or hardware target at once.
 
 ## Build and silent deployment
 

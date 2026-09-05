@@ -24,11 +24,13 @@
     "heapLimitBytes": 131072
   },
   "build": {
+    "configuration": "release",
+    "lto": true,
     "cLayout": "modules",
     "generatedDirectory": "main/generated",
     "generatedHeader": "main/generated/ctilde_exports.h",
     "espIdfProjectDirectory": ".",
-    "optimization": "speed",
+    "optimization": "size",
     "floatingPoint": "precise"
   }
 }

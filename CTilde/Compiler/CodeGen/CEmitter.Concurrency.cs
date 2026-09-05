@@ -13,6 +13,30 @@ internal sealed partial class CEmitter
         writer.WriteLine("    static const int orders[5] = { __ATOMIC_RELAXED, __ATOMIC_ACQUIRE, __ATOMIC_RELEASE, __ATOMIC_ACQ_REL, __ATOMIC_SEQ_CST }; return orders[order];");
         writer.WriteLine("#endif");
         writer.WriteLine("}");
+        writer.WriteLine("#if !defined(_MSC_VER)");
+        writer.WriteLine("static uint32_t ct_atomic_scalar_compare_exchange_u32(void* storage, uint32_t desired, uint32_t comparand, int success, int failure)");
+        writer.WriteLine("{");
+        writer.WriteLine("    uint32_t expected = comparand;");
+        writer.WriteLine(IsManagedModule ? "#if defined(ESP_PLATFORM)" : "#if 0");
+        writer.WriteLine("    (void)success; (void)failure; (void)ctilde_managed_atomic_compare_exchange_u32((volatile uint32_t*)storage, &expected, desired);");
+        writer.WriteLine("#else");
+        writer.WriteLine("    (void)__atomic_compare_exchange_n((uint32_t*)storage, &expected, desired, false, success, failure);");
+        writer.WriteLine("#endif");
+        writer.WriteLine("    return expected;");
+        writer.WriteLine("}");
+        if (IsManagedModule)
+        {
+            writer.WriteLine("#if defined(ESP_PLATFORM)");
+            writer.WriteLine("static uint32_t ct_atomic_scalar_compare_exchange_subword(void* storage, size_t size, uint32_t desired, uint32_t comparand)");
+            writer.WriteLine("{");
+            writer.WriteLine("    volatile uint32_t* word = (volatile uint32_t*)((uintptr_t)storage & ~(uintptr_t)3u);");
+            writer.WriteLine("    unsigned shift = (unsigned)((uintptr_t)storage & 3u) * 8u; uint32_t value_mask = size == 1u ? UINT32_C(255) : UINT32_C(65535); uint32_t mask = value_mask << shift; comparand &= value_mask;");
+            writer.WriteLine("    uint32_t expected = __atomic_load_n(word, __ATOMIC_SEQ_CST);");
+            writer.WriteLine("    for (;;) { uint32_t observed = (expected & mask) >> shift; if (observed != comparand) return observed; uint32_t replacement = (expected & ~mask) | ((desired << shift) & mask); if (ctilde_managed_atomic_compare_exchange_u32(word, &expected, replacement)) return observed; }");
+            writer.WriteLine("}");
+            writer.WriteLine("#endif");
+        }
+        writer.WriteLine("#endif");
         writer.WriteLine("static uint64_t ct_atomic_scalar_load(const void* storage, size_t size, int32_t order)");
         writer.WriteLine("{");
         writer.WriteLine("    int native_order = ct_atomic_order(order, true, false);");
@@ -28,7 +52,13 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    (void)success; (void)failure; switch (size) { case 1u: return (uint8_t)_InterlockedCompareExchange8((volatile char*)storage, (char)desired, (char)comparand); case 2u: return (uint16_t)_InterlockedCompareExchange16((volatile short*)storage, (short)desired, (short)comparand); case 4u: return (uint32_t)_InterlockedCompareExchange((volatile long*)storage, (long)desired, (long)comparand); case 8u: return (uint64_t)_InterlockedCompareExchange64((volatile __int64*)storage, (__int64)desired, (__int64)comparand); default: ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTA0003\", \"<atomic>\", 0); }");
         writer.WriteLine("#else");
-        writer.WriteLine("    switch (size) { case 1u: { uint8_t expected = (uint8_t)comparand; (void)__atomic_compare_exchange_n((uint8_t*)storage, &expected, (uint8_t)desired, false, success, failure); return expected; } case 2u: { uint16_t expected = (uint16_t)comparand; (void)__atomic_compare_exchange_n((uint16_t*)storage, &expected, (uint16_t)desired, false, success, failure); return expected; } case 4u: { uint32_t expected = (uint32_t)comparand; (void)__atomic_compare_exchange_n((uint32_t*)storage, &expected, (uint32_t)desired, false, success, failure); return expected; } case 8u: { uint64_t expected = comparand; (void)__atomic_compare_exchange_n((uint64_t*)storage, &expected, desired, false, success, failure); return expected; } default: ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTA0003\", \"<atomic>\", 0); }");
+        if (IsManagedModule)
+        {
+            writer.WriteLine("#if defined(ESP_PLATFORM)");
+            writer.WriteLine("    if (size == 1u || size == 2u) return ct_atomic_scalar_compare_exchange_subword(storage, size, (uint32_t)desired, (uint32_t)comparand);");
+            writer.WriteLine("#endif");
+        }
+        writer.WriteLine("    switch (size) { case 1u: { uint8_t expected = (uint8_t)comparand; (void)__atomic_compare_exchange_n((uint8_t*)storage, &expected, (uint8_t)desired, false, success, failure); return expected; } case 2u: { uint16_t expected = (uint16_t)comparand; (void)__atomic_compare_exchange_n((uint16_t*)storage, &expected, (uint16_t)desired, false, success, failure); return expected; } case 4u: return ct_atomic_scalar_compare_exchange_u32(storage, (uint32_t)desired, (uint32_t)comparand, success, failure); case 8u: { uint64_t expected = comparand; (void)__atomic_compare_exchange_n((uint64_t*)storage, &expected, desired, false, success, failure); return expected; } default: ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTA0003\", \"<atomic>\", 0); }");
         writer.WriteLine("#endif");
         writer.WriteLine("}");
         writer.WriteLine("static uint64_t ct_atomic_scalar_exchange(void* storage, size_t size, uint64_t desired, int32_t order) { (void)ct_atomic_order(order, false, false); uint64_t observed = ct_atomic_scalar_load(storage, size, 0); for (;;) { uint64_t previous = ct_atomic_scalar_compare_exchange(storage, size, desired, observed, order, 0); if (previous == observed) return observed; observed = previous; } }");
@@ -76,6 +106,12 @@ internal sealed partial class CEmitter
             return;
         }
 
+        if (IsManagedModule)
+        {
+            writer.WriteLine("extern void* ctilde_managed_thread_payload_allocate(size_t size, void** done);");
+            writer.WriteLine("extern void ctilde_managed_thread_payload_free(void* payload);");
+            writer.WriteLine("CT_NORETURN extern void ctilde_managed_thread_exit(void);");
+        }
         writer.WriteLine("typedef struct ct_managed_thread_payload {");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    HANDLE Handle; unsigned NativeId;");
@@ -93,7 +129,8 @@ internal sealed partial class CEmitter
         writer.WriteLine("{");
         writer.WriteLine($"    ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), UINT64_C(2), 2);");
         writer.WriteLine("    ct_release_fast((ct_object*)(void*)thread);");
-        writer.WriteLine("    ct_thread_detach();");
+        if (!IsManagedModule)
+            writer.WriteLine("    ct_thread_detach();");
         writer.WriteLine("}");
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("#define CT_MANAGED_THREAD_WORKER_RETURN unsigned __stdcall");
@@ -129,8 +166,8 @@ internal sealed partial class CEmitter
             writer.WriteLine("        worker_state->ExceptionTop = &worker_frame;");
             if (IsManagedModule)
             {
-                writer.WriteLine("        bool worker_failed = false;");
-                writer.WriteLine("        if (setjmp(worker_jump) != 0) { static const uint8_t diagnostic[] = \"C~ unhandled child-thread exception\\n\"; ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_runtime_console_write(diagnostic, sizeof(diagnostic) - 1u); ct_release_fast(exception); worker_failed = true; }");
+                writer.WriteLine("        volatile bool worker_failed = false;");
+                writer.WriteLine("        if (setjmp(worker_jump) != 0) { static const uint8_t diagnostic[] = \"C~ unhandled child-thread exception\\n\"; ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_runtime_console_write(diagnostic, sizeof(diagnostic) - 1u); ct_release(exception); worker_failed = true; }");
             }
             else
                 writer.WriteLine("        if (setjmp(worker_jump) != 0) { ct_object* exception = worker_state->CurrentException; worker_state->CurrentException = NULL; worker_state->ExceptionTop = worker_frame.Previous; ct_unhandled_exception(exception); }");
@@ -157,7 +194,7 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    return 0u;");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
-        writer.WriteLine("    vTaskDelete(NULL);");
+        writer.WriteLine(IsManagedModule ? "    ctilde_managed_thread_exit();" : "    vTaskDelete(NULL);");
         writer.WriteLine("#else");
         writer.WriteLine("    return NULL;");
         writer.WriteLine("#endif");
@@ -171,7 +208,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("    if (prior != 0u) ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0101\", \"<thread-start>\", 0);");
         writer.WriteLine($"    if (thread->{start} == NULL) {{ ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTT0102\", \"<thread-start>\", 0); }}");
         writer.WriteLine($"    if ((uint32_t)thread->{priority} > 4u) {{ ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0103\", \"<thread-start>\", 0); }}");
-        writer.WriteLine("    ct_managed_thread_payload* payload = (ct_managed_thread_payload*)calloc(1u, sizeof(*payload));");
+        if (IsManagedModule)
+            writer.WriteLine("    void* done = NULL; ct_managed_thread_payload* payload = (ct_managed_thread_payload*)ctilde_managed_thread_payload_allocate(sizeof(*payload), &done); if (payload != NULL) payload->Done = (SemaphoreHandle_t)done;");
+        else
+            writer.WriteLine("    ct_managed_thread_payload* payload = (ct_managed_thread_payload*)calloc(1u, sizeof(*payload));");
         writer.WriteLine($"    if (payload == NULL) {{ ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", \"<thread-start>\", 0); }}");
         writer.WriteLine("    ct_atomic_store_relaxed(&payload->Ready, 0u); ct_atomic_store_relaxed(&payload->Abort, 0u);");
         writer.WriteLine($"    thread->{handle} = (uintptr_t)(void*)payload; thread->{id} = ct_atomic_fetch_add_relaxed(&ct_managed_thread_next_id, 1u); ct_retain_fast((ct_object*)(void*)thread);");
@@ -183,7 +223,9 @@ internal sealed partial class CEmitter
         writer.WriteLine($"    uint32_t stack_bytes = thread->{stack}; uint32_t native_stack_bytes = stack_bytes == 0u ? (uint32_t)configMINIMAL_STACK_SIZE : (stack_bytes + 3u) & ~UINT32_C(3); UBaseType_t native_priority = (UBaseType_t)(tskIDLE_PRIORITY + 1u + (unsigned)thread->{priority});");
         if (IsManagedModule)
             writer.WriteLine("    payload->Process = ct_runtime_api->CurrentProcess();");
-        writer.WriteLine("    payload->Done = xSemaphoreCreateBinary(); if (payload->Done != NULL) { ct_atomic_store_release(&payload->Ready, 1u); created = xTaskCreate(ct_managed_thread_worker, \"C~ worker\", native_stack_bytes, thread, native_priority, &payload->Handle) == pdPASS; if (!created) ct_atomic_store_relaxed(&payload->Ready, 0u); }");
+        if (!IsManagedModule)
+            writer.WriteLine("    payload->Done = xSemaphoreCreateBinary();");
+        writer.WriteLine("    if (payload->Done != NULL) { ct_atomic_store_release(&payload->Ready, 1u); created = xTaskCreate(ct_managed_thread_worker, \"C~ worker\", native_stack_bytes, thread, native_priority, &payload->Handle) == pdPASS; if (!created) ct_atomic_store_relaxed(&payload->Ready, 0u); }");
         writer.WriteLine("#else");
         writer.WriteLine("    pthread_attr_t attributes; if (pthread_attr_init(&attributes) == 0) {");
         writer.WriteLine($"        if (thread->{stack} != 0u && pthread_attr_setstacksize(&attributes, (size_t)thread->{stack}) != 0) priority_ok = false;");
@@ -197,11 +239,13 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("        if (created) { (void)TerminateThread(payload->Handle, 1u); (void)CloseHandle(payload->Handle); created = false; }");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
-        writer.WriteLine("        if (!created && payload->Done != NULL) vSemaphoreDelete(payload->Done);");
+        if (!IsManagedModule)
+            writer.WriteLine("        if (!created && payload->Done != NULL) vSemaphoreDelete(payload->Done);");
         writer.WriteLine("#else");
         writer.WriteLine("        if (created) (void)pthread_join(payload->Handle, NULL);");
         writer.WriteLine("#endif");
-        writer.WriteLine($"        if (!created) {{ thread->{handle} = 0u; free(payload); ct_release_fast((ct_object*)(void*)thread); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); }}");
+        var freePayload = IsManagedModule ? "ctilde_managed_thread_payload_free" : "free";
+        writer.WriteLine($"        if (!created) {{ thread->{handle} = 0u; {freePayload}(payload); ct_release_fast((ct_object*)(void*)thread); ct_atomic_scalar_store((void*)&thread->{state}, sizeof(thread->{state}), 0u, 2); }}");
         writer.WriteLine("        ct_raise_runtime_fault(CT_FAULT_THREAD_STATE, \"CTT0103\", \"<thread-start>\", 0);");
         writer.WriteLine("    }");
         writer.WriteLine("}");
@@ -243,11 +287,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("    (void)CloseHandle(payload->Handle);");
         writer.WriteLine("#elif defined(ESP_PLATFORM)");
-        writer.WriteLine("    if (payload->Done != NULL) vSemaphoreDelete(payload->Done);");
+        if (!IsManagedModule)
+            writer.WriteLine("    if (payload->Done != NULL) vSemaphoreDelete(payload->Done);");
         writer.WriteLine("#else");
         writer.WriteLine("    if (!payload->Joined) (void)pthread_detach(payload->Handle);");
         writer.WriteLine("#endif");
-        writer.WriteLine($"    thread->{handle} = 0u; free(payload);");
+        writer.WriteLine($"    thread->{handle} = 0u; {freePayload}(payload);");
         writer.WriteLine("}");
         writer.WriteLine();
     }

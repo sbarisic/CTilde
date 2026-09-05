@@ -1,0 +1,86 @@
+using System;
+using System.Threading;
+using System.Diagnostics;
+
+public sealed class AllocationCell
+{
+    public byte[] Data;
+
+    public AllocationCell(int size)
+    {
+        Data = new byte[size];
+    }
+}
+
+public static class Program
+{
+    private static Atomic<int> completed = new Atomic<int>(0);
+    private static bool keepRunning;
+    private static bool runUntilCancelled;
+
+    private static void Work()
+    {
+        int round = 0;
+        while (round < 250 || keepRunning || runUntilCancelled)
+        {
+            AllocationCell[] values = new AllocationCell[8];
+            for (int index = 0; index < values.Length; index++)
+            {
+                values[index] = new AllocationCell(64 + index);
+                values[index].Data[0] = (byte)index;
+            }
+            for (int index = values.Length - 1; index >= 0; index--)
+            {
+                if (values[index].Data[0] != (byte)index)
+                    throw new InvalidOperationException();
+                values[index] = null;
+            }
+            round++;
+            Thread.Sleep(1u);
+            if (!keepRunning && Process.IsCancellationRequested)
+                break;
+        }
+        completed.FetchAdd(1, MemoryOrder.SequentiallyConsistent);
+    }
+
+    [EntryPoint]
+    public static int Main(string[] args)
+    {
+        Atomic<byte> small = new Atomic<byte>((byte)7);
+        Atomic<ushort> medium = new Atomic<ushort>((ushort)1025);
+        Atomic<sbyte> signedSmall = new Atomic<sbyte>((sbyte)-1);
+        Atomic<short> signedMedium = new Atomic<short>((short)-1025);
+        if (signedSmall.CompareExchange((sbyte)-2, (sbyte)-1, MemoryOrder.SequentiallyConsistent,
+            MemoryOrder.Relaxed) != -1 || signedMedium.CompareExchange((short)-2049,
+            (short)-1025, MemoryOrder.SequentiallyConsistent, MemoryOrder.Relaxed)
+            != -1025)
+            return 13;
+        Atomic<long> wide = new Atomic<long>(4000000000L);
+        if (small.CompareExchange((byte)9, (byte)7, MemoryOrder.SequentiallyConsistent,
+            MemoryOrder.Relaxed) != 7 || small.CompareExchange((byte)11, (byte)7,
+            MemoryOrder.SequentiallyConsistent, MemoryOrder.Relaxed) != 9 || medium.CompareExchange((ushort)2049,
+            (ushort)1025, MemoryOrder.SequentiallyConsistent, MemoryOrder.Relaxed)
+            != 1025 || medium.Load(MemoryOrder.Acquire) != 2049 || wide.CompareExchange(5000000000L,
+            4000000000L, MemoryOrder.SequentiallyConsistent, MemoryOrder.Relaxed)
+            != 4000000000L)
+            return 12;
+        if (args.Length > 0 && args[0] == "quota")
+        {
+            byte[] impossible = new byte[131072];
+            Console.WriteLine(impossible.Length);
+            return 10;
+        }
+        keepRunning = args.Length > 0 && args[0] == "force";
+        runUntilCancelled = args.Length > 0 && args[0] == "cancel";
+        Thread first = new Thread(Work, 8192u);
+        Thread second = new Thread(Work, 8192u);
+        first.Start();
+        second.Start();
+        first.Join();
+        second.Join();
+        if (completed.Load(MemoryOrder.SequentiallyConsistent) != 2)
+            return 11;
+        Console.WriteLine("ALLOCATOR_OK");
+        return 0;
+    }
+}

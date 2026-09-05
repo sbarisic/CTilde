@@ -10,4 +10,4 @@ This example loads an ordinary native plug-in through hosted C~ `[NativeImport]`
 
 The default matrix uses MSVC, WSL GCC, and WSL Clang. Use `-Compilers msvc` for the Windows-only path.
 
-This is native C ABI loading, not shared-runtime managed C~ module loading. Managed Module ABI 1 currently targets ESP-IDF. The hosted target does not yet emit a C~ shared library, consume `.ctmeta.json` references, isolate mutable static state per process, or load managed C~ types through a shared runtime.
+This is native C ABI loading, not shared-runtime managed C~ module loading. Managed Module ABI 3 currently targets ESP-IDF. The hosted target does not yet emit a C~ shared library, consume `.ctmeta.json` references, isolate mutable static state per process, or load managed C~ types through a shared runtime.

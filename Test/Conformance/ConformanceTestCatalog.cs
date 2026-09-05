@@ -4,6 +4,8 @@ internal static class ConformanceTestCatalog
 {
     public static readonly IReadOnlySet<string> CrossToolchain = new HashSet<string>(StringComparer.Ordinal)
     {
+        "draft 0.50 streaming and stable sorting runtime",
+        "draft 0.50 native header cache invalidation",
         "64-bit integers",
         "ARC cycle limitation",
         "ARC deterministic lifetime",

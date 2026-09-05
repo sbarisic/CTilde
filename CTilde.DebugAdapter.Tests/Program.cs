@@ -10,6 +10,11 @@ var tests = new List<(string Name, Action Run)>
     ("DAP framing and initialize", DapFraming),
     ("unsupported hover remains nonfatal", UnsupportedHoverRemainsNonfatal),
     ("MI stream parsing", MiStreamParsing),
+    ("MI shared string corpus", () => {
+        using var corpus = JsonDocument.Parse(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "gdb-mi-strings.json")));
+        foreach (var item in corpus.RootElement.EnumerateArray())
+            Equal(item.GetProperty("text").GetString()!, MiParser.Parse(item.GetProperty("record").GetString()!)!.Text!);
+    }),
     ("fake GDB command lifecycle", FakeGdbLifecycle),
     ("debug control 32-bit layout", () => DebugControlLayout(4)),
     ("debug control 64-bit layout", () => DebugControlLayout(8)),

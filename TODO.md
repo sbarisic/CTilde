@@ -1,6 +1,6 @@
 # C~ roadmap
 
-This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.49 surface is in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements are in [C_ABI.md](C_ABI.md).
+This document tracks outstanding work only. Completed language, compiler, runtime, editor, and target milestones are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) and the Git history. The normative Draft 0.50 surface is in [LANGUAGE.md](LANGUAGE.md), and native compatibility requirements are in [C_ABI.md](C_ABI.md).
 
 ## Language and standard library
 
@@ -55,24 +55,24 @@ The first typed-IR size tranche removes cleanup boundaries with no live records,
 
 ## Managed modules
 
-Draft 0.49 advances managed modules to Runtime ABI 22, Module ABI 3, and schema-3 metadata. Provider-owned resident stubs make ordinary and exceptional managed calls cleanup-safe, and ESP32/Xtensa applications and libraries can package named process-local code overlays behind those stubs. Draft 0.48 redirected streams, stable process identities, exact dependency imports, and Draft 0.47 metadata references remain available. Remaining work is:
+Draft 0.50 retains Runtime ABI 22, Module ABI 3, and schema-3 metadata. It adds the native size profile, inferred placement for private single-overlay helpers, final-package executable/data measurement, separated resident load segments, and example-local working-set budgets. Provider-owned resident stubs still make ordinary and exceptional managed calls cleanup-safe. Draft 0.48 redirected streams, stable process identities, exact dependency imports, and Draft 0.47 metadata references remain available. Remaining work is:
 
 - [ ] Make the canonical descriptor returned by runtime registration authoritative in generated object, interface, delegate, cast, and dispatch metadata; validate its complete ABI shape rather than only name, size, alignment, and value/reference kind.
 - [ ] Add runtime-sized unboxed `ct_type_ops` dictionaries for shared arrays, lists, dictionaries, equality, hashing, comparison, ARC copy/drop, and exceptions.
 - [ ] Complete the supported managed-library surface for fields and richer descriptor-sharing scenarios. Constructors, properties, concrete classes, structures, interfaces, arrays, delegates, and exceptions use cleanup-safe provider stubs for the currently supported concrete non-generic surface.
 - [ ] Move the complete non-generic standard library and generic implementations into the shared firmware component once canonical operations and callable imports are available. Managed ELF files currently still contain reachable private runtime and standard-library implementation code.
-- [ ] Extend the resident native-resource ledger beyond the current ManagedShell socket/crypto users as additional firmware accessors are added; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
+- [ ] Extend the resident native-resource ledger beyond the current socket, crypto, and managed-thread payload users as additional firmware accessors are added; retain the documented undefined behavior for unsafe state that escapes runtime accounting.
 - [ ] Define whether a stuck normal static finalizer may be promoted back to forced cleanup after it has taken ownership from `Main`.
-- [ ] Move more private runtime and standard-library implementation out of modules; Draft 0.49 audits the Xtensa overlay relocation subset but ordinary resident module relocation coverage remains a separate loader concern.
+- [ ] Move more private runtime and standard-library implementation out of modules; Draft 0.50 infers helpers that belong to one overlay and audits the Xtensa overlay relocation subset, but helpers shared by resident and multiple overlay paths still require resident code or shared-runtime extraction.
 - [ ] Add optional overlay compression, prefetching, pinning, more than one executable window, or RAM-backed source caching only after measured transition and memory evidence. Raw overlay-body breakpoints, disassembly-aware stepping, and hot replacement also remain deferred.
 - [ ] Extend overlays beyond ESP32/Xtensa only with backend-specific executable-memory, relocation, and cache-coherency evidence. ESP32-C3/RISC-V, hosted, Cosmopolitan, freestanding, and resident firmware deliberately reject `[Overlay]`.
-- [ ] Add corrupt, wrong-architecture, stale-ABI, dependency-cycle, version-conflict, signature-mismatch, heap-quota, child-thread, exception, cancellation, forced-termination, and cross-process reference rejection tests.
-- [ ] Extend the ManagedShell hardware runner to execute the lifecycle loop and persist a machine-readable report so the manual 2026-09-02 measurements become a replayable acceptance gate.
+- [ ] Expand corrupt, wrong-architecture, stale-ABI, dependency-cycle, version-conflict, signature-mismatch, and cross-process reference rejection tests.
+- [ ] Extend thread lifecycle stress to cancellation during native task creation and attachment. The current fixture observes both workers before requesting termination.
 - [ ] Design a separate hosted Managed Module ABI host only if desktop shared-runtime modules are required. The current [HostedNativeImport example](examples/HostedNativeImport/README.md) intentionally exercises native C ABI loading and cannot substitute for managed descriptors, canonical types, process instances, or `.ctmeta.json` references.
 
 ## SSH and remote administration
 
-Draft 0.49 implements the common `shell.ctm` environment, opaque resident socket/crypto tokens, Curve25519/P-256/AES-GCM transport, public-key authentication, rekey limits, redirected shell and exec channels, SFTP v3 rooted beneath `/sftp`, and an explicit secrets-aware packaging target. These components have focused build coverage but not external or hardware acceptance. Remaining work is:
+Draft 0.49 implements the common `shell.ctm` environment, opaque resident socket/crypto tokens, Curve25519/P-256/AES-GCM transport, public-key authentication, rekey limits, redirected shell and exec channels, SFTP v3 rooted beneath `/sftp`, and an explicit secrets-aware packaging target. Draft 0.50 reduces their executable working set and adds size gates; it does not complete protocol acceptance. Remaining work is:
 
 - [ ] Run connected ESP32 Wi-Fi, UART-shell supervision, remote shell/exec, resize, Nano-over-SSH, service-control, cancellation, and complete descendant cleanup scenarios.
 - [ ] Run OpenSSH and libssh interoperability for transport, public-key authentication, PTY/exec, exit status, and SFTP operations.
@@ -107,6 +107,8 @@ The staged target contract and rejected shortcuts are documented in [COSMOPOLITA
 - [ ] Define retained callback registration, unregistration, rooting, and cross-thread lifetime rules separately from the existing synchronous callback profile.
 
 ## Deferred research
+
+- [ ] Compare compact-map index widths and occupancy encodings on x64 and ESP32, with separate operation timings and peak-memory measurements. The [benchmark-only entry-array prototype](Test/Fixtures/CompactMap/README.md) reduced allocations but increased payload storage, so production `Map` retains its eight-array layout.
 
 - [ ] Record a comparable pre-optimization renderer timing only if a representative historical build can be reconstructed; current elapsed-time measurements remain non-gating.
 - [ ] Add architecture-specific inline-assembly validation only if C~ gains a native backend. The GNU C backend intentionally delegates instruction validation to the assembler.

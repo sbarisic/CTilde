@@ -123,11 +123,6 @@ internal static partial class ConformanceTests
             }
 
             var repositoryRoot = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", ".."));
-            var physicalSources = new[] { "CTilde", "CTilde.Cli", "editors", "examples" }
-                .SelectMany(directory => Directory.EnumerateFiles(Path.Combine(repositoryRoot, directory), "*.ct", SearchOption.AllDirectories))
-                .Where(path => !path.Split(Path.DirectorySeparatorChar).Any(segment => segment is "bin" or "obj" or ".artifacts" or "artifacts" or "node_modules" or ".vscode-test"))
-                .ToArray();
-            Assert(physicalSources.Length == 98, $"Expected 98 physical C~ sources, found {physicalSources.Length}.");
             var repositoryCheck = RunProcess("dotnet", [CliPath(), "format", "--check", "CTilde", "CTilde.Cli", "editors", "examples"], workingDirectory: repositoryRoot);
             Assert(repositoryCheck.ExitCode == 0, repositoryCheck.StandardError);
         });

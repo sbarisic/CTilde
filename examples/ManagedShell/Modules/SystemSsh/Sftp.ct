@@ -15,7 +15,7 @@ internal sealed class SftpDirectoryState
     internal int Position;
 }
 
-[Overlay("sftp")]
+[Overlay("sftp-core")]
 internal sealed class SftpSession
 {
     private const uint StatusOk = 0u;
@@ -48,16 +48,21 @@ internal sealed class SftpSession
 
     internal void Input(byte[] data)
     {
-        if (data.Length > inbound.Length - inboundLength) throw new InvalidOperationException();
-        for (int index = 0; index < data.Length; index++) inbound[inboundLength + index] = data[index];
+        if (data.Length > inbound.Length - inboundLength)
+            throw new InvalidOperationException();
+        for (int index = 0; index < data.Length; index++)
+            inbound[inboundLength + index] = data[index];
         inboundLength += data.Length;
         while (inboundLength >= 4)
         {
             uint length = SshWire.ReadUInt32(inbound, 0);
-            if (length == 0u || length > 35000u) throw new InvalidOperationException();
-            if (inboundLength < (int)length + 4) return;
+            if (length == 0u || length > 35000u)
+                throw new InvalidOperationException();
+            if (inboundLength < (int)length + 4)
+                return;
             byte[] request = new byte[(int)length];
-            for (int index = 0; index < request.Length; index++) request[index] = inbound[index + 4];
+            for (int index = 0; index < request.Length; index++)
+                request[index] = inbound[index + 4];
             int consumed = request.Length + 4;
             for (int index = consumed; index < inboundLength; index++)
                 inbound[index - consumed] = inbound[index];
@@ -68,7 +73,8 @@ internal sealed class SftpSession
 
     internal byte[] Output()
     {
-        if (outputCount == 0) return null;
+        if (outputCount == 0)
+            return null;
         byte[] value = output[outputHead].Data;
         output[outputHead] = null;
         outputHead = (outputHead + 1) % output.Length;
@@ -78,7 +84,8 @@ internal sealed class SftpSession
 
     internal void Close()
     {
-        for (int index = 0; index < files.Length; index++) CloseSlot(index);
+        for (int index = 0; index < files.Length; index++)
+            CloseSlot(index);
         inboundLength = 0;
         outputCount = 0;
     }
@@ -97,24 +104,42 @@ internal sealed class SftpSession
         uint id = reader.ReadUInt32();
         try
         {
-            if (type == 3) OpenFile(id, reader);
-            else if (type == 4) CloseHandle(id, reader);
-            else if (type == 5) ReadFile(id, reader);
-            else if (type == 6) WriteFile(id, reader);
-            else if (type == 7 || type == 17) StatPath(id, reader);
-            else if (type == 8) StatHandle(id, reader);
-            else if (type == 9) SetPathAttributes(id, reader);
-            else if (type == 10) SetHandleAttributes(id, reader);
-            else if (type == 11) OpenDirectory(id, reader);
-            else if (type == 12) ReadDirectory(id, reader);
-            else if (type == 13) RemoveFile(id, reader);
-            else if (type == 14) MakeDirectory(id, reader);
-            else if (type == 15) RemoveDirectory(id, reader);
-            else if (type == 16) RealPath(id, reader);
-            else if (type == 18) Rename(id, reader, false);
-            else if (type == 19 || type == 20) SendStatus(id, StatusUnsupported, "links are not supported");
-            else if (type == 200) Extended(id, reader);
-            else SendStatus(id, StatusUnsupported, "operation is not supported");
+            if (type == 3)
+                OpenFile(id, reader);
+            else if (type == 4)
+                CloseHandle(id, reader);
+            else if (type == 5)
+                ReadFile(id, reader);
+            else if (type == 6)
+                WriteFile(id, reader);
+            else if (type == 7 || type == 17)
+                StatPath(id, reader);
+            else if (type == 8)
+                StatHandle(id, reader);
+            else if (type == 9)
+                SetPathAttributes(id, reader);
+            else if (type == 10)
+                SetHandleAttributes(id, reader);
+            else if (type == 11)
+                OpenDirectory(id, reader);
+            else if (type == 12)
+                ReadDirectory(id, reader);
+            else if (type == 13)
+                RemoveFile(id, reader);
+            else if (type == 14)
+                MakeDirectory(id, reader);
+            else if (type == 15)
+                RemoveDirectory(id, reader);
+            else if (type == 16)
+                RealPath(id, reader);
+            else if (type == 18)
+                Rename(id, reader, false);
+            else if (type == 19 || type == 20)
+                SendStatus(id, StatusUnsupported, "links are not supported");
+            else if (type == 200)
+                Extended(id, reader);
+            else
+                SendStatus(id, StatusUnsupported, "operation is not supported");
         }
         catch (IOException)
         {
@@ -140,6 +165,7 @@ internal sealed class SftpSession
         Queue(writer.ToArray());
     }
 
+    [Overlay("sftp-files")]
     private void OpenFile(uint id, SshPacketReader reader)
     {
         string path = Path(reader.ReadString());
@@ -153,18 +179,26 @@ internal sealed class SftpSession
         bool truncate = (flags & 16u) != 0u;
         bool exclusive = (flags & 32u) != 0u;
         FileAccess access = FileAccess.Read;
-        if (read && write) access = FileAccess.ReadWrite;
-        else if (write) access = FileAccess.Write;
+        if (read && write)
+            access = FileAccess.ReadWrite;
+        else if (write)
+            access = FileAccess.Write;
         FileMode mode = FileMode.Open;
-        if (append) mode = FileMode.Append;
-        else if (exclusive && create) mode = FileMode.CreateNew;
-        else if (create && truncate) mode = FileMode.Create;
-        else if (create) mode = FileMode.OpenOrCreate;
-        else if (truncate) mode = FileMode.Truncate;
+        if (append)
+            mode = FileMode.Append;
+        else if (exclusive && create)
+            mode = FileMode.CreateNew;
+        else if (create && truncate)
+            mode = FileMode.Create;
+        else if (create)
+            mode = FileMode.OpenOrCreate;
+        else if (truncate)
+            mode = FileMode.Truncate;
         int slot = AllocateSlot();
         files[slot] = new FileStream(path, mode, access);
         paths[slot] = path;
-        if (generations[slot] == 0u) generations[slot] = 1u;
+        if (generations[slot] == 0u)
+            generations[slot] = 1u;
         SendHandle(id, slot);
     }
 
@@ -176,36 +210,46 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-files")]
     private void ReadFile(uint id, SshPacketReader reader)
     {
         int slot = ReadHandle(reader);
         ulong offset = reader.ReadUInt64();
         uint length = reader.ReadUInt32();
         reader.RequireEnd();
-        if (files[slot] == null || length > 32768u) throw new InvalidOperationException();
+        if (files[slot] == null || length > 32768u)
+            throw new InvalidOperationException();
         files[slot].Position = (long)offset;
         byte[] data = new byte[(int)length];
         int count = files[slot].Read(data, 0, data.Length);
-        if (count == 0) { SendStatus(id, StatusEof, "end of file"); return; }
+        if (count == 0)
+        {
+            SendStatus(id, StatusEof, "end of file");
+            return;
+        }
         byte[] exact = new byte[count];
-        for (int index = 0; index < count; index++) exact[index] = data[index];
+        for (int index = 0; index < count; index++)
+            exact[index] = data[index];
         SshPacketWriter writer = Response((byte)103, id, count + 16);
         writer.WriteBytes(exact);
         Queue(writer.ToArray());
     }
 
+    [Overlay("sftp-files")]
     private void WriteFile(uint id, SshPacketReader reader)
     {
         int slot = ReadHandle(reader);
         ulong offset = reader.ReadUInt64();
         byte[] data = reader.ReadBytes();
         reader.RequireEnd();
-        if (files[slot] == null || data.Length > 32768) throw new InvalidOperationException();
+        if (files[slot] == null || data.Length > 32768)
+            throw new InvalidOperationException();
         files[slot].Position = (long)offset;
         files[slot].Write(data, 0, data.Length);
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-files")]
     private void StatPath(uint id, SshPacketReader reader)
     {
         string path = Path(reader.ReadString());
@@ -213,6 +257,7 @@ internal sealed class SftpSession
         SendAttributes(id, File.GetMetadata(path));
     }
 
+    [Overlay("sftp-files")]
     private void StatHandle(uint id, SshPacketReader reader)
     {
         int slot = ReadHandle(reader);
@@ -220,11 +265,16 @@ internal sealed class SftpSession
         SendAttributes(id, File.GetMetadata(paths[slot]));
     }
 
+    [Overlay("sftp-files")]
     private void SetPathAttributes(uint id, SshPacketReader reader)
     {
         string path = Path(reader.ReadString());
         uint flags = reader.ReadUInt32();
-        if ((flags & ~1u) != 0u) { SendStatus(id, StatusUnsupported, "attribute is not supported"); return; }
+        if ((flags & ~1u) != 0u)
+        {
+            SendStatus(id, StatusUnsupported, "attribute is not supported");
+            return;
+        }
         if ((flags & 1u) != 0u)
         {
             ulong length = reader.ReadUInt64();
@@ -236,16 +286,23 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-files")]
     private void SetHandleAttributes(uint id, SshPacketReader reader)
     {
         int slot = ReadHandle(reader);
         uint flags = reader.ReadUInt32();
-        if ((flags & ~1u) != 0u) { SendStatus(id, StatusUnsupported, "attribute is not supported"); return; }
-        if ((flags & 1u) != 0u) files[slot].SetLength((long)reader.ReadUInt64());
+        if ((flags & ~1u) != 0u)
+        {
+            SendStatus(id, StatusUnsupported, "attribute is not supported");
+            return;
+        }
+        if ((flags & 1u) != 0u)
+            files[slot].SetLength((long)reader.ReadUInt64());
         reader.RequireEnd();
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-directories")]
     private void OpenDirectory(uint id, SshPacketReader reader)
     {
         string path = Path(reader.ReadString());
@@ -255,21 +312,29 @@ internal sealed class SftpSession
         state.Entries = Directory.GetFileSystemEntries(path);
         directories[slot] = state;
         paths[slot] = path;
-        if (generations[slot] == 0u) generations[slot] = 1u;
+        if (generations[slot] == 0u)
+            generations[slot] = 1u;
         SendHandle(id, slot);
     }
 
+    [Overlay("sftp-directories")]
     private void ReadDirectory(uint id, SshPacketReader reader)
     {
         int slot = ReadHandle(reader);
         reader.RequireEnd();
         SftpDirectoryState state = directories[slot];
-        if (state == null) throw new InvalidOperationException();
+        if (state == null)
+            throw new InvalidOperationException();
         string[] entries = state.Entries;
         int position = state.Position;
-        if (position >= entries.Length) { SendStatus(id, StatusEof, "end of directory"); return; }
+        if (position >= entries.Length)
+        {
+            SendStatus(id, StatusEof, "end of directory");
+            return;
+        }
         int count = entries.Length - position;
-        if (count > 8) count = 8;
+        if (count > 8)
+            count = 8;
         SshPacketWriter writer = Response((byte)104, id, 4096);
         writer.WriteUInt32((uint)count);
         for (int index = 0; index < count; index++)
@@ -284,6 +349,7 @@ internal sealed class SftpSession
         Queue(writer.ToArray());
     }
 
+    [Overlay("sftp-files")]
     private void RemoveFile(uint id, SshPacketReader reader)
     {
         File.Delete(Path(reader.ReadString()));
@@ -291,6 +357,7 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-directories")]
     private void MakeDirectory(uint id, SshPacketReader reader)
     {
         string path = Path(reader.ReadString());
@@ -300,6 +367,7 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-directories")]
     private void RemoveDirectory(uint id, SshPacketReader reader)
     {
         Directory.Delete(Path(reader.ReadString()), false);
@@ -307,6 +375,7 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-files")]
     private void Rename(uint id, SshPacketReader reader, bool overwrite)
     {
         string source = Path(reader.ReadString());
@@ -316,6 +385,7 @@ internal sealed class SftpSession
         SendStatus(id, StatusOk, "");
     }
 
+    [Overlay("sftp-directories")]
     private void RealPath(uint id, SshPacketReader reader)
     {
         string requested = reader.ReadString();
@@ -324,7 +394,8 @@ internal sealed class SftpSession
         if (!SshWire.TryNormalizeSftpPath(requested, out normalized))
             throw new InvalidOperationException();
         string remote = normalized.Substring(root.Length);
-        if (remote.Length == 0) remote = "/";
+        if (remote.Length == 0)
+            remote = "/";
         SshPacketWriter writer = Response((byte)104, id, 512);
         writer.WriteUInt32(1u);
         writer.WriteString(remote);
@@ -335,6 +406,7 @@ internal sealed class SftpSession
         Queue(writer.ToArray());
     }
 
+    [Overlay("sftp-files")]
     private void Extended(uint id, SshPacketReader reader)
     {
         string operation = reader.ReadString();
@@ -376,21 +448,37 @@ internal sealed class SftpSession
     {
         writer.WriteUInt32(5u);
         writer.WriteUInt64((ulong)metadata.Length);
-        if (metadata.Kind == FileSystemEntryKind.Directory) writer.WriteUInt32(16877u);
-        else writer.WriteUInt32(33188u);
+        if (metadata.Kind == FileSystemEntryKind.Directory)
+            writer.WriteUInt32(16877u);
+        else
+            writer.WriteUInt32(33188u);
     }
 
     private static void SkipAttributes(SshPacketReader reader)
     {
         uint flags = reader.ReadUInt32();
-        if ((flags & 1u) != 0u) reader.ReadUInt64();
-        if ((flags & 2u) != 0u) { reader.ReadUInt32(); reader.ReadUInt32(); }
-        if ((flags & 4u) != 0u) reader.ReadUInt32();
-        if ((flags & 8u) != 0u) { reader.ReadUInt32(); reader.ReadUInt32(); }
+        if ((flags & 1u) != 0u)
+            reader.ReadUInt64();
+        if ((flags & 2u) != 0u)
+        {
+            reader.ReadUInt32();
+            reader.ReadUInt32();
+        }
+        if ((flags & 4u) != 0u)
+            reader.ReadUInt32();
+        if ((flags & 8u) != 0u)
+        {
+            reader.ReadUInt32();
+            reader.ReadUInt32();
+        }
         if ((flags & 0x80000000u) != 0u)
         {
             uint count = reader.ReadUInt32();
-            for (uint index = 0u; index < count; index++) { reader.ReadString(); reader.ReadString(); }
+            for (uint index = 0u; index < count; index++)
+            {
+                reader.ReadString();
+                reader.ReadString();
+            }
         }
     }
 
@@ -407,44 +495,51 @@ internal sealed class SftpSession
     private int ReadHandle(SshPacketReader reader)
     {
         byte[] handle = reader.ReadBytes();
-        if (handle.Length != 8) throw new InvalidOperationException();
+        if (handle.Length != 8)
+            throw new InvalidOperationException();
         uint slot = SshWire.ReadUInt32(handle, 0);
         uint generation = SshWire.ReadUInt32(handle, 4);
-        if (slot >= 8u || generations[(int)slot] != generation ||
-            (files[(int)slot] == null && directories[(int)slot] == null))
+        if (slot >= 8u || generations[(int)slot] != generation || (files[(int)slot]
+            == null && directories[(int)slot] == null))
             throw new InvalidOperationException();
-        return (int)slot;
+        return(int)slot;
     }
 
     private int AllocateSlot()
     {
         for (int index = 0; index < files.Length; index++)
-            if (files[index] == null && directories[index] == null) return index;
+            if (files[index] == null && directories[index] == null)
+            return index;
         throw new InvalidOperationException();
     }
 
     private void CloseSlot(int slot)
     {
-        if (files[slot] != null) files[slot].Dispose();
+        if (files[slot] != null)
+            files[slot].Dispose();
         files[slot] = null;
         paths[slot] = null;
         directories[slot] = null;
         generations[slot]++;
-        if (generations[slot] == 0u) generations[slot] = 1u;
+        if (generations[slot] == 0u)
+            generations[slot] = 1u;
     }
 
     private string Path(string remote)
     {
         string normalized;
-        if (!SshWire.TryNormalizeSftpPath(remote, out normalized)) throw new InvalidOperationException();
-        if (normalized != root && !normalized.StartsWith(root + "/")) throw new InvalidOperationException();
+        if (!SshWire.TryNormalizeSftpPath(remote, out normalized))
+            throw new InvalidOperationException();
+        if (normalized != root && !normalized.StartsWith(root + "/"))
+            throw new InvalidOperationException();
         return normalized;
     }
 
     private static string FileName(string path)
     {
         int slash = path.LastIndexOf('/');
-        if (slash < 0) return path;
+        if (slash < 0)
+            return path;
         return path.Substring(slash + 1);
     }
 
@@ -467,10 +562,12 @@ internal sealed class SftpSession
 
     private void Queue(byte[] payload)
     {
-        if (outputCount == output.Length) throw new InvalidOperationException();
+        if (outputCount == output.Length)
+            throw new InvalidOperationException();
         byte[] framed = new byte[payload.Length + 4];
         SshWire.WriteUInt32(framed, 0, (uint)payload.Length);
-        for (int index = 0; index < payload.Length; index++) framed[index + 4] = payload[index];
+        for (int index = 0; index < payload.Length; index++)
+            framed[index + 4] = payload[index];
         int tail = (outputHead + outputCount) % output.Length;
         SftpOutputPacket packet = new SftpOutputPacket();
         packet.Data = framed;

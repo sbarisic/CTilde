@@ -329,7 +329,9 @@ internal sealed class PropertySymbol : MemberSymbol
         set => DeclaredEffects = value ? DeclaredEffects | EffectContract.NoRuntime : DeclaredEffects & ~EffectContract.NoRuntime;
     }
     public bool IsNoRecursion { get; set; }
-    public string? OverlayName { get; init; }
+    public string? OverlayName { get; internal set; }
+    public bool IsInferredOverlay { get; internal set; }
+    public string? OverlayPlacementReason { get; internal set; }
     public bool IsExplicitlyResident { get; init; }
     public PropertySymbol? OverriddenProperty { get; set; }
     public List<PropertySymbol> ImplementedInterfaceProperties { get; } = [];
@@ -395,7 +397,10 @@ internal sealed class MethodSymbol : MemberSymbol
     public bool IsInterrupt { get; init; }
     public bool IsInterruptSafe { get; init; }
     public bool IsInterruptCode { get; set; }
-    public string? OverlayName { get; init; }
+    public string? OverlayName { get; internal set; }
+    public bool IsInferredOverlay { get; internal set; }
+    public bool RequiresOverlayEntry { get; internal set; } = true;
+    public string? OverlayPlacementReason { get; internal set; }
     public bool IsExplicitlyResident { get; init; }
     public bool IsOverlay => OverlayName is not null;
     public uint? TaskStackSize { get; init; }

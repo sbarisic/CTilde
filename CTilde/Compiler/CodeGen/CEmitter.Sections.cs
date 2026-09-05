@@ -24,8 +24,16 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("#if defined(__GNUC__) || defined(__clang__)");
             writer.WriteLine("#define CT_OVERLAY_BODY(name) __attribute__((section(\".ctilde.overlay.\" name \".text\"), used, noinline))");
+            writer.WriteLine("#define CT_MANAGED_OVERLAY_IMPORT __attribute__((visibility(\"default\"), used))");
+            writer.WriteLine("#if defined(__GNUC__) && !defined(__clang__)");
+            writer.WriteLine("#define CT_OVERLAY_STUB __attribute__((noinline, noipa))");
+            writer.WriteLine("#else");
+            writer.WriteLine("#define CT_OVERLAY_STUB __attribute__((noinline))");
+            writer.WriteLine("#endif");
             writer.WriteLine("#else");
             writer.WriteLine("#define CT_OVERLAY_BODY(name)");
+            writer.WriteLine("#define CT_MANAGED_OVERLAY_IMPORT");
+            writer.WriteLine("#define CT_OVERLAY_STUB");
             writer.WriteLine("#endif");
             writer.WriteLine();
         }

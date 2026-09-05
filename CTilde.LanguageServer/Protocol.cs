@@ -109,10 +109,10 @@ internal static class UriHelpers
 {
     public static string ToPath(string uri)
     {
-        var path = Uri.UnescapeDataString(new Uri(uri).AbsolutePath);
-        if (OperatingSystem.IsWindows() && path.Length >= 3 && path[0] == '/' && char.IsLetter(path[1]) && path[2] == ':')
-            path = path[1..];
-        return Path.GetFullPath(path.Replace('/', Path.DirectorySeparatorChar));
+        var parsed = new Uri(uri);
+        if (!parsed.IsFile)
+            throw new ArgumentException("Expected a file URI.", nameof(uri));
+        return Path.GetFullPath(parsed.LocalPath);
     }
 
     public static string ToUri(string path)

@@ -35,6 +35,7 @@ internal sealed class TypedIrEmissionLowerer(CEmitter emitter)
 {
     public TypedIrProgram Lower(TypedIrProgram program)
     {
+        emitter.RegisterAccessorMethods(program.Functions);
         var functions = program.Functions.Select(LowerFunction).ToImmutableArray();
         var initializerIndex = 0;
         var initializers = program.ModuleInitializers.Select(initializer => LowerInitializer(initializer, initializerIndex++)).ToImmutableArray();

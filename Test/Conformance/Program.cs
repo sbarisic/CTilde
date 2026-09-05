@@ -1,5 +1,14 @@
 using CTilde.Tests;
 
+if (args is ["--capture-child", var childMode])
+{
+    if (childMode == "wait") { Thread.Sleep(30000); return 0; }
+    var output = Task.Run(() => { for (var i = 0; i < 2048; i++) Console.Out.WriteLine(new string('o', 1024)); });
+    var error = Task.Run(() => { for (var i = 0; i < 2048; i++) Console.Error.WriteLine(new string('e', 1024)); });
+    Task.WaitAll(output, error);
+    return 0;
+}
+
 var crossToolchainOnly = false;
 string? commandLineFilter = null;
 for (var index = 0; index < args.Length; index++)
@@ -67,6 +76,9 @@ ConformanceTests.RegisterPart42(suite);
 ConformanceTests.RegisterPart43(suite);
 ConformanceTests.RegisterPart44(suite);
 ConformanceTests.RegisterPart45(suite);
+ConformanceTests.RegisterPart46(suite);
+ConformanceTests.RegisterPart47(suite);
+ConformanceTests.RegisterPart48(suite);
 return suite.Complete();
 
 internal sealed class ConformanceSuite

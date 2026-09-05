@@ -79,8 +79,13 @@ public static class RepositoryModules
     }
 
     /// <summary>Materializes locked modules. Update additionally resolves selectors to new exact revisions.</summary>
-    public static void Restore(string projectRoot, IReadOnlyList<RepositoryModuleReference> modules, bool update)
+    public static void Restore(string projectRoot, IReadOnlyList<RepositoryModuleReference> modules, bool update) =>
+        RestoreAsync(projectRoot, modules, update).GetAwaiter().GetResult();
+
+    public static async Task RestoreAsync(string projectRoot, IReadOnlyList<RepositoryModuleReference> modules, bool update,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         projectRoot = Path.GetFullPath(projectRoot);
         var existing = ReadLock(projectRoot, required: false);
         if (modules.Count == 0)
@@ -92,21 +97,23 @@ public static class RepositoryModules
         var resolved = new List<LockedModuleDocument>();
         foreach (var module in modules)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var old = existing?.Modules.FirstOrDefault(candidate => candidate.Path == module.ModulePath &&
                 candidate.Repository == module.Repository && candidate.Selector == module.Selector);
             var refresh = update || module.UpdatePolicy == RepositoryModuleUpdatePolicy.Refresh || old is null;
             var cacheRoot = CacheRoot(projectRoot, module.ModulePath);
-            EnsureCheckout(cacheRoot, module.Repository);
+            await EnsureCheckoutAsync(cacheRoot, module.Repository, cancellationToken).ConfigureAwait(false);
             if (refresh)
-                RunGit(cacheRoot, "fetch", "--tags", "--prune", "origin");
-            var revision = refresh ? ResolveSelector(cacheRoot, module.Selector) : old!.Revision;
-            RunGit(cacheRoot, "checkout", "--detach", "--force", revision);
-            RunGit(cacheRoot, "clean", "-fdx");
-            var actualRevision = RunGit(cacheRoot, "rev-parse", "HEAD").Trim();
+                await RunGitAsync(cacheRoot, cancellationToken, "fetch", "--tags", "--prune", "origin").ConfigureAwait(false);
+            var revision = refresh ? await ResolveSelectorAsync(cacheRoot, module.Selector, cancellationToken).ConfigureAwait(false) : old!.Revision;
+            await RunGitAsync(cacheRoot, cancellationToken, "checkout", "--detach", "--force", revision).ConfigureAwait(false);
+            await RunGitAsync(cacheRoot, cancellationToken, "clean", "-fdx").ConfigureAwait(false);
+            var actualRevision = (await RunGitAsync(cacheRoot, cancellationToken, "rev-parse", "HEAD").ConfigureAwait(false)).Trim();
             if (!IsRevision(actualRevision))
                 throw new CTildeProjectException($"Git returned invalid revision '{actualRevision}' for module '{module.ModulePath}'.");
             resolved.Add(new LockedModuleDocument(module.ModulePath, module.Repository, module.Selector, actualRevision, ComputeContentHash(cacheRoot)));
         }
+        cancellationToken.ThrowIfCancellationRequested();
         WriteLock(projectRoot, new ModuleLockDocument(1, resolved.OrderBy(module => module.Path, StringComparer.Ordinal).ToArray()));
     }
 
@@ -135,7 +142,7 @@ public static class RepositoryModules
         }
     }
 
-    private static void EnsureCheckout(string cacheRoot, string repository)
+    private static async Task EnsureCheckoutAsync(string cacheRoot, string repository, CancellationToken cancellationToken)
     {
         if (Directory.Exists(cacheRoot))
         {
@@ -144,14 +151,14 @@ public static class RepositoryModules
             return;
         }
         Directory.CreateDirectory(Path.GetDirectoryName(cacheRoot)!);
-        RunGit(Path.GetDirectoryName(cacheRoot)!, "clone", "--no-checkout", "--", repository, cacheRoot);
+        await RunGitAsync(Path.GetDirectoryName(cacheRoot)!, cancellationToken, "clone", "--no-checkout", "--", repository, cacheRoot).ConfigureAwait(false);
     }
 
-    private static string ResolveSelector(string checkout, string selector)
+    private static async Task<string> ResolveSelectorAsync(string checkout, string selector, CancellationToken cancellationToken)
     {
         foreach (var candidate in new[] { selector, "refs/tags/" + selector, "refs/remotes/origin/" + selector, "origin/" + selector })
         {
-            var result = TryRunGit(checkout, "rev-parse", "--verify", candidate + "^{commit}");
+            var result = await TryRunGitAsync(checkout, cancellationToken, "rev-parse", "--verify", candidate + "^{commit}").ConfigureAwait(false);
             if (result.ExitCode == 0 && IsRevision(result.Output.Trim()))
                 return result.Output.Trim();
         }
@@ -332,15 +339,18 @@ public static class RepositoryModules
     private static string StableName(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant()[..16];
     private static bool IsRevision(string value) => value.Length == 40 && value.All(Uri.IsHexDigit);
 
-    private static string RunGit(string workingDirectory, params string[] arguments)
+    private static string RunGit(string workingDirectory, params string[] arguments) =>
+        RunGitAsync(workingDirectory, CancellationToken.None, arguments).GetAwaiter().GetResult();
+
+    private static async Task<string> RunGitAsync(string workingDirectory, CancellationToken cancellationToken, params string[] arguments)
     {
-        var result = TryRunGit(workingDirectory, arguments);
+        var result = await TryRunGitAsync(workingDirectory, cancellationToken, arguments).ConfigureAwait(false);
         if (result.ExitCode != 0)
             throw new CTildeProjectException($"git {string.Join(' ', arguments)} failed in '{workingDirectory}': {result.Error.Trim()}");
         return result.Output;
     }
 
-    private static ProcessResult TryRunGit(string workingDirectory, params string[] arguments)
+    private static async Task<ProcessResult> TryRunGitAsync(string workingDirectory, CancellationToken cancellationToken, params string[] arguments)
     {
         var start = new ProcessStartInfo("git")
         {
@@ -354,15 +364,32 @@ public static class RepositoryModules
             start.ArgumentList.Add(argument);
         try
         {
-            using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start git.");
-            var output = process.StandardOutput.ReadToEnd();
-            var error = process.StandardError.ReadToEnd();
-            process.WaitForExit();
-            return new(process.ExitCode, output, error);
+            return await CaptureProcessAsync(start, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
             throw new CTildeProjectException($"Could not run Git: {exception.Message}", exception);
+        }
+    }
+
+    internal static async Task<ProcessResult> CaptureProcessAsync(ProcessStartInfo start, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var process = Process.Start(start) ?? throw new InvalidOperationException("Could not start subprocess.");
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            await process.WaitForExitAsync(cancellationToken).ConfigureAwait(false);
+            return new(process.ExitCode, await output.ConfigureAwait(false), await error.ConfigureAwait(false));
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); }
+            catch (InvalidOperationException) { }
+            await process.WaitForExitAsync(CancellationToken.None).ConfigureAwait(false);
+            await Task.WhenAll(output, error).ConfigureAwait(false);
+            throw;
         }
     }
 
@@ -385,5 +412,5 @@ public static class RepositoryModules
     private sealed record LocalReplacementDocument(
         [property: JsonPropertyName("replacements")] Dictionary<string, string>? Replacements);
 
-    private readonly record struct ProcessResult(int ExitCode, string Output, string Error);
+    internal readonly record struct ProcessResult(int ExitCode, string Output, string Error);
 }

@@ -59,8 +59,12 @@ internal static partial class ConformanceTests
                 "Schema-3 metadata omitted deterministic reachable placement or retained an unreachable overlay.");
             var bodySymbols = Regex.Matches(metadataText, "\\\"bodySymbol\\\": \\\"([^\\\"]+)\\\"")
                 .Select(match => match.Groups[1].Value).ToArray();
-            Assert(bodySymbols.Length == 2 && bodySymbols.Sum(symbol =>
-                    Regex.Matches(generated, $@"\b{Regex.Escape(symbol)}\s*\(").Count) > bodySymbols.Length * 3,
+            var bound = (BoundProgram)typeof(Compilation).GetField("_boundProgram",
+                System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(compilation)!;
+            var shade = bound.Model.ProjectTypes.Single(type => type.Name == "Renderer").Methods.Single(method => method.Name == "Shade");
+            var shadeBody = CEmitter.OverlayBodyName(shade, shade.CName);
+            Assert(bodySymbols.Length == 1 && !shade.RequiresOverlayEntry &&
+                    !bodySymbols.Contains(shadeBody) && Regex.Matches(generated, $@"\b{Regex.Escape(shadeBody)}\s*\(").Count >= 3,
                 "A proven same-overlay call did not target its typed overlay body directly.");
         });
 

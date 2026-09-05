@@ -14,8 +14,21 @@ internal sealed class SshPacketReader
         position = 0;
     }
 
-    internal int Remaining { get { return data.Length - position; } }
-    internal int Position { get { return position; } }
+    internal int Remaining
+    {
+        get
+        {
+            return data.Length - position;
+        }
+    }
+
+    internal int Position
+    {
+        get
+        {
+            return position;
+        }
+    }
 
     internal byte ReadByte()
     {
@@ -46,9 +59,11 @@ internal sealed class SshPacketReader
     internal byte[] ReadBytes()
     {
         uint length = ReadUInt32();
-        if (length > 35000u || length > (uint)Remaining) throw new InvalidOperationException();
+        if (length > 35000u || length > (uint)Remaining)
+            throw new InvalidOperationException();
         byte[] result = new byte[(int)length];
-        for (int index = 0; index < result.Length; index++) result[index] = data[position + index];
+        for (int index = 0; index < result.Length; index++)
+            result[index] = data[position + index];
         position += result.Length;
         return result;
     }
@@ -57,7 +72,8 @@ internal sealed class SshPacketReader
     {
         Require(count);
         byte[] result = new byte[count];
-        for (int index = 0; index < count; index++) result[index] = data[position + index];
+        for (int index = 0; index < count; index++)
+            result[index] = data[position + index];
         position += count;
         return result;
     }
@@ -70,20 +86,24 @@ internal sealed class SshPacketReader
 
     internal byte[] Prefix(int count)
     {
-        if (count < 0 || count > data.Length) throw new ArgumentOutOfRangeException();
+        if (count < 0 || count > data.Length)
+            throw new ArgumentOutOfRangeException();
         byte[] result = new byte[count];
-        for (int index = 0; index < count; index++) result[index] = data[index];
+        for (int index = 0; index < count; index++)
+            result[index] = data[index];
         return result;
     }
 
     internal void RequireEnd()
     {
-        if (position != data.Length) throw new InvalidOperationException();
+        if (position != data.Length)
+            throw new InvalidOperationException();
     }
 
     private void Require(int count)
     {
-        if (count < 0 || position > data.Length - count) throw new InvalidOperationException();
+        if (count < 0 || position > data.Length - count)
+            throw new InvalidOperationException();
     }
 }
 
@@ -98,7 +118,13 @@ internal sealed class SshPacketWriter
         position = 0;
     }
 
-    internal int Length { get { return position; } }
+    internal int Length
+    {
+        get
+        {
+            return position;
+        }
+    }
 
     internal void WriteByte(byte value)
     {
@@ -108,8 +134,10 @@ internal sealed class SshPacketWriter
 
     internal void WriteBoolean(bool value)
     {
-        if (value) WriteByte((byte)1);
-        else WriteByte((byte)0);
+        if (value)
+            WriteByte((byte)1);
+        else
+            WriteByte((byte)0);
     }
 
     internal void WriteUInt32(uint value)
@@ -128,7 +156,8 @@ internal sealed class SshPacketWriter
     internal void WriteRaw(byte[] value)
     {
         Require(value.Length);
-        for (int index = 0; index < value.Length; index++) data[position++] = value[index];
+        for (int index = 0; index < value.Length; index++)
+            data[position++] = value[index];
     }
 
     internal void WriteBytes(byte[] value)
@@ -145,16 +174,19 @@ internal sealed class SshPacketWriter
     internal byte[] ToArray()
     {
         byte[] result = new byte[position];
-        for (int index = 0; index < position; index++) result[index] = data[index];
+        for (int index = 0; index < position; index++)
+            result[index] = data[index];
         return result;
     }
 
     private void Require(int count)
     {
-        if (count < 0 || position > data.Length - count) throw new InvalidOperationException();
+        if (count < 0 || position > data.Length - count)
+            throw new InvalidOperationException();
     }
 }
 
+[Overlay("transport")]
 internal sealed class SshTransport
 {
     private uint socket;
@@ -182,11 +214,45 @@ internal sealed class SshTransport
         serverVersion = "SSH-2.0-CTilde_0.49";
     }
 
-    internal string ClientVersion { get { return clientVersion; } }
-    internal string ServerVersion { get { return serverVersion; } }
-    internal long BytesReceived { get { return bytesReceived; } }
-    internal long BytesSent { get { return bytesSent; } }
-    internal uint Socket { get { return socket; } }
+    internal string ClientVersion
+    {
+        get
+        {
+            return clientVersion;
+        }
+    }
+
+    internal string ServerVersion
+    {
+        get
+        {
+            return serverVersion;
+        }
+    }
+
+    internal long BytesReceived
+    {
+        get
+        {
+            return bytesReceived;
+        }
+    }
+
+    internal long BytesSent
+    {
+        get
+        {
+            return bytesSent;
+        }
+    }
+
+    internal uint Socket
+    {
+        get
+        {
+            return socket;
+        }
+    }
 
     internal void ExchangeIdentification(long deadline)
     {
@@ -198,17 +264,22 @@ internal sealed class SshTransport
         while (used < received.Length)
         {
             long left = deadline - SshNative.MonotonicMilliseconds();
-            if (left <= 0L) throw new InvalidOperationException();
+            if (left <= 0L)
+                throw new InvalidOperationException();
             uint timeout = (uint)left;
-            if (timeout > 5000u) timeout = 5000u;
+            if (timeout > 5000u)
+                timeout = 5000u;
             int count = SshNative.Receive(socket, received, used, 1, timeout);
-            if (count <= 0) throw new InvalidOperationException();
+            if (count <= 0)
+                throw new InvalidOperationException();
             bytesReceived += count;
             if (received[used] == (byte)'\n')
             {
                 int lineLength = used - lineStart;
-                if (lineLength > 0 && received[used - 1] == (byte)'\r') lineLength--;
-                if (lineLength > 255) throw new InvalidOperationException();
+                if (lineLength > 0 && received[used - 1] == (byte)'\r')
+                    lineLength--;
+                if (lineLength > 255)
+                    throw new InvalidOperationException();
                 string line = Encoding.UTF8.GetString(received, lineStart, lineLength);
                 if (line.StartsWith("SSH-2.0-"))
                 {
@@ -222,8 +293,8 @@ internal sealed class SshTransport
         throw new InvalidOperationException();
     }
 
-    internal void Activate(byte[] receiveKey, byte[] receiveIvValue,
-        byte[] sendKey, byte[] sendIvValue)
+    internal void Activate(byte[] receiveKey, byte[] receiveIvValue, byte[] sendKey,
+        byte[] sendIvValue)
     {
         uint replacementInbound;
         uint replacementOutbound;
@@ -237,8 +308,10 @@ internal sealed class SshTransport
             SshNative.Close(replacementInbound);
             throw;
         }
-        if (inboundCipher != 0u) SshNative.Close(inboundCipher);
-        if (outboundCipher != 0u) SshNative.Close(outboundCipher);
+        if (inboundCipher != 0u)
+            SshNative.Close(inboundCipher);
+        if (outboundCipher != 0u)
+            SshNative.Close(outboundCipher);
         inboundCipher = replacementInbound;
         outboundCipher = replacementOutbound;
         for (int index = 0; index < 12; index++)
@@ -262,43 +335,54 @@ internal sealed class SshTransport
         byte[] header = new byte[4];
         ReceiveExact(header, 0, 4, timeout);
         uint packetLength = SshWire.ReadUInt32(header, 0);
-        if (packetLength < 5u) throw new InvalidOperationException();
-        if (packetLength > (uint)maximumPacket) throw new InvalidOperationException();
+        if (packetLength < 5u)
+            throw new InvalidOperationException();
+        if (packetLength > (uint)maximumPacket)
+            throw new InvalidOperationException();
         byte[] body = new byte[(int)packetLength];
         if (encrypted)
         {
-            if (inboundInvocation == 18446744073709551615UL) throw new InvalidOperationException();
+            if (inboundInvocation == 18446744073709551615UL)
+                throw new InvalidOperationException();
             byte[] cipher = new byte[(int)packetLength];
             byte[] tag = new byte[16];
             ReceiveExact(cipher, 0, cipher.Length, timeout);
             ReceiveExact(tag, 0, tag.Length, timeout);
             byte[] nonce = Nonce(inboundIv, inboundInvocation);
-            SshNative.Require(SshNative.AesOpen(inboundCipher, nonce, header, cipher, tag, body));
+            SshNative.Require(SshNative.AesOpen(inboundCipher, nonce, header, cipher,
+                tag, body));
             inboundInvocation++;
         }
-        else ReceiveExact(body, 0, body.Length, timeout);
+        else
+            ReceiveExact(body, 0, body.Length, timeout);
         inboundSequence++;
         int padding = body[0];
-        if (padding < 4 || padding >= body.Length) throw new InvalidOperationException();
+        if (padding < 4 || padding >= body.Length)
+            throw new InvalidOperationException();
         int payloadLength = body.Length - padding - 1;
         byte[] payload = new byte[payloadLength];
-        for (int index = 0; index < payloadLength; index++) payload[index] = body[index + 1];
+        for (int index = 0; index < payloadLength; index++)
+            payload[index] = body[index + 1];
         return payload;
     }
 
     internal void SendPacket(byte[] payload)
     {
         int block = 8;
-        if (encrypted) block = 16;
+        if (encrypted)
+            block = 16;
         int padding = block - ((payload.Length + 5) % block);
-        if (padding < 4) padding += block;
+        if (padding < 4)
+            padding += block;
         int packetLength = payload.Length + padding + 1;
-        if (packetLength > maximumPacket) throw new InvalidOperationException();
+        if (packetLength > maximumPacket)
+            throw new InvalidOperationException();
         byte[] header = new byte[4];
         SshWire.WriteUInt32(header, 0, (uint)packetLength);
         byte[] body = new byte[packetLength];
         body[0] = (byte)padding;
-        for (int index = 0; index < payload.Length; index++) body[index + 1] = payload[index];
+        for (int index = 0; index < payload.Length; index++)
+            body[index + 1] = payload[index];
         unsafe
         {
             NativeBuffer<byte> random = stackalloc byte[32];
@@ -307,9 +391,11 @@ internal sealed class SshTransport
             while (left > 0)
             {
                 int count = left;
-                if (count > 32) count = 32;
+                if (count > 32)
+                    count = 32;
                 SshNative.Require(SshNative.Random(random));
-                for (int index = 0; index < count; index++) body[offset + index] = random[(nuint)index];
+                for (int index = 0; index < count; index++)
+                    body[offset + index] = random[(nuint)index];
                 offset += count;
                 left -= count;
             }
@@ -317,24 +403,40 @@ internal sealed class SshTransport
         SendExact(header, 0, header.Length, 5000u);
         if (encrypted)
         {
-            if (outboundInvocation == 18446744073709551615UL) throw new InvalidOperationException();
+            if (outboundInvocation == 18446744073709551615UL)
+                throw new InvalidOperationException();
             byte[] nonce = Nonce(outboundIv, outboundInvocation);
             byte[] cipher = new byte[body.Length];
             byte[] tag = new byte[16];
-            SshNative.Require(SshNative.AesSeal(outboundCipher, nonce, header, body, cipher, tag));
+            SshNative.Require(SshNative.AesSeal(outboundCipher, nonce, header, body,
+                cipher, tag));
             SendExact(cipher, 0, cipher.Length, 5000u);
             SendExact(tag, 0, tag.Length, 5000u);
             outboundInvocation++;
         }
-        else SendExact(body, 0, body.Length, 5000u);
+        else
+            SendExact(body, 0, body.Length, 5000u);
         outboundSequence++;
     }
 
     internal void Close()
     {
-        if (inboundCipher != 0u) { SshNative.Close(inboundCipher); inboundCipher = 0u; }
-        if (outboundCipher != 0u) { SshNative.Close(outboundCipher); outboundCipher = 0u; }
-        if (socket != 0u) { SshNative.Shutdown(socket, 3u); SshNative.Close(socket); socket = 0u; }
+        if (inboundCipher != 0u)
+        {
+            SshNative.Close(inboundCipher);
+            inboundCipher = 0u;
+        }
+        if (outboundCipher != 0u)
+        {
+            SshNative.Close(outboundCipher);
+            outboundCipher = 0u;
+        }
+        if (socket != 0u)
+        {
+            SshNative.Shutdown(socket, 3u);
+            SshNative.Close(socket);
+            socket = 0u;
+        }
     }
 
     private void ReceiveExact(byte[] data, int offset, int count, uint timeout)
@@ -342,8 +444,10 @@ internal sealed class SshTransport
         int received = 0;
         while (received < count)
         {
-            int value = SshNative.Receive(socket, data, offset + received, count - received, timeout);
-            if (value <= 0) throw new InvalidOperationException();
+            int value = SshNative.Receive(socket, data, offset + received, count
+                - received, timeout);
+            if (value <= 0)
+                throw new InvalidOperationException();
             received += value;
             bytesReceived += value;
         }
@@ -354,8 +458,10 @@ internal sealed class SshTransport
         int sent = 0;
         while (sent < count)
         {
-            int result = SshNative.Send(socket, data, offset + sent, count - sent, timeout);
-            if (result <= 0) throw new InvalidOperationException();
+            int result = SshNative.Send(socket, data, offset + sent, count - sent,
+                timeout);
+            if (result <= 0)
+                throw new InvalidOperationException();
             sent += result;
             bytesSent += result;
         }
@@ -364,7 +470,8 @@ internal sealed class SshTransport
     private static byte[] Nonce(byte[] basis, ulong invocation)
     {
         byte[] result = new byte[12];
-        for (int index = 0; index < 12; index++) result[index] = basis[index];
+        for (int index = 0; index < 12; index++)
+            result[index] = basis[index];
         ulong carry = invocation;
         for (int index = 11; index >= 4; index--)
         {

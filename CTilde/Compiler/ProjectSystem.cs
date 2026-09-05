@@ -108,6 +108,7 @@ public enum CTildeNativeBuildConfiguration
 
 public enum NativeOptimization
 {
+    Size,
     Speed,
     Aggressive,
 }
@@ -779,8 +780,8 @@ public static class CTildeProjectFile
         if ((target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && document?.EspIdfProjectDirectory is not null)
             throw new CTildeProjectException($"Property 'build.espIdfProjectDirectory' in '{manifestPath}' is valid only for ESP-IDF projects.");
         if (target == CompilationTarget.EspIdf &&
-            (document?.Compiler is not null || document?.Configuration is not null || document?.Executable is not null || document?.Image is not null || document?.Lto == true))
-            throw new CTildeProjectException($"Properties 'build.compiler', 'build.configuration', 'build.executable', and 'build.lto' in '{manifestPath}' are valid only for hosted or Cosmopolitan projects.");
+            (document?.Compiler is not null || document?.Executable is not null || document?.Image is not null))
+            throw new CTildeProjectException($"Properties 'build.compiler', 'build.executable', and 'build.image' in '{manifestPath}' are not valid for ESP-IDF projects.");
         if ((target is CompilationTarget.Hosted or CompilationTarget.Cosmopolitan) && document?.Image is not null)
             throw new CTildeProjectException($"Property 'build.image' in '{manifestPath}' is valid only for freestanding projects.");
         if (target == CompilationTarget.Freestanding && (document?.Executable is not null || document?.EspIdfProjectDirectory is not null))
@@ -833,9 +834,10 @@ public static class CTildeProjectFile
         NativeOptimization? optimization = document?.Optimization switch
         {
             null => null,
+            "size" => NativeOptimization.Size,
             "speed" => NativeOptimization.Speed,
             "aggressive" => NativeOptimization.Aggressive,
-            _ => throw new CTildeProjectException($"Unknown build optimization '{document.Optimization}' in '{manifestPath}'; expected speed or aggressive."),
+            _ => throw new CTildeProjectException($"Unknown build optimization '{document.Optimization}' in '{manifestPath}'; expected size, speed, or aggressive."),
         };
         NativeCpuTarget? cpuTarget = document?.CpuTarget switch
         {

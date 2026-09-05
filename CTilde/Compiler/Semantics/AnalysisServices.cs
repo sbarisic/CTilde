@@ -44,6 +44,8 @@ internal sealed class AnalysisServices : ILoweringServices
     public DiagnosticBag Diagnostics { get; }
     public EffectRegistry Effects { get; } = new();
     public IEnumerable<(MethodSymbol Method, SyntaxNode Syntax)> ExternUses => _externUses;
+    public ImmutableHashSet<MethodSymbol> DelegateTargets => _delegateThunks.Keys.Select(key => key.Method).ToImmutableHashSet();
+    public ImmutableHashSet<MethodSymbol> UnmanagedAddressTargets => _functionPointerTrampolines.Keys.Select(key => key.Method).ToImmutableHashSet();
     public bool UsesExceptions { get; private set; }
     public bool EmitDebugInformation => false;
     public bool EmitDebugInstrumentation => false;

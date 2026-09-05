@@ -38,7 +38,9 @@
   <member id="M:System.IO.File.GetMetadata(string)"><summary>Returns metadata for a path without following symbolic links.</summary></member>
   <member id="T:System.IO.Stream"><summary>Defines synchronous byte I/O, seeking, flushing, copying, and explicit disposal.</summary></member>
   <member id="T:System.IO.FileStream"><summary>Owns one private hosted file handle until idempotent disposal.</summary></member>
-  <member id="T:System.IO.StreamReader"><summary>Reads strict UTF-8 text, strips one leading BOM, and recognizes LF or CRLF lines.</summary></member>
+  <member id="T:System.IO.StreamReader"><summary>Reads strict UTF-8 text incrementally through a 4096-byte buffer.</summary><remarks>Strips one leading BOM, including fragmented input, and recognizes LF or CRLF. Invalid input is reported when consumed. Supports non-seekable streams.</remarks></member>
+  <member id="M:System.IO.StreamReader.ReadLine()"><summary>Reads one complete line without waiting for end of input.</summary><returns>The line without its terminator, or null at end of input.</returns><remarks>Validates UTF-8 in the returned line. Later malformed input does not prevent delivery of a complete valid line.</remarks></member>
+  <member id="M:System.IO.StreamReader.ReadToEnd()"><summary>Reads and validates all remaining UTF-8 text.</summary><returns>The remaining text, or an empty string at end of input.</returns></member>
   <member id="T:System.IO.StreamWriter"><summary>Writes strict UTF-8 through a 4096-byte buffer with deterministic LF line endings.</summary></member>
   <member id="T:System.IO.Directory"><summary>Provides synchronous directory creation, deletion, move, current-directory, and sorted enumeration operations.</summary></member>
   <member id="M:System.IO.Directory.GetFileSystemEntries(string)"><summary>Returns full paths sorted by ordinal UTF-8 bytes.</summary></member>

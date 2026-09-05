@@ -14,6 +14,36 @@ extern void ct_managed_shell_led_prompt_started(void);
 extern void ct_managed_shell_led_process_starting(void);
 extern void ct_managed_shell_led_process_started(uint32_t process_id);
 extern void ct_managed_shell_led_process_start_failed(void);
+extern void ct_thread_attach(void);
+extern void ct_thread_detach(void);
+
+static void prompt_started(void)
+{
+    ct_thread_attach();
+    ct_managed_shell_led_prompt_started();
+    ct_thread_detach();
+}
+
+static void process_starting(void)
+{
+    ct_thread_attach();
+    ct_managed_shell_led_process_starting();
+    ct_thread_detach();
+}
+
+static void process_started(uint32_t process_id)
+{
+    ct_thread_attach();
+    ct_managed_shell_led_process_started(process_id);
+    ct_thread_detach();
+}
+
+static void process_start_failed(void)
+{
+    ct_thread_attach();
+    ct_managed_shell_led_process_start_failed();
+    ct_thread_detach();
+}
 
 static size_t process_snapshot(ct_managed_shell_process_info *output, size_t capacity)
 {
@@ -41,10 +71,10 @@ static const ct_managed_shell_host_api_v1 s_api = {
     .MinimumFreeHeap = minimum_free_heap,
     .SetForeground = ctilde_managed_process_set_foreground,
     .TerminateDescendants = ctilde_managed_process_terminate_descendants,
-    .PromptStarted = ct_managed_shell_led_prompt_started,
-    .ProcessStarting = ct_managed_shell_led_process_starting,
-    .ProcessStarted = ct_managed_shell_led_process_started,
-    .ProcessStartFailed = ct_managed_shell_led_process_start_failed,
+    .PromptStarted = prompt_started,
+    .ProcessStarting = process_starting,
+    .ProcessStarted = process_started,
+    .ProcessStartFailed = process_start_failed,
 };
 
 const ct_managed_shell_host_api_v1 *ct_managed_shell_host_v1(void) { return &s_api; }

@@ -13,6 +13,7 @@ $diagnosticsTest = Join-Path $root "..\Test\ManagedShellDiagnostics.test.mjs"
 $sshTest = Join-Path $root "..\Test\ManagedShellSsh.test.mjs"
 $modules = @(
     [pscustomobject]@{ Name = "Managed Hello"; Directory = "Hello"; Artifact = "examples.hello.ctm" },
+    [pscustomobject]@{ Name = "Allocator acceptance"; Directory = "AllocatorFixture"; Artifact = "tests.allocator.ctm" },
     [pscustomobject]@{ Name = "Memory diagnostics"; Directory = "Memory"; Artifact = "memory.ctm" },
     [pscustomobject]@{ Name = "Task manager"; Directory = "TaskManager"; Artifact = "taskmgr.ctm" },
     [pscustomobject]@{ Name = "SD manager"; Directory = "Sd"; Artifact = "sd.ctm" },
@@ -25,6 +26,51 @@ $modules = @(
     [pscustomobject]@{ Name = "Managed overlay library"; Directory = "OverlayLibrary"; Artifact = "tests.overlay.library.ctm" },
     [pscustomobject]@{ Name = "Managed overlay acceptance"; Directory = "OverlayFixture"; Artifact = "tests.overlay.ctm" }
 )
+
+function Get-ManagedModuleSize {
+    param([Parameter(Mandatory)][string]$ModulePath)
+
+    $bytes = [IO.File]::ReadAllBytes($ModulePath)
+    if ($bytes.Length -lt 52 -or $bytes[0] -ne 0x7f -or $bytes[1] -ne 0x45 -or
+        $bytes[2] -ne 0x4c -or $bytes[3] -ne 0x46 -or $bytes[4] -ne 1 -or $bytes[5] -ne 1) {
+        throw "Managed module '$ModulePath' is not a little-endian ELF32 package."
+    }
+    $sectionHeaderOffset = [BitConverter]::ToUInt32($bytes, 32)
+    $sectionHeaderSize = [BitConverter]::ToUInt16($bytes, 46)
+    $sectionHeaderCount = [BitConverter]::ToUInt16($bytes, 48)
+    if ($sectionHeaderSize -ne 40) {
+        throw "Managed module '$ModulePath' has an unsupported ELF32 section-header size."
+    }
+    $residentExecutable = 0L
+    $residentData = 0L
+    for ($index = 0; $index -lt $sectionHeaderCount; $index++) {
+        $offset = [int64]$sectionHeaderOffset + [int64]$index * $sectionHeaderSize
+        if ($offset -lt 0 -or $offset + 40 -gt $bytes.Length) {
+            throw "Managed module '$ModulePath' has an invalid section-header table."
+        }
+        if ([BitConverter]::ToUInt32($bytes, [int]$offset + 4) -ne 1) { continue }
+        $flags = [BitConverter]::ToUInt32($bytes, [int]$offset + 8)
+        $memoryBytes = [BitConverter]::ToUInt32($bytes, [int]$offset + 20)
+        if (($flags -band 6) -eq 6) { $residentExecutable += $memoryBytes }
+        if (($flags -band 3) -eq 3) { $residentData += $memoryBytes }
+    }
+    $metadataPath = [IO.Path]::ChangeExtension($ModulePath, ".ctmeta.json")
+    $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
+    return [pscustomobject]@{
+        module = $metadata.name
+        packageBytes = [int64](Get-Item -LiteralPath $ModulePath).Length
+        residentExecutableBytes = $residentExecutable
+        residentDataBytes = $residentData
+        maximumOverlayBytes = [int64]$metadata.maximumOverlayBytes
+    }
+}
+
+$sizeBudgets = @{
+    "shell.ctm" = [pscustomobject]@{ Resident = 28KB; Overlay = 20KB }
+    "system.ssh.ctm" = [pscustomobject]@{ Resident = 36KB; Overlay = 28KB }
+    "sshd.ctm" = [pscustomobject]@{ Resident = 10KB; Overlay = [int64]::MaxValue }
+}
+$sizeMeasurements = @{}
 
 $firmwareSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Program.ct") -Raw
 $shellSource = Get-Content -LiteralPath (Join-Path $PSScriptRoot "Modules\Shell\Program.ct") -Raw
@@ -117,7 +163,8 @@ $sshSources = [string]::Join("`n", (Get-Content -LiteralPath @(
 foreach ($requiredSshMarker in @('curve25519-sha256', 'kex-strict-s-v00@openssh.com',
         'aes128-gcm@openssh.com', 'ssh-userauth', 'publickey', 'ExchangeKeys(payload)',
         '/storage/modules/shell.ctm', '[Overlay("configuration")]', '[Overlay("handshake")]',
-        '[Overlay("authentication")]', '[Overlay("sftp")]',
+        '[Overlay("authentication")]', '[Overlay("sftp-core")]',
+        '[Overlay("sftp-files")]', '[Overlay("sftp-directories")]',
         'SftpSession', 'MaximumTransferBytes = 32768')) {
     if ($sshSources -notmatch [regex]::Escape($requiredSshMarker)) {
         throw "Managed SSH implementation is missing '$requiredSshMarker'."
@@ -221,6 +268,20 @@ foreach ($module in $modules) {
     $moduleStorage = Join-Path $PSScriptRoot ("storage\modules\" + $module.Artifact)
     dotnet run --project $cli -- --project $moduleProject --build --idf-path $IdfPath
     if ($LASTEXITCODE -ne 0) { throw "$($module.Name) module build failed." }
+    if ($sizeBudgets.ContainsKey($module.Artifact)) {
+        $measurement = Get-ManagedModuleSize -ModulePath $moduleOutput
+        $budget = $sizeBudgets[$module.Artifact]
+        if ($measurement.residentExecutableBytes -gt $budget.Resident) {
+            throw "$($module.Name) resident executable size $($measurement.residentExecutableBytes) exceeds $($budget.Resident) bytes."
+        }
+        if ($measurement.maximumOverlayBytes -gt $budget.Overlay) {
+            throw "$($module.Name) overlay window $($measurement.maximumOverlayBytes) exceeds $($budget.Overlay) bytes."
+        }
+        $sizeMeasurements[$module.Artifact] = $measurement
+        Write-Host ("{0}: package={1}, resident-executable={2}, resident-data={3}, overlay-window={4}" -f `
+            $measurement.module, $measurement.packageBytes, $measurement.residentExecutableBytes,
+            $measurement.residentDataBytes, $measurement.maximumOverlayBytes)
+    }
     if ($module.Artifact -eq "sd.ctm" -and (Get-Item -LiteralPath $moduleOutput).Length -gt 98304) {
         throw "$($module.Name) exceeds the 96 KiB ESP32 module-load budget."
     }
@@ -233,6 +294,30 @@ foreach ($module in $modules) {
     New-Item -ItemType Directory -Force (Split-Path -Parent $moduleStorage) | Out-Null
     Copy-Item -LiteralPath $moduleOutput -Destination $moduleStorage -Force
 }
+
+$concurrentExecutableBytes =
+    $sizeMeasurements["shell.ctm"].residentExecutableBytes +
+    $sizeMeasurements["shell.ctm"].maximumOverlayBytes +
+    $sizeMeasurements["system.ssh.ctm"].residentExecutableBytes +
+    $sizeMeasurements["system.ssh.ctm"].maximumOverlayBytes +
+    $sizeMeasurements["sshd.ctm"].residentExecutableBytes +
+    $sizeMeasurements["sshd.ctm"].maximumOverlayBytes
+$concurrentBudgetBytes = 122KB
+if ($concurrentExecutableBytes -gt $concurrentBudgetBytes) {
+    throw "Concurrent UART shell and SSH daemon executable working set $concurrentExecutableBytes exceeds $concurrentBudgetBytes bytes."
+}
+$sizeReport = [ordered]@{
+    schemaVersion = 1
+    draftVersion = "0.50"
+    generatedAtUtc = [DateTime]::UtcNow.ToString("o")
+    modules = @($sizeMeasurements.Values | Sort-Object module)
+    concurrentProcessGraphExecutableBytes = $concurrentExecutableBytes
+    concurrentProcessGraphBudgetBytes = $concurrentBudgetBytes
+}
+$sizeReportPath = Join-Path $root "..\artifacts\managed-shell\managed-module-sizes.json"
+New-Item -ItemType Directory -Force (Split-Path -Parent $sizeReportPath) | Out-Null
+$sizeReport | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sizeReportPath -Encoding utf8
+Write-Host "Concurrent shell plus SSH executable working set: $concurrentExecutableBytes / $concurrentBudgetBytes bytes."
 
 dotnet run --project $cli -- --project $shellProject --build --idf-path $IdfPath
 if ($LASTEXITCODE -ne 0) { throw "Managed shell firmware build failed." }

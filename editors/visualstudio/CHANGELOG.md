@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased source changes — Draft 0.50
+
+- Refresh source membership after create, delete, and rename; reuse unchanged syntax trees and retain open-buffer precedence.
+- Preserve UNC file-URI authorities and decode one-to-three-digit GDB MI octal escapes in the managed adapter.
+- Update the source documentation for Runtime ABI 22, Managed Module ABI 3, and the 29-project example solution. Extension package version 0.15.0 is unchanged; no VSIX was published.
+
 - Synchronized the Draft 0.46 documentation and project inventory with 20 categorized `Examples.sln` entries, including the standalone managed memory and task-manager modules. Extension version 0.15.0 is unchanged; no VSIX was produced or installed.
 - Aligned source metadata and standard-library documentation with Draft 0.46, Runtime ABI 19, and the new ESP-IDF storage surface while retaining extension version 0.15.0. No VSIX was produced or installed.
 - Added the Draft 0.45 ManagedShell firmware and managed-application project wrappers to the categorized 18-project example solution, aligned project-contract tests with the fixed Module ABI 1 identities, and retained extension version 0.15.0. No VSIX was produced or installed by this source revision.

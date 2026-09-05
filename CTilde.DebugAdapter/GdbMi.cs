@@ -232,6 +232,14 @@ internal static class MiParser
             if (character != '\\') { value.Append(character); continue; }
             if (position >= text.Length) break;
             var escaped = text[position++];
+            if (escaped is >= '0' and <= '7')
+            {
+                var octal = escaped - '0';
+                for (var digits = 1; digits < 3 && position < text.Length && text[position] is >= '0' and <= '7'; digits++)
+                    octal = octal * 8 + text[position++] - '0';
+                value.Append((char)octal);
+                continue;
+            }
             value.Append(escaped switch { 'n' => '\n', 'r' => '\r', 't' => '\t', 'b' => '\b', 'f' => '\f', 'v' => '\v', '"' => '"', '\\' => '\\', _ => escaped });
         }
         return value.ToString();

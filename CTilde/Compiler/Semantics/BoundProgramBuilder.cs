@@ -51,10 +51,15 @@ internal static class BoundProgramBuilder
         }
 
         ConstDataEvaluator.Evaluate(model, services, bodies);
-        AnalyzeModuleInitializers(model, services, bodies);
+        var analyzedInitializers = new HashSet<FieldSymbol>();
+        var initializerIndex = 0;
+        AnalyzeInitializerClosure();
         CompileTimeEvaluator.EvaluateAssertions(model, services);
+        AnalyzeInitializerClosure();
         ValidateConstructorCycles(model);
         model.Effects = EffectAnalyzer.Analyze(model, bodies);
+        model.DelegateTargets = services.DelegateTargets;
+        model.UnmanagedAddressTargets = services.UnmanagedAddressTargets;
         InterruptValidator.Validate(model, bodies, target);
         FreestandingValidator.Validate(model, bodies, target);
         RecursionAnalyzer.Validate(model, bodies, noRecursion);
@@ -71,6 +76,16 @@ internal static class BoundProgramBuilder
             services.DynamicGeneratedSymbols.ToImmutableHashSet(StringComparer.Ordinal),
             services.UsesExceptions,
             model.UserSyntaxTrees.SelectMany(tree => tree.Tokens).Any(token => token.Kind == SyntaxKind.AsmKeyword));
+
+        void AnalyzeInitializerClosure()
+        {
+            // Initializers can construct generic types and create lambdas whose bodies
+            // were not available during the initial method-binding pass.
+            while (AnalyzeModuleInitializers(model, services, bodies, analyzedInitializers, ref initializerIndex) |
+                   AnalyzeAvailableBodies())
+            {
+            }
+        }
     }
 
     private static void AnalyzeBody(
@@ -84,15 +99,19 @@ internal static class BoundProgramBuilder
         bodies.Add(new BoundBodyBinder(services, method, nameOverride, property, getter).Bind());
     }
 
-    private static void AnalyzeModuleInitializers(
+    private static bool AnalyzeModuleInitializers(
         CompilationModel model,
         AnalysisServices services,
-        ImmutableArray<BoundBody>.Builder bodies)
+        ImmutableArray<BoundBody>.Builder bodies,
+        HashSet<FieldSymbol> analyzed,
+        ref int initializerIndex)
     {
-        var initializerIndex = 0;
+        var changed = false;
         foreach (var field in model.UserTypes.SelectMany(type => type.Fields)
-                     .Where(field => field.IsStatic && field.Initializer is not null && !field.IsConstInit && field.Name != "<underlying>"))
+                     .Where(field => field.IsStatic && field.Initializer is not null && !field.IsConstInit && field.Name != "<underlying>").ToArray())
         {
+            if (!analyzed.Add(field)) continue;
+            changed = true;
             var method = new MethodSymbol
             {
                 Name = "<module_init>",
@@ -111,6 +130,7 @@ internal static class BoundProgramBuilder
                 model.Diagnostics.Add("CT2140", $"Const field '{field.Name}' does not have a constant initializer.", field.Initializer!.Source, field.Initializer.Span);
             bodies.Add(analyzer.Finish());
         }
+        return changed;
     }
 
     private static void ValidateConstructorCycles(CompilationModel model)

@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 
 const require = createRequire(import.meta.url);
 const { MiRecordStream, isWriteError, miArray, miString, miTuple, parseMiRecord } = require("../out/gdbMi.js");
+
+test("GDB MI shared string corpus", () => {
+  const corpus = JSON.parse(readFileSync(new URL("../../../Test/Fixtures/gdb-mi-strings.json", import.meta.url), "utf8"));
+  for (const item of corpus) assert.equal(parseMiRecord(item.record).text, item.text);
+});
 
 test("GDB MI transport accepts Node null and undefined successful write callbacks", () => {
   assert.equal(isWriteError(null), false);

@@ -274,21 +274,21 @@ internal sealed partial class CEmitter
         writer.WriteLine($"bool ct_object_reference_equals({objectCType}* left, {objectCType}* right) {{ return left == right; }}");
         if (_usesExceptions && Model.Types.TryGetValue("System.Exception", out var exceptionType))
         {
-            var message = exceptionType.Properties.Single(property => property.Name == "Message");
             writer.WriteLine("CT_NORETURN static void ct_unhandled_exception(ct_object* exception)");
             writer.WriteLine("{");
             writer.WriteLine("    ct_thread_state* state = ct_thread_require_attached();");
-            writer.WriteLine($"    ct_string* message = {NameMangler.Getter(message)}(({NameMangler.Type(exceptionType)}*)(void*)exception);");
             writer.WriteLine("    const char* code = state->ExceptionCode == NULL ? \"CTE0001\" : state->ExceptionCode;");
             if (IsManagedModule)
             {
-                writer.WriteLine("    (void)message;");
+                writer.WriteLine("    (void)exception;");
                 writer.WriteLine("    ct_runtime_api->RuntimeFault(code, state->ExceptionFile, state->ExceptionLine);");
                 writer.WriteLine("    for (;;) { __asm__ volatile (\"\" ::: \"memory\"); }");
                 writer.WriteLine("}");
                 writer.WriteLine();
                 return;
             }
+            var message = exceptionType.Properties.Single(property => property.Name == "Message");
+            writer.WriteLine($"    ct_string* message = {NameMangler.Getter(message)}(({NameMangler.Type(exceptionType)}*)(void*)exception);");
             writer.WriteLine("    ct_panic_info info = { code, state->ExceptionFile, state->ExceptionLine };");
             writer.WriteLine("    if (ct_installed_panic_handler != NULL) ct_installed_panic_handler(&info, ct_installed_panic_context);");
             writer.WriteLine("    (void)fprintf(stderr, \"C~ unhandled exception %s: %s\", code, exception->Type->Name);");

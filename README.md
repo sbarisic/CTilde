@@ -2,9 +2,11 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.49 uses Runtime ABI 22 and Managed Module ABI 3. ESP32/Xtensa managed applications and libraries can place selected bodies in named, process-local code overlays while stable resident stubs preserve module context and exception cleanup across local and imported calls. Schema-3 metadata records exact overlay capabilities without changing the public API hash. ManagedShell now runs its UART, redirected SSH, and single-command environments from a shared `shell.ctm`; its development SSH library supplies encrypted public-key sessions and SFTP through resident opaque socket/crypto tokens. External interoperability, hardware, fuzz, endurance, and security acceptance remain pending. Debug metadata remains version 3.
+Draft 0.50 uses Runtime ABI 22 and Managed Module ABI 3. It adds a reusable native size profile and infers named-overlay placement for private helpers used by only one overlay. ESP32/Xtensa managed packages separate loader metadata, executable code, immutable data, and writable data so only real instructions consume scarce contiguous executable RAM. Stable resident stubs continue to preserve module context and exception cleanup across local and imported calls. ManagedShell runs UART, redirected SSH, and single-command environments from `shell.ctm`; its development SSH library supplies encrypted public-key sessions and SFTP through resident opaque socket/crypto tokens. External interoperability, fuzz, endurance, and security acceptance remain pending. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
+
+The Draft 0.50 correctness pass preserves these ABI versions. It fixes callable overlay placement, concurrent managed allocation accounting, transitive native-header cache invalidation, project membership refresh, UNC paths, Git subprocess cancellation, and MI escape decoding. It also adds incremental `StreamReader` input, stable merge sorting, and unchanged syntax-tree reuse. The compact-map prototype remains a benchmark fixture; production map storage is unchanged. See [the review report](CORRECTNESS_REVIEW.md) for dispositions and validation limits.
 
 ## Language examples
 
@@ -111,7 +113,7 @@ public static class Program
 
 SIMD lane values always use 16-byte storage. Scalar lowering is the portable default. Set `cpuFeatures: ["simd128"]` for explicit supported-target intrinsic lowering, or set top-level `simdOptimizations: true` to optimize scalar geometry in hosted x64 applications and implicitly select SIMD128. `Vec3x4` stores three `F32x4` components in exactly 48 bytes.
 
-The [example catalog](examples/README.md) groups 20 editor projects by language/hosted, systems-target, managed-module, and ESP-IDF responsibilities. The focused [language tour](examples/LanguageTour/README.md) covers embedded assets, runes, lambdas, operators, abstract dispatch, and native data layouts. The [collections and geometry tour](examples/CollectionsAndGeometry/README.md) exercises the generic containers and scalar math surface, while the [hosted path tracer](examples/HostedIo/README.md) remains the larger multi-file program.
+The [example catalog](examples/README.md) groups 29 editor projects by language/hosted, systems-target, managed-module, and ESP-IDF responsibilities. The focused [language tour](examples/LanguageTour/README.md) covers embedded assets, runes, lambdas, operators, abstract dispatch, and native data layouts. The [collections and geometry tour](examples/CollectionsAndGeometry/README.md) exercises the generic containers and scalar math surface, while the [hosted path tracer](examples/HostedIo/README.md) remains the larger multi-file program.
 
 ## Build the compiler
 
@@ -128,7 +130,7 @@ Build the compiler and command-line tooling:
 dotnet build .\CTilde.sln --nologo
 ```
 
-The compiler can stop after C emission:
+Build the Hello example with the native toolchain:
 
 ```powershell
 dotnet run --project .\CTilde.Cli -- --project .\examples\Hello\ctilde.json --build
@@ -212,13 +214,13 @@ Project Build and Run commands use concise `normal` output by default: manifest,
 
 Builds that share an output directory wait for its owner for up to 30 seconds. The lock records the owner process, operation, manifest, and start time; a timeout is reported as `CT6002`. Each project Check, Build, or Run atomically refreshes `.ctilde/build-diagnostics.json`. Successful compilation clears its diagnostics, failed compilation replaces them, and cancellation preserves the previous valid receipt.
 
-Release builds can select `speed` or `aggressive` optimization, `baseline` or x64-only `avx2`, and `precise` or `fast` floating-point behavior. The matching CLI overrides are `--optimization`, `--cpu-target`, and `--floating-point`. Hosted project builds can run explicit `--pgo generate` training and `--pgo use` phases; PGO also requires Release and LTO. Omit these settings to preserve the target's historical toolchain behavior.
+Release builds can select `size`, `speed`, or `aggressive` optimization, `baseline` or x64-only `avx2`, and `precise` or `fast` floating-point behavior. `size` maps to `/O1` under MSVC and `-Os` under GCC, Clang, ESP-IDF, and Cosmopolitan; native and LTO link steps repeat the applicable optimization. The matching CLI overrides are `--optimization`, `--cpu-target`, and `--floating-point`. Hosted project builds can run explicit `--pgo generate` training and `--pgo use` phases; PGO also requires Release and LTO. Cosmopolitan `tiny` accepts an omitted or explicit `size` profile and rejects `speed` or `aggressive`. Omit these settings to preserve the target's historical toolchain behavior.
 
 `build.stackReport` or `--stack-report <path>` explicitly enables schema-v1 native stack analysis for a GCC-family native build. `[StackUsage(n)]` verifies a body-bearing method's complete transitive byte bound and supplies a trusted terminal bound for extern, native-import, and assembly-only methods. Incomplete recursion, dynamic frames, indirect calls, and unannotated native boundaries remain visible as unknown rather than being guessed. MSVC and Clang stack-report requests fail before native compilation.
 
 Hosted projects can list checked-in `.c` files in `hosted.nativeSources`; those files compile and link with generated C and Clean never deletes them. `hosted.runtimeFiles` selects explicit files by resolved OS and architecture, copies them beside a successfully linked executable, and records their hashes for safe Clean behavior. Sources are manifest-relative explicit files; destinations are filenames, not paths. Linux binaries with staged runtime files receive an `$ORIGIN` runtime search path. Clean removes only unchanged staged copies and preserves files modified after staging. A manifest with `"kind": "standard-library"` accepts only `kind`, `sources`, and `exclude`. Check and Build validate its physical declarations across the supported target matrix without producing a binary; Clean is a no-op and Run is unavailable.
 
-An ESP-IDF managed application or library selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits deterministic schema-3 `.ctmeta.json` declarations and a resident ELF `.ctm` with an optional appended Xtensa overlay container. Overlay packaging disables linker relaxation and rejects direct instruction targets outside their owning payload. The runtime stages and hashes payload bytes before aligned word-only executable-window writes. Consumers compile against exact metadata references without provider source; the loader validates and patches managed import and call-target slots before publication. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 3 remains ESP-IDF-only.
+An ESP-IDF managed application or library selects `espIdf.artifact: "managed-module"`, modular C output, and a `managedModule` identity. Optional exact `managedModule.nativeSources` compile checked-in `.c` files from the ESP-IDF `main` component into the `.ctm`; project-local quoted headers are included in the build identity but do not change the managed API hash. Missing, duplicate, external, generated, and undeclared component C files are rejected. Build emits deterministic schema-3 `.ctmeta.json` declarations and a resident ELF `.ctm` with an optional appended Xtensa overlay container. Draft 0.50 packages loader metadata, resident code, immutable data, and writable data into distinct ELF load segments, reports their final sizes, and disables linker relaxation. The runtime reports the requested resident executable allocation, current executable free space, largest free block, and overlay window before relocation. It stages and hashes overlay bytes before aligned word-only executable-window writes. Consumers compile against exact metadata references without provider source; the loader validates and patches managed import and call-target slots before publication. Managed module code is trusted and has accounting but no memory protection. Managed Module ABI 3 remains ESP-IDF-only.
 
 Repository modules use exact lock-file revisions. Ordinary builds do not access the network. Use explicit module commands when content is missing or must change:
 
@@ -287,7 +289,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 ## Documentation
 
-- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.49 language and native-build rules.
+- [LANGUAGE.md](LANGUAGE.md): normative Draft 0.50 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
 - [C_ABI.md](C_ABI.md): generated C, Runtime ABI 22, Managed Module ABI 3, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.

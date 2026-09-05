@@ -1,0 +1,9 @@
+[
+  { "record": "~\"a\\040b\\n\"", "text": "a b\n" },
+  { "record": "~\"\\1x\\12x\\1234\"", "text": "\u0001x\nxS4" },
+  { "record": "@\"C:\\\\work\\040dir\\\\a.ct\"", "text": "C:\\work dir\\a.ct" },
+  { "record": "~\"\\t\\r\\b\\f\\v\\042\\134\"", "text": "\t\r\b\f\u000b\"\\" },
+  { "record": "~\"café 🐟\"", "text": "café 🐟" },
+  { "record": "~\"partial\\", "text": "partial" },
+  { "record": "~\"\\q\\8\"", "text": "q8" }
+]

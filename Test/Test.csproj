@@ -12,6 +12,8 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Conformance/**/*.cs" />
+    <Compile Include="../CTilde.LanguageServer/WorkspaceState.cs" Link="Tooling/WorkspaceState.cs" />
+    <Compile Include="../CTilde.LanguageServer/Protocol.cs" Link="Tooling/Protocol.cs" />
     <ProjectReference Include="../CTilde/CTilde.csproj" />
     <ProjectReference Include="../CTilde.Cli/CTilde.Cli.csproj" />
     <Content Include="../examples/Hello/*.ct" Link="Examples/Hello/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />

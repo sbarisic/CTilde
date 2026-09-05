@@ -1,6 +1,6 @@
 # C~ examples
 
-`Examples.sln` is the editor/discovery solution for 27 manifest-backed C~ projects. Projects are grouped by responsibility and have `ActiveCfg` mappings only, so opening the solution never builds every native target or requires every optional toolchain at once. Select one project and use its supported manifest-backed command; examples that need a companion native library, module packaging, optional toolchain, or hardware use the runner named in their README.
+`Examples.sln` is the editor/discovery solution for 29 manifest-backed C~ projects. Projects are grouped by responsibility and have `ActiveCfg` mappings only, so opening the solution never builds every native target or requires every optional toolchain at once. Select one project and use its supported manifest-backed command; examples that need a companion native library, module packaging, optional toolchain, or hardware use the runner named in their README.
 
 ## Language and hosted programs
 
@@ -29,7 +29,7 @@
 
 | Project | What it demonstrates | Requirements |
 | --- | --- | --- |
-| [Managed Shell Firmware](ManagedShell/README.md) | Firmware supervision plus shared `shell.ctm` UART/SSH/exec sessions, LittleFS and removable SD/FAT VFS, redirected processes, overlays, status LED, and unload | ESP-IDF 6 and ESP32 |
+| [Managed Shell Firmware](ManagedShell/README.md) | Firmware supervision plus size-gated `shell.ctm` UART/SSH/exec sessions, LittleFS and removable SD/FAT VFS, redirected processes, inferred overlays, status LED, and unload | ESP-IDF 6 and ESP32 |
 | [Managed Shell Application](ManagedShell/Modules/Shell/Program.ct) | One managed ANSI editor, parser, command router, foreground ownership policy, and cold command overlays shared by UART and SSH | ESP-IDF 6 Xtensa toolchain |
 | [Managed Hello Module](ManagedShell/Modules/Hello/Program.ct) | A `.ctm` application with arguments, process-local mutable statics, copied-message receive, cooperative cancellation, and safe CPU-load mode | ESP-IDF 6 Xtensa toolchain |
 | [Managed Memory Tool](ManagedShell/Modules/Memory/Program.ct) | A separate `memory.ctm` application with module-local native reporting for RAM, allocator, process, module, task, and LittleFS diagnostics | ESP-IDF 6 Xtensa toolchain |
@@ -39,7 +39,7 @@
 | [Managed Filesystem Commands](ManagedShell/Modules/FsCommands/Program.ct) | The load-on-demand `commands.fs.ctm` implementation behind the shell's extensionless recursive `mkdir` and strict UTF-8 `cat` aliases | ESP-IDF 6 Xtensa toolchain |
 | [Managed Network Tool](ManagedShell/Modules/Net/Program.ct) | `net.ctm` Wi-Fi station status, scan, profile-based connection, disconnect, and readiness through a resident state owner | ESP-IDF 6 Xtensa toolchain |
 | [Managed SSH Library](ManagedShell/Modules/SystemSsh/Protocol.ct) | Managed SSH framing, Curve25519/P-256/AES-GCM transport, public-key authentication, session channels, shared-shell launch, and rooted SFTP v3 with cold overlays | ESP-IDF 6 Xtensa toolchain |
-| [Managed SSH Service](ManagedShell/Modules/Sshd/Program.ct) | `sshd.ctm` consuming `system.ssh.ctmeta.json` without provider source and controlling the poll loop through mailbox status/reload/disconnect/stop commands | ESP-IDF 6 Xtensa toolchain |
+| [Managed SSH Service](ManagedShell/Modules/Sshd/Program.ct) | Size-profiled `sshd.ctm` consuming `system.ssh.ctmeta.json` without provider source; protocol, mailbox control, and SFTP remain in the partitioned unloadable library | ESP-IDF 6 Xtensa toolchain |
 | [Managed Overlay Library](ManagedShell/Modules/OverlayLibrary/Library.ct) | A separately packaged schema-3 library with resident stubs, overlay bodies, process-local state, and a throwing managed export | ESP-IDF 6 Xtensa toolchain |
 | [Managed Overlay Acceptance](ManagedShell/Modules/OverlayFixture/Program.ct) | Nested local and cross-library overlay transitions, same-overlay direct calls, delegates, cleanup, exception propagation, and subsequent-call recovery | ESP-IDF 6 Xtensa toolchain |
 | [T-CAN Hardware](TCan485/README.md) | Physical ESP32 peripherals, generated bindings, runtime services, debugger acceptance, and Wi-Fi opt-in | ESP-IDF 6 and T-CAN485 |

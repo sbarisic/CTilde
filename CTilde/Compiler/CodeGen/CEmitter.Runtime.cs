@@ -410,10 +410,12 @@ internal sealed partial class CEmitter
         writer.WriteLine("static void ct_release_last(ct_object* object, ct_thread_state* state);");
         writer.WriteLine("static CT_INLINE void ct_retain_core(ct_object* object) {" +
             (EmitDebugObjects ? " ct_debug_arc_touch(object);" : string.Empty) +
-            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount); for (;;) { if (count == UINT32_MAX) return; if (CT_UNLIKELY(count == 0u || count == UINT32_MAX - 1u)) ct_fail(\"CTM0002\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_relaxed(&object->RefCount, &count, count + 1u)) return; } }");
+            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount);" +
+            " for (;;) { if (count == UINT32_MAX) return; if (CT_UNLIKELY(count == 0u || count == UINT32_MAX - 1u)) ct_fail(\"CTM0002\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_relaxed(&object->RefCount, &count, count + 1u)) return; } }");
         writer.WriteLine("static CT_INLINE uint32_t ct_release_decrement(ct_object* object) {" +
             (EmitDebugObjects ? " ct_debug_arc_touch(object);" : string.Empty) +
-            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount); for (;;) { if (count == UINT32_MAX) return UINT32_MAX; if (CT_UNLIKELY(count == 0u)) ct_fail(\"CTM0003\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_release(&object->RefCount, &count, count - 1u)) return count; } }");
+            " uint32_t count = ct_atomic_load_relaxed(&object->RefCount);" +
+            " for (;;) { if (count == UINT32_MAX) return UINT32_MAX; if (CT_UNLIKELY(count == 0u)) ct_fail(\"CTM0003\", \"<runtime>\", 0); if (ct_atomic_compare_exchange_release(&object->RefCount, &count, count - 1u)) return count; } }");
         writer.WriteLine("static CT_INLINE void ct_retain_fast(ct_object* object) { if (object != NULL) ct_retain_core(object); }");
         writer.WriteLine("static CT_INLINE void ct_release_fast(ct_object* object) { if (object == NULL) return; uint32_t count = ct_release_decrement(object); if (CT_UNLIKELY(count == 1u)) ct_release_last(object, NULL); }");
         writer.WriteLine("void ct_retain(ct_object* object) { (void)ct_thread_require_attached(); ct_retain_fast(object); }");
@@ -1098,7 +1100,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("    free(value); }");
     }
 
-    private static void EmitAtomicRuntime(CWriter writer)
+    private void EmitAtomicRuntime(CWriter writer)
     {
         writer.WriteLine("#if defined(_MSC_VER)");
         writer.WriteLine("typedef volatile long ct_atomic_u32;");
@@ -1112,6 +1114,27 @@ internal sealed partial class CEmitter
         writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, (long)amount); }");
         writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { return (uint32_t)_InterlockedExchangeAdd(value, -(long)amount); }");
         writer.WriteLine("static CT_INLINE void ct_atomic_acquire_fence(void) { _ReadWriteBarrier(); }");
+        writer.WriteLine("#elif defined(__XTENSA__)");
+        writer.WriteLine("typedef uint32_t ct_atomic_u32;");
+        writer.WriteLine("#define CT_ATOMIC_U32_INIT(value) ((ct_atomic_u32)(value))");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_relaxed(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_load_acquire(const ct_atomic_u32* value) { return __atomic_load_n(value, __ATOMIC_ACQUIRE); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_relaxed(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELAXED); }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_store_release(ct_atomic_u32* value, uint32_t desired) { __atomic_store_n(value, desired, __ATOMIC_RELEASE); }");
+        if (IsManagedModule)
+        {
+            writer.WriteLine("extern bool ctilde_managed_atomic_compare_exchange_u32(volatile uint32_t* value, uint32_t* expected, uint32_t desired);");
+            writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return ctilde_managed_atomic_compare_exchange_u32(value, expected, desired); }");
+        }
+        else
+        {
+            writer.WriteLine("static CT_INLINE uint32_t ct_atomic_xtensa_compare_set(ct_atomic_u32* value, uint32_t expected, uint32_t desired) { uint32_t observed; __asm__ __volatile__(\"memw\\n wsr.scompare1 %2\\n rsync\\n s32c1i %0, %3, 0\" : \"=a\"(observed) : \"0\"(desired), \"a\"(expected), \"a\"(value) : \"memory\"); return observed; }");
+            writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_relaxed(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { uint32_t requested = *expected; uint32_t observed = ct_atomic_xtensa_compare_set(value, requested, desired); if (observed == requested) return true; *expected = observed; return false; }");
+        }
+        writer.WriteLine("static CT_INLINE bool ct_atomic_compare_exchange_release(ct_atomic_u32* value, uint32_t* expected, uint32_t desired) { return ct_atomic_compare_exchange_relaxed(value, expected, desired); }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_add_relaxed(ct_atomic_u32* value, uint32_t amount) { uint32_t observed = ct_atomic_load_relaxed(value); for (;;) { uint32_t expected = observed; if (ct_atomic_compare_exchange_relaxed(value, &observed, expected + amount)) return expected; } }");
+        writer.WriteLine("static CT_INLINE uint32_t ct_atomic_fetch_sub_release(ct_atomic_u32* value, uint32_t amount) { uint32_t observed = ct_atomic_load_relaxed(value); for (;;) { uint32_t expected = observed; if (ct_atomic_compare_exchange_release(value, &observed, expected - amount)) return expected; } }");
+        writer.WriteLine("static CT_INLINE void ct_atomic_acquire_fence(void) { __atomic_thread_fence(__ATOMIC_ACQUIRE); }");
         writer.WriteLine("#else");
         writer.WriteLine("typedef uint32_t ct_atomic_u32;");
         writer.WriteLine("#define CT_ATOMIC_U32_INIT(value) ((ct_atomic_u32)(value))");

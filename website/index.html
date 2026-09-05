@@ -44,7 +44,7 @@
       <div class="hero-lines" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span></span> Draft 0.49 experimental systems language</p>
+          <p class="eyebrow"><span></span> Draft 0.50 experimental systems language</p>
           <h1>Familiar syntax.<br><em>Native systems.</em></h1>
           <p class="hero-lede">C~ brings C#-style structure to native systems work. It compiles to deterministic C23 for desktop programs, freestanding images, Cosmopolitan executables, ESP-IDF firmware, and trusted managed applications on ESP32—without the CLR.</p>
           <div class="hero-actions">
@@ -97,7 +97,7 @@
         </div>
 
         <div class="status-strip" aria-label="Current compatibility versions">
-          <div><strong>0.46</strong><span>Language draft</span></div>
+          <div><strong>0.50</strong><span>Language draft</span></div>
           <div><strong>22</strong><span>Runtime ABI</span></div>
           <div><strong>3</strong><span>Managed Module ABI</span></div>
           <div><strong>3</strong><span>Debug metadata</span></div>
@@ -107,14 +107,14 @@
           <article class="capability-card">
             <p class="capability-label">Standard library</p>
             <h3>Useful above the metal</h3>
-            <p>Strings and strict UTF-8, scalar parsing, streams, files, directories, collections, math, geometry, time, random numbers, threads, mutexes, and TLS ship as source with the compiler.</p>
+            <p>Strings and strict UTF-8, incremental line reading, stable merge sorting, files, collections, math, geometry, time, random numbers, threads, mutexes, and TLS ship as source with the compiler.</p>
             <ul><li>Generic collections</li><li>Rune-aware text</li><li>Portable runtime services</li></ul>
           </article>
           <article class="capability-card">
             <p class="capability-label">Native performance</p>
             <h3>Controlled release builds</h3>
-            <p>Select speed or aggressive optimization, baseline or AVX2 code generation, precise or fast floating point, LTO, and hosted PGO without hiding the resolved native flags.</p>
-            <ul><li>MSVC, GCC, and Clang</li><li>SIMD128 lane types</li><li>Stack-usage reports</li></ul>
+            <p>Select size, speed, or aggressive optimization, baseline or AVX2 code generation, precise or fast floating point, LTO, and hosted PGO without hiding the resolved native flags.</p>
+            <ul><li><code>/O1</code> and <code>-Os</code> size profiles</li><li>Compiler-resolved header caching</li><li>Stack-usage reports</li></ul>
           </article>
           <article class="capability-card">
             <p class="capability-label">Hosted</p>
@@ -137,7 +137,7 @@
           <article class="capability-card">
             <p class="capability-label">Tooling</p>
             <h3>Edit and debug in context</h3>
-            <p>VS Code and Visual Studio understand <code>.ctproj</code> projects through the language server. The C~-aware debug adapter maps native execution back to source and supports hosted and ESP-IDF QEMU launch workflows.</p>
+            <p>VS Code and Visual Studio share project-aware language services. Source-file changes refresh project membership while unchanged syntax trees are reused. Native debugging maps execution back to C~ source.</p>
             <ul><li>Diagnostics and completion</li><li>Semantic navigation</li><li>Logical breakpoints</li></ul>
           </article>
         </div>
@@ -151,6 +151,7 @@
         <div class="section-heading">
           <p class="eyebrow"><span></span> A taste of C~</p>
           <h2 id="examples-heading">Small language. Clear intent.</h2>
+          <p>Some panels show excerpts. Follow each example link for the complete program and target setup.</p>
         </div>
 
         <div class="example-browser">
@@ -635,7 +636,7 @@ card.Start();
             <div class="example-copy">
               <p class="example-number">15 / MANAGED ESP32 APPLICATION</p>
               <h3>Run native modules as logical processes.</h3>
-              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
+              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. Draft 0.50 separates executable code from loader metadata and data, infers private helper placement, and gates the final executable working set. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
               <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
             </div>
             <div class="code-window">
@@ -653,7 +654,9 @@ card.Start();
     <span class="tok-keyword">byte</span>[] payload;
     <span class="tok-keyword">if</span> (current.TryReceive(<span class="tok-number">250u</span>, <span class="tok-keyword">out</span> payload))
         <span class="tok-type">Console</span>.WriteLine(<span class="tok-type">Encoding</span>.UTF8.GetString(payload));
-    <span class="tok-keyword">return</span> <span class="tok-type">Process</span>.IsCancellationRequested ? -<span class="tok-number">1</span> : <span class="tok-number">0</span>;
+    <span class="tok-keyword">if</span> (<span class="tok-type">Process</span>.IsCancellationRequested)
+        <span class="tok-keyword">return</span> -<span class="tok-number">1</span>;
+    <span class="tok-keyword">return</span> <span class="tok-number">0</span>;
 }</code></pre>
             </div>
           </div>
@@ -692,7 +695,7 @@ card.Start();
       <div class="shell project-cta-inner">
         <div>
           <p class="eyebrow"><span></span> Open source</p>
-          <h2 id="project-heading">The compiler, specification, standard library, and 20 example projects are all in one place.</h2>
+          <h2 id="project-heading">The compiler, specification, standard library, and 29 example projects are all in one place.</h2>
         </div>
         <div class="project-links">
           <a class="button button-primary" href="https://github.com/sbarisic/CTilde" target="_blank" rel="noopener noreferrer">Explore C~ on GitHub <span aria-hidden="true">↗</span></a>

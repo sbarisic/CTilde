@@ -18,4 +18,4 @@ The archive contains symbolic links and must be extracted by a ZIP tool that pre
 
 The build retains `build/Cosmopolitan.com.dbg`, the ELF/DWARF carrier used for symbol inspection and native debugging. `build/Cosmopolitan.com` is the unwrapped APE payload. Successful execution prints the worker result and creates `cosmopolitan-output.txt` in the current directory.
 
-Draft 0.40 accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.
+The current target accepts only explicit `architecture: "x64"` and the `x86_64-unknown-cosmo-cc` wrapper. Arm64 and fat x64+Arm64 APEs require later compiler work described in the repository Cosmopolitan design document.

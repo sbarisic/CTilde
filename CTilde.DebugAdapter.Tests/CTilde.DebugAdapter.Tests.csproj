@@ -9,5 +9,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../CTilde.DebugAdapter/CTilde.DebugAdapter.csproj" />
+    <Content Include="../Test/Fixtures/gdb-mi-strings.json" Link="gdb-mi-strings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -250,8 +250,8 @@
         },
         "optimization": {
           "type": "string",
-          "enum": ["speed", "aggressive"],
-          "description": "Controlled Release optimization: /O2 (plus /Ob3 for aggressive) or -O2/-O3. Omit to preserve the target's legacy behavior."
+          "enum": ["size", "speed", "aggressive"],
+          "description": "Controlled Release optimization: /O1, /O2 (plus /Ob3 for aggressive), or -Os/-O2/-O3. Omit to preserve the target's legacy behavior."
         },
         "cpuTarget": {
           "type": "string",

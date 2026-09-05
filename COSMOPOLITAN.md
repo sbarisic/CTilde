@@ -2,7 +2,7 @@
 
 ## Status
 
-This document defines the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). Draft 0.24 implemented Stage 1: explicit x86-64 semantics, project/CLI/schema/editor support, a dedicated WSL-aware driver, retained ELF/DWARF and APE artifacts, and a managed-runtime acceptance example executed from the same APE on WSL/Linux and Windows. Draft 0.34 retains that target contract and supports manifest-driven rebuild-and-run. Later stages remain outstanding in [TODO.md](TODO.md).
+This document defines the staged C~ integration of [Cosmopolitan Libc](https://github.com/jart/cosmopolitan) and its [cosmocc toolchain](https://github.com/jart/cosmopolitan/blob/master/tool/cosmocc/README.md). Draft 0.24 implemented Stage 1: explicit x86-64 semantics, project/CLI/schema/editor support, a dedicated WSL-aware driver, retained ELF/DWARF and APE artifacts, and a managed-runtime acceptance example executed from the same APE on WSL/Linux and Windows. Draft 0.50 retains that target contract and the manifest-driven rebuild-and-run support introduced in Draft 0.34. Later stages remain outstanding in [TODO.md](TODO.md).
 
 The implementation deliberately starts with a multi-operating-system x86-64 executable. AArch64 and a combined x86-64/AArch64 image follow only after each architecture has an independent semantic compilation. This avoids producing a nominally fat binary from C~ source whose `static if`, target queries, CPU intrinsics, or inline assembly were already resolved for one architecture.
 

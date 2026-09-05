@@ -26,7 +26,7 @@ internal static partial class ConformanceTests
                     "Omitted Draft 0.41 native profile properties did not preserve the legacy build defaults.");
 
                 File.WriteAllText(manifest, "{ \"target\": \"hosted\", \"sources\": [\"*.ct\"], \"build\": { \"optimization\": \"maximum\" } }");
-                AssertProjectFailure(manifest, "speed or aggressive");
+                AssertProjectFailure(manifest, "size, speed, or aggressive");
                 File.WriteAllText(manifest, "{ \"target\": \"hosted\", \"sources\": [\"*.ct\"], \"build\": { \"pgo\": { \"directory\": \"../escape\" } } }");
                 AssertProjectFailure(manifest, "stay within");
             }

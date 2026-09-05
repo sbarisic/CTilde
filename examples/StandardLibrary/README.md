@@ -1,6 +1,6 @@
 # Standard-library tour
 
-This hosted x64 project runs on the current Draft 0.46 compiler and demonstrates the library foundations introduced from Draft 0.40 through Draft 0.42 in small, responsibility-based source files. Draft 0.46 storage is demonstrated by the ESP-IDF ManagedShell example because its first backend is the T-CAN485 SD slot:
+This hosted x64 project runs on the current Draft 0.50 compiler and demonstrates the library foundations introduced from Draft 0.40 through Draft 0.42 in small, responsibility-based source files. Draft 0.46 storage is demonstrated by the ESP-IDF ManagedShell example because its first backend is the T-CAN485 SD slot:
 
 - ordinal UTF-8 string search, replacement, splitting, segments, joining, and ASCII helpers;
 - `StringBuilder`, composite formatting, numeric format specifications, and custom `IFormattable` values;

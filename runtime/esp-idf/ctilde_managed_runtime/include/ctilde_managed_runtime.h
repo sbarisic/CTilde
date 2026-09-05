@@ -220,6 +220,8 @@ bool ctilde_managed_native_resource_release(uintptr_t token);
 void ctilde_managed_console_set_uart_activity_hook(void (*hook)(void));
 int ctilde_managed_preflight(const char *path, char *error, size_t error_capacity);
 const ct_runtime_api_v22 *ctilde_runtime_api_v22(void);
+bool ctilde_managed_atomic_compare_exchange_u32(volatile uint32_t *value,
+    uint32_t *expected, uint32_t desired);
 
 /* Managed standard-library entry points. The managed layouts are private to ABI 19. */
 

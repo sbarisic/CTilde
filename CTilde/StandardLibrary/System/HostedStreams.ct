@@ -245,8 +245,11 @@ public sealed class StreamReader
     private Encoding encoding;
     private bool leaveOpen;
     private bool disposed;
-    private string content;
+    private byte[] buffer;
     private int position;
+    private int length;
+    private bool eof;
+    private bool preambleChecked;
 
     public StreamReader(Stream stream) : this(stream, Encoding.UTF8, false)
     {
@@ -259,42 +262,89 @@ public sealed class StreamReader
         this.stream = stream;
         this.encoding = encoding;
         this.leaveOpen = leaveOpen;
-        content = null;
+        buffer = new byte[4096];
     }
 
     public bool EndOfStream
     {
         get
         {
-            EnsureLoaded();
-            return position >= content.Length;
+            Prepare();
+            return !EnsureBuffered(1);
         }
     }
 
     public string ReadToEnd()
     {
-        EnsureLoaded();
-        string result = content.Substring(position);
-        position = content.Length;
-        return result;
+        return ReadResult(false);
     }
 
     public string ReadLine()
     {
-        EnsureLoaded();
-        if (position >= content.Length)
+        return ReadResult(true);
+    }
+
+    private string ReadResult(bool line)
+    {
+        Prepare();
+        if (line && !EnsureBuffered(1))
             return null;
-        int end = content.IndexOf('\n', position);
-        if (end < 0)
-            end = content.Length;
-        int count = end - position;
-        if (count > 0 && content[position + count - 1] == '\r')
-            count--;
-        string result = content.Substring(position, count);
-        position = end;
-        if (end < content.Length)
+        byte[] result = new byte[128];
+        int count = 0;
+        while (EnsureBuffered(1))
+        {
+            byte value = buffer[position];
             position++;
-        return result;
+            if (line && value == 10)
+                break;
+            if (count == 2147483647)
+                throw new System.OverflowException();
+            if (count == result.Length)
+            {
+                int capacity = 2147483647;
+                if (result.Length <= 1073741823)
+                    capacity = result.Length * 2;
+                byte[] expanded = new byte[capacity];
+                for (int index = 0; index < count; index++)
+                    expanded[index] = result[index];
+                result = expanded;
+            }
+            result[count] = value;
+            count++;
+        }
+        if (line && count > 0 && result[count - 1] == 13)
+            count--;
+        return encoding.GetString(result, 0, count);
+    }
+
+    private void Prepare()
+    {
+        if (disposed)
+            throw new System.ObjectDisposedException();
+        if (preambleChecked)
+            return;
+        if (EnsureBuffered(1) && buffer[position] == 0xef && EnsureBuffered(2) && buffer[position
+            + 1] == 0xbb && EnsureBuffered(3) && buffer[position + 2] == 0xbf)
+            position += 3;
+        preambleChecked = true;
+    }
+
+    private bool EnsureBuffered(int required)
+    {
+        while (length - position < required && !eof)
+        {
+            int remaining = length - position;
+            for (int index = 0; index < remaining; index++)
+                buffer[index] = buffer[position + index];
+            position = 0;
+            length = remaining;
+            int read = stream.Read(buffer, length, buffer.Length - length);
+            if (read == 0)
+                eof = true;
+            else
+                length += read;
+        }
+        return length - position >= required;
     }
 
     public void Dispose()
@@ -302,62 +352,9 @@ public sealed class StreamReader
         if (disposed)
             return;
         disposed = true;
+        buffer = null;
         if (!leaveOpen)
             stream.Dispose();
-    }
-
-    private void EnsureLoaded()
-    {
-        if (disposed)
-            throw new System.ObjectDisposedException();
-        if (content != null)
-            return;
-        byte[] bytes = ReadRemainingBytes();
-        int offset = 0;
-        if (bytes.Length >= 3 && bytes[0] == 0xef && bytes[1] == 0xbb && bytes[2]
-            == 0xbf)
-            offset = 3;
-        content = encoding.GetString(bytes, offset, bytes.Length - offset);
-    }
-
-    private byte[] ReadRemainingBytes()
-    {
-        int capacity = 4096;
-        bool seekable = stream.CanSeek;
-        if (seekable)
-        {
-            long remaining = stream.Length - stream.Position;
-            if (remaining < 0 || remaining > 2147483647)
-                throw new System.OverflowException();
-            capacity = (int)remaining;
-        }
-        byte[] buffer = new byte[capacity];
-        int length = 0;
-        while (true)
-        {
-            if (length == buffer.Length)
-            {
-                int next = buffer.Length * 2;
-                if (buffer.Length == 0)
-                    next = 4096;
-                if (next < buffer.Length)
-                    throw new System.OverflowException();
-                byte[] expanded = new byte[next];
-                for (int index = 0; index < length; index++)
-                    expanded[index] = buffer[index];
-                buffer = expanded;
-            }
-            int read = stream.Read(buffer, length, buffer.Length - length);
-            if (read == 0)
-                break;
-            length += read;
-        }
-        if (length == buffer.Length)
-            return buffer;
-        byte[] exact = new byte[length];
-        for (int index = 0; index < length; index++)
-            exact[index] = buffer[index];
-        return exact;
     }
 }
 

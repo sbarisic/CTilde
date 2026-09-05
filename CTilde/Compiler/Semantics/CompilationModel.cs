@@ -93,6 +93,8 @@ internal sealed partial class CompilationModel
     public bool FreestandingRuntimeRequired { get; set; }
     public bool FreestandingHeapRequired { get; set; }
     public EffectAnalysis Effects { get; set; } = EffectAnalysis.Empty;
+    public ImmutableHashSet<MethodSymbol> DelegateTargets { get; set; } = [];
+    public ImmutableHashSet<MethodSymbol> UnmanagedAddressTargets { get; set; } = [];
 
     public SourceOwnerIdentity? SourceOwnerFor(SourceText source) =>
         SyntaxTrees.FirstOrDefault(tree => ReferenceEquals(tree.Text, source))?.SourceOwner;

@@ -138,16 +138,65 @@ public static class ArrayAlgorithms
     public static T[] Sorted<T>(T[] source, Ordering<T> ordering)
     {
         T[] result = Copy(source);
-        for (int index = 1; index < result.Length; index++)
+        int runStart = 0;
+        while (runStart < result.Length)
         {
-            T value = result[index];
-            int insertion = index;
-            while (insertion > 0 && ordering(result[insertion - 1], value) > 0)
+            int runEnd = result.Length;
+            if (result.Length - runStart >= 32)
+                runEnd = runStart + 32;
+            for (int index = runStart + 1; index < runEnd; index++)
             {
-                result[insertion] = result[insertion - 1];
-                insertion--;
+                T value = result[index];
+                int insertion = index;
+                while (insertion > runStart && ordering(result[insertion - 1], value)
+                    > 0)
+                {
+                    result[insertion] = result[insertion - 1];
+                    insertion--;
+                }
+                result[insertion] = value;
             }
-            result[insertion] = value;
+            runStart = runEnd;
+        }
+        if (result.Length <= 32)
+            return result;
+        T[] scratch = new T[result.Length];
+        int width = 32;
+        while (width < result.Length)
+        {
+            int start = 0;
+            while (start < result.Length)
+            {
+                int middle = result.Length;
+                if (result.Length - start >= width)
+                    middle = start + width;
+                int end = result.Length;
+                if (result.Length - middle >= width)
+                    end = middle + width;
+                int left = start;
+                int right = middle;
+                for (int target = start; target < end; target++)
+                {
+                    if (left < middle && (right >= end || ordering(result[left],
+                        result[right]) <= 0))
+                    {
+                        scratch[target] = result[left];
+                        left++;
+                    }
+                    else
+                    {
+                        scratch[target] = result[right];
+                        right++;
+                    }
+                }
+                start = end;
+            }
+            T[] previous = result;
+            result = scratch;
+            scratch = previous;
+            if (width >= result.Length - width)
+                break;
+            width *= 2;
         }
         return result;
     }

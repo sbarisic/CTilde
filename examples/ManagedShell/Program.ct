@@ -11,6 +11,9 @@ internal static class ShellPlatform
 {
     [Extern("ct_managed_shell_initialize")]
     internal static int Initialize();
+
+    [Extern("ct_managed_shell_start_network")]
+    internal static int StartNetwork();
 }
 
 internal enum ShellLedColor
@@ -160,6 +163,7 @@ public static class ShellLed
 
     [Export("ct_managed_shell_input_activity")]
     [NoAlloc]
+    [NoRuntime]
     public static void InputActivity()
     {
         inputGeneration.FetchAdd(1, MemoryOrder.Release);
@@ -283,6 +287,7 @@ public static class Program
             Console.Write("LED initialization failed: ");
             Console.WriteLine(ledResult.GetName());
         }
+        bool networkInitializationAttempted = false;
         while (true)
         {
             string[] shellArguments = new string[1];
@@ -294,6 +299,16 @@ public static class Program
                 Console.WriteLine("Managed shell module failed to start; retrying");
                 Thread.Sleep(2000u);
                 continue;
+            }
+            if (!networkInitializationAttempted)
+            {
+                networkInitializationAttempted = true;
+                int networkResult = ShellPlatform.StartNetwork();
+                if (networkResult != 0)
+                {
+                    Console.Write("Managed network initialization deferred: ");
+                    Console.WriteLine(networkResult);
+                }
             }
             int exitCode = shell.Wait();
             if (exitCode != 0)

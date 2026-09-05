@@ -28,6 +28,8 @@ An ESP-IDF manifest can select `espIdf.artifact: "managed-module"` to emit a Run
 
 Use `ctilde --help` for generated-C, project, toolchain, and ESP-IDF options. ESP-IDF and hosted C toolchains are external dependencies and are not included in this archive.
 
+Hosted and freestanding native object-cache format 2 resolves transitive headers with the selected compiler before reuse. Old-format entries are ignored; unavailable dependency information produces an uncached build. This cache version does not change Draft 0.50, Runtime ABI 22, or Managed Module ABI 3. Explicit `restore` and `update` commands support Ctrl+C and preserve the last valid lockfile on failure or cancellation.
+
 The Cosmopolitan target introduced in Draft 0.24 uses an external official `cosmocc` toolchain. CTilde does not bundle or download its roughly 421 MiB release archive during compilation, install a systemwide APE loader, or call unsupported physical `*-linux-cosmo-gcc` executables directly. The first target requires the supported `x86_64-unknown-cosmo-cc` wrapper and matching `x86_64-linux-cosmo-objcopy`; see [the repository design](../COSMOPOLITAN.md).
 
 Prepare a hosted executable and machine-local debugger descriptor:

@@ -17,6 +17,8 @@
 #define CTILDE_SHELL_TLS_INDEX 1
 
 extern void ct_managed_shell_input_activity(void);
+extern void ct_thread_attach(void);
+extern void ct_thread_detach(void);
 
 static_assert(CTILDE_SHELL_TLS_INDEX < CONFIG_FREERTOS_THREAD_LOCAL_STORAGE_POINTERS,
     "The managed shell requires a FreeRTOS TLS slot for firmware C~ state");
@@ -30,6 +32,13 @@ void ct_esp_thread_state_set(void *state, ct_esp_thread_state_delete_fn delete_c
 {
     vTaskSetThreadLocalStoragePointerAndDelCallback(NULL, CTILDE_SHELL_TLS_INDEX, state,
         state == NULL ? NULL : delete_callback);
+}
+
+static void managed_shell_input_activity(void)
+{
+    ct_thread_attach();
+    ct_managed_shell_input_activity();
+    ct_thread_detach();
 }
 
 int32_t ct_managed_shell_initialize(void)
@@ -73,15 +82,12 @@ int32_t ct_managed_shell_initialize(void)
         printf("Managed shell host initialization failed: %d\n", shell_host_result);
         return shell_host_result;
     }
-    ctilde_managed_console_set_uart_activity_hook(ct_managed_shell_input_activity);
+    ctilde_managed_console_set_uart_activity_hook(managed_shell_input_activity);
     const int storage_result = ct_managed_storage_host_initialize();
     if (storage_result != 0) {
         printf("Managed storage initialization failed: %d\n", storage_result);
         return storage_result;
     }
-    const int network_result = ct_managed_network_host_initialize();
-    if (network_result != 0)
-        printf("Managed network initialization deferred: %d\n", network_result);
     const int ssh_result = ct_managed_ssh_host_initialize();
     if (ssh_result != 0) {
         printf("Managed SSH host initialization failed: %d\n", ssh_result);
@@ -93,4 +99,9 @@ int32_t ct_managed_shell_initialize(void)
         printf("LittleFS mounted at %s (%u/%u bytes used)\n", CTILDE_MANAGED_MODULE_ROOT,
             (unsigned)used, (unsigned)total);
     return 0;
+}
+
+int32_t ct_managed_shell_start_network(void)
+{
+    return ct_managed_network_host_initialize();
 }

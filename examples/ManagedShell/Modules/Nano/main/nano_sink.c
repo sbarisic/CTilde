@@ -43,6 +43,8 @@ typedef struct nano_sink {
 extern const ct_runtime_api_v22 *ct_runtime_api;
 extern const ct_managed_module_descriptor_v3 ct_managed_module_v3;
 
+int32_t ct_nano_sink_flush(uintptr_t handle);
+
 uintptr_t ct_nano_sink_create(uint32_t capacity)
 {
     if (capacity == 0 || capacity > 32768 || ct_runtime_api == NULL) return 0;
@@ -71,7 +73,11 @@ void ct_nano_sink_reset(uintptr_t handle)
 int32_t ct_nano_sink_append(uintptr_t handle, uint8_t value)
 {
     nano_sink *sink = (nano_sink *)handle;
-    if (sink == NULL || sink->Length >= sink->Capacity) return -1;
+    if (sink == NULL) return -1;
+    if (sink->Length == sink->Capacity) {
+        const int32_t result = ct_nano_sink_flush(handle);
+        if (result != 0) return result;
+    }
     sink->Data[sink->Length++] = value;
     return 0;
 }
@@ -87,6 +93,7 @@ int32_t ct_nano_sink_flush(uintptr_t handle)
         sizeof(transfer));
     if (result != 0 || transfer.Count != transfer.Length)
         return result == 0 ? -1 : result;
+    sink->Length = 0;
     return ct_runtime_api->Service(UINT32_C(18), NULL, 0u);
 }
 

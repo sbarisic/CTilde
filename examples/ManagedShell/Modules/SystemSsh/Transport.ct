@@ -339,17 +339,20 @@ internal sealed class SshTransport
             throw new InvalidOperationException();
         if (packetLength > (uint)maximumPacket)
             throw new InvalidOperationException();
+        if ((encrypted && packetLength % 16u != 0u) || (!encrypted && (packetLength + 4u) % 8u != 0u))
+            throw new InvalidOperationException();
         byte[] body = new byte[(int)packetLength];
         if (encrypted)
         {
             if (inboundInvocation == 18446744073709551615UL)
                 throw new InvalidOperationException();
-            byte[] cipher = new byte[(int)packetLength];
             byte[] tag = new byte[16];
-            ReceiveExact(cipher, 0, cipher.Length, timeout);
+            ReceiveExact(body, 0, body.Length, timeout);
             ReceiveExact(tag, 0, tag.Length, timeout);
             byte[] nonce = Nonce(inboundIv, inboundInvocation);
-            SshNative.Require(SshNative.AesOpen(inboundCipher, nonce, header, cipher,
+            // The body stays private until authentication succeeds. Native
+            // failure clears it before Require throws.
+            SshNative.Require(SshNative.AesOpen(inboundCipher, nonce, header, body,
                 tag, body));
             inboundInvocation++;
         }
@@ -369,9 +372,13 @@ internal sealed class SshTransport
     internal void SendPacket(byte[] payload)
     {
         int block = 8;
+        int framing = 5;
         if (encrypted)
+        {
             block = 16;
-        int padding = block - ((payload.Length + 5) % block);
+            framing = 1;
+        }
+        int padding = block - ((payload.Length + framing) % block);
         if (padding < 4)
             padding += block;
         int packetLength = payload.Length + padding + 1;
@@ -406,11 +413,10 @@ internal sealed class SshTransport
             if (outboundInvocation == 18446744073709551615UL)
                 throw new InvalidOperationException();
             byte[] nonce = Nonce(outboundIv, outboundInvocation);
-            byte[] cipher = new byte[body.Length];
             byte[] tag = new byte[16];
             SshNative.Require(SshNative.AesSeal(outboundCipher, nonce, header, body,
-                cipher, tag));
-            SendExact(cipher, 0, cipher.Length, 5000u);
+                body, tag));
+            SendExact(body, 0, body.Length, 5000u);
             SendExact(tag, 0, tag.Length, 5000u);
             outboundInvocation++;
         }

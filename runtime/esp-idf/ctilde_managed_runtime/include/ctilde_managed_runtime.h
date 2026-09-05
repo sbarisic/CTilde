@@ -16,6 +16,10 @@ extern "C" {
 #define CTILDE_MANAGED_MODULE_NAME_CAPACITY 64u
 #define CTILDE_MANAGED_MODULE_VERSION_CAPACITY 32u
 
+/* Native firmware instrumentation, outside the module ABI. Phase must be a
+   fixed identifier containing only ASCII letters, digits, '_' or '-'. */
+void ctilde_managed_memory_sample(const char *phase, uint32_t subject);
+
 #define CT_RUNTIME_SERVICE_THREAD_ATTACH 1u
 #define CT_RUNTIME_SERVICE_THREAD_DETACH 2u
 #define CT_RUNTIME_SERVICE_CONSOLE_WRITE 16u

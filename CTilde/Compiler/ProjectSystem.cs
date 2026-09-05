@@ -50,7 +50,14 @@ public sealed record ManagedModuleConfiguration(
     ulong? HeapLimitBytes,
     ImmutableArray<string> NativeSources = default,
     string? ProjectRoot = null,
-    string? NativeComponentDirectory = null);
+    string? NativeComponentDirectory = null,
+    ManagedMemoryLimits? MemoryLimits = null);
+
+/// <summary>Optional limits for statically known managed-module memory requirements.</summary>
+/// <param name="ResidentRamBytes">Maximum retained linked sections, including section padding. Excludes dynamic loader and allocator overhead.</param>
+/// <param name="OverlayRamBytes">Maximum per-process executable overlay window.</param>
+/// <param name="ProcessStackBytes">Maximum declared main-task stack allocation.</param>
+public sealed record ManagedMemoryLimits(ulong? ResidentRamBytes, ulong? OverlayRamBytes, uint? ProcessStackBytes);
 
 public enum CTildeRunExecutor
 {
@@ -656,6 +663,8 @@ public static class CTildeProjectFile
             throw new CTildeProjectException($"managedModule.mainTaskStackBytes in '{manifestPath}' must be at least 2048 and divisible by 16.", "CT6202");
         if (document.HeapLimitBytes is > 0 and < 1024)
             throw new CTildeProjectException($"managedModule.heapLimitBytes in '{manifestPath}' must be zero/unlimited or at least 1024.", "CT6202");
+        if (document.MemoryLimits?.ProcessStackBytes is uint stackLimit && stack > stackLimit)
+            throw new CTildeProjectException($"Managed process stack requires {stack} bytes, exceeding the configured {stackLimit}-byte limit.", "CT6202");
 
         var nativeSources = ResolveExistingFiles(document.NativeSources ?? [], "managedModule.nativeSources", root, manifestPath,
             path => Path.GetExtension(path).Equals(".c", StringComparison.Ordinal));
@@ -698,7 +707,9 @@ public static class CTildeProjectFile
         }
         ValidateManagedReferenceGraph(document.Name, referenceMetadata.ToImmutable(), manifestPath);
         return new ManagedModuleConfiguration(kind, document.Name, document.Version, references.ToImmutable(), stack,
-            document.HeapLimitBytes is null or 0 ? null : document.HeapLimitBytes, nativeSources, root, mainDirectory);
+            document.HeapLimitBytes is null or 0 ? null : document.HeapLimitBytes, nativeSources, root, mainDirectory,
+            document.MemoryLimits is null ? null : new ManagedMemoryLimits(document.MemoryLimits.ResidentRamBytes,
+                document.MemoryLimits.OverlayRamBytes, document.MemoryLimits.ProcessStackBytes));
     }
 
     private static void ValidateManagedReferenceGraph(string rootName, ImmutableArray<ManagedModuleMetadata> references, string manifestPath)
@@ -1213,7 +1224,13 @@ public static class CTildeProjectFile
         [property: JsonPropertyName("references")] string[]? References,
         [property: JsonPropertyName("nativeSources")] string[]? NativeSources,
         [property: JsonPropertyName("mainTaskStackBytes")] uint? MainTaskStackBytes,
-        [property: JsonPropertyName("heapLimitBytes")] ulong? HeapLimitBytes);
+        [property: JsonPropertyName("heapLimitBytes")] ulong? HeapLimitBytes,
+        [property: JsonPropertyName("memoryLimits")] ManagedMemoryLimitsDocument? MemoryLimits);
+
+    private sealed record ManagedMemoryLimitsDocument(
+        [property: JsonPropertyName("residentRamBytes")] ulong? ResidentRamBytes,
+        [property: JsonPropertyName("overlayRamBytes")] ulong? OverlayRamBytes,
+        [property: JsonPropertyName("processStackBytes")] uint? ProcessStackBytes);
 
     private sealed record HostedDocument(
         [property: JsonPropertyName("nativeSources")] string[]? NativeSources,

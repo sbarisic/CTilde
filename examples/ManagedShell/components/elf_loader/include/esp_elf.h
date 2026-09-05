@@ -93,6 +93,12 @@ int esp_elf_relocate(esp_elf_t *elf, const uint8_t *pbuf);
  */
 int esp_elf_relocate_file(esp_elf_t *elf, const char *path);
 
+/** Release the name lookup table after all required symbols are resolved.
+ * The caller must exclude concurrent lookup/unload. Resolved code and data
+ * addresses stay valid until the image is unloaded. Safe to call repeatedly.
+ */
+void esp_elf_discard_symbols(esp_elf_t *elf);
+
 /**
  * @brief Request running relocated ELF function.
  *

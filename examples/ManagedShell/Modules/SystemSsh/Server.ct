@@ -193,7 +193,11 @@ internal sealed class SshConnection
         if (sessionIdentifier == null)
             sessionIdentifier = exchangeHash;
         byte[] fixedSignature = new byte[64];
-        SshNative.Require(SshNative.P256Sign(hostKey, exchangeHash, fixedSignature));
+        // ECDSA signs the exchange hash as a message. The native operation
+        // accepts a digest, so hash that message before signing.
+        byte[] signatureHash = new byte[32];
+        SshNative.Require(SshNative.Sha256(exchangeHash, 0, exchangeHash.Length, signatureHash));
+        SshNative.Require(SshNative.P256Sign(hostKey, signatureHash, fixedSignature));
         byte[] signatureBlob = SignatureBlob(fixedSignature);
         SshPacketWriter reply = new SshPacketWriter(512);
         reply.WriteByte((byte)31);
@@ -334,7 +338,7 @@ internal sealed class SshConnection
         writer.WriteBytes(hostBlob);
         writer.WriteBytes(clientPublic);
         writer.WriteBytes(serverPublic);
-        writer.WriteBytes(MpintLittleEndian(secret));
+        writer.WriteBytes(MpintFixed(secret, 0));
         return writer.ToArray();
     }
 
@@ -342,7 +346,7 @@ internal sealed class SshConnection
     private byte[] Derive(byte[] secret, byte[] exchangeHash, byte letter, int count)
     {
         SshPacketWriter writer = new SshPacketWriter(256);
-        writer.WriteBytes(MpintLittleEndian(secret));
+        writer.WriteBytes(MpintFixed(secret, 0));
         writer.WriteRaw(exchangeHash);
         writer.WriteByte(letter);
         writer.WriteRaw(sessionIdentifier);
@@ -352,24 +356,6 @@ internal sealed class SshConnection
         byte[] result = new byte[count];
         for (int index = 0; index < count; index++)
             result[index] = hash[index];
-        return result;
-    }
-
-    [Overlay("handshake")]
-    private static byte[] MpintLittleEndian(byte[] value)
-    {
-        int end = value.Length - 1;
-        while (end >= 0 && value[end] == 0)
-            end--;
-        if (end < 0)
-            return new byte[0];
-        bool leading = (value[end] & 128) != 0;
-        int extra = 0;
-        if (leading)
-            extra = 1;
-        byte[] result = new byte[end + 1 + extra];
-        for (int index = 0; index <= end; index++)
-            result[extra + index] = value[end - index];
         return result;
     }
 

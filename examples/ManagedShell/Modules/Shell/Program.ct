@@ -23,11 +23,8 @@ internal static class ShellHost
     internal static unsafe int ModuleGet(uint index, out uint references, out uint calls,
         out uint allocations, out bool stopping, NativeBuffer<byte> name, NativeBuffer<byte> version);
 
-    [Extern("ct_shell_free_heap")]
-    internal static nuint FreeHeap();
-
-    [Extern("ct_shell_minimum_free_heap")]
-    internal static nuint MinimumFreeHeap();
+    [Extern("ct_shell_print_memory")]
+    internal static void PrintMemory();
 
     [Extern("ct_shell_set_foreground")]
     internal static bool SetForeground(uint id);
@@ -266,10 +263,7 @@ internal static class ShellCommands
             return PrintProcesses();
         if (command == "free")
         {
-            Console.Write("free heap: ");
-            Console.Write((ulong)ShellHost.FreeHeap());
-            Console.Write(", minimum: ");
-            Console.WriteLine((ulong)ShellHost.MinimumFreeHeap());
+            ShellHost.PrintMemory();
             return 0;
         }
         if (command == "kill" || command == "wait")

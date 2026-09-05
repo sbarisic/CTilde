@@ -1,8 +1,10 @@
 # Implementation status
 
-Last reviewed: 2026-09-04
+Last reviewed: 2026-09-05
 
 ## Current state
+
+The lower-RAM work for Draft 0.51 remains in progress. The compiler still uses Draft 0.50, Runtime ABI 22, and Managed Module ABI 3. Implemented changes include linked-section memory budgets, lifecycle heap samples, early process-stack reservation, disposable ELF lookup metadata, and bounded in-place SSH AEAD. Production flash mapping and lifetime-checked spans are not implemented. See [progress and validation limits](examples/ManagedShell/DRAFT051_PROGRESS.md).
 
 C~ Draft 0.50 has one compiler path:
 

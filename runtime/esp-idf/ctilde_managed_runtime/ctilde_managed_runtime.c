@@ -79,6 +79,31 @@ static void publish_executable_memory_on_cpu(void *unused)
 #endif
 }
 
+void ctilde_managed_memory_sample(const char *phase, uint32_t subject)
+{
+#ifdef CONFIG_CTILDE_MANAGED_MEMORY_TRACE
+    if (phase == NULL) return;
+    for (const char *cursor = phase; *cursor != '\0'; ++cursor) {
+        if (!((*cursor >= 'a' && *cursor <= 'z') || (*cursor >= 'A' && *cursor <= 'Z') ||
+              (*cursor >= '0' && *cursor <= '9') || *cursor == '_' || *cursor == '-')) return;
+    }
+    multi_heap_info_t bytes, executable;
+    heap_caps_get_info(&bytes, MALLOC_CAP_8BIT);
+    heap_caps_get_info(&executable, MALLOC_CAP_EXEC);
+    ESP_LOGI("ctilde.memory", "CT_MEMORY {\"schemaVersion\":1,\"phase\":\"%s\","
+        "\"subject\":%" PRIu32 ",\"timestampUs\":%" PRIi64 ",\"scope\":\"global\","
+        "\"byteAddressable\":{\"freeBytes\":%zu,\"allocatedBytes\":%zu,\"largestBlockBytes\":%zu,"
+        "\"minimumFreeBytes\":%zu,\"allocatedBlocks\":%zu},"
+        "\"executable\":{\"freeBytes\":%zu,\"largestBlockBytes\":%zu}}",
+        phase, subject, esp_timer_get_time(), bytes.total_free_bytes, bytes.total_allocated_bytes,
+        bytes.largest_free_block, bytes.minimum_free_bytes, bytes.allocated_blocks,
+        executable.total_free_bytes, executable.largest_free_block);
+#else
+    (void)phase;
+    (void)subject;
+#endif
+}
+
 static int publish_executable_memory(void)
 {
     publish_executable_memory_on_cpu(NULL);
@@ -1300,13 +1325,17 @@ static int inspect_module_overlay_requirement(const char *path, size_t *maximum_
 }
 
 static int inspect_process_overlay_requirement(const char *path, const char *const *chain,
-    size_t depth, size_t *maximum_bytes)
+    size_t depth, size_t *maximum_bytes, uint32_t *root_stack_bytes, char *root_name)
 {
     if (path == NULL || maximum_bytes == NULL || depth >= CT_MAX_PROCESS_MODULES) return -ELOOP;
     ct_binary_manifest_v1 *manifest = NULL;
     uint8_t *manifest_bytes = NULL;
     int result = read_manifest(path, &manifest, &manifest_bytes, NULL);
     if (result != 0) return result;
+    if (depth == 0u && root_stack_bytes != NULL) {
+        *root_stack_bytes = manifest->MainTaskStackBytes;
+        (void)snprintf(root_name, CT_MODULE_NAME_MAX, "%s", manifest->Name);
+    }
     for (size_t index = 0; index < depth; ++index) {
         if (strcmp(chain[index], manifest->Name) == 0) {
             free(manifest_bytes);
@@ -1332,7 +1361,7 @@ static int inspect_process_overlay_requirement(const char *path, const char *con
         else result = resolve_module_path_bytes((const uint8_t *)dependency_name,
             (size_t)written, dependency_path);
         if (result == 0) result = inspect_process_overlay_requirement(dependency_path,
-            next_chain, depth + 1u, maximum_bytes);
+            next_chain, depth + 1u, maximum_bytes, root_stack_bytes, root_name);
         if (result != 0) break;
     }
     free(manifest_bytes);
@@ -1341,6 +1370,7 @@ static int inspect_process_overlay_requirement(const char *path, const char *con
 
 static int load_module_recursive(const char *path, const char *const *chain, size_t depth, ct_module **output)
 {
+    ctilde_managed_memory_sample("module_load_begin", (uint32_t)depth);
     if (depth >= CT_MAX_PROCESS_MODULES) return -ELOOP;
     ct_binary_manifest_v1 *manifest;
     uint8_t *manifest_bytes;
@@ -1443,6 +1473,13 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         result = -ELIBBAD;
         goto fail;
     }
+    /* Managed contracts retain callable addresses in their own descriptor.
+       The private dynamic handle needs no further name lookup. */
+    if (esp_dldiscard_symbols(module->DynamicHandle) != 0) {
+        result = -ENOEXEC;
+        goto fail;
+    }
+    ctilde_managed_memory_sample("module_lookup_metadata_released", (uint32_t)depth);
     module->Descriptor = descriptor;
     module->DataLoadBias = (uintptr_t)(const void *)descriptor - (uintptr_t)module->DescriptorVma;
     module->ExecutableLoadBias = module->OverlayCount == 0u ? 0u :
@@ -1494,6 +1531,7 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
     xSemaphoreGive(s_registry);
     free(manifest_bytes);
     *output = module;
+    ctilde_managed_memory_sample("module_load_complete", (uint32_t)depth);
     return 0;
 
 fail:
@@ -2689,6 +2727,7 @@ static void cleanup_process(ct_process *process, bool forced)
     __atomic_store_n(&process->TaskCount, 0u, __ATOMIC_RELEASE);
     vTaskSetThreadLocalStoragePointer(NULL, CONFIG_CTILDE_MANAGED_TLS_INDEX, previous_context);
     release_module(root);
+    ctilde_managed_memory_sample("process_resources_released", process->Id);
     __atomic_store_n(&process->Completed, true, __ATOMIC_RELEASE);
     xSemaphoreGive(process->Completion);
 }
@@ -2817,6 +2856,13 @@ static ct_process *allocate_process(void)
 
 static uintptr_t fail_unpublished_process_start(ct_process *process)
 {
+    /* The reserved task has no TLS cleanup callback and cannot enter managed
+       code until the starter sends its notification. Delete it before reuse. */
+    if (process->MainTask != NULL) {
+        vTaskDelete(process->MainTask);
+        process->MainTask = NULL;
+        process->TaskCount = 0u;
+    }
     __atomic_store_n(&process->State, CT_PROCESS_FAILED, __ATOMIC_RELEASE);
     cleanup_process(process, true);
     vSemaphoreDelete(process->Completion);
@@ -2826,6 +2872,12 @@ static uintptr_t fail_unpublished_process_start(ct_process *process)
     (void)memset(process, 0, sizeof(*process));
     xSemaphoreGive(s_registry);
     return 0;
+}
+
+static void reserved_process_main(void *argument)
+{
+    (void)ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    process_main(argument);
 }
 
 static uintptr_t start_process_core(const void *path_value, const void *arguments_value,
@@ -2838,12 +2890,28 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     if (resolve_module_path_bytes(path->Data, (size_t)path->Length, path_buffer) != 0) return 0;
     const char *overlay_chain[1] = { NULL };
     size_t reserved_overlay_bytes = 0u;
+    uint32_t reserved_stack_bytes = 0u;
+    char reserved_task_name[CT_MODULE_NAME_MAX];
     const int overlay_result = inspect_process_overlay_requirement(path_buffer, overlay_chain, 0u,
-        &reserved_overlay_bytes);
+        &reserved_overlay_bytes, &reserved_stack_bytes, reserved_task_name);
     if (overlay_result != 0) {
         ESP_LOGE(TAG, "Managed process overlay preflight failed: %d", overlay_result);
         return 0;
     }
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    ct_process *process = allocate_process();
+    xSemaphoreGive(s_registry);
+    if (process == NULL) return 0;
+    ctilde_managed_memory_sample("process_state_created", process->Id);
+    process->TaskCount = 1u;
+    if (xTaskCreate(reserved_process_main, reserved_task_name, reserved_stack_bytes, process,
+            tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
+        ESP_LOGE(TAG, "Managed task reservation failed: stack=%u, free=%u, largest=%u",
+            (unsigned)reserved_stack_bytes, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
+            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+        return fail_unpublished_process_start(process);
+    }
+    ctilde_managed_memory_sample("process_stack_reserved", process->Id);
     volatile uint32_t *reserved_overlay = NULL;
     if (reserved_overlay_bytes != 0u) {
         reserved_overlay = heap_caps_aligned_alloc(16u, reserved_overlay_bytes,
@@ -2853,34 +2921,22 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
                 "executable-largest=%u", (unsigned)reserved_overlay_bytes,
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT),
                 (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT));
-            return 0;
+            return fail_unpublished_process_start(process);
         }
     }
+    process->OverlayWindow = reserved_overlay;
+    process->OverlayWindowSize = reserved_overlay_bytes;
     ct_module *module = NULL;
     const char *chain[1] = { NULL };
     const int module_result = load_module_recursive(path_buffer, chain, 0, &module);
     if (module_result != 0) {
-        heap_caps_free((void *)(uintptr_t)reserved_overlay);
         ESP_LOGE(TAG, "Managed process module load failed: %d", module_result);
-        return 0;
-    }
-    if (module->Descriptor->Kind != 1 || module->Descriptor->Main == NULL || module->Descriptor->CreateArguments == NULL) {
-        heap_caps_free((void *)(uintptr_t)reserved_overlay);
-        release_module(module);
-        return 0;
-    }
-    xSemaphoreTake(s_registry, portMAX_DELAY);
-    ct_process *process = allocate_process();
-    xSemaphoreGive(s_registry);
-    if (process == NULL) {
-        ESP_LOGE(TAG, "Managed process allocation failed: no process slot or control resources");
-        heap_caps_free((void *)(uintptr_t)reserved_overlay);
-        release_module(module);
-        return 0;
+        return fail_unpublished_process_start(process);
     }
     process->Root = module;
-    process->OverlayWindow = reserved_overlay;
-    process->OverlayWindowSize = reserved_overlay_bytes;
+    if (module->Descriptor->Kind != 1 || module->Descriptor->Main == NULL || module->Descriptor->CreateArguments == NULL ||
+        module->Descriptor->MainTaskStackBytes != reserved_stack_bytes)
+        return fail_unpublished_process_start(process);
     ct_process *parent = current_process();
     process->ParentId = parent == NULL ? 0u : parent->Id;
     (void)snprintf(process->RootName, sizeof(process->RootName), "%s", module->Name);
@@ -2930,16 +2986,8 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
             return fail_unpublished_process_start(process);
         }
     }
-    process->TaskCount = 1;
-    if (xTaskCreate(process_main, module->Name, module->Descriptor->MainTaskStackBytes, process,
-            tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
-        ESP_LOGE(TAG, "Managed process %u task creation failed: stack=%u, free=%u, largest=%u",
-            (unsigned)process->Id, (unsigned)module->Descriptor->MainTaskStackBytes,
-            (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
-            (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
-        process->TaskCount = 0;
-        return fail_unpublished_process_start(process);
-    }
+    ctilde_managed_memory_sample("process_ready", process->Id);
+    xTaskNotifyGive(process->MainTask);
     const size_t process_index = (size_t)(process - s_processes);
     while (__atomic_load_n(&s_published_process_ids[process_index], __ATOMIC_ACQUIRE) != process->Id) vTaskDelay(1);
     return (uintptr_t)process->Id;

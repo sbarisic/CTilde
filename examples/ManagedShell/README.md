@@ -22,7 +22,13 @@ The onboard GPIO4 WS2812 is a low-brightness status display. Orange means that f
 
 ## Diagnostics
 
-`free` keeps its compact existing shell output. Run `memory.ctm` for the comprehensive one-shot report. The application accepts no arguments. Its sections have these meanings:
+Module builds now emit `<module>.memory.json` beside each `.ctm`. The report separates linked code, mutable data, constants, padding, stack, and overlay requirements. Dynamic costs remain unknown until measured. Optional `managedModule.memoryLimits` fields are `residentRamBytes`, `overlayRamBytes`, and `processStackBytes`. They limit known build requirements, not total runtime peaks.
+
+The [lower-RAM progress report](DRAFT051_PROGRESS.md) describes current loader and SSH changes. Draft 0.51, flash mapping, and safe spans remain incomplete. Existing ABI versions and partition offsets remain unchanged.
+
+`free` prints the current free heap and lifetime minimum free heap, followed by an aligned RAM table. Each row shows free, used, and total bytes plus the free percentage to one decimal place. Rows include default, 8-bit, 32-bit, internal, DMA, executable, and SPIRAM pools. These pools overlap and must not be summed. Unavailable pools show `not configured`.
+
+Run `memory.ctm` for the comprehensive one-shot report. The application accepts no arguments. Its sections have these meanings:
 
 - `RAM summary` reports exact total, used, currently available, attributed allocation payload, allocator overhead, lifetime minimum free, peak used, largest currently possible one-block allocation, fragmentation, and block counts.
 - `Capability pools` reports default, 8-bit, 32-bit, internal, DMA, executable, and SPIRAM heaps. These rows overlap and must not be summed.
@@ -140,6 +146,20 @@ exit code: -1
 For an LED acceptance run, start `examples.hello.ctm listen` and observe green. Sending `exit` makes the final idle state blue. Starting it again and using `kill` produces exit code `-1` and makes the final idle state red. While either color is displayed, typing temporarily overlays white and restores the underlying state.
 
 For initial installation on a device whose storage can be replaced, flash and monitor with an active ESP-IDF 6 environment. This target also writes the generated `storage` and `sftp` images. For an existing device, preserve its flash backup and merge only the required module updates into its storage image before writing the application and storage partitions; do not use the full flash target to preserve user data.
+
+For the existing 4 MiB ESP32 on Windows, close the serial monitor and run this command from the repository root:
+
+```powershell
+.\examples\ManagedShell\Rebuild-Flash.ps1 -Port COM4
+```
+
+The script rebuilds all modules and firmware, checks size budgets, and flashes the full firmware and built storage images. It does not download flash or calculate differences by default. Files stored only on the device's storage partition are replaced by the build image. NVS, SFTP, the partition table, and the bootloader are not written.
+
+The script uses the ROM bootloader (`--no-stub`) and opens the serial monitor after flashing. Press Ctrl+] to close the monitor. Use `-NoMonitor` to stop after flashing. Override `-IdfProfile` and `-EspPython` if the installed tool paths differ. Use `-UseStub` only on a connection where the faster stub works reliably.
+
+Use `-PreserveStorage` to enable the slower backup-and-merge workflow. This mode downloads a fresh 4 MiB backup, replaces only changed shipped modules, and verifies that other storage files remain unchanged. It enables differential flashing with esptool verification. Add `-FullFlash` to this mode to write both merged images in full. The ROM backup can take tens of minutes.
+
+Preservation mode stores backups and reports in ignored `artifacts/managed-shell/flash-*` directories and installs `littlefs-python` 0.19.0 locally. Backups can contain credentials. This mode retries a failed backup once and requires a complete backup, matching partition table, and mountable filesystem before writing.
 
 ```powershell
 idf.py -C examples/ManagedShell -p COM4 flash monitor

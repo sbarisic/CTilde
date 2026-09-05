@@ -1,0 +1,505 @@
+{
+  "schemaVersion": 1,
+  "measurementKind": "linked artifact inspection",
+  "limitations": [
+    "Lookup payload excludes allocator overhead and other loader metadata.",
+    "Relocation staging moves from variable heap allocation to 384 stack bytes.",
+    "These are not device peak RAM, timing, or SSH acceptance measurements."
+  ],
+  "workloads": [
+    {
+      "module": "tests.allocator",
+      "before": {
+        "packageBytes": 23948,
+        "sha256": "e31e4905109035e9731ee7ed262423009ab35494de3552c5b377decd3679798d",
+        "sectionBytes": {
+          ".text": 11585,
+          ".rodata": 1433,
+          ".data.rel.ro": 2600,
+          ".data": 28,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 115,
+        "lookupRecordBytes": 32,
+        "lookupNameCount": 4,
+        "largestRelocationTableBytes": 4440
+      },
+      "after": {
+        "packageBytes": 23948,
+        "sha256": "e31e4905109035e9731ee7ed262423009ab35494de3552c5b377decd3679798d",
+        "sectionBytes": {
+          ".text": 11585,
+          ".rodata": 1433,
+          ".data.rel.ro": 2600,
+          ".data": 28,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 115,
+        "lookupRecordBytes": 32,
+        "lookupNameCount": 4,
+        "largestRelocationTableBytes": 4440
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 147,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 4440,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "commands.fs",
+      "before": {
+        "packageBytes": 43300,
+        "sha256": "d1bf9d71b50edee766cce7ddb63c5faa404d9c7abe642787fe4cfef15a52d0c6",
+        "sectionBytes": {
+          ".text": 30268,
+          ".rodata": 1598,
+          ".data.rel.ro": 3872,
+          ".data": 4,
+          ".bss": 260
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 5160
+      },
+      "after": {
+        "packageBytes": 43300,
+        "sha256": "d1bf9d71b50edee766cce7ddb63c5faa404d9c7abe642787fe4cfef15a52d0c6",
+        "sectionBytes": {
+          ".text": 30268,
+          ".rodata": 1598,
+          ".data.rel.ro": 3872,
+          ".data": 4,
+          ".bss": 260
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 5160
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 114,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 5160,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "examples.hello",
+      "before": {
+        "packageBytes": 27964,
+        "sha256": "4ce70869f69b5dcd8369e665ff36280943664e41a611db33f8a3e618e16431a1",
+        "sectionBytes": {
+          ".text": 14684,
+          ".rodata": 1262,
+          ".data.rel.ro": 2544,
+          ".data": 4,
+          ".bss": 228
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 3972
+      },
+      "after": {
+        "packageBytes": 27964,
+        "sha256": "4ce70869f69b5dcd8369e665ff36280943664e41a611db33f8a3e618e16431a1",
+        "sectionBytes": {
+          ".text": 14684,
+          ".rodata": 1262,
+          ".data.rel.ro": 2544,
+          ".data": 4,
+          ".bss": 228
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 3972
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 114,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 3972,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "memory",
+      "before": {
+        "packageBytes": 23428,
+        "sha256": "452d280e02d43660d4f68c2901a27beda78f627ad78a885f3673d7060b1980cb",
+        "sectionBytes": {
+          ".text": 13040,
+          ".rodata": 2353,
+          ".data.rel.ro": 1800,
+          ".data": 4,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 126,
+        "lookupRecordBytes": 32,
+        "lookupNameCount": 4,
+        "largestRelocationTableBytes": 3612
+      },
+      "after": {
+        "packageBytes": 23428,
+        "sha256": "452d280e02d43660d4f68c2901a27beda78f627ad78a885f3673d7060b1980cb",
+        "sectionBytes": {
+          ".text": 13040,
+          ".rodata": 2353,
+          ".data.rel.ro": 1800,
+          ".data": 4,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 126,
+        "lookupRecordBytes": 32,
+        "lookupNameCount": 4,
+        "largestRelocationTableBytes": 3612
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 158,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 3612,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "nano",
+      "before": {
+        "packageBytes": 117480,
+        "sha256": "4d3788a4551a2affa75ca1d1306cd58ad001e950151563f5006fb8190288a68d",
+        "sectionBytes": {
+          ".text": 31079,
+          ".rodata": 1745,
+          ".data.rel.ro": 5780,
+          ".data": 260,
+          ".bss": 240
+        },
+        "lookupNamesBytes": 2404,
+        "lookupRecordBytes": 624,
+        "lookupNameCount": 78,
+        "largestRelocationTableBytes": 10716
+      },
+      "after": {
+        "packageBytes": 117464,
+        "sha256": "ad213e319d0b4d95613fca1704576a8c2dc8aca4fc2ee19e8f505ff8629b97f8",
+        "sectionBytes": {
+          ".text": 31127,
+          ".rodata": 1745,
+          ".data.rel.ro": 5780,
+          ".data": 260,
+          ".bss": 240
+        },
+        "lookupNamesBytes": 2404,
+        "lookupRecordBytes": 624,
+        "lookupNameCount": 78,
+        "largestRelocationTableBytes": 10716
+      },
+      "packageDeltaBytes": -16,
+      "baselineRetainedLookupPayloadBytes": 3028,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 10716,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "net",
+      "before": {
+        "packageBytes": 48992,
+        "sha256": "67206789ad209ea624626bb053b8f08c254bb1f17ec428b5574b9b68ea6fafe9",
+        "sectionBytes": {
+          ".text": 10685,
+          ".rodata": 1270,
+          ".data.rel.ro": 4760,
+          ".data": 24,
+          ".bss": 392
+        },
+        "lookupNamesBytes": 1131,
+        "lookupRecordBytes": 360,
+        "lookupNameCount": 45,
+        "largestRelocationTableBytes": 7992
+      },
+      "after": {
+        "packageBytes": 48992,
+        "sha256": "67206789ad209ea624626bb053b8f08c254bb1f17ec428b5574b9b68ea6fafe9",
+        "sectionBytes": {
+          ".text": 10685,
+          ".rodata": 1270,
+          ".data.rel.ro": 4760,
+          ".data": 24,
+          ".bss": 392
+        },
+        "lookupNamesBytes": 1131,
+        "lookupRecordBytes": 360,
+        "lookupNameCount": 45,
+        "largestRelocationTableBytes": 7992
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 1491,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 7992,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "tests.overlay",
+      "before": {
+        "packageBytes": 42240,
+        "sha256": "82639c0973b221e6077da003aae0286f42d003b864dc18e58aa8ed4ea65ed56a",
+        "sectionBytes": {
+          ".text": 18962,
+          ".rodata": 2046,
+          ".data.rel.ro": 2312,
+          ".data": 204,
+          ".bss": 240
+        },
+        "lookupNamesBytes": 449,
+        "lookupRecordBytes": 112,
+        "lookupNameCount": 14,
+        "largestRelocationTableBytes": 7044
+      },
+      "after": {
+        "packageBytes": 42240,
+        "sha256": "82639c0973b221e6077da003aae0286f42d003b864dc18e58aa8ed4ea65ed56a",
+        "sectionBytes": {
+          ".text": 18962,
+          ".rodata": 2046,
+          ".data.rel.ro": 2312,
+          ".data": 204,
+          ".bss": 240
+        },
+        "lookupNamesBytes": 449,
+        "lookupRecordBytes": 112,
+        "lookupNameCount": 14,
+        "largestRelocationTableBytes": 7044
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 561,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 7044,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "tests.overlay.library",
+      "before": {
+        "packageBytes": 28424,
+        "sha256": "78bc5f7479bbaa83464a1be42700fabda973bd047a251002aba932ee24593275",
+        "sectionBytes": {
+          ".text": 11584,
+          ".rodata": 1382,
+          ".data.rel.ro": 1960,
+          ".data": 104,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 233,
+        "lookupRecordBytes": 56,
+        "lookupNameCount": 7,
+        "largestRelocationTableBytes": 4788
+      },
+      "after": {
+        "packageBytes": 28424,
+        "sha256": "78bc5f7479bbaa83464a1be42700fabda973bd047a251002aba932ee24593275",
+        "sectionBytes": {
+          ".text": 11584,
+          ".rodata": 1382,
+          ".data.rel.ro": 1960,
+          ".data": 104,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 233,
+        "lookupRecordBytes": 56,
+        "lookupNameCount": 7,
+        "largestRelocationTableBytes": 4788
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 289,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 4788,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "sd",
+      "before": {
+        "packageBytes": 42804,
+        "sha256": "b91effbfa1098e1c1c12ed9382d69f28ca0b7fb91b2f212b25b04be1c9d8c2ef",
+        "sectionBytes": {
+          ".text": 27031,
+          ".rodata": 1181,
+          ".data.rel.ro": 5096,
+          ".data": 4,
+          ".bss": 248
+        },
+        "lookupNamesBytes": 274,
+        "lookupRecordBytes": 88,
+        "lookupNameCount": 11,
+        "largestRelocationTableBytes": 5652
+      },
+      "after": {
+        "packageBytes": 42804,
+        "sha256": "b91effbfa1098e1c1c12ed9382d69f28ca0b7fb91b2f212b25b04be1c9d8c2ef",
+        "sectionBytes": {
+          ".text": 27031,
+          ".rodata": 1181,
+          ".data.rel.ro": 5096,
+          ".data": 4,
+          ".bss": 248
+        },
+        "lookupNamesBytes": 274,
+        "lookupRecordBytes": 88,
+        "lookupNameCount": 11,
+        "largestRelocationTableBytes": 5652
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 362,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 5652,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "shell",
+      "before": {
+        "packageBytes": 71032,
+        "sha256": "e5b3d47d799670c5903122d562b3f4dddf833b8874f98aef3ed61479f95234ff",
+        "sectionBytes": {
+          ".text": 14049,
+          ".rodata": 1591,
+          ".data.rel.ro": 5824,
+          ".data": 144,
+          ".bss": 280
+        },
+        "lookupNamesBytes": 1753,
+        "lookupRecordBytes": 472,
+        "lookupNameCount": 59,
+        "largestRelocationTableBytes": 8904
+      },
+      "after": {
+        "packageBytes": 71032,
+        "sha256": "e5b3d47d799670c5903122d562b3f4dddf833b8874f98aef3ed61479f95234ff",
+        "sectionBytes": {
+          ".text": 14049,
+          ".rodata": 1591,
+          ".data.rel.ro": 5824,
+          ".data": 144,
+          ".bss": 280
+        },
+        "lookupNamesBytes": 1753,
+        "lookupRecordBytes": 472,
+        "lookupNameCount": 59,
+        "largestRelocationTableBytes": 8904
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 2225,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 8904,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "sshd",
+      "before": {
+        "packageBytes": 14604,
+        "sha256": "7952c9835cf320cad82307bb786aa961f4b0caa764308d0475d46322355207d9",
+        "sectionBytes": {
+          ".text": 4597,
+          ".rodata": 1072,
+          ".data.rel.ro": 1472,
+          ".data": 4,
+          ".bss": 224
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 3576
+      },
+      "after": {
+        "packageBytes": 14604,
+        "sha256": "8c3c07cc3f86703998a0e01df496085c1963df48067ae20e20756ffbbef41417",
+        "sectionBytes": {
+          ".text": 4597,
+          ".rodata": 1072,
+          ".data.rel.ro": 1472,
+          ".data": 4,
+          ".bss": 224
+        },
+        "lookupNamesBytes": 90,
+        "lookupRecordBytes": 24,
+        "lookupNameCount": 3,
+        "largestRelocationTableBytes": 3576
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 114,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 3576,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "system.ssh",
+      "before": {
+        "packageBytes": 204420,
+        "sha256": "7a472fae10b07f5d53eb3f52866c383849d500e62710bde05a623dbbf463200f",
+        "sectionBytes": {
+          ".text": 35918,
+          ".rodata": 2907,
+          ".data.rel.ro": 9720,
+          ".data": 1424,
+          ".bss": 300
+        },
+        "lookupNamesBytes": 5528,
+        "lookupRecordBytes": 1512,
+        "lookupNameCount": 189,
+        "largestRelocationTableBytes": 21336
+      },
+      "after": {
+        "packageBytes": 203860,
+        "sha256": "a78b0326cb1615abc8824726bb4f8bb03e7893ab9db434f156996eeef551bc1d",
+        "sectionBytes": {
+          ".text": 35918,
+          ".rodata": 2907,
+          ".data.rel.ro": 9720,
+          ".data": 1424,
+          ".bss": 300
+        },
+        "lookupNamesBytes": 5497,
+        "lookupRecordBytes": 1504,
+        "lookupNameCount": 188,
+        "largestRelocationTableBytes": 21336
+      },
+      "packageDeltaBytes": -560,
+      "baselineRetainedLookupPayloadBytes": 7040,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 21336,
+      "currentRelocationStackBufferBytes": 384
+    },
+    {
+      "module": "taskmgr",
+      "before": {
+        "packageBytes": 24948,
+        "sha256": "0b77a9d971f968b4507021fe3db0db69958389c18f817c0b7d9bc5d3d67fd4a8",
+        "sectionBytes": {
+          ".text": 15168,
+          ".rodata": 1759,
+          ".data.rel.ro": 1936,
+          ".data": 4,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 160,
+        "lookupRecordBytes": 40,
+        "lookupNameCount": 5,
+        "largestRelocationTableBytes": 3396
+      },
+      "after": {
+        "packageBytes": 24948,
+        "sha256": "0b77a9d971f968b4507021fe3db0db69958389c18f817c0b7d9bc5d3d67fd4a8",
+        "sectionBytes": {
+          ".text": 15168,
+          ".rodata": 1759,
+          ".data.rel.ro": 1936,
+          ".data": 4,
+          ".bss": 208
+        },
+        "lookupNamesBytes": 160,
+        "lookupRecordBytes": 40,
+        "lookupNameCount": 5,
+        "largestRelocationTableBytes": 3396
+      },
+      "packageDeltaBytes": 0,
+      "baselineRetainedLookupPayloadBytes": 200,
+      "currentRetainedLookupPayloadBytesAfterBinding": 0,
+      "baselineRelocationHeapBufferBytes": 3396,
+      "currentRelocationStackBufferBytes": 384
+    }
+  ]
+}

@@ -43,7 +43,7 @@ internal sealed class NanoTerminal
     public NanoTerminal(int requestedRows, int requestedColumns)
     {
         SetSize(requestedRows, requestedColumns);
-        sink = NanoSinkRuntime.Create(32768u);
+        sink = NanoSinkRuntime.Create(1024u);
         if (sink == (nuint)0)
             throw new OutOfMemoryException();
     }

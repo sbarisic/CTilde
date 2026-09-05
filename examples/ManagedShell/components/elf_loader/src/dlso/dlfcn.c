@@ -240,6 +240,15 @@ uintptr_t esp_dlmap(void *handle, uintptr_t address)
     return result;
 }
 
+int esp_dldiscard_symbols(void *handle)
+{
+    if (!handle || !dlmod_validate_handle(handle)) return -1;
+    struct dlmod_slist_t *mod = (struct dlmod_slist_t *)handle;
+    if (!mod->elf) return -1;
+    esp_elf_discard_symbols(mod->elf);
+    return 0;
+}
+
 /**
  * @brief Display system module/symbol information.
  *

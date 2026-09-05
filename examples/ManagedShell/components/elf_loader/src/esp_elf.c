@@ -913,20 +913,23 @@ static int elf_relocate_from_file(esp_elf_t *elf, int fd, off_t file_size)
     for (uint32_t section_index = 0; section_index < ehdr.shnum; ++section_index) {
         const elf32_shdr_t *section = &shdr[section_index];
         if (section->type != SHT_RELA) continue;
-        if (section->link != symtab_index || section->size % sizeof(elf32_rela_t) != 0) {
+        if (section->link != symtab_index || section->size % sizeof(elf32_rela_t) != 0 ||
+            (uint64_t)section->offset + section->size > (uint64_t)file_size) {
             result = -ENOEXEC;
             goto cleanup;
         }
         const size_t relocation_count = section->size / sizeof(elf32_rela_t);
-        elf32_rela_t *relocations = esp_elf_malloc(section->size, false);
-        if (relocations == NULL) { result = -ENOMEM; goto cleanup; }
-        result = elf_read_at(fd, file_size, section->offset, relocations, section->size);
-        if (result != 0) {
-            esp_elf_free(relocations);
-            goto cleanup;
-        }
+        elf32_rela_t relocations[32];
         for (size_t relocation_index = 0; relocation_index < relocation_count; ++relocation_index) {
-            const elf32_rela_t rela = relocations[relocation_index];
+            if (relocation_index % 32u == 0u) {
+                const size_t remaining = relocation_count - relocation_index;
+                const size_t count = remaining < 32u ? remaining : 32u;
+                result = elf_read_at(fd, file_size,
+                    section->offset + (uint32_t)(relocation_index * sizeof(elf32_rela_t)),
+                    relocations, count * sizeof(elf32_rela_t));
+                if (result != 0) break;
+            }
+            const elf32_rela_t rela = relocations[relocation_index % 32u];
             const size_t symbol_index = ELF_R_SYM(rela.info);
             if (symbol_index >= symbol_count || symtab[symbol_index].name >= string_section->size ||
                 memchr(strtab + symtab[symbol_index].name, 0,
@@ -968,19 +971,32 @@ static int elf_relocate_from_file(esp_elf_t *elf, int fd, off_t file_size)
             result = esp_elf_arch_relocate(elf, &rela, symbol, (uint32_t)address);
             if (result != 0) break;
         }
-        esp_elf_free(relocations);
         if (result != 0) goto cleanup;
     }
 
     elf->num = 0;
+    size_t export_name_bytes = 0u;
     for (size_t index = 0; index < symbol_count; ++index) {
-        if (ELF_ST_BIND(symtab[index].info) == STB_GLOBAL && ELF_ST_TYPE(symtab[index].info) == STT_FUNC)
+        if (ELF_ST_BIND(symtab[index].info) == STB_GLOBAL && ELF_ST_TYPE(symtab[index].info) == STT_FUNC) {
+            if (symtab[index].name >= string_section->size || elf->num == UINT16_MAX) {
+                result = -ENOEXEC; goto cleanup;
+            }
+            const char *name = strtab + symtab[index].name;
+            const char *end = memchr(name, 0, string_section->size - symtab[index].name);
+            if (end == NULL || (size_t)(end - name) + 1u > UINT32_MAX - export_name_bytes) {
+                result = -ENOEXEC; goto cleanup;
+            }
+            export_name_bytes += (size_t)(end - name) + 1u;
             ++elf->num;
+        }
     }
     if (elf->num != 0) {
         elf->symtab = esp_elf_malloc((uint32_t)elf->num * sizeof(*elf->symtab), false);
         if (elf->symtab == NULL) { result = -ENOMEM; goto cleanup; }
         memset(elf->symtab, 0, (size_t)elf->num * sizeof(*elf->symtab));
+        elf->symtab_names = esp_elf_malloc((uint32_t)export_name_bytes, false);
+        if (elf->symtab_names == NULL) { result = -ENOMEM; goto cleanup; }
+        char *next_name = elf->symtab_names;
         uint16_t exported = 0;
         for (size_t index = 0; index < symbol_count; ++index) {
             if (ELF_ST_BIND(symtab[index].info) != STB_GLOBAL || ELF_ST_TYPE(symtab[index].info) != STT_FUNC)
@@ -989,13 +1005,9 @@ static int elf_relocate_from_file(esp_elf_t *elf, int fd, off_t file_size)
             const size_t name_length = strlen(name) + 1;
             elf->symtab[exported].addr =
                 (void *)(elf->ptext + symtab[index].value - elf->sec[ELF_SEC_TEXT].v_addr);
-            elf->symtab[exported].name = esp_elf_malloc(name_length, false);
-            if (elf->symtab[exported].name == NULL) {
-                elf->num = exported;
-                result = -ENOMEM;
-                goto cleanup;
-            }
+            elf->symtab[exported].name = next_name;
             memcpy(elf->symtab[exported].name, name, name_length);
+            next_name += name_length;
             ++exported;
         }
     }
@@ -1009,6 +1021,24 @@ cleanup:
     return result;
 }
 #endif
+
+void esp_elf_discard_symbols(esp_elf_t *elf)
+{
+    if (elf == NULL) return;
+#if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
+    if (elf->symtab != NULL) {
+        if (elf->symtab_names == NULL) {
+            for (uint16_t index = 0; index < elf->num; ++index)
+                esp_elf_free(elf->symtab[index].name);
+        }
+        esp_elf_free(elf->symtab);
+    }
+    esp_elf_free(elf->symtab_names);
+    elf->symtab = NULL;
+    elf->symtab_names = NULL;
+    elf->num = 0;
+#endif
+}
 
 int esp_elf_relocate_file(esp_elf_t *elf, const char *path)
 {
@@ -1091,20 +1121,7 @@ void esp_elf_deinit(esp_elf_t *elf)
     esp_elf_arch_deinit_mmu(elf);
 #endif
 
-#if CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
-    if (elf->num && elf->symtab) {
-        for (int i = 0; i < elf->num; i++) {
-            if (elf->symtab[i].name) {
-                esp_elf_free(elf->symtab[i].name);
-            }
-        }
-
-        esp_elf_free(elf->symtab);
-        elf->symtab = NULL;
-    }
-
-    elf->num = 0;
-#endif
+    esp_elf_discard_symbols(elf);
 
     /* Reset structure to initial state (same as esp_elf_init) */
     memset(elf, 0, sizeof(esp_elf_t));

@@ -46,7 +46,8 @@ internal static class StackUsageReporter
         foreach (var symbol in symbols.Where(symbol => symbol.Kind is "method" or "getter" or "setter"))
         {
             if (symbol.EntryPoint)
-                roots.Add((request.Target == CompilationTarget.EspIdf ? "app_main" : "main", symbol, "entryPoint"));
+                roots.Add((request.ManagedModule is not null ? "ct_managed_main" :
+                    request.Target == CompilationTarget.EspIdf ? "app_main" : "main", symbol, "entryPoint"));
             if (symbol.Export is not null)
                 roots.Add((symbol.Export, symbol, symbol.TaskStackBytes is null ? "export" : "taskEntry"));
             if (symbol.Used)
@@ -63,6 +64,8 @@ internal static class StackUsageReporter
         {
             var bound = ComputeBound(root.NativeName, functions, trusted, new HashSet<string>(StringComparer.Ordinal));
             var declared = root.Kind == "contract" ? root.Symbol.StackUsageBytes : null;
+            var configuredStack = root.Kind == "entryPoint" && request.ManagedModule is not null
+                ? request.ManagedModule.MainTaskStackBytes : root.Symbol.TaskStackBytes;
             string status;
             if (declared is not null)
             {
@@ -79,10 +82,10 @@ internal static class StackUsageReporter
                 else
                     status = "verified";
             }
-            else if (root.Symbol.TaskStackBytes is not null && bound.Complete && bound.WorstCaseBytes > root.Symbol.TaskStackBytes.Value)
+            else if (configuredStack is not null && bound.KnownLowerBoundBytes > configuredStack.Value)
             {
                 status = "exceeded";
-                messages.Add($"CT2226: TaskEntry '{root.Symbol.Identity}' requires {bound.WorstCaseBytes} bytes but StackSize is {root.Symbol.TaskStackBytes.Value} bytes.");
+                messages.Add($"CT2226: '{root.Symbol.Identity}' requires at least {bound.KnownLowerBoundBytes} stack bytes but its configured stack is {configuredStack.Value} bytes.");
             }
             else
                 status = bound.Complete ? "verified" : "unverified";
@@ -92,12 +95,13 @@ internal static class StackUsageReporter
                 ["nativeName"] = root.NativeName,
                 ["identity"] = root.Symbol.Identity,
                 ["kind"] = root.Kind,
-                ["configuredTaskStackBytes"] = root.Symbol.TaskStackBytes,
+                ["configuredTaskStackBytes"] = configuredStack,
+                ["scope"] = request.ManagedModule is not null ? "module call graph; excludes runtime task wrapper" : "native call graph",
                 ["declaredStackUsageBytes"] = declared,
                 ["knownLowerBoundBytes"] = bound.KnownLowerBoundBytes,
                 ["worstCaseBytes"] = bound.WorstCaseBytes,
-                ["headroomBytes"] = bound.Complete && root.Symbol.TaskStackBytes is not null
-                    ? (long)root.Symbol.TaskStackBytes.Value - bound.WorstCaseBytes : null,
+                ["headroomBytes"] = bound.Complete && configuredStack is not null
+                    ? (long)configuredStack.Value - bound.WorstCaseBytes : null,
                 ["complete"] = bound.Complete,
                 ["status"] = status,
                 ["worstCasePath"] = bound.Path,

@@ -178,6 +178,25 @@ internal static partial class ConformanceTests
                 Assert(failing.ContractFailure && failing.Messages.Any(message => message.Contains("CT2226", StringComparison.Ordinal)),
                     "An exceeded native stack contract did not fail with CT2226 evidence.");
 
+                WriteSymbols(64);
+                File.WriteAllText(usage, File.ReadAllText(usage).Replace(":main\t", ":ct_managed_main\t"));
+                File.WriteAllText(graph, File.ReadAllText(graph).Replace("\"main\"", "\"ct_managed_main\""));
+                var managedRequest = request with
+                {
+                    Target = CompilationTarget.EspIdf,
+                    ManagedModule = new ManagedModuleConfiguration(ManagedModuleKind.Application, "tests.stack", "1.0.0", [], 48, null),
+                };
+                var managed = CTilde.Cli.StackUsageReporter.Analyze(managedRequest, native);
+                Assert(managed.ContractFailure && managed.Messages.Any(message => message.Contains("at least 56", StringComparison.Ordinal)),
+                    "Managed entry must use ct_managed_main and enforce its configured stack.");
+                File.AppendAllText(graph, "edge: { sourcename: \"ct_method\" targetname: \"__indirect_call\" }\n");
+                var indirect = CTilde.Cli.StackUsageReporter.Analyze(managedRequest with
+                {
+                    ManagedModule = managedRequest.ManagedModule! with { MainTaskStackBytes = 4096 },
+                }, native);
+                Assert(indirect.ContractFailure && File.ReadAllText(report).Contains("__indirect_call:missing-frame", StringComparison.Ordinal),
+                    "An indirect call must keep the stack bound unknown.");
+
                 File.WriteAllText(usage, "program.c:1:1:worker\t8\tstatic\nprogram.c:2:1:ct_task\t24\tstatic\n");
                 File.WriteAllText(graph, "graph: { title: \"program.c\"\nnode: { title: \"worker\" label: \"worker\" }\nnode: { title: \"ct_task\" label: \"ct_task\" }\nedge: { sourcename: \"worker\" targetname: \"ct_task\" }\n}\n");
                 File.WriteAllText(symbols, System.Text.Json.JsonSerializer.Serialize(new

@@ -163,7 +163,17 @@
           "description": "Exact private C implementation files inside the managed module's ESP-IDF main component. Files compile into the module; their project-local quoted-header closure contributes to build identity, not API hash."
         },
         "mainTaskStackBytes": { "type": "integer", "minimum": 2048, "multipleOf": 16, "default": 8192 },
-        "heapLimitBytes": { "type": "integer", "minimum": 0, "description": "Per-process heap quota in bytes; zero or omission means unlimited." }
+        "heapLimitBytes": { "type": "integer", "minimum": 0, "description": "Per-process heap quota in bytes; zero or omission means unlimited." },
+        "memoryLimits": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "residentRamBytes": { "type": "integer", "minimum": 0 },
+            "overlayRamBytes": { "type": "integer", "minimum": 0 },
+            "processStackBytes": { "type": "integer", "minimum": 0 }
+          },
+          "description": "Build-time limits for known linked resident sections, overlay windows, and the declared process stack. Dynamic allocation costs remain separately measured."
+        }
       }
     },
     "freestanding": {

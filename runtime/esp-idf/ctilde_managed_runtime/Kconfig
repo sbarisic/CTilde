@@ -1,5 +1,14 @@
 menu "C~ managed runtime"
 
+config CTILDE_MANAGED_MEMORY_TRACE
+    bool "Emit JSON memory samples at managed lifecycle boundaries"
+    default n
+    help
+        Emit versioned CT_MEMORY JSON records to the firmware log. Samples are
+        global heap observations, not per-process attribution or continuous
+        peak measurements. Logging can affect timing. Use the same setting
+        for baseline and comparison firmware.
+
 config CTILDE_MANAGED_TLS_INDEX
     int "FreeRTOS TLS index"
     range 0 7

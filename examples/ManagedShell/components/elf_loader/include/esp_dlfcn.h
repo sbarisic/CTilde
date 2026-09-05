@@ -49,6 +49,12 @@ void *dlopen(const char *file, int mode);
  */
 void *dlsym(void *handle, const char *name);
 
+/** Release lookup metadata for a privately owned, fully bound module.
+ * Subsequent dlsym calls cannot resolve names. Resolved pointers and esp_dlmap
+ * remain valid. The caller must exclude concurrent lookup and unload.
+ */
+int esp_dldiscard_symbols(void *handle);
+
 /**
  * @brief Map an ELF virtual address into the relocated module image.
  *

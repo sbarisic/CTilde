@@ -260,6 +260,7 @@ typedef struct esp_elf {
 #ifdef CONFIG_ELF_DYNAMIC_LOAD_SHARED_OBJECT
     uint16_t        num;                /*!< number of symbols in the dynamic object */
     esp_symtab_t    *symtab;            /*!< symbol table of dynamic object pointer */
+    char           *symtab_names;      /*!< CTilde: contiguous owned export names, or NULL for legacy allocations */
 #endif
 } esp_elf_t;
 

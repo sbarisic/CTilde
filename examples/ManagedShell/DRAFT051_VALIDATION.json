@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "releaseComplete": false,
+  "versions": {
+    "draft": "0.50",
+    "runtimeAbi": 22,
+    "managedModuleAbi": 3
+  },
+  "host": {
+    "fastPassed": true,
+    "fastSeconds": 1588.94,
+    "msvcConformancePassed": 285,
+    "gccConformancePassed": 114,
+    "clangConformancePassed": 114,
+    "editorAndDebugAdapterChecksPassed": true,
+    "managedModulesBuilt": 13,
+    "firmwareSizeChecksPassed": true,
+    "sshProtocolFixturesPassed": 8,
+    "sshFixtureNote": "Protocol fixes were rebuilt and checked after the core Fast run.",
+    "psaAead": {
+      "passed": true,
+      "maximumBytes": 35000,
+      "lengthCases": 9,
+      "exactInPlace": true,
+      "partialOverlapRejected": true,
+      "invalidTagOutputCleared": true
+    },
+    "loaderMetadataSanitizersPassed": true,
+    "nanoSink": {
+      "sanitizersPassed": true,
+      "outputBytesChecked": 80000,
+      "bufferBytes": 1024,
+      "previousBufferBytes": 32768
+    },
+    "allocator": {
+      "passed": true,
+      "concurrentAllocations": 64000,
+      "quotaReservation": true,
+      "failureRollback": true,
+      "cleanup": true,
+      "strongCasAba": true,
+      "nativeThreadPayloadCleanup": true,
+      "sourceSha256": "BF113BAAAB8EBEB92DAE03E95264AA59BC8A022AD13EEF1D5C7C8BEF818E1BFA"
+    }
+  },
+  "device": {
+    "target": "ESP32 without PSRAM",
+    "firmwareBytes": 1047344,
+    "firmwareSha256": "f3884a6d68089d78b673cab9797596eaebde143f70a4fb45b6a95f9793eb2664",
+    "partitionLayoutChanged": false,
+    "preservedNonModuleFiles": 6,
+    "lifecycle": {
+      "passed": true,
+      "pairedCycles": 100,
+      "before": {
+        "freeBytes": 114368,
+        "bootMinimumFreeBytes": 3824
+      },
+      "after": {
+        "freeBytes": 113036,
+        "bootMinimumFreeBytes": 3824
+      },
+      "quota": {
+        "rejected": true,
+        "exitCode": -1,
+        "freeBytes": 113028,
+        "bootMinimumFreeBytes": 3824
+      },
+      "termination": [
+        {
+          "mode": "cancel",
+          "terminationUartElapsedMs": 108.91,
+          "freeBytes": 113024,
+          "bootMinimumFreeBytes": 3824
+        },
+        {
+          "mode": "force",
+          "terminationUartElapsedMs": 1094.09,
+          "freeBytes": 113028,
+          "bootMinimumFreeBytes": 3824
+        }
+      ],
+      "heapIntegrityPassed": true,
+      "modulesAfterFixtureCleanup": 1,
+      "largestBlockDuringFinalMemoryCommandBytes": 77824,
+      "heapDriftBytes": -1332,
+      "note": "Global heap includes UART history and network activity. Drift is reported, not classified as leak-free."
+    },
+    "applications": {
+      "helloReturned": true,
+      "filesystemReturned": true,
+      "nanoFailed": false,
+      "nanoDisplayedEditor": true,
+      "nanoReturnedToShell": true,
+      "heapIntegrityPassed": true,
+      "fileSaved": false
+    },
+    "ssh": {
+      "keyExchangePassed": true,
+      "encryptedNegotiationPassed": true,
+      "clientPublicKeyAccepted": true,
+      "authenticatedSessionPassed": false,
+      "sftpPassed": false,
+      "pendingReason": "Existing local client private key is encrypted; SSH agent was stopped."
+    },
+    "waitingForNetworkSnapshots": {
+      "beforeFreeBytes": 8696,
+      "afterFreeBytes": 19668,
+      "differenceBytes": 10972,
+      "note": "Same command sequence, but not identical UART history or network timing. These are snapshots, not continuous peaks."
+    }
+  },
+  "website": {
+    "staticAssetsAndAnchorsPassed": true,
+    "javascriptSyntaxPassed": true,
+    "httpPreview": "Automatic approval review rejected server startup: blocked by policy."
+  },
+  "remaining": [
+    "Production flash mapping and cache migration",
+    "Draft 0.51 and ABI migration",
+    "Lifetime-checked spans and scoped callable contracts",
+    "General buffer-oriented library APIs",
+    "Escape analysis and memory optimization profile",
+    "Complete memory attribution and workload peak/timing comparisons",
+    "Authenticated SSH, SFTP, maximum-packet, and repeated-disconnect acceptance",
+    "Complete specification and documentation reconciliation"
+  ]
+}

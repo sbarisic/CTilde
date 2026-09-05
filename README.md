@@ -8,6 +8,8 @@ C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
 The Draft 0.50 correctness pass preserves these ABI versions. It fixes callable overlay placement, concurrent managed allocation accounting, transitive native-header cache invalidation, project membership refresh, UNC paths, Git subprocess cancellation, and MI escape decoding. It also adds incremental `StreamReader` input, stable merge sorting, and unchanged syntax-tree reuse. The compact-map prototype remains a benchmark fixture; production map storage is unchanged. See [the review report](CORRECTNESS_REVIEW.md) for dispositions and validation limits.
 
+The [Draft 0.51 lower-RAM work](examples/ManagedShell/DRAFT051_PROGRESS.md) is incomplete. Current changes add memory budgets and samples, reserve process stacks earlier, release bound ELF lookup metadata, and reuse SSH crypto buffers. Flash-mapped modules and lifetime-checked spans are not available. Current ABI versions remain unchanged.
+
 ## Language examples
 
 ### Hello world

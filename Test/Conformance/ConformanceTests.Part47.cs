@@ -10,6 +10,59 @@ internal static partial class ConformanceTests
 {
     public static void RegisterPart47(ConformanceSuite suite)
     {
+        suite.Run("draft 0.51 managed memory section accounting", () =>
+        {
+            var image = new byte[512];
+            new byte[] { 127, 69, 76, 70, 1, 1 }.CopyTo(image, 0);
+            void U32(int offset, uint value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(image.AsSpan(offset), value);
+            void U16(int offset, ushort value) => System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(image.AsSpan(offset), value);
+            U32(32, 52); U16(46, 40); U16(48, 5); U16(50, 1);
+            var names = System.Text.Encoding.UTF8.GetBytes("\0.shstrtab\0.text\0.data\0.rodata\0");
+            names.CopyTo(image, 300);
+            U32(92 + 16, 300); U32(92 + 20, (uint)names.Length);
+            U32(132, 11); U32(132 + 8, 6); U32(132 + 20, 101);
+            U32(172, 17); U32(172 + 8, 3); U32(172 + 20, 20);
+            U32(212, 23); U32(212 + 8, 2); U32(212 + 20, 30); U32(212 + 32, 16);
+            var sections = ManagedMemoryReporter.ReadSections(image);
+            Assert(sections.Count == 3 && sections[0].Name == ".text" && sections[0].Executable && sections[0].Bytes == 101 &&
+                sections[1].Writable && !sections[1].Executable && sections[1].Bytes == 20 &&
+                !sections[2].Writable && !sections[2].Executable && sections[2].Bytes == 30,
+                "Linked section memory classes were not preserved.");
+            var costs = ManagedMemoryReporter.CalculateResidentCosts(sections);
+            Assert(costs == new ManagedMemoryReporter.ResidentCosts(101, 20, 30, 15) && costs.Total == 166,
+                "Loader allocation sizes must include code rounding and inter-section padding.");
+            U32(212 + 32, 3);
+            try { _ = ManagedMemoryReporter.CalculateResidentCosts(ManagedMemoryReporter.ReadSections(image)); throw new InvalidOperationException("Invalid alignment accepted."); }
+            catch (NativeBuildException) { }
+            U32(32, uint.MaxValue);
+            try { _ = ManagedMemoryReporter.ReadSections(image); throw new InvalidOperationException("Invalid section table accepted."); }
+            catch (NativeBuildException) { }
+        });
+
+        suite.Run("draft 0.51 managed memory project limits", () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "ctilde-memory-limits-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(root);
+            try
+            {
+                File.WriteAllText(Path.Combine(root, "Program.ct"), "public static class Program { [EntryPoint] public static int Main(string[] args) { return 0; } }");
+                var manifest = Path.Combine(root, "ctilde.json");
+                var json = """
+                    { "target":"esp-idf", "sources":["Program.ct"], "espIdf":{"artifact":"managed-module"},
+                      "managedModule":{"kind":"application","name":"tests.memory","version":"1.0.0",
+                      "mainTaskStackBytes":4096,"memoryLimits":{"residentRamBytes":1000,"overlayRamBytes":0,"processStackBytes":4096}},
+                      "build":{"cLayout":"modules"} }
+                    """;
+                File.WriteAllText(manifest, json);
+                var module = CTildeProjectFile.Load(manifest).Configuration.ManagedModule!;
+                Assert(module.MemoryLimits == new ManagedMemoryLimits(1000, 0, 4096), "Memory limits were not loaded.");
+                File.WriteAllText(manifest, json.Replace("\"processStackBytes\":4096", "\"processStackBytes\":2048"));
+                try { _ = CTildeProjectFile.Load(manifest); throw new InvalidOperationException("Stack budget violation accepted."); }
+                catch (CTildeProjectException exception) { Assert(exception.Message.Contains("stack", StringComparison.OrdinalIgnoreCase), "Stack diagnostic missing."); }
+            }
+            finally { Directory.Delete(root, true); }
+        });
+
         suite.Run("draft 0.50 overlay callable residency", () =>
         {
             var module = new ManagedModuleConfiguration(ManagedModuleKind.Application, "Tests.Residency", "1.0.0", [], 4096, 16384);

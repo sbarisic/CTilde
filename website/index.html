@@ -638,6 +638,7 @@ card.Start();
               <h3>Run native modules as logical processes.</h3>
               <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. Draft 0.50 separates executable code from loader metadata and data, infers private helper placement, and gates the final executable working set. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
               <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
+              <p>Lower-RAM work adds memory budgets, early stack reservation, disposable ELF lookup metadata, and in-place SSH crypto buffers. Draft 0.51 remains incomplete. Flash-mapped modules and lifetime-checked spans are not available, and authenticated SSH/SFTP hardware acceptance remains pending.</p>
             </div>
             <div class="code-window">
               <div class="code-toolbar" aria-hidden="true">

@@ -29,11 +29,11 @@ const sshString = value => {
   const bytes = Buffer.isBuffer(value) ? value : Buffer.from(value, "utf8");
   return Buffer.concat([u32(bytes.length), bytes]);
 };
-const mpintLittleEndian = value => {
-  let end = value.length - 1;
-  while (end >= 0 && value[end] === 0) end--;
-  if (end < 0) return Buffer.alloc(0);
-  const result = Buffer.from([...value.subarray(0, end + 1)].reverse());
+const mpintNetworkOrder = value => {
+  let start = 0;
+  while (start < value.length && value[start] === 0) start++;
+  if (start === value.length) return Buffer.alloc(0);
+  const result = value.subarray(start);
   return (result[0] & 0x80) === 0 ? result : Buffer.concat([Buffer.from([0]), result]);
 };
 
@@ -48,7 +48,7 @@ test("SSH negotiation keeps extension markers separate from the selected KEX", (
 test("OpenSSH AES-GCM packet fixture authenticates the clear packet length", () => {
   const key = Buffer.from("000102030405060708090a0b0c0d0e0f", "hex");
   const nonce = Buffer.from("101112131415161718191a1b", "hex");
-  const body = Buffer.from("087465737400000000", "hex");
+  const body = Buffer.concat([Buffer.from([11]), Buffer.from("test"), Buffer.alloc(11)]);
   const header = u32(body.length);
   const cipher = createCipheriv("aes-128-gcm", key, nonce);
   cipher.setAAD(header, { plaintextLength: body.length });
@@ -58,7 +58,8 @@ test("OpenSSH AES-GCM packet fixture authenticates the clear packet length", () 
   decipher.setAAD(header, { plaintextLength: encrypted.length });
   decipher.setAuthTag(tag);
   assert.deepEqual(Buffer.concat([decipher.update(encrypted), decipher.final()]), body);
-  assert.match(transport, /AesSeal\(outboundCipher, nonce, header, body,\s+cipher, tag\)/);
+  assert.match(transport, /AesSeal\(outboundCipher, nonce, header, body,\s+body, tag\)/);
+  assert.match(transport, /AesOpen\(inboundCipher, nonce, header, body,\s+tag, body\)/);
   assert.match(transport, /outboundInvocation = 0UL/);
   assert.match(transport, /Nonce\(outboundIv, outboundInvocation\)/);
   assert.match(transport, /for \(int index = 11; index >= 4; index--\)/);
@@ -74,7 +75,7 @@ test("exchange hash and key derivation use SSH strings and the original session 
   const clientPublic = Buffer.alloc(32, 1);
   const serverPublic = Buffer.alloc(32, 2);
   const secret = Buffer.from([...Array(32).keys()].map(index => index + 1));
-  const encodedSecret = mpintLittleEndian(secret);
+  const encodedSecret = mpintNetworkOrder(secret);
   const exchangeHash = createHash("sha256").update(Buffer.concat([
     sshString("SSH-2.0-client"),
     sshString("SSH-2.0-CTilde_0.49"),
@@ -86,13 +87,39 @@ test("exchange hash and key derivation use SSH strings and the original session 
     sshString(encodedSecret),
   ])).digest();
   assert.equal(exchangeHash.toString("hex"),
-    "a9d957a4d4d702f14e4dfd6fdecf79371238cc9fcde4f1b1e58084feacbd5fce");
+    "2c53797999e8e7d0c7bbce6a3b3ea5f633f11a32d269e07ce80ee1441e903626");
   const receiveKey = createHash("sha256").update(Buffer.concat([
     sshString(encodedSecret), exchangeHash, Buffer.from("A"), exchangeHash,
   ])).digest().subarray(0, 16);
-  assert.equal(receiveKey.toString("hex"), "981d869136378aa01e8c6de652ab3e1d");
+  assert.equal(receiveKey.toString("hex"), "7f8617a8662b60083ff1addcca05bf77");
   assert.match(server, /if \(sessionIdentifier == null\)\s+sessionIdentifier = exchangeHash/);
   assert.match(server, /writer\.WriteRaw\(sessionIdentifier\)/);
+});
+
+test("RFC 8731 secret order, ECDSA message hashing, and GCM alignment match OpenSSH", () => {
+  assert.equal(mpintNetworkOrder(Buffer.from("008001", "hex")).toString("hex"), "008001");
+  assert.equal(mpintNetworkOrder(Buffer.from("000102", "hex")).toString("hex"), "0102");
+  assert.equal(mpintNetworkOrder(Buffer.alloc(32)).length, 0);
+  assert.doesNotMatch(server, /MpintLittleEndian/);
+  assert.match(server, /Sha256\(exchangeHash, 0, exchangeHash.Length, signatureHash\)/);
+  assert.match(server, /P256Sign\(hostKey, signatureHash, fixedSignature\)/);
+  const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const hash = createHash("sha256").update("exchange transcript").digest();
+  const signature = sign("sha256", hash, privateKey);
+  assert.equal(verify("sha256", hash, publicKey, signature), true);
+  assert.equal(verify("sha256", createHash("sha256").update(hash).digest(), publicKey, signature), false);
+  for (const encrypted of [false, true]) {
+    const block = encrypted ? 16 : 8;
+    const framing = encrypted ? 1 : 5;
+    for (let payload = 0; payload < 100; payload++) {
+      let padding = block - ((payload + framing) % block);
+      if (padding < 4) padding += block;
+      assert.equal((payload + framing + padding) % block, 0);
+      assert.ok(padding >= 4);
+    }
+  }
+  assert.match(transport, /framing = 1/);
+  assert.match(transport, /payload.Length \+ framing/);
 });
 
 test("authorized-key fixture has the exact P-256 SSH blob shape", () => {

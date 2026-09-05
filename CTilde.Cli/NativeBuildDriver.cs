@@ -917,6 +917,7 @@ internal static class EspIdfBuildDriver
             }
             else
                 File.Copy(candidates[0], temporary, overwrite: false);
+            ManagedMemoryReporter.Write(request, temporary, metadata.MaximumOverlayBytes);
             File.Move(temporary, request.ManagedModuleArtifactPath!, overwrite: true);
         }
         finally

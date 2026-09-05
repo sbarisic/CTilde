@@ -418,7 +418,9 @@ static int32_t p256_private_import(const uint8_t *pem, size_t length, uint32_t *
     (void)memcpy(terminated, pem, length);
     terminated[length] = 0u;
     mbedtls_pk_init(pk);
+    ctilde_managed_memory_sample("ssh_key_parse_begin", 0u);
     const int result = mbedtls_pk_parse_key(pk, terminated, length + 1u, NULL, 0u);
+    ctilde_managed_memory_sample("ssh_key_parse_complete", 0u);
     mbedtls_platform_zeroize(terminated, length + 1u);
     free(terminated);
     const int can_sign = result == 0 ? mbedtls_pk_can_do_psa(pk,
@@ -544,6 +546,63 @@ static int32_t aes128_gcm_create(const uint8_t key[16], uint32_t *token)
     return register_resource(CT_SSH_RESOURCE_PSA_KEY, &key_id, token);
 }
 
+/* Bounded scratch replaces the previous packet-sized ciphertext/tag copy. */
+static psa_status_t aead_packet(bool encrypt, psa_key_id_t key, const uint8_t nonce[12],
+    const uint8_t *additional, size_t additional_length, const uint8_t *input,
+    size_t length, uint8_t *output, uint8_t *generated_tag, const uint8_t *expected_tag)
+{
+    /* Only disjoint buffers or exact in-place use are supported. A forward
+       overlap could overwrite input that a later update has not consumed. */
+    if (input != output && length != 0u) {
+        const uintptr_t source = (uintptr_t)input, destination = (uintptr_t)output;
+        const uintptr_t distance = source > destination ? source - destination : destination - source;
+        if (distance < length) return PSA_ERROR_INVALID_ARGUMENT;
+    }
+    psa_aead_operation_t operation = PSA_AEAD_OPERATION_INIT;
+    uint8_t scratch[PSA_AEAD_UPDATE_OUTPUT_SIZE(PSA_KEY_TYPE_AES, PSA_ALG_GCM, 256u)];
+    size_t written = 0u;
+    psa_status_t status = encrypt ? psa_aead_encrypt_setup(&operation, key, PSA_ALG_GCM) :
+        psa_aead_decrypt_setup(&operation, key, PSA_ALG_GCM);
+    if (status == PSA_SUCCESS) status = psa_aead_set_lengths(&operation, additional_length, length);
+    if (status == PSA_SUCCESS) status = psa_aead_set_nonce(&operation, nonce, 12u);
+    if (status == PSA_SUCCESS && additional_length != 0u)
+        status = psa_aead_update_ad(&operation, additional, additional_length);
+    for (size_t offset = 0u; status == PSA_SUCCESS && offset < length;) {
+        const size_t count = length - offset > 256u ? 256u : length - offset;
+        size_t produced = 0u;
+        status = psa_aead_update(&operation, input + offset, count, scratch, sizeof(scratch), &produced);
+        if (status == PSA_SUCCESS) {
+            if (produced > offset + count - written) { status = PSA_ERROR_BUFFER_TOO_SMALL; break; }
+            if (produced != 0u) memcpy(output + written, scratch, produced);
+            written += produced;
+            offset += count;
+        }
+    }
+    if (status == PSA_SUCCESS) {
+        size_t produced = 0u;
+        size_t tag_length = 0u;
+        status = encrypt ? psa_aead_finish(&operation, scratch, sizeof(scratch), &produced,
+            generated_tag, 16u, &tag_length) :
+            psa_aead_verify(&operation, scratch, sizeof(scratch), &produced, expected_tag, 16u);
+        if (status == PSA_SUCCESS) {
+            if (produced > length - written || (encrypt && tag_length != 16u))
+                status = PSA_ERROR_CORRUPTION_DETECTED;
+            else {
+                if (produced != 0u) memcpy(output + written, scratch, produced);
+                written += produced;
+                if (written != length) status = PSA_ERROR_CORRUPTION_DETECTED;
+            }
+        }
+    }
+    (void)psa_aead_abort(&operation);
+    mbedtls_platform_zeroize(scratch, sizeof(scratch));
+    if (status != PSA_SUCCESS) {
+        if (length != 0u) mbedtls_platform_zeroize(output, length);
+        if (generated_tag != NULL) mbedtls_platform_zeroize(generated_tag, 16u);
+    }
+    return status;
+}
+
 static int32_t aes128_gcm_seal(uint32_t token, const uint8_t nonce[12],
     const uint8_t *additional, size_t additional_length, const uint8_t *plain,
     size_t plain_length, uint8_t *cipher, uint8_t tag[16])
@@ -552,19 +611,9 @@ static int32_t aes128_gcm_seal(uint32_t token, const uint8_t nonce[12],
     if (resource == NULL || nonce == NULL || (plain == NULL && plain_length != 0u) ||
         (cipher == NULL && plain_length != 0u) || tag == NULL ||
         (additional == NULL && additional_length != 0u)) return -EINVAL;
-    uint8_t *combined = malloc(plain_length + 16u);
-    if (combined == NULL) return -ENOMEM;
-    size_t output_length = 0u;
-    const psa_status_t status = psa_aead_encrypt(resource->Value.Key, PSA_ALG_GCM,
-        nonce, 12u, additional, additional_length, plain, plain_length,
-        combined, plain_length + 16u, &output_length);
-    if (status == PSA_SUCCESS && output_length == plain_length + 16u) {
-        (void)memcpy(cipher, combined, plain_length);
-        (void)memcpy(tag, combined + plain_length, 16u);
-    }
-    mbedtls_platform_zeroize(combined, plain_length + 16u);
-    free(combined);
-    return status == PSA_SUCCESS && output_length == plain_length + 16u ? 0 : -EIO;
+    const psa_status_t status = aead_packet(true, resource->Value.Key, nonce,
+        additional, additional_length, plain, plain_length, cipher, tag, NULL);
+    return status == PSA_SUCCESS ? 0 : -EIO;
 }
 
 static int32_t aes128_gcm_open(uint32_t token, const uint8_t nonce[12],
@@ -575,17 +624,9 @@ static int32_t aes128_gcm_open(uint32_t token, const uint8_t nonce[12],
     if (resource == NULL || nonce == NULL || (cipher == NULL && cipher_length != 0u) ||
         (plain == NULL && cipher_length != 0u) || tag == NULL ||
         (additional == NULL && additional_length != 0u)) return -EINVAL;
-    uint8_t *combined = malloc(cipher_length + 16u);
-    if (combined == NULL) return -ENOMEM;
-    (void)memcpy(combined, cipher, cipher_length);
-    (void)memcpy(combined + cipher_length, tag, 16u);
-    size_t output_length = 0u;
-    const psa_status_t status = psa_aead_decrypt(resource->Value.Key, PSA_ALG_GCM,
-        nonce, 12u, additional, additional_length, combined, cipher_length + 16u,
-        plain, cipher_length, &output_length);
-    mbedtls_platform_zeroize(combined, cipher_length + 16u);
-    free(combined);
-    return status == PSA_SUCCESS && output_length == cipher_length ? 0 :
+    const psa_status_t status = aead_packet(false, resource->Value.Key, nonce,
+        additional, additional_length, cipher, cipher_length, plain, NULL, tag);
+    return status == PSA_SUCCESS ? 0 :
         status == PSA_ERROR_INVALID_SIGNATURE ? -EBADMSG : -EIO;
 }
 

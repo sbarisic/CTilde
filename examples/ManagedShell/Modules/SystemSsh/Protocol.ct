@@ -127,13 +127,15 @@ internal static class SshWire
     internal static bool TryNormalizeSftpPath(string path, out string normalized)
     {
         normalized = null;
-        if (path == null || path.Length == 0 || path[0] != '/')
+        if (path == null)
             return false;
         for (int index = 0; index < path.Length; index++)
             if (path[index] == '\0' || path[index] == '\\')
             return false;
         string result = "/sftp";
-        int position = 1;
+        int position = 0;
+        if (path.Length != 0 && path[0] == '/')
+            position = 1;
         while (position <= path.Length)
         {
             int slash = path.IndexOf('/', position);

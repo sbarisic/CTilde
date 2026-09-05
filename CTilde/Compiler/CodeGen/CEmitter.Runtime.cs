@@ -194,15 +194,17 @@ internal sealed partial class CEmitter
         writer.WriteLine("typedef struct ct_interface_entry ct_interface_entry;");
         if (IsManagedModule)
         {
-            writer.WriteLine("typedef struct ct_runtime_api_v22 ct_runtime_api_v22;");
-            writer.WriteLine("typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;");
+            writer.WriteLine("typedef struct ct_runtime_api_v23 ct_runtime_api_v23;");
+            writer.WriteLine("typedef struct ct_managed_module_descriptor_v4 ct_managed_module_descriptor_v4;");
             writer.WriteLine("typedef struct ct_process_context ct_process_context;");
-            writer.WriteLine("typedef struct ct_runtime_thread_attach_v22 { uint32_t Size; ct_process_context* Process; } ct_runtime_thread_attach_v22;");
-            writer.WriteLine("typedef struct ct_managed_call_target_v3 { uint32_t Size; uint32_t Placement; uint32_t OverlayId; uint32_t Reserved; uintptr_t Body; } ct_managed_call_target_v3;");
-            writer.WriteLine("typedef struct ct_managed_call_frame_v22 { uintptr_t Opaque[8]; } ct_managed_call_frame_v22;");
-            writer.WriteLine("struct ct_runtime_api_v22 { uint32_t Size; uint32_t AbiVersion; void* (*Allocate)(size_t, const ct_managed_module_descriptor_v3*); void (*Free)(void*); void (*FinalRelease)(void*); void (*Raise)(void*); void (*RuntimeFault)(const char*, const char*, int32_t); const ct_type_descriptor* (*RegisterType)(const void*); void (*UnregisterTypes)(const ct_managed_module_descriptor_v3*); ct_process_context* (*CurrentProcess)(void); void* (*CurrentModuleState)(const ct_managed_module_descriptor_v3*); void* (*CurrentThreadState)(void); void (*SetThreadState)(void*); bool (*CancellationRequested)(void); uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3*, const ct_managed_call_target_v3*, ct_managed_call_frame_v22*); void (*LeaveManagedCall)(ct_managed_call_frame_v22*); int32_t (*Service)(uint32_t, void*, size_t); };");
-            writer.WriteLine("const ct_runtime_api_v22* ct_runtime_api = NULL;");
-            writer.WriteLine("extern const ct_managed_module_descriptor_v3 ct_managed_module_v3;");
+            writer.WriteLine("typedef struct ct_runtime_thread_attach_v23 { uint32_t Size; ct_process_context* Process; } ct_runtime_thread_attach_v23;");
+            writer.WriteLine("typedef struct ct_managed_call_target_v4 { uint32_t Size; uint32_t Placement; uint32_t OverlayId; uint32_t Reserved; uintptr_t Body; } ct_managed_call_target_v4;");
+            writer.WriteLine("typedef struct ct_managed_call_frame_v23 { uintptr_t Opaque[8]; } ct_managed_call_frame_v23;");
+            writer.WriteLine(RuntimeAbiContract.Declarations);
+            writer.WriteLine("const ct_runtime_api_v23* ct_runtime_api = NULL;");
+            writer.WriteLine("const ct_core_api_v1* ct_core_api = NULL;");
+            writer.WriteLine("const ct_buffer_api_v1* ct_buffer_api = NULL;");
+            writer.WriteLine("extern const ct_managed_module_descriptor_v4 ct_managed_module_v4;");
             writer.WriteLine("typedef struct ct_runtime_console_transfer_v19 { uint8_t* Data; size_t Length; size_t Count; bool Eof; } ct_runtime_console_transfer_v19;");
             writer.WriteLine("typedef struct ct_runtime_io_path_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; } ct_runtime_io_path_v19;");
             writer.WriteLine("typedef struct ct_runtime_io_open_v19 { uint32_t Size; const uint8_t* Path; size_t PathLength; uint8_t Mode; uint8_t Access; uintptr_t Handle; } ct_runtime_io_open_v19;");
@@ -373,7 +375,7 @@ internal sealed partial class CEmitter
             writer.WriteLine("    ct_debug_fatal_hook(code, file, line);");
         if (IsManagedModule)
         {
-            writer.WriteLine("    ct_runtime_api->RuntimeFault(code, file, (int32_t)line);");
+            writer.WriteLine("    ct_core_api->RuntimeFault(code, file, (int32_t)line);");
             writer.WriteLine("    for (;;) { __asm__ volatile (\"\" ::: \"memory\"); }");
         }
         else if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Panic))
@@ -585,8 +587,14 @@ internal sealed partial class CEmitter
         {
             if (_usesFreestandingFloatFormatting)
                 EmitRyuFormattingSupport(writer);
-            writer.WriteLine("static int32_t ct_format_u64_decimal(uint64_t value, bool negative, char* output) { char reversed[20]; int32_t count = 0; do { reversed[count++] = (char)('0' + value % UINT64_C(10)); value /= UINT64_C(10); } while (value != 0u); int32_t length = 0; if (negative) output[length++] = '-'; while (count > 0) output[length++] = reversed[--count]; return length; }");
-            writer.WriteLine("static int32_t ct_format_i64_decimal(int64_t value, char* output) { bool negative = value < 0; uint64_t magnitude = negative ? (uint64_t)(-(value + 1)) + UINT64_C(1) : (uint64_t)value; return ct_format_u64_decimal(magnitude, negative, output); }");
+            if (IsManagedModule)
+                writer.WriteLine("static int32_t ct_format_u64_decimal(uint64_t value, bool negative, char* output) { return ct_buffer_api->FormatUnsigned(value, negative, output); }");
+            else
+                writer.WriteLine("static int32_t ct_format_u64_decimal(uint64_t value, bool negative, char* output) { char reversed[20]; int32_t count = 0; do { reversed[count++] = (char)('0' + value % UINT64_C(10)); value /= UINT64_C(10); } while (value != 0u); int32_t length = 0; if (negative) output[length++] = '-'; while (count > 0) output[length++] = reversed[--count]; return length; }");
+            if (IsManagedModule)
+                writer.WriteLine("static int32_t ct_format_i64_decimal(int64_t value, char* output) { return ct_buffer_api->FormatSigned(value, output); }");
+            else
+                writer.WriteLine("static int32_t ct_format_i64_decimal(int64_t value, char* output) { bool negative = value < 0; uint64_t magnitude = negative ? (uint64_t)(-(value + 1)) + UINT64_C(1) : (uint64_t)value; return ct_format_u64_decimal(magnitude, negative, output); }");
             writer.WriteLine("static ct_string* ct_to_string_int(int32_t value, const char* file, int line) { char buffer[12]; int32_t length = ct_format_i64_decimal((int64_t)value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
             writer.WriteLine("static ct_string* ct_to_string_uint(uint32_t value, const char* file, int line) { char buffer[11]; int32_t length = ct_format_u64_decimal((uint64_t)value, false, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
             writer.WriteLine("static ct_string* ct_to_string_long(int64_t value, const char* file, int line) { char buffer[21]; int32_t length = ct_format_i64_decimal(value, buffer); return ct_string_from_bytes((const uint8_t*)buffer, length, file, line); }");
@@ -625,7 +633,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("static ct_string* ct_to_string_bool(bool value, const char* file, int line) { const char* text = value ? \"True\" : \"False\"; return ct_string_from_bytes((const uint8_t*)text, value ? 4 : 5, file, line); }");
         writer.WriteLine("static ct_string* ct_to_string_char(uint8_t value, const char* file, int line) { return ct_string_from_bytes(&value, 1, file, line); }");
         writer.WriteLine("static uint32_t ct_validate_rune(uint32_t value, const char* file, int line) { if (value > UINT32_C(0x10ffff) || (value >= UINT32_C(0xd800) && value <= UINT32_C(0xdfff))) ct_raise_runtime_fault(CT_FAULT_ARGUMENT, \"CTU0001\", file, line); return value; }");
-        writer.WriteLine("static int32_t ct_utf8_encode_rune(uint32_t value, uint8_t buffer[4]) { if (value <= UINT32_C(0x7f)) { buffer[0] = (uint8_t)value; return 1; } if (value <= UINT32_C(0x7ff)) { buffer[0] = (uint8_t)(UINT32_C(0xc0) | (value >> 6)); buffer[1] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 2; } if (value <= UINT32_C(0xffff)) { buffer[0] = (uint8_t)(UINT32_C(0xe0) | (value >> 12)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 3; } buffer[0] = (uint8_t)(UINT32_C(0xf0) | (value >> 18)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 12) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[3] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 4; }");
+        if (IsManagedModule)
+            writer.WriteLine("static int32_t ct_utf8_encode_rune(uint32_t value, uint8_t buffer[4]) { return ct_buffer_api->EncodeRune(value, buffer); }");
+        else
+            writer.WriteLine("static int32_t ct_utf8_encode_rune(uint32_t value, uint8_t buffer[4]) { if (value <= UINT32_C(0x7f)) { buffer[0] = (uint8_t)value; return 1; } if (value <= UINT32_C(0x7ff)) { buffer[0] = (uint8_t)(UINT32_C(0xc0) | (value >> 6)); buffer[1] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 2; } if (value <= UINT32_C(0xffff)) { buffer[0] = (uint8_t)(UINT32_C(0xe0) | (value >> 12)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 3; } buffer[0] = (uint8_t)(UINT32_C(0xf0) | (value >> 18)); buffer[1] = (uint8_t)(UINT32_C(0x80) | ((value >> 12) & UINT32_C(0x3f))); buffer[2] = (uint8_t)(UINT32_C(0x80) | ((value >> 6) & UINT32_C(0x3f))); buffer[3] = (uint8_t)(UINT32_C(0x80) | (value & UINT32_C(0x3f))); return 4; }");
         writer.WriteLine("static ct_string* ct_to_string_rune(uint32_t value, const char* file, int line) { uint8_t buffer[4]; value = ct_validate_rune(value, file, line); int32_t length = ct_utf8_encode_rune(value, buffer); return ct_string_from_bytes(buffer, length, file, line); }");
         if (IsFreestanding || UsesEspRuntimeConsole)
         {
@@ -1003,8 +1014,8 @@ internal sealed partial class CEmitter
     {
         if (IsManagedModule)
         {
-            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_runtime_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v3); if (value == NULL) ct_runtime_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
-            writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_runtime_api->Free(value); }");
+            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_core_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v4); if (value == NULL) ct_core_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
+            writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_core_api->Free(value); }");
             return;
         }
         if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Allocate))
@@ -1195,7 +1206,7 @@ internal sealed partial class CEmitter
         {
             writer.WriteLine("static ct_thread_state* ct_thread_require_attached(void) { ct_thread_state* state = ct_thread_current(); if (state == NULL) ct_fail(\"CTT0001\", \"<managed-entry>\", 0); return state; }");
             writer.WriteLine("static void ct_runtime_require_ready(void) { (void)ct_thread_require_attached(); if (ct_runtime_api->CurrentProcess() == NULL) ct_fail(\"CTT0002\", \"<managed-entry>\", 0); }");
-            writer.WriteLine("static void ct_thread_attach_to(ct_process_context* process) { ct_runtime_thread_attach_v22 request = { sizeof(request), process }; if (ct_runtime_api->Service(UINT32_C(1), &request, sizeof(request)) != 0) ct_fail(\"CTT0002\", \"<thread-attach>\", 0); }");
+            writer.WriteLine("static void ct_thread_attach_to(ct_process_context* process) { ct_runtime_thread_attach_v23 request = { sizeof(request), process }; if (ct_runtime_api->Service(UINT32_C(1), &request, sizeof(request)) != 0) ct_fail(\"CTT0002\", \"<thread-attach>\", 0); }");
             writer.WriteLine("void ct_thread_attach(void) { ct_thread_attach_to(ct_runtime_api->CurrentProcess()); }");
             writer.WriteLine("void ct_thread_detach(void) { if (ct_runtime_api->Service(UINT32_C(2), NULL, 0u) != 0) ct_fail(\"CTT0002\", \"<thread-detach>\", 0); }");
             return;
@@ -1441,7 +1452,7 @@ internal sealed partial class CEmitter
             foreach (var field in mutable)
                 writer.WriteLine($"    {CDeclaration(field.Type, field.CName)};");
             writer.WriteLine("} ct_managed_module_static_state;");
-            writer.WriteLine("static CT_INLINE ct_managed_module_static_state* ct_module_state(void) { return (ct_managed_module_static_state*)ct_runtime_api->CurrentModuleState(&ct_managed_module_v3); }");
+            writer.WriteLine("static CT_INLINE ct_managed_module_static_state* ct_module_state(void) { return (ct_managed_module_static_state*)ct_runtime_api->CurrentModuleState(&ct_managed_module_v4); }");
             writer.WriteLine("#define ct_module_phase (ct_module_state()->Phase)");
             foreach (var field in mutable)
                 writer.WriteLine($"#define {field.CName} (ct_module_state()->{field.CName})");

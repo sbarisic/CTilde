@@ -7,7 +7,8 @@
     "Transport.ct",
     "Configuration.ct",
     "Server.ct",
-    "Sftp.ct"
+    "Sftp.ct",
+    "SftpFramer.ct"
   ],
   "espIdf": {
     "artifact": "managed-module"

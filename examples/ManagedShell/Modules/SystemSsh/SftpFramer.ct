@@ -1,0 +1,49 @@
+using System;
+
+namespace System.Ssh;
+
+[Overlay("sftp-core")]
+internal sealed class SftpFramer
+{
+    private uint length;
+    private int headerBytes;
+    private byte[] packet;
+    private int packetBytes;
+
+    internal byte[] Read(byte[] data, ref int position)
+    {
+        if (position < 0 || position > data.Length)
+            throw new ArgumentOutOfRangeException();
+        while (headerBytes < 4 && position < data.Length)
+        {
+            length = (length << 8) | data[position++];
+            headerBytes++;
+        }
+        if (headerBytes < 4)
+            return null;
+        if (length == 0u || length > 35000u)
+            throw new InvalidOperationException();
+        if (packet == null)
+            packet = new byte[(int)length];
+        int count = packet.Length - packetBytes;
+        if (count > data.Length - position)
+            count = data.Length - position;
+        for (int index = 0; index < count; index++)
+            packet[packetBytes + index] = data[position + index];
+        packetBytes += count;
+        position += count;
+        if (packetBytes < packet.Length)
+            return null;
+        byte[] completed = packet;
+        Reset();
+        return completed;
+    }
+
+    internal void Reset()
+    {
+        length = 0u;
+        headerBytes = 0;
+        packet = null;
+        packetBytes = 0;
+    }
+}

@@ -2,13 +2,13 @@
 
 C~ is a small systems language with C#-style syntax. It compiles `.ct` files to deterministic GNU C23 and native programs. Generated programs use the C~ runtime. They do not require the CLR.
 
-Draft 0.50 uses Runtime ABI 22 and Managed Module ABI 3. It adds a reusable native size profile and infers named-overlay placement for private helpers used by only one overlay. ESP32/Xtensa managed packages separate loader metadata, executable code, immutable data, and writable data so only real instructions consume scarce contiguous executable RAM. Stable resident stubs continue to preserve module context and exception cleanup across local and imported calls. ManagedShell runs UART, redirected SSH, and single-command environments from `shell.ctm`; its development SSH library supplies encrypted public-key sessions and SFTP through resident opaque socket/crypto tokens. External interoperability, fuzz, endurance, and security acceptance remain pending. Debug metadata remains version 3.
+The previous Draft 0.50 used Runtime ABI 22 and Managed Module ABI 3. It adds a reusable native size profile and infers named-overlay placement for private helpers used by only one overlay. ESP32/Xtensa managed packages separate loader metadata, executable code, immutable data, and writable data so only real instructions consume scarce contiguous executable RAM. Stable resident stubs continue to preserve module context and exception cleanup across local and imported calls. ManagedShell runs UART, redirected SSH, and single-command environments from `shell.ctm`; its development SSH library supplies encrypted public-key sessions and SFTP through resident opaque socket/crypto tokens. External interoperability, fuzz, endurance, and security acceptance remain pending. Debug metadata remains version 3.
 
 C~ is experimental. [LANGUAGE.md](LANGUAGE.md) is the normative specification.
 
-The Draft 0.50 correctness pass preserves these ABI versions. It fixes callable overlay placement, concurrent managed allocation accounting, transitive native-header cache invalidation, project membership refresh, UNC paths, Git subprocess cancellation, and MI escape decoding. It also adds incremental `StreamReader` input, stable merge sorting, and unchanged syntax-tree reuse. The compact-map prototype remains a benchmark fixture; production map storage is unchanged. See [the review report](CORRECTNESS_REVIEW.md) for dispositions and validation limits.
+The Draft 0.50 correctness pass preserved those ABI versions. It fixes callable overlay placement, concurrent managed allocation accounting, transitive native-header cache invalidation, project membership refresh, UNC paths, Git subprocess cancellation, and MI escape decoding. It also adds incremental `StreamReader` input, stable merge sorting, and unchanged syntax-tree reuse. The compact-map prototype remains a benchmark fixture; production map storage is unchanged. See [the review report](CORRECTNESS_REVIEW.md) for dispositions and validation limits.
 
-The [Draft 0.51 lower-RAM work](examples/ManagedShell/DRAFT051_PROGRESS.md) is incomplete. Current changes add memory budgets and samples, reserve process stacks earlier, release bound ELF lookup metadata, and reuse SSH crypto buffers. Flash-mapped modules and lifetime-checked spans are not available. Current ABI versions remain unchanged.
+The [Draft 0.51 lower-RAM work](examples/ManagedShell/DRAFT051_PROGRESS.md) is incomplete. The compiler now uses Runtime ABI 23 and Managed Module ABI 4. Rebuild firmware and modules together. Current changes add capability tables and shared buffer helpers to the earlier memory work. Flash-mapped modules and lifetime-checked spans are not available. Net RAM reduction and authenticated SSH/SFTP acceptance remain pending.
 
 ## Language examples
 
@@ -251,7 +251,7 @@ The [QEMU example](examples/QemuFreestanding/README.md) builds a 32-bit Multiboo
 
 C~ supports `[Extern]`, hosted `[NativeImport]`, `[Export]`, pointers, scoped native buffers, synchronous callbacks, typed GNU assembly, assembly functions, fixed sections, linker addresses, MMIO, and explicit ownership annotations. Native imports use extensionless logical names: `foo` maps to `foo.dll` on Windows and `libfoo.so` on Linux, using the operating-system loader search path. The [hosted native-import example](examples/HostedNativeImport/README.md) builds and executes one stateful plug-in under MSVC, WSL GCC, and WSL Clang; it deliberately does not present that C ABI as managed-module loading.
 
-The generated header exposes exported methods and runtime lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 3 descriptor and bind to the firmware-owned `ct_runtime_api_v22` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
+The generated header exposes exported methods and runtime lifecycle functions. Managed `.ctm` files use the separate Managed Module ABI 4 descriptor and bind to the firmware-owned `ct_runtime_api_v23` table. [C_ABI.md](C_ABI.md) defines the native layouts and compatibility rules.
 
 Null access, bounds errors, invalid casts, integer division by zero, checked size overflow, and managed allocation failure are catchable exceptions on exception-capable targets. Freestanding routes these faults to its panic provider. ABI, runtime lifecycle, thread attachment, ARC corruption, and native-boundary failures are always panics.
 
@@ -293,7 +293,7 @@ The API also emits modular bundles, public headers, symbol maps, and version-3 d
 
 - [LANGUAGE.md](LANGUAGE.md): normative Draft 0.50 language and native-build rules.
 - [STDLIB.md](STDLIB.md): standard-library APIs and runtime behavior.
-- [C_ABI.md](C_ABI.md): generated C, Runtime ABI 22, Managed Module ABI 3, and native interop.
+- [C_ABI.md](C_ABI.md): generated C, Runtime ABI 23, Managed Module ABI 4, and native interop.
 - [ARCHITECTURE.md](ARCHITECTURE.md): compiler phases and ownership boundaries.
 - [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md): measured implementation and validation status.
 - [TODO.md](TODO.md): outstanding work only.

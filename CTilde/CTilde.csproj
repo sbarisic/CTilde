@@ -14,6 +14,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Compiler/**/*.cs" />
+    <EmbeddedResource Include="../runtime/esp-idf/ctilde_managed_runtime/include/ct_runtime_contract.h" LogicalName="CTilde.RuntimeContract.h" />
     <EmbeddedResource Include="StandardLibrary/**/*.ct" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
     <EmbeddedResource Include="StandardLibrary/**/*.xml" LogicalName="CTilde.StandardLibrary.%(Filename)%(Extension)" />
     <EmbeddedResource Include="../third_party/ryu/4c0618b0/ryu/*" LogicalName="CTilde.Ryu.%(Filename)%(Extension)" />

@@ -44,6 +44,8 @@ public sealed record ManagedModuleOverlayFunctionMetadata(
     string BodySymbol,
     int TargetIndex);
 
+public sealed record ManagedModuleCapabilityMetadata(uint Id, uint MajorVersion);
+
 public sealed record ManagedModuleMetadata(
     int SchemaVersion,
     string DraftVersion,
@@ -60,7 +62,8 @@ public sealed record ManagedModuleMetadata(
     ImmutableArray<ManagedModuleDeclarationMetadata> Declarations = default,
     bool HasOverlays = false,
     int MaximumOverlayBytes = 0,
-    ImmutableArray<ManagedModuleOverlayMetadata> Overlays = default)
+    ImmutableArray<ManagedModuleOverlayMetadata> Overlays = default,
+    ImmutableArray<ManagedModuleCapabilityMetadata> RequiredCapabilities = default)
 {
     internal const int MaximumNameAsciiBytes = 63;
     internal const int MaximumVersionAsciiBytes = 31;
@@ -100,9 +103,11 @@ public sealed record ManagedModuleMetadata(
         var exports = Exports.IsDefault ? ImmutableArray<ManagedModuleExportMetadata>.Empty : Exports;
         var declarations = Declarations.IsDefault ? ImmutableArray<ManagedModuleDeclarationMetadata>.Empty : Declarations;
         var overlays = Overlays.IsDefault ? ImmutableArray<ManagedModuleOverlayMetadata>.Empty : Overlays;
+        var capabilities = RequiredCapabilities.IsDefault ? ImmutableArray<ManagedModuleCapabilityMetadata>.Empty : RequiredCapabilities;
         var canonical = this with
         {
             Dependencies = [.. dependencies.OrderBy(item => item.Name, StringComparer.Ordinal)],
+            RequiredCapabilities = [.. capabilities.OrderBy(item => item.Id)],
             Types = [.. types.OrderBy(item => item.Fingerprint, StringComparer.Ordinal)],
             Exports = [.. exports.OrderBy(item => item.Identity, StringComparer.Ordinal)],
             Declarations = [.. declarations.OrderBy(item => item.Namespace, StringComparer.Ordinal).ThenBy(item => item.Source, StringComparer.Ordinal)],
@@ -114,6 +119,9 @@ public sealed record ManagedModuleMetadata(
 
     public void Validate(string source)
     {
+        if (!RequiredCapabilities.IsDefault && (RequiredCapabilities.Any(item => item.Id == 0 || item.MajorVersion == 0) ||
+            RequiredCapabilities.Select(item => item.Id).Distinct().Count() != RequiredCapabilities.Length))
+            throw new CTildeProjectException($"Managed-module metadata '{source}' has invalid or duplicate capability requirements.", "CT6201");
         if (SchemaVersion != 3 || DraftVersion != CompilerContract.DraftVersion || RuntimeAbi != CompilerContract.RuntimeAbiVersion || ModuleAbi != CompilerContract.ManagedModuleAbiVersion)
             throw new CTildeProjectException($"Managed-module metadata '{source}' is incompatible with Draft {CompilerContract.DraftVersion}, Runtime ABI {CompilerContract.RuntimeAbiVersion}, and Module ABI {CompilerContract.ManagedModuleAbiVersion}.", "CT6201");
         if (Kind is not ("application" or "library") || !IsCanonicalName(Name) || !IsExactVersion(Version) || !IsHash(BuildIdentity) || !IsHash(ApiHash))

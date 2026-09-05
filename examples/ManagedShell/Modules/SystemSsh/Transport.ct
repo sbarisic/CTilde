@@ -339,7 +339,8 @@ internal sealed class SshTransport
             throw new InvalidOperationException();
         if (packetLength > (uint)maximumPacket)
             throw new InvalidOperationException();
-        if ((encrypted && packetLength % 16u != 0u) || (!encrypted && (packetLength + 4u) % 8u != 0u))
+        if ((encrypted && packetLength % 16u != 0u) || (!encrypted && (packetLength
+            + 4u) % 8u != 0u))
             throw new InvalidOperationException();
         byte[] body = new byte[(int)packetLength];
         if (encrypted)

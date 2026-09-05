@@ -8,8 +8,8 @@
 extern "C" {
 #endif
 
-#define CTILDE_RUNTIME_ABI_VERSION 22u
-#define CTILDE_MANAGED_MODULE_ABI_VERSION 3u
+#define CTILDE_RUNTIME_ABI_VERSION 23u
+#define CTILDE_MANAGED_MODULE_ABI_VERSION 4u
 #define CTILDE_MANAGED_MODULE_SD_ROOT "/sd/modules"
 #define CTILDE_MANAGED_MODULE_FALLBACK_ROOT "/storage/modules"
 #define CTILDE_MANAGED_MODULE_ROOT CTILDE_MANAGED_MODULE_FALLBACK_ROOT
@@ -81,44 +81,33 @@ typedef struct ct_type_ops {
     int32_t (*Compare)(const void *left, const void *right);
 } ct_type_ops;
 typedef struct ct_process_context ct_process_context;
-typedef struct ct_runtime_thread_attach_v22 {
+typedef struct ct_runtime_thread_attach_v23 {
     uint32_t Size;
     ct_process_context *Process;
-} ct_runtime_thread_attach_v22;
-typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;
+} ct_runtime_thread_attach_v23;
+typedef struct ct_managed_module_descriptor_v4 ct_managed_module_descriptor_v4;
 
-typedef struct ct_managed_call_target_v3 {
+typedef struct ct_managed_call_target_v4 {
     uint32_t Size;
     uint32_t Placement;
     uint32_t OverlayId;
     uint32_t Reserved;
     uintptr_t Body;
-} ct_managed_call_target_v3;
+} ct_managed_call_target_v4;
 
-typedef struct ct_managed_call_frame_v22 {
+typedef struct ct_managed_call_frame_v23 {
     uintptr_t Opaque[8];
-} ct_managed_call_frame_v22;
+} ct_managed_call_frame_v23;
 
-typedef struct ct_runtime_api_v22 {
-    uint32_t Size;
-    uint32_t AbiVersion;
-    void *(*Allocate)(size_t size, const ct_managed_module_descriptor_v3 *module);
-    void (*Free)(void *value);
-    void (*FinalRelease)(void *value);
-    void (*Raise)(void *exception);
-    void (*RuntimeFault)(const char *code, const char *file, int32_t line);
-    const ct_type_descriptor *(*RegisterType)(const void *descriptor);
-    void (*UnregisterTypes)(const ct_managed_module_descriptor_v3 *module);
-    ct_process_context *(*CurrentProcess)(void);
-    void *(*CurrentModuleState)(const ct_managed_module_descriptor_v3 *module);
-    void *(*CurrentThreadState)(void);
-    void (*SetThreadState)(void *state);
-    bool (*CancellationRequested)(void);
-    uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3 *module,
-        const ct_managed_call_target_v3 *target, ct_managed_call_frame_v22 *frame);
-    void (*LeaveManagedCall)(ct_managed_call_frame_v22 *frame);
-    int32_t (*Service)(uint32_t service, void *payload, size_t size);
-} ct_runtime_api_v22;
+typedef struct ct_runtime_api_v23 ct_runtime_api_v23;
+#include "ct_runtime_contract.h"
+
+/* Firmware implementations of the buffer capability. */
+uint32_t ctilde_buffer_hash_bytes(const void* value, size_t size);
+int32_t ctilde_buffer_format_unsigned(uint64_t value, bool negative, char *output);
+int32_t ctilde_buffer_format_signed(int64_t value, char *output);
+int32_t ctilde_buffer_encode_rune(uint32_t value, uint8_t buffer[4]);
+bool ctilde_buffer_validate_utf8(const uint8_t* data, size_t length);
 
 typedef struct ct_managed_dependency_v2 {
     const char *Name;
@@ -132,14 +121,14 @@ typedef struct ct_managed_export_v2 {
     void *Address;
 } ct_managed_export_v2;
 
-typedef struct ct_managed_import_v3 {
+typedef struct ct_managed_import_v4 {
     const char *Dependency;
     const char *Identity;
     void **AddressSlot;
-    const ct_managed_module_descriptor_v3 **ModuleSlot;
-} ct_managed_import_v3;
+    const ct_managed_module_descriptor_v4 **ModuleSlot;
+} ct_managed_import_v4;
 
-struct ct_managed_module_descriptor_v3 {
+struct ct_managed_module_descriptor_v4 {
     uint32_t Size;
     uint32_t RuntimeAbi;
     uint32_t ModuleAbi;
@@ -153,7 +142,7 @@ struct ct_managed_module_descriptor_v3 {
     uint32_t ExportCount;
     const ct_managed_export_v2 *Exports;
     uint32_t ImportCount;
-    const ct_managed_import_v3 *Imports;
+    const ct_managed_import_v4 *Imports;
     size_t StaticStateSize;
     size_t StaticStateAlignment;
     uint32_t MainTaskStackBytes;
@@ -164,9 +153,11 @@ struct ct_managed_module_descriptor_v3 {
     void *(*CreateArguments)(int32_t count, const char *const *values, const size_t *lengths);
     void *(*CreateBytes)(const uint8_t *data, size_t length);
     uint32_t CallTargetCount;
-    ct_managed_call_target_v3 *CallTargets;
+    ct_managed_call_target_v4 *CallTargets;
     uint32_t HasOverlays;
     uint32_t MaximumOverlayBytes;
+    uint32_t CapabilityCount;
+    const ct_capability_requirement *RequiredCapabilities;
 };
 
 typedef enum ct_managed_process_state {
@@ -223,7 +214,10 @@ uintptr_t ctilde_managed_native_resource_register(uintptr_t value,
 bool ctilde_managed_native_resource_release(uintptr_t token);
 void ctilde_managed_console_set_uart_activity_hook(void (*hook)(void));
 int ctilde_managed_preflight(const char *path, char *error, size_t error_capacity);
-const ct_runtime_api_v22 *ctilde_runtime_api_v22(void);
+const ct_runtime_api_v23 *ctilde_runtime_api_v23(void);
+/* Tables must be immutable firmware-owned storage. Registration closes on first lookup. */
+int32_t ctilde_managed_register_capability(uint32_t id, const void *table);
+const void *ctilde_managed_get_capability(uint32_t id, uint32_t major_version, uint32_t minimum_size);
 bool ctilde_managed_atomic_compare_exchange_u32(volatile uint32_t *value,
     uint32_t *expected, uint32_t desired);
 

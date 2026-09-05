@@ -2,30 +2,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef struct ct_managed_module_descriptor_v3 ct_managed_module_descriptor_v3;
-typedef struct ct_managed_call_target_v3 ct_managed_call_target_v3;
-typedef struct ct_managed_call_frame_v22 ct_managed_call_frame_v22;
+typedef struct ct_managed_module_descriptor_v4 ct_managed_module_descriptor_v4;
+typedef struct ct_managed_call_target_v4 ct_managed_call_target_v4;
+typedef struct ct_managed_call_frame_v23 ct_managed_call_frame_v23;
 
-typedef struct ct_runtime_api_v22 {
-    uint32_t Size;
-    uint32_t AbiVersion;
-    void *(*Allocate)(size_t, const void *);
-    void (*Free)(void *);
-    void (*FinalRelease)(void *);
-    void (*Raise)(void *);
-    void (*RuntimeFault)(const char *, const char *, int32_t);
-    const void *(*RegisterType)(const void *);
-    void (*UnregisterTypes)(const ct_managed_module_descriptor_v3 *);
-    void *(*CurrentProcess)(void);
-    void *(*CurrentModuleState)(const void *);
-    void *(*CurrentThreadState)(void);
-    void (*SetThreadState)(void *);
-    bool (*CancellationRequested)(void);
-    uintptr_t (*EnterManagedCall)(const ct_managed_module_descriptor_v3 *,
-        const ct_managed_call_target_v3 *, ct_managed_call_frame_v22 *);
-    void (*LeaveManagedCall)(ct_managed_call_frame_v22 *);
-    int32_t (*Service)(uint32_t, void *, size_t);
-} ct_runtime_api_v22;
+typedef struct ct_type_descriptor ct_type_descriptor;
+typedef struct ct_process_context ct_process_context;
+typedef struct ct_runtime_api_v23 ct_runtime_api_v23;
+#include "../../../../../runtime/esp-idf/ctilde_managed_runtime/include/ct_runtime_contract.h"
 
 typedef struct ct_console_transfer_v19 {
     uint8_t *Data;
@@ -40,8 +24,8 @@ typedef struct nano_sink {
     size_t Capacity;
 } nano_sink;
 
-extern const ct_runtime_api_v22 *ct_runtime_api;
-extern const ct_managed_module_descriptor_v3 ct_managed_module_v3;
+extern const ct_runtime_api_v23 *ct_runtime_api;
+extern const ct_managed_module_descriptor_v4 ct_managed_module_v4;
 
 int32_t ct_nano_sink_flush(uintptr_t handle);
 
@@ -49,7 +33,7 @@ uintptr_t ct_nano_sink_create(uint32_t capacity)
 {
     if (capacity == 0 || capacity > 32768 || ct_runtime_api == NULL) return 0;
     nano_sink *sink = (nano_sink *)ct_runtime_api->Allocate(sizeof(*sink) + capacity,
-        &ct_managed_module_v3);
+        &ct_managed_module_v4);
     if (sink == NULL) return 0;
     sink->Data = (uint8_t *)(sink + 1);
     sink->Length = 0;

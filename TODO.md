@@ -27,6 +27,21 @@ Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte
 
 ## Compiler optimization
 
+### Draft 0.51 lower-RAM programs
+
+The current stage and measurements are in [the implementation report](examples/ManagedShell/DRAFT051_PROGRESS.md). Remaining release gates are:
+
+- [ ] Generate service calls through the capability contract and remove the SSH module's native adapter.
+- [ ] Share the remaining ARC, array, string, exception, and collection algorithms without changing ownership or exception behavior.
+- [ ] Implement the mapped-section package and ESP32 flash cache. Keep partition migration separate from ordinary flashing.
+- [ ] Add checked spans, scoped parameters, callable lifetime metadata, and buffer-taking library APIs.
+- [ ] Reuse SSH packet storage, use 16 KiB channel/SFTP chunks, and preserve larger transport packet reception and backpressure.
+- [ ] Reduce fixed process storage and select smaller stacks only after measured stack acceptance.
+- [ ] Complete memory accounting, workload comparisons, mapping failure tests, and authenticated command, interactive, and SFTP acceptance.
+- [ ] Add the memory optimization profile with bounded temporary promotion and stronger reachability analysis.
+
+### Other compiler work
+
 The first typed-IR size tranche removes cleanup boundaries with no live records, coalesces fresh owned moves, propagates conservative non-null and fixed-range facts, and simplifies constant loops and stack allocations. The following low-risk generated-C tranche moves reachable atomic, wrapping-arithmetic, ARC, null, bounds, and stack-size common paths into the modular internal header, assigns default object hashes lazily, and devirtualizes sealed receivers and sealed overrides. Public ABI 16 layouts and native ownership entry points remain unchanged. Measured results are recorded in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). Remaining work is:
 
 - [ ] Add an optional readable-C mode with source-oriented names and annotations while preserving compact deterministic Release output by default.

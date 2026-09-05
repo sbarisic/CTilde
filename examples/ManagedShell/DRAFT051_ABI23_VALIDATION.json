@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "releaseComplete": false,
+  "comparisonBaseline": "37e4349870eab9fadef636798f72cae663b4a6b1",
+  "versions": { "draft": "0.51", "runtimeAbi": 23, "managedModuleAbi": 4 },
+  "host": {
+    "fast": {
+      "passed": true,
+      "seconds": 1725.06,
+      "msvcConformance": 285,
+      "gccConformance": 114,
+      "clangConformance": 114,
+      "editorAndDebugAdapterChecksPassed": true,
+      "scope": "Shared runtime and service tables, before the later SFTP framing change"
+    },
+    "capabilityRegistryAndPureHelpersSanitizers": "passed",
+    "productionManifestReaderSanitizers": "passed",
+    "productionPsaSignatureAndAead": "passed",
+    "sftpFramerCompiledTest": "passed",
+    "sftpRootedPathCompiledTest": "passed",
+    "sftpCompilerBackends": ["MSVC", "GCC", "Clang"],
+    "sshRunnerPipeDrainAndChildTimeout": "passed",
+    "sftpFramerCases": ["split headers", "bytewise body", "35000-byte request", "multiple requests", "invalid lengths", "reset partial request", "ARC cleanup"],
+    "markdownAndWebsiteStaticChecks": "passed",
+    "localWebsiteHttpChecks": "passed"
+  },
+  "device": {
+    "target": "ESP32 without PSRAM",
+    "partitionLayoutChanged": false,
+    "nonModuleStorageFilesPreserved": 6,
+    "lifecycle": {
+      "passed": true,
+      "cycles": 100,
+      "beforeFreeBytes": 112600,
+      "afterFreeBytes": 110096,
+      "bootMinimumFreeBytes": 3908,
+      "quotaRejection": true,
+      "cancellation": true,
+      "forcedTermination": true,
+      "heapIntegrity": true,
+      "scope": "Production SD logger, shared services, manifest fix, incremental SFTP framing, and rooted relative paths",
+      "note": "Samples include shell history and do not establish leak-free behavior or continuous peaks. The boot minimum includes an earlier failed SSH session."
+    },
+    "ssh": {
+      "publicKeyAuthentication": "passed",
+      "remoteCommand": "failed after authentication",
+      "sftp": "failed after authentication with current framing and path fixes",
+      "interactiveSession": "pending",
+      "smallStackSelection": "pending; production remains 8192 bytes"
+    }
+  },
+  "remaining": [
+    "Production flash mapping and separate partition migration",
+    "Compiler-generated capability calls and remaining shared algorithms",
+    "Checked spans and callable lifetime contracts",
+    "Reusable SSH packet arenas and backpressure",
+    "Dynamic process storage and memory optimization profile",
+    "Complete workload memory accounting and baseline comparisons",
+    "Authenticated command, interactive session, and SFTP hash acceptance"
+  ],
+  "evidenceDirectory": "artifacts/draft051-abi23",
+  "evidenceNote": "Local artifacts contain device-specific data and are not committed."
+}

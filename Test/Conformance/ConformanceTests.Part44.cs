@@ -65,7 +65,8 @@ internal static partial class ConformanceTests
             try
             {
                 var metadata = ManagedModuleMetadata.Load(metadataPath);
-                Assert(metadata.SchemaVersion == 3 && metadata.ModuleAbi == 3 && metadata.RuntimeAbi == 22 &&
+                Assert(metadata.SchemaVersion == 3 && metadata.ModuleAbi == CompilerContract.ManagedModuleAbiVersion &&
+                    metadata.RuntimeAbi == CompilerContract.RuntimeAbiVersion &&
                     metadata.Declarations.Length == 2 && metadata.Exports.Any(export => export.Member == "Add"),
                     "Managed-library metadata omitted its v3 declarations or callable export.");
 
@@ -92,7 +93,7 @@ internal static partial class ConformanceTests
                 Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
                 var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
                 Assert(generated.Contains("ct_managed_import_", StringComparison.Ordinal) &&
-                    generated.Contains("ct_managed_import_v3", StringComparison.Ordinal) &&
+                    generated.Contains("ct_managed_import_v4", StringComparison.Ordinal) &&
                     !generated.Contains("EnterCall", StringComparison.Ordinal) && !generated.Contains("LeaveCall", StringComparison.Ordinal),
                     "Consumer did not emit provider-owned Module ABI 3 import dispatch.");
             }

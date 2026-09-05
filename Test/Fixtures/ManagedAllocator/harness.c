@@ -11,7 +11,7 @@
 
 typedef struct ct_process ct_process;
 typedef struct ct_module ct_module;
-typedef struct ct_managed_module_descriptor_v3 { int Identity; } ct_managed_module_descriptor_v3;
+typedef struct ct_managed_module_descriptor_v4 { int Identity; } ct_managed_module_descriptor_v4;
 typedef struct ct_allocation {
     struct ct_allocation *Previous, *Next;
     ct_process *Process;
@@ -19,7 +19,7 @@ typedef struct ct_allocation {
     size_t Size;
     max_align_t Alignment;
 } ct_allocation;
-struct ct_module { const ct_managed_module_descriptor_v3 *Descriptor; bool Stopping; uint32_t LiveAllocations; };
+struct ct_module { const ct_managed_module_descriptor_v4 *Descriptor; bool Stopping; uint32_t LiveAllocations; };
 struct ct_process {
     uint32_t RuntimeGate, InstanceCount;
     struct { ct_module *Module; } Instances[1];
@@ -83,7 +83,7 @@ static bool ctilde_managed_native_resource_release(uintptr_t token) {
 #include "allocator_under_test.inc"
 #undef calloc
 
-static ct_managed_module_descriptor_v3 descriptor;
+static ct_managed_module_descriptor_v4 descriptor;
 static ct_module module = { .Descriptor = &descriptor };
 static ct_process process = { .InstanceCount = 1, .Instances = {{ &module }}, .AllocationLock = PTHREAD_MUTEX_INITIALIZER };
 static void *reserved_allocation;

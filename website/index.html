@@ -44,7 +44,7 @@
       <div class="hero-lines" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span></span> Draft 0.50 experimental systems language</p>
+          <p class="eyebrow"><span></span> Draft 0.51 in development</p>
           <h1>Familiar syntax.<br><em>Native systems.</em></h1>
           <p class="hero-lede">C~ brings C#-style structure to native systems work. It compiles to deterministic C23 for desktop programs, freestanding images, Cosmopolitan executables, ESP-IDF firmware, and trusted managed applications on ESP32—without the CLR.</p>
           <div class="hero-actions">
@@ -131,7 +131,7 @@
           <article class="capability-card">
             <p class="capability-label">Managed ESP32 apps</p>
             <h3>Load, run, reclaim</h3>
-            <p>Managed Module ABI 3 packages checked resident ELFs with optional Xtensa code overlays. Schema-3 references compile without provider source, and Runtime ABI 22 keeps managed calls cleanup-safe across returns and exceptions.</p>
+            <p>The in-progress Draft 0.51 compiler uses Managed Module ABI 4 and Runtime ABI 23. Firmware and modules require a coordinated rebuild. Schema-3 references compile without provider source, and managed calls preserve cleanup across returns and exceptions.</p>
             <ul><li>Checked managed imports</li><li>Independent state and heaps</li><li>Redirected process I/O</li></ul>
           </article>
           <article class="capability-card">
@@ -636,9 +636,9 @@ card.Start();
             <div class="example-copy">
               <p class="example-number">15 / MANAGED ESP32 APPLICATION</p>
               <h3>Run native modules as logical processes.</h3>
-              <p>A <code>.ctm</code> application shares Runtime ABI 22 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. Draft 0.50 separates executable code from loader metadata and data, infers private helper placement, and gates the final executable working set. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
+              <p>A <code>.ctm</code> application shares Runtime ABI 23 with firmware while keeping mutable statics, heap accounting, cancellation, copied mailboxes, console endpoints, child tasks, and an executable overlay window process-local. Draft 0.50 separates executable code from loader metadata and data, infers private helper placement, and gates the final executable working set. ManagedShell uses the same <code>shell.ctm</code> for UART, SSH, and one-command sessions; its development SSH modules add encrypted public-key channels and rooted SFTP without placing protocol code in firmware.</p>
               <a href="https://github.com/sbarisic/CTilde/tree/master/examples/ManagedShell" target="_blank" rel="noopener noreferrer">Explore ManagedShell <span aria-hidden="true">→</span></a>
-              <p>Lower-RAM work adds memory budgets, early stack reservation, disposable ELF lookup metadata, and in-place SSH crypto buffers. Draft 0.51 remains incomplete. Flash-mapped modules and lifetime-checked spans are not available, and authenticated SSH/SFTP hardware acceptance remains pending.</p>
+              <p>Lower-RAM work adds capability tables and shared buffer helpers to memory budgets, early stack reservation, disposable ELF lookup metadata, and in-place SSH crypto buffers. Draft 0.51 remains incomplete. Flash-mapped modules and lifetime-checked spans are not available. Net RAM reduction and authenticated SSH/SFTP hardware acceptance remain pending.</p>
             </div>
             <div class="code-window">
               <div class="code-toolbar" aria-hidden="true">

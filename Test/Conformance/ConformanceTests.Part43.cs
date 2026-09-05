@@ -174,7 +174,7 @@ internal static partial class ConformanceTests
             var types = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_types.h").Content;
             var runtimeHeader = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime_internal.h").Content;
             var runtime = bundle.Artifacts.Single(artifact => artifact.RelativePath == "ctilde_runtime.c").Content;
-            Assert(combined.Contains("ct_runtime_api_v22", StringComparison.Ordinal) &&
+            Assert(combined.Contains("ct_runtime_api_v23", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(32)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(48)", StringComparison.Ordinal) &&
                 combined.Contains("Service(UINT32_C(53)", StringComparison.Ordinal) &&

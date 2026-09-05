@@ -1541,7 +1541,7 @@ internal sealed partial class CEmitter : ILoweringServices
                      .Reverse())
             writer.WriteLine($"    {DropValueStatement(field.Type, $"&{field.CName}")}");
         if (IsManagedModule)
-            writer.WriteLine("    ct_runtime_api->UnregisterTypes(&ct_managed_module_v3);");
+            writer.WriteLine("    ct_runtime_api->UnregisterTypes(&ct_managed_module_v4);");
         writer.WriteLine("    ct_module_phase = 3u;");
         writer.WriteLine("}");
         if (!IsManagedModule)
@@ -1557,8 +1557,8 @@ internal sealed partial class CEmitter : ILoweringServices
         var metadata = _managedModuleMetadata ?? throw new InvalidOperationException("Managed module metadata is unavailable.");
         writer.WriteLine("typedef struct ct_managed_dependency_v2 { const char* Name; const char* Version; const char* BuildIdentity; const char* ApiHash; } ct_managed_dependency_v2;");
         writer.WriteLine("typedef struct ct_managed_export_v2 { const char* Identity; void* Address; } ct_managed_export_v2;");
-        writer.WriteLine("typedef struct ct_managed_import_v3 { const char* Dependency; const char* Identity; void** AddressSlot; const ct_managed_module_descriptor_v3** ModuleSlot; } ct_managed_import_v3;");
-        writer.WriteLine("struct ct_managed_module_descriptor_v3 { uint32_t Size; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Kind; const char* Name; const char* Version; const char* BuildIdentity; const char* ApiHash; uint32_t DependencyCount; const ct_managed_dependency_v2* Dependencies; uint32_t ExportCount; const ct_managed_export_v2* Exports; uint32_t ImportCount; const ct_managed_import_v3* Imports; size_t StaticStateSize; size_t StaticStateAlignment; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; void (*Initialize)(void); void (*Finalize)(void); int32_t (*Main)(void*); void* (*CreateArguments)(int32_t, const char* const*, const size_t*); void* (*CreateBytes)(const uint8_t*, size_t); uint32_t CallTargetCount; ct_managed_call_target_v3* CallTargets; uint32_t HasOverlays; uint32_t MaximumOverlayBytes; };");
+        writer.WriteLine("typedef struct ct_managed_import_v4 { const char* Dependency; const char* Identity; void** AddressSlot; const ct_managed_module_descriptor_v4** ModuleSlot; } ct_managed_import_v4;");
+        writer.WriteLine("struct ct_managed_module_descriptor_v4 { uint32_t Size; uint32_t RuntimeAbi; uint32_t ModuleAbi; uint32_t Kind; const char* Name; const char* Version; const char* BuildIdentity; const char* ApiHash; uint32_t DependencyCount; const ct_managed_dependency_v2* Dependencies; uint32_t ExportCount; const ct_managed_export_v2* Exports; uint32_t ImportCount; const ct_managed_import_v4* Imports; size_t StaticStateSize; size_t StaticStateAlignment; uint32_t MainTaskStackBytes; uint64_t HeapLimitBytes; void (*Initialize)(void); void (*Finalize)(void); int32_t (*Main)(void*); void* (*CreateArguments)(int32_t, const char* const*, const size_t*); void* (*CreateBytes)(const uint8_t*, size_t); uint32_t CallTargetCount; ct_managed_call_target_v4* CallTargets; uint32_t HasOverlays; uint32_t MaximumOverlayBytes; uint32_t CapabilityCount; const ct_capability_requirement* RequiredCapabilities; };");
         if (metadata.Dependencies.Length != 0)
         {
             writer.WriteLine("static const ct_managed_dependency_v2 ct_managed_dependencies[] = {");
@@ -1577,7 +1577,7 @@ internal sealed partial class CEmitter : ILoweringServices
         var imports = ManagedImports().ToArray();
         if (imports.Length != 0)
         {
-            writer.WriteLine("static const ct_managed_import_v3 ct_managed_imports[] = {");
+            writer.WriteLine("static const ct_managed_import_v4 ct_managed_imports[] = {");
             foreach (var import in imports)
                 writer.WriteLine($"    {{ \"{EscapeCString(import.Dependency)}\", \"{import.Identity}\", &{import.Name}_address, &{import.Name}_module }},");
             writer.WriteLine("};");
@@ -1634,12 +1634,13 @@ internal sealed partial class CEmitter : ILoweringServices
         var callTargets = ManagedCallEntries();
         var callTargetsPointer = callTargets.IsEmpty ? "NULL" : "ct_managed_call_targets_v3";
         writer.WriteLine("CT_MANAGED_EXPORT void ct_managed_module_text_anchor(void) { }");
-        writer.WriteLine($"CT_MANAGED_LOCAL const ct_managed_module_descriptor_v3 ct_managed_module_v3 = {{ sizeof(ct_managed_module_descriptor_v3), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), \"{EscapeCString(configuration.Name)}\", \"{EscapeCString(configuration.Version)}\", \"{metadata.BuildIdentity}\", \"{metadata.ApiHash}\", UINT32_C({metadata.Dependencies.Length}), {dependenciesPointer}, UINT32_C({exports.Length}), {exportsPointer}, UINT32_C({imports.Length}), {importsPointer}, sizeof(ct_managed_module_static_state), _Alignof(ct_managed_module_static_state), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}), ct_module_init, ct_module_fini, {mainPointer}, {argumentsFactory}, ct_managed_create_bytes, UINT32_C({callTargets.Length}), {callTargetsPointer}, UINT32_C({(metadata.HasOverlays ? 1 : 0)}), UINT32_C({metadata.MaximumOverlayBytes}) }};");
-        writer.WriteLine("CT_MANAGED_EXPORT const ct_managed_module_descriptor_v3* ct_managed_module_descriptor(void) { return &ct_managed_module_v3; }");
+        writer.WriteLine("static const ct_capability_requirement ct_managed_required_capabilities[] = { { CT_CAP_CORE, 1u, sizeof(ct_core_api_v1) }, { CT_CAP_BUFFER, 1u, sizeof(ct_buffer_api_v1) } };");
+        writer.WriteLine($"CT_MANAGED_LOCAL const ct_managed_module_descriptor_v4 ct_managed_module_v4 = {{ sizeof(ct_managed_module_descriptor_v4), UINT32_C({CompilerContract.RuntimeAbiVersion}), UINT32_C({CompilerContract.ManagedModuleAbiVersion}), UINT32_C({(configuration.Kind == ManagedModuleKind.Application ? 1 : 2)}), \"{EscapeCString(configuration.Name)}\", \"{EscapeCString(configuration.Version)}\", \"{metadata.BuildIdentity}\", \"{metadata.ApiHash}\", UINT32_C({metadata.Dependencies.Length}), {dependenciesPointer}, UINT32_C({exports.Length}), {exportsPointer}, UINT32_C({imports.Length}), {importsPointer}, sizeof(ct_managed_module_static_state), _Alignof(ct_managed_module_static_state), UINT32_C({configuration.MainTaskStackBytes}), UINT64_C({configuration.HeapLimitBytes ?? 0}), ct_module_init, ct_module_fini, {mainPointer}, {argumentsFactory}, ct_managed_create_bytes, UINT32_C({callTargets.Length}), {callTargetsPointer}, UINT32_C({(metadata.HasOverlays ? 1 : 0)}), UINT32_C({metadata.MaximumOverlayBytes}), UINT32_C(2), ct_managed_required_capabilities }};");
+        writer.WriteLine("CT_MANAGED_EXPORT const ct_managed_module_descriptor_v4* ct_managed_module_descriptor(void) { return &ct_managed_module_v4; }");
         if (_usesExceptions)
             writer.WriteLine("CT_GENERATED_LOCAL void ct_runtime_faults_init(void);");
         var runtimeFaultInitialization = _usesExceptions ? " ct_runtime_faults_init();" : string.Empty;
-        writer.WriteLine($"CT_MANAGED_EXPORT int32_t ct_managed_module_bind_runtime(const ct_runtime_api_v22* runtime) {{ if (runtime == NULL || runtime->Size < sizeof(ct_runtime_api_v22) || runtime->AbiVersion != UINT32_C({CompilerContract.RuntimeAbiVersion})) return -1; ct_runtime_api = runtime;{runtimeFaultInitialization} return 0; }}");
+        writer.WriteLine($"CT_MANAGED_EXPORT int32_t ct_managed_module_bind_runtime(const ct_runtime_api_v23* runtime) {{ if (runtime == NULL || runtime->Size < sizeof(ct_runtime_api_v23) || runtime->AbiVersion != UINT32_C({CompilerContract.RuntimeAbiVersion})) return -1; if (runtime->GetCapability == NULL) return -1; const ct_core_api_v1* core = (const ct_core_api_v1*)runtime->GetCapability(CT_CAP_CORE, 1u, sizeof(ct_core_api_v1)); const ct_buffer_api_v1* buffer = (const ct_buffer_api_v1*)runtime->GetCapability(CT_CAP_BUFFER, 1u, sizeof(ct_buffer_api_v1)); if (core == NULL || buffer == NULL) return -1; ct_core_api = core; ct_buffer_api = buffer; ct_runtime_api = runtime;{runtimeFaultInitialization} return 0; }}");
         EmitManagedBinaryManifest(writer, configuration, metadata);
     }
 
@@ -1705,10 +1706,10 @@ internal sealed partial class CEmitter : ILoweringServices
             writer.WriteLine(ManagedCallSignature(entry, entry.BodyName, prototype: true));
         if (entries.IsEmpty)
             return;
-        writer.WriteLine("static void ct_leave_managed_call_cleanup(void* value) { ct_runtime_api->LeaveManagedCall((ct_managed_call_frame_v22*)value); }");
-        writer.WriteLine("static ct_managed_call_target_v3 ct_managed_call_targets_v3[] = {");
+        writer.WriteLine("static void ct_leave_managed_call_cleanup(void* value) { ct_runtime_api->LeaveManagedCall((ct_managed_call_frame_v23*)value); }");
+        writer.WriteLine("static ct_managed_call_target_v4 ct_managed_call_targets_v3[] = {");
         foreach (var entry in entries)
-            writer.WriteLine($"    {{ sizeof(ct_managed_call_target_v3), UINT32_C({entry.Placement}), UINT32_C({entry.OverlayId}), UINT32_C(0), {(entry.Placement == 0u ? $"(uintptr_t)&{entry.BodyName}" : "(uintptr_t)0")} }},");
+            writer.WriteLine($"    {{ sizeof(ct_managed_call_target_v4), UINT32_C({entry.Placement}), UINT32_C({entry.OverlayId}), UINT32_C(0), {(entry.Placement == 0u ? $"(uintptr_t)&{entry.BodyName}" : "(uintptr_t)0")} }},");
         writer.WriteLine("};");
         for (var index = 0; index < entries.Length; index++)
         {
@@ -1718,10 +1719,10 @@ internal sealed partial class CEmitter : ILoweringServices
             writer.WriteLine(ManagedCallSignature(entry, entry.StubName, prototype: false));
             writer.WriteLine("{");
             writer.WriteLine("    ct_cleanup_record* ct_call_boundary = ct_cleanup_top;");
-            writer.WriteLine("    ct_managed_call_frame_v22 ct_call_frame = {0};");
+            writer.WriteLine("    ct_managed_call_frame_v23 ct_call_frame = {0};");
             writer.WriteLine("    ct_cleanup_record ct_call_cleanup = {0};");
             writer.WriteLine("    ct_cleanup_push(&ct_call_cleanup, &ct_call_frame, ct_leave_managed_call_cleanup);");
-            writer.WriteLine($"    uintptr_t ct_body_address = ct_runtime_api->EnterManagedCall(&ct_managed_module_v3, &ct_managed_call_targets_v3[{index}], &ct_call_frame);");
+            writer.WriteLine($"    uintptr_t ct_body_address = ct_runtime_api->EnterManagedCall(&ct_managed_module_v4, &ct_managed_call_targets_v3[{index}], &ct_call_frame);");
             if (returnType == CType.Void)
             {
                 writer.WriteLine($"    ((__typeof__(&{entry.BodyName}))(uintptr_t)ct_body_address)({arguments});");
@@ -1891,7 +1892,7 @@ internal sealed partial class CEmitter : ILoweringServices
             var arguments = string.Join(", ", method.Parameters.Select(parameter => NameMangler.Identifier(parameter.Name)));
             var returnType = CTypeName(method.ReturnType);
             writer.WriteLine($"static void* {import.Name}_address = NULL;");
-            writer.WriteLine($"static const ct_managed_module_descriptor_v3* {import.Name}_module = NULL;");
+            writer.WriteLine($"static const ct_managed_module_descriptor_v4* {import.Name}_module = NULL;");
             writer.WriteLine($"CT_GENERATED_LOCAL {CFunctionDeclaration(method.ReturnType, import.Name, parameters)}");
             writer.WriteLine("{");
             writer.WriteLine($"    if ({import.Name}_address == NULL || {import.Name}_module == NULL) ct_runtime_api->RuntimeFault(\"CTM0006\", \"<managed-import>\", 0);");

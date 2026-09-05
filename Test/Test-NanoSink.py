@@ -12,13 +12,13 @@ test.write_text('#include "'+source.as_posix()+'"\n'+r'''
 #include <stdlib.h>
 #include <assert.h>
 #include <stdio.h>
-struct ct_managed_module_descriptor_v3 { int unused; };
-const ct_managed_module_descriptor_v3 ct_managed_module_v3={0};
+struct ct_managed_module_descriptor_v4 { int unused; };
+const ct_managed_module_descriptor_v4 ct_managed_module_v4={0};
 static unsigned char output[100000];
 static size_t written, largest_allocation;
 static int live, fail_write, fail_allocate;
-static void *allocate(size_t n,const void *owner) {
-    assert(owner==&ct_managed_module_v3);
+static void *allocate(size_t n,const ct_managed_module_descriptor_v4 *owner) {
+    assert(owner==&ct_managed_module_v4);
     if(fail_allocate)return NULL;
     if(n>largest_allocation)largest_allocation=n;
     ++live;return calloc(1,n);
@@ -33,8 +33,8 @@ static int32_t service(uint32_t id,void *data,size_t size) {
     for(size_t i=0;i<transfer->Length;++i)output[written++]=transfer->Data[i];
     transfer->Count=transfer->Length;return 0;
 }
-static const ct_runtime_api_v22 api={.Allocate=allocate,.Free=release,.Service=service};
-const ct_runtime_api_v22 *ct_runtime_api=&api;
+static const ct_runtime_api_v23 api={.Allocate=allocate,.Free=release,.Service=service};
+const ct_runtime_api_v23 *ct_runtime_api=&api;
 int main(void) {
     uintptr_t sink=ct_nano_sink_create(1024);assert(sink);
     for(size_t i=0;i<80000;++i)assert(ct_nano_sink_append(sink,(uint8_t)(i%251))==0);

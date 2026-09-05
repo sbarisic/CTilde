@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$IdfPath = "C:\esp\v6.0.2\esp-idf",
+    [string]$CompilerDll = '',
     [switch]$BuildOnly,
     [switch]$ValidateOnly
 )
@@ -11,6 +12,14 @@ $cli = Join-Path $root "..\CTilde.Cli\CTilde.Cli.csproj"
 $shellProject = Join-Path $PSScriptRoot "ctilde.json"
 $diagnosticsTest = Join-Path $root "..\Test\ManagedShellDiagnostics.test.mjs"
 $sshTest = Join-Path $root "..\Test\ManagedShellSsh.test.mjs"
+function Invoke-ModuleCompiler([string]$Project) {
+    if ($CompilerDll) {
+        dotnet $CompilerDll --project $Project --build --idf-path $IdfPath
+    } else {
+        dotnet run --project $cli -- --project $Project --build --idf-path $IdfPath
+    }
+    if ($LASTEXITCODE -ne 0) { throw "Compiler build failed for $Project." }
+}
 $modules = @(
     [pscustomobject]@{ Name = "Managed Hello"; Directory = "Hello"; Artifact = "examples.hello.ctm" },
     [pscustomobject]@{ Name = "Allocator acceptance"; Directory = "AllocatorFixture"; Artifact = "tests.allocator.ctm" },
@@ -230,7 +239,7 @@ foreach ($requiredOverlayHardening in @('volatile uint32_t *OverlayWindow', 'uin
         throw "Managed overlay runtime is missing hardening marker '$requiredOverlayHardening'."
     }
 }
-foreach ($requiredProcessOwnership in @('ct_runtime_thread_attach_v22', 'ct_child_task',
+foreach ($requiredProcessOwnership in @('ct_runtime_thread_attach_v23', 'ct_child_task',
         'terminate_child_tasks', 'NativeResources', 'ForegroundProcess')) {
     if ($managedRuntimeSource -notmatch [regex]::Escape($requiredProcessOwnership)) {
         throw "Managed process ownership is missing '$requiredProcessOwnership'."
@@ -266,7 +275,7 @@ foreach ($module in $modules) {
     $moduleProject = Join-Path $moduleRoot "ctilde.json"
     $moduleOutput = Join-Path $moduleRoot ("build\managed-modules\" + $module.Artifact)
     $moduleStorage = Join-Path $PSScriptRoot ("storage\modules\" + $module.Artifact)
-    dotnet run --project $cli -- --project $moduleProject --build --idf-path $IdfPath
+    Invoke-ModuleCompiler $moduleProject
     if ($LASTEXITCODE -ne 0) { throw "$($module.Name) module build failed." }
     if ($sizeBudgets.ContainsKey($module.Artifact)) {
         $measurement = Get-ManagedModuleSize -ModulePath $moduleOutput
@@ -308,7 +317,7 @@ if ($concurrentExecutableBytes -gt $concurrentBudgetBytes) {
 }
 $sizeReport = [ordered]@{
     schemaVersion = 1
-    draftVersion = "0.50"
+    draftVersion = "0.51"
     generatedAtUtc = [DateTime]::UtcNow.ToString("o")
     modules = @($sizeMeasurements.Values | Sort-Object module)
     concurrentProcessGraphExecutableBytes = $concurrentExecutableBytes
@@ -319,7 +328,7 @@ New-Item -ItemType Directory -Force (Split-Path -Parent $sizeReportPath) | Out-N
 $sizeReport | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $sizeReportPath -Encoding utf8
 Write-Host "Concurrent shell plus SSH executable working set: $concurrentExecutableBytes / $concurrentBudgetBytes bytes."
 
-dotnet run --project $cli -- --project $shellProject --build --idf-path $IdfPath
+Invoke-ModuleCompiler $shellProject
 if ($LASTEXITCODE -ne 0) { throw "Managed shell firmware build failed." }
 
 if (-not $BuildOnly) {

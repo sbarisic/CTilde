@@ -70,7 +70,7 @@ internal static class ManagedOverlayPackager
             BuildReporter.Current?.Detail($"Overlay instruction audit: {auditedInstructionRelocations} relocation(s); Xtensa relaxation disabled");
             var residentImportSlots = ResidentImportSlots(linkedImage);
             var descriptorSymbol = linkedImage.NamedSymbols.SingleOrDefault(symbol =>
-                symbol.Name == "ct_managed_module_v3" && symbol.SectionIndex != 0)
+                symbol.Name == "ct_managed_module_v4" && symbol.SectionIndex != 0)
                 ?? throw new NativeBuildException("Resident ELF does not retain the Module ABI 3 descriptor symbol.");
             var textAnchorSymbols = linkedImage.NamedSymbols.Where(symbol =>
                     symbol.Name == "ct_managed_module_text_anchor" && symbol.SectionIndex != 0)

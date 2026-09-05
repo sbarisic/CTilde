@@ -8,6 +8,135 @@ internal static partial class ConformanceTests
 {
     public static void RegisterPart45(ConformanceSuite suite)
     {
+        suite.Run("draft 0.51 SFTP rooted relative paths", () =>
+        {
+            var protocol = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "SystemSsh", "Protocol.ct"));
+            var start = protocol.IndexOf("    internal static bool TryNormalizeSftpPath(", StringComparison.Ordinal);
+            var end = protocol.IndexOf("    internal static bool IsAuthorizedP256Line(", start, StringComparison.Ordinal);
+            Assert(start >= 0 && end > start, "Production path normalizer was not found.");
+            var helper = "using System; internal static class SshWire {\n" + protocol[start..end] + "\n}";
+            const string source = """
+                using System;
+                public static class Program
+                {
+                    private static void Check(string input, string expected)
+                    {
+                        string actual;
+                        bool valid = SshWire.TryNormalizeSftpPath(input, out actual);
+                        if (valid != (expected != null) || actual != expected)
+                            throw new InvalidOperationException();
+                    }
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        Check(".", "/sftp");
+                        Check("", "/sftp");
+                        Check("/", "/sftp");
+                        Check("./docs//readme.txt", "/sftp/docs/readme.txt");
+                        Check("/docs/./readme.txt", "/sftp/docs/readme.txt");
+                        Check("../storage/ssh", null);
+                        Check("/docs/../escape", null);
+                        Check("docs\\escape", null);
+                        Check("docs\0escape", null);
+                        Check(null, null);
+                        Console.WriteLine("SFTP_PATH_OK");
+                    }
+                }
+                """;
+            var result = CompileAndRun([SyntaxTree.ParseText(helper, "paths.ct"), SyntaxTree.ParseText(source, "test.ct")]);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SFTP_PATH_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 SFTP incremental request framing", () =>
+        {
+            var framer = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "SystemSsh", "SftpFramer.ct")).Replace("[Overlay(\"sftp-core\")]", "", StringComparison.Ordinal);
+            const string source = """
+                using System;
+                using System.Ssh;
+                public static class Program
+                {
+                    [Extern("ct_memory_diagnostic_live_objects")]
+                    [NoAlloc]
+                    public static uint LiveObjects();
+                    private static void Check(bool value)
+                    {
+                        if (!value) throw new InvalidOperationException();
+                    }
+                    [EntryPoint]
+                    public static void Main()
+                    {
+                        uint baseline = LiveObjects();
+                        Run();
+                        Check(LiveObjects() == baseline);
+                        Console.WriteLine("SFTP_FRAMER_OK");
+                    }
+                    private static void Run()
+                    {
+                        SftpFramer framer = new SftpFramer();
+                        byte[] wire = new byte[35004];
+                        wire[2] = (byte)136; wire[3] = (byte)184;
+                        for (int index = 4; index < wire.Length; index++)
+                            wire[index] = (byte)index;
+                        for (int split = 0; split <= 4; split++)
+                        {
+                            byte[] prefix = new byte[split];
+                            byte[] suffix = new byte[wire.Length - split];
+                            for (int index = 0; index < split; index++) prefix[index] = wire[index];
+                            for (int index = split; index < wire.Length; index++) suffix[index - split] = wire[index];
+                            int position = 0;
+                            Check(framer.Read(prefix, ref position) == null && position == split);
+                            position = 0;
+                            byte[] packet = framer.Read(suffix, ref position);
+                            Check(packet.Length == 35000 && position == suffix.Length);
+                            for (int index = 0; index < packet.Length; index++) Check(packet[index] == (byte)(index + 4));
+                        }
+                        byte[] bytewise = new byte[1];
+                        for (int index = 0; index < wire.Length; index++)
+                        {
+                            bytewise[0] = wire[index];
+                            int position = 0;
+                            byte[] packet = framer.Read(bytewise, ref position);
+                            Check(position == 1);
+                            Check((packet != null) == (index == wire.Length - 1));
+                        }
+                        byte[] joined = new byte[70008];
+                        for (int index = 0; index < joined.Length; index++) joined[index] = wire[index % wire.Length];
+                        int offset = 0;
+                        Check(framer.Read(joined, ref offset).Length == 35000 && offset == 35004);
+                        Check(framer.Read(joined, ref offset).Length == 35000 && offset == joined.Length);
+                        byte[] invalid = new byte[4];
+                        for (int attempt = 0; attempt < 3; attempt++)
+                        {
+                            if (attempt == 1) { invalid[2] = (byte)136; invalid[3] = (byte)185; }
+                            if (attempt == 2) { invalid[0] = (byte)255; invalid[1] = (byte)255; invalid[2] = (byte)255; invalid[3] = (byte)255; }
+                            offset = 0;
+                            bool rejected = false;
+                            try { framer.Read(invalid, ref offset); }
+                            catch (InvalidOperationException) { rejected = true; }
+                            Check(rejected);
+                            framer.Reset();
+                        }
+                        byte[] partial = new byte[5];
+                        partial[3] = (byte)2; partial[4] = (byte)1;
+                        offset = 0;
+                        Check(framer.Read(partial, ref offset) == null);
+                        framer.Reset();
+                        partial[3] = (byte)1;
+                        offset = 0;
+                        Check(framer.Read(partial, ref offset)[0] == 1);
+                    }
+                }
+                """;
+            var result = CompileAndRun([
+                SyntaxTree.ParseText(framer, "SftpFramer.ct"),
+                SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics: true);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SFTP_FRAMER_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
         suite.Run("draft 0.49 overlay placement and resident call stubs", () =>
         {
             const string source = """
@@ -41,7 +170,7 @@ internal static partial class ConformanceTests
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
             Assert(generated.Contains("CT_OVERLAY_BODY(\"render\")", StringComparison.Ordinal) &&
-                generated.Contains("ct_managed_call_target_v3", StringComparison.Ordinal) &&
+                generated.Contains("ct_managed_call_target_v4", StringComparison.Ordinal) &&
                 generated.Contains("EnterManagedCall", StringComparison.Ordinal) &&
                 generated.Contains("ct_leave_managed_call_cleanup", StringComparison.Ordinal) &&
                 generated.Contains("ct_cleanup_push(&ct_call_cleanup", StringComparison.Ordinal) &&
@@ -366,7 +495,7 @@ internal static partial class ConformanceTests
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
-            Assert(generated.Contains("ct_runtime_thread_attach_v22", StringComparison.Ordinal) &&
+            Assert(generated.Contains("ct_runtime_thread_attach_v23", StringComparison.Ordinal) &&
                 generated.Contains("payload->Process = ct_runtime_api->CurrentProcess()", StringComparison.Ordinal) &&
                 generated.Contains("ct_thread_attach_to(payload->Process)", StringComparison.Ordinal),
                 "Generated managed workers do not inherit the creating process context.");

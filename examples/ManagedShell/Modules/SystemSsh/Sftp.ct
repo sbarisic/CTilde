@@ -24,8 +24,7 @@ internal sealed class SftpSession
     private const uint StatusPermissionDenied = 3u;
     private const uint StatusFailure = 4u;
     private const uint StatusUnsupported = 8u;
-    private byte[] inbound;
-    private int inboundLength;
+    private SftpFramer inbound;
     private SftpOutputPacket[] output;
     private int outputHead;
     private int outputCount;
@@ -38,7 +37,7 @@ internal sealed class SftpSession
     internal SftpSession(string root)
     {
         this.root = root;
-        inbound = new byte[35004];
+        inbound = new SftpFramer();
         output = new SftpOutputPacket[16];
         files = new FileStream[8];
         paths = new string[8];
@@ -48,25 +47,12 @@ internal sealed class SftpSession
 
     internal void Input(byte[] data)
     {
-        if (data.Length > inbound.Length - inboundLength)
-            throw new InvalidOperationException();
-        for (int index = 0; index < data.Length; index++)
-            inbound[inboundLength + index] = data[index];
-        inboundLength += data.Length;
-        while (inboundLength >= 4)
+        int position = 0;
+        while (position < data.Length)
         {
-            uint length = SshWire.ReadUInt32(inbound, 0);
-            if (length == 0u || length > 35000u)
-                throw new InvalidOperationException();
-            if (inboundLength < (int)length + 4)
+            byte[] request = inbound.Read(data, ref position);
+            if (request == null)
                 return;
-            byte[] request = new byte[(int)length];
-            for (int index = 0; index < request.Length; index++)
-                request[index] = inbound[index + 4];
-            int consumed = request.Length + 4;
-            for (int index = consumed; index < inboundLength; index++)
-                inbound[index - consumed] = inbound[index];
-            inboundLength -= consumed;
             Dispatch(request);
         }
     }
@@ -86,7 +72,7 @@ internal sealed class SftpSession
     {
         for (int index = 0; index < files.Length; index++)
             CloseSlot(index);
-        inboundLength = 0;
+        inbound.Reset();
         outputCount = 0;
     }
 

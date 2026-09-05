@@ -93,6 +93,7 @@ internal static class ManagedModuleMetadataEmitter
             $"name={configuration.Name}",
             $"version={configuration.Version}",
             $"architecture={compilation.Options.Architecture}",
+            $"runtimeContract={ManagedModuleMetadata.HashIdentity(RuntimeAbiContract.Declarations)}",
             $"api={apiHash}",
             sourceIdentity,
             nativeIdentity,
@@ -103,7 +104,8 @@ internal static class ManagedModuleMetadataEmitter
         return new ManagedModuleMetadata(3, CompilerContract.DraftVersion, CompilerContract.RuntimeAbiVersion,
             CompilerContract.ManagedModuleAbiVersion, configuration.Kind.ToString().ToLowerInvariant(), configuration.Name,
             configuration.Version, ManagedModuleMetadata.HashIdentity(buildText), apiHash, dependencies, types, exports, declarations,
-            overlays.Length != 0, 0, overlays);
+            overlays.Length != 0, 0, overlays,
+            [new(RuntimeAbiContract.CapabilityId("CT_CAP_CORE"), 1), new(RuntimeAbiContract.CapabilityId("CT_CAP_BUFFER"), 1)]);
     }
 
     private static string RenderDeclaration(string moduleName, TypeSymbol type)

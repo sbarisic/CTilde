@@ -43,9 +43,9 @@ internal static partial class ConformanceTests
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var combined = string.Join('\n', bundle.Artifacts.Where(artifact => artifact.RelativePath.EndsWith(".c", StringComparison.Ordinal)).Select(artifact => artifact.Content));
             Assert(!combined.Contains("void app_main(void)", StringComparison.Ordinal), "A managed module emitted the firmware app_main entry.");
-            Assert(combined.Contains("ct_managed_module_v3", StringComparison.Ordinal) &&
+            Assert(combined.Contains("ct_managed_module_v4", StringComparison.Ordinal) &&
                 combined.Contains(".ctilde.manifest", StringComparison.Ordinal) &&
-                combined.Contains("ct_runtime_api_v22", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
+                combined.Contains("ct_runtime_api_v23", StringComparison.Ordinal), "Managed ELF ABI records were not emitted.");
             Assert(combined.Contains("uint64_t FingerprintHigh; uint64_t FingerprintLow;", StringComparison.Ordinal),
                 "Runtime ABI 22 type descriptors omitted their canonical fingerprint fields.");
             Assert(combined.Contains("ct_managed_module_static_state", StringComparison.Ordinal) &&
@@ -99,6 +99,15 @@ internal static partial class ConformanceTests
                 metadata.GetProperty("moduleAbi").GetInt32() == CompilerContract.ManagedModuleAbiVersion &&
                 metadata.GetProperty("name").GetString() == "Demo.App" && metadata.GetProperty("apiHash").GetString()!.Length == 64,
                 "Managed public metadata omitted its exact ABI identity.");
+            var capabilities = metadata.GetProperty("requiredCapabilities").EnumerateArray().ToArray();
+            Assert(capabilities.Length == 2 && capabilities[0].GetProperty("id").GetUInt32() == 1 &&
+                capabilities[1].GetProperty("id").GetUInt32() == 2 &&
+                capabilities.All(item => item.GetProperty("majorVersion").GetUInt32() == 1),
+                "Managed metadata omitted the required core and buffer capability versions.");
+            Assert(combined.Contains("runtime->GetCapability", StringComparison.Ordinal) &&
+                combined.IndexOf("if (core == NULL || buffer == NULL)", StringComparison.Ordinal) <
+                combined.IndexOf("ct_core_api = core", StringComparison.Ordinal),
+                "Managed runtime binding must validate capabilities before publishing their pointers.");
 
             var ordinary = Compile("public static class Program { [EntryPoint] public static void Main() { } }");
             Assert(!ordinary.GetDiagnostics().Any(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error), "Ordinary firmware entry behavior changed.");
@@ -275,7 +284,7 @@ internal static partial class ConformanceTests
                     }
                     catch (CTildeProjectException exception)
                     {
-                        Assert(exception.Code == "CT6202" && exception.Message.Contains("ABI 3 limit", StringComparison.Ordinal),
+                        Assert(exception.Code == "CT6202" && exception.Message.Contains($"ABI {CompilerContract.ManagedModuleAbiVersion} limit", StringComparison.Ordinal),
                             $"An over-capacity project {field} did not report the CT6202 ABI limit diagnostic: {exception}");
                     }
                 }

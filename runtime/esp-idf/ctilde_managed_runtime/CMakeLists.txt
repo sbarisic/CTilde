@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "ctilde_managed_runtime.c"
+    SRCS "ctilde_managed_runtime.c" "ctilde_runtime_capabilities.c" "ctilde_runtime_buffer.c"
     INCLUDE_DIRS "include"
     REQUIRES elf_loader freertos esp_system esp_timer heap mbedtls
 )

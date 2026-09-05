@@ -502,32 +502,14 @@ static int32_t p256_public_import(const uint8_t public_key[65], uint32_t *token)
     return register_resource(CT_SSH_RESOURCE_PSA_KEY, &key, token);
 }
 
-static size_t encode_der_integer(uint8_t *output, const uint8_t value[32])
-{
-    size_t first = 0u;
-    while (first < 31u && value[first] == 0u) first++;
-    const size_t count = 32u - first;
-    const bool leading = (value[first] & 0x80u) != 0u;
-    output[0] = 0x02u;
-    output[1] = (uint8_t)(count + (leading ? 1u : 0u));
-    size_t offset = 2u;
-    if (leading) output[offset++] = 0u;
-    (void)memcpy(output + offset, value + first, count);
-    return offset + count;
-}
-
 static int32_t p256_verify(uint32_t token, const uint8_t hash[32],
     const uint8_t signature[64])
 {
     ct_ssh_resource *resource = find_resource(token, CT_SSH_RESOURCE_PSA_KEY);
     if (resource == NULL || hash == NULL || signature == NULL) return -EINVAL;
-    uint8_t der[72];
-    const size_t left = encode_der_integer(der + 2u, signature);
-    const size_t right = encode_der_integer(der + 2u + left, signature + 32u);
-    der[0] = 0x30u;
-    der[1] = (uint8_t)(left + right);
+    /* PSA ECDSA consumes fixed-width r || s, unlike mbedtls_pk_verify's DER input. */
     const psa_status_t status = psa_verify_hash(resource->Value.Key,
-        PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, 32u, der, 2u + left + right);
+        PSA_ALG_ECDSA(PSA_ALG_SHA_256), hash, 32u, signature, 64u);
     return status == PSA_SUCCESS ? 1 : status == PSA_ERROR_INVALID_SIGNATURE ? 0 : -EIO;
 }
 
@@ -683,7 +665,21 @@ static const struct esp_elfsym s_symbols[] = {
 
 int ct_managed_ssh_host_initialize(void)
 {
+    static const ct_network_api_v1 network = {
+        sizeof(ct_network_api_v1), 1u, network_ready, socket_listen, socket_accept,
+        socket_wait, socket_receive, socket_send, socket_shutdown, resource_close
+    };
+    static const ct_crypto_api_v1 crypto = {
+        sizeof(ct_crypto_api_v1), 1u, random_bytes, constant_time_equal,
+        sha256_create, sha256_update, sha256_finish, x25519_create, x25519_shared,
+        p256_private_import, p256_public, p256_sign, p256_public_import, p256_verify,
+        aes128_gcm_create, aes128_gcm_seal, aes128_gcm_open, zeroize, resource_close
+    };
     s_resource_lock = xSemaphoreCreateMutexStatic(&s_resource_lock_storage);
     if (s_resource_lock == NULL) return -ENOMEM;
+    int result = ctilde_managed_register_capability(CT_CAP_NETWORK, &network);
+    if (result != 0) return result;
+    result = ctilde_managed_register_capability(CT_CAP_CRYPTO, &crypto);
+    if (result != 0) return result;
     return esp_elf_register_symbol((esp_elf_symbol_table_t *)(uintptr_t)(const void *)s_symbols);
 }

@@ -362,7 +362,7 @@ public static class Program
             Console.WriteLine("usage: shell.ctm --uart | --ssh | --exec <command>");
             return 2;
         }
-        Console.WriteLine("CTilde managed shell - Runtime ABI 22 / Module ABI 3");
+        Console.WriteLine("CTilde managed shell - Runtime ABI 23 / Module ABI 4");
         ShellCommands.Help();
         ShellEditor editor = new ShellEditor();
         while (!Process.IsCancellationRequested)

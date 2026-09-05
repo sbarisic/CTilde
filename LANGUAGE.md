@@ -4,7 +4,7 @@ Specification version: draft 0.50
 
 ## Status
 
-This document is the normative specification for C~ draft 0.50.
+This document retains the Draft 0.50 language surface. The in-progress Draft 0.51 compiler uses Runtime ABI 23 and Managed Module ABI 4, as specified in [C_ABI.md](C_ABI.md). Checked spans, scoped parameters, and flash mapping remain planned features. See [implementation progress](examples/ManagedShell/DRAFT051_PROGRESS.md).
 
 C~ is a statically typed language with C#-style syntax and a small managed runtime. A conforming draft 0.50 compiler emits deterministic GNU C23 unity or modular artifacts and diagnoses invalid programs before it writes C.
 

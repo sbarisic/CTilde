@@ -26,6 +26,8 @@
     <Content Include="../examples/ManagedShell/ShellCommandLine.ct" Link="Examples/ManagedShell/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../examples/ManagedShell/Modules/Nano/NanoBuffer.ct" Link="Examples/ManagedShell/Nano/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../examples/ManagedShell/Modules/Nano/NanoInput.ct" Link="Examples/ManagedShell/Nano/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/ManagedShell/Modules/SystemSsh/SftpFramer.ct" Link="Examples/ManagedShell/SystemSsh/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../examples/ManagedShell/Modules/SystemSsh/Protocol.ct" Link="Examples/ManagedShell/SystemSsh/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="Snapshots/*" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -223,7 +223,10 @@ internal sealed partial class CEmitter
         writer.WriteLine("}");
         writer.WriteLine("static ct_object* ct_checked_cast(ct_object* value, const ct_type_descriptor* target, const char* file, int line) { if (value == NULL) return NULL; if (!ct_type_is_assignable(value->Type, target)) ct_raise_runtime_fault(CT_FAULT_CAST, \"CTO0001\", file, line); return value; }");
         writer.WriteLine("static ct_object* ct_safe_cast(ct_object* value, const ct_type_descriptor* target) { return value != NULL && ct_type_is_assignable(value->Type, target) ? value : NULL; }");
-        writer.WriteLine("static uint32_t ct_hash_bytes(const void* value, size_t size) { const uint8_t* bytes = (const uint8_t*)value; uint32_t hash = UINT32_C(2166136261); for (size_t i = 0; i < size; ++i) { hash ^= bytes[i]; hash *= UINT32_C(16777619); } return hash; }");
+        if (IsManagedModule)
+            writer.WriteLine("static uint32_t ct_hash_bytes(const void* value, size_t size) { return ct_buffer_api->HashBytes(value, size); }");
+        else
+            writer.WriteLine("static uint32_t ct_hash_bytes(const void* value, size_t size) { const uint8_t* bytes = (const uint8_t*)value; uint32_t hash = UINT32_C(2166136261); for (size_t i = 0; i < size; ++i) { hash ^= bytes[i]; hash *= UINT32_C(16777619); } return hash; }");
         writer.WriteLine("static uint32_t ct_hash_float(float value) { if (isnan(value)) return UINT32_C(0x7FC00000); if (value == 0.0f) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
         writer.WriteLine("static uint32_t ct_hash_double(double value) { if (isnan(value)) return UINT32_C(0x7FF80000); if (value == 0.0) return 0u; return ct_hash_bytes(&value, sizeof(value)); }");
         EmitDefaultVTable(writer, "ct_default_vtable", virtualMethods, virtualProperties);

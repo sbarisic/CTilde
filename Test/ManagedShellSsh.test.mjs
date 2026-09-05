@@ -18,6 +18,7 @@ const sshRoot = join(root, "examples", "ManagedShell", "Modules", "SystemSsh");
 const server = readFileSync(join(sshRoot, "Server.ct"), "utf8");
 const transport = readFileSync(join(sshRoot, "Transport.ct"), "utf8");
 const sftp = readFileSync(join(sshRoot, "Sftp.ct"), "utf8");
+const sftpFramer = readFileSync(join(sshRoot, "SftpFramer.ct"), "utf8");
 const configuration = readFileSync(join(sshRoot, "Configuration.ct"), "utf8");
 
 const u32 = value => {
@@ -101,7 +102,7 @@ test("RFC 8731 secret order, ECDSA message hashing, and GCM alignment match Open
   assert.equal(mpintNetworkOrder(Buffer.from("000102", "hex")).toString("hex"), "0102");
   assert.equal(mpintNetworkOrder(Buffer.alloc(32)).length, 0);
   assert.doesNotMatch(server, /MpintLittleEndian/);
-  assert.match(server, /Sha256\(exchangeHash, 0, exchangeHash.Length, signatureHash\)/);
+  assert.match(server, /Sha256\(exchangeHash, 0, exchangeHash.Length,\s+signatureHash\)/);
   assert.match(server, /P256Sign\(hostKey, signatureHash, fixedSignature\)/);
   const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
   const hash = createHash("sha256").update("exchange transcript").digest();
@@ -183,16 +184,19 @@ test("session channels retain the bounded window and shared-shell routing contra
 
 test("SFTP fixtures stay below the rooted packet and handle limits", () => {
   const normalize = path => {
-    if (!path.startsWith("/") || path.includes("\0") || path.includes("\\")) return null;
+    if (path.includes("\0") || path.includes("\\")) return null;
     const parts = path.split("/").filter(part => part !== "" && part !== ".");
     if (parts.includes("..")) return null;
     return "/sftp" + (parts.length === 0 ? "" : `/${parts.join("/")}`);
   };
   assert.equal(normalize("/"), "/sftp");
+  assert.equal(normalize("."), "/sftp");
+  assert.equal(normalize(""), "/sftp");
+  assert.equal(normalize("docs/readme.txt"), "/sftp/docs/readme.txt");
   assert.equal(normalize("/docs/./readme.txt"), "/sftp/docs/readme.txt");
   assert.equal(normalize("/../storage/ssh/authorized_keys"), null);
   assert.equal(normalize("/docs\\escape"), null);
-  assert.match(sftp, /length > 35000u/);
+  assert.match(sftpFramer, /length > 35000u/);
   assert.match(sftp, /data\.Length > 32768/);
   assert.match(sftp, /files = new FileStream\[8\]/);
   assert.match(sftp, /generations\[slot\]\+\+/);

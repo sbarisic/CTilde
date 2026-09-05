@@ -347,7 +347,7 @@ struct ct_module {
     uint8_t BuildIdentity[32];
     uint8_t ApiHash[32];
     void *DynamicHandle;
-    const ct_managed_module_descriptor_v3 *Descriptor;
+    const ct_managed_module_descriptor_v4 *Descriptor;
     ct_module *Dependencies[CT_MAX_DEPENDENCIES];
     uint32_t DependencyCount;
     uint32_t References;
@@ -867,8 +867,10 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     (void)memset(&header, 0, sizeof(header));
     io_result = read_file_range(file, manifest_section_offset, &header, fixed_size);
     if (io_result != 0) { fclose(file); return io_result; }
-    static const uint8_t magic[8] = { 'C', 'T', 'M', 'O', 'D', 3, 0, 0 };
-    if (memcmp(header.Magic, magic, sizeof(magic)) != 0 || header.HeaderSize != fixed_size ||
+    static const uint8_t magic[5] = { 'C', 'T', 'M', 'O', 'D' };
+    if (memcmp(header.Magic, magic, sizeof(magic)) != 0 ||
+        header.ModuleAbi > UINT8_MAX || header.Magic[5] != (uint8_t)header.ModuleAbi ||
+        header.Magic[6] != 0u || header.Magic[7] != 0u || header.HeaderSize != fixed_size ||
         header.DependencyCount > CT_MAX_DEPENDENCIES) {
         fclose(file); return -ENOEXEC;
     }
@@ -882,8 +884,13 @@ static int read_manifest(const char *path, ct_binary_manifest_v1 **result, uint8
     fclose(file);
     if (io_result != 0) { free(manifest); return io_result; }
 
-    if (manifest->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION ||
-        manifest->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION || manifest->Architecture != expected_architecture ||
+    if (manifest->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION || manifest->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION) {
+        ESP_LOGE(TAG, "Module ABI mismatch: found runtime=%u module=%u; firmware requires runtime=%u module=%u. Rebuild all modules.",
+            (unsigned)manifest->RuntimeAbi, (unsigned)manifest->ModuleAbi,
+            (unsigned)CTILDE_RUNTIME_ABI_VERSION, (unsigned)CTILDE_MANAGED_MODULE_ABI_VERSION);
+        free(manifest); return -EPROTONOSUPPORT;
+    }
+    if (manifest->Architecture != expected_architecture ||
         (manifest->Kind != 1 && manifest->Kind != 2) ||
         !canonical_module_name(manifest->Name, sizeof(manifest->Name)) ||
         !exact_module_version(manifest->Version, sizeof(manifest->Version)) ||
@@ -921,7 +928,9 @@ int ctilde_managed_preflight(const char *path, char *error, size_t error_capacit
     ct_binary_manifest_v1 *manifest;
     uint8_t *bytes;
     const int result = read_manifest(resolved, &manifest, &bytes, NULL);
-    if (result != 0) set_error(error, error_capacity, "invalid or incompatible managed ELF manifest");
+    if (result != 0) set_error(error, error_capacity, result == -EPROTONOSUPPORT
+        ? "module ABI mismatch; rebuild all modules for Runtime ABI 23 / Module ABI 4"
+        : "invalid or incompatible managed ELF manifest");
     free(bytes);
     return result;
 }
@@ -963,7 +972,7 @@ static bool hash_matches_text(const uint8_t expected[32], const char *actual)
     return true;
 }
 
-static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v3 *descriptor, const ct_binary_manifest_v1 *manifest)
+static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v4 *descriptor, const ct_binary_manifest_v1 *manifest)
 {
     if (descriptor == NULL || descriptor->Size != sizeof(*descriptor) ||
         descriptor->RuntimeAbi != CTILDE_RUNTIME_ABI_VERSION || descriptor->ModuleAbi != CTILDE_MANAGED_MODULE_ABI_VERSION ||
@@ -1000,7 +1009,7 @@ static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v3 *d
             if (strcmp(descriptor->Exports[previous].Identity, exported->Identity) == 0) return false;
     }
     for (uint32_t index = 0; index < descriptor->ImportCount; ++index) {
-        const ct_managed_import_v3 *imported = &descriptor->Imports[index];
+        const ct_managed_import_v4 *imported = &descriptor->Imports[index];
         if (imported->Dependency == NULL || imported->Identity == NULL || strlen(imported->Identity) != 64u ||
             imported->AddressSlot == NULL || imported->ModuleSlot == NULL) return false;
         bool dependency_found = false;
@@ -1013,7 +1022,7 @@ static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v3 *d
     }
     bool found_overlay_target = false;
     for (uint32_t index = 0; index < descriptor->CallTargetCount; ++index) {
-        const ct_managed_call_target_v3 *target = &descriptor->CallTargets[index];
+        const ct_managed_call_target_v4 *target = &descriptor->CallTargets[index];
         if (target->Size != sizeof(*target) || target->Reserved != 0u || target->Placement > 1u ||
             (target->Placement == 0u && (target->OverlayId != 0u || target->Body == (uintptr_t)0)) ||
             (target->Placement == 1u && target->OverlayId == 0u)) return false;
@@ -1025,9 +1034,9 @@ static bool descriptor_matches_manifest(const ct_managed_module_descriptor_v3 *d
 
 static int bind_module_imports(ct_module *module)
 {
-    const ct_managed_module_descriptor_v3 *descriptor = module->Descriptor;
+    const ct_managed_module_descriptor_v4 *descriptor = module->Descriptor;
     for (uint32_t index = 0; index < descriptor->ImportCount; ++index) {
-        const ct_managed_import_v3 *imported = &descriptor->Imports[index];
+        const ct_managed_import_v4 *imported = &descriptor->Imports[index];
         ct_module *provider = NULL;
         for (uint32_t dependency = 0; dependency < module->DependencyCount; ++dependency) {
             if (strcmp(module->Dependencies[dependency]->Name, imported->Dependency) == 0) {
@@ -1447,12 +1456,12 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         ESP_LOGE(TAG, "Module '%s' could not publish relocated executable memory on all cores", manifest->Name);
         goto fail;
     }
-    typedef const ct_managed_module_descriptor_v3 *(*descriptor_function)(void);
-    typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v22 *runtime);
+    typedef const ct_managed_module_descriptor_v4 *(*descriptor_function)(void);
+    typedef int32_t (*bind_runtime_function)(const ct_runtime_api_v23 *runtime);
     descriptor_function get_descriptor = (descriptor_function)dlsym(module->DynamicHandle, "ct_managed_module_descriptor");
     bind_runtime_function bind_runtime = (bind_runtime_function)dlsym(module->DynamicHandle, "ct_managed_module_bind_runtime");
     void *text_anchor = module->OverlayCount == 0u ? NULL : dlsym(module->DynamicHandle, "ct_managed_module_text_anchor");
-    const ct_managed_module_descriptor_v3 *descriptor = get_descriptor == NULL ? NULL : get_descriptor();
+    const ct_managed_module_descriptor_v4 *descriptor = get_descriptor == NULL ? NULL : get_descriptor();
     if (descriptor == NULL || bind_runtime == NULL || (module->OverlayCount != 0u && text_anchor == NULL)) {
         ESP_LOGE(TAG, "Module '%s' does not export the Module ABI 3 descriptor, bind, or text-anchor functions", manifest->Name);
         result = -ENOEXEC;
@@ -1468,7 +1477,20 @@ static int load_module_recursive(const char *path, const char *const *chain, siz
         result = -ENOEXEC;
         goto fail;
     }
-    if (bind_runtime(ctilde_runtime_api_v22()) != 0) {
+    if (descriptor->CapabilityCount > 16u || (descriptor->CapabilityCount != 0u && descriptor->RequiredCapabilities == NULL)) {
+        result = -ENOEXEC;
+        goto fail;
+    }
+    for (uint32_t index = 0; index < descriptor->CapabilityCount; ++index) {
+        const ct_capability_requirement *required = &descriptor->RequiredCapabilities[index];
+        if (ctilde_managed_get_capability(required->Id, required->MajorVersion, required->MinimumSize) == NULL) {
+            ESP_LOGE(TAG, "Module '%s' requires unavailable capability %u version %u size %u", module->Name,
+                (unsigned)required->Id, (unsigned)required->MajorVersion, (unsigned)required->MinimumSize);
+            result = -ENOSYS;
+            goto fail;
+        }
+    }
+    if (bind_runtime(ctilde_runtime_api_v23()) != 0) {
         ESP_LOGE(TAG, "Module '%s' rejected Runtime ABI %u", manifest->Name, CTILDE_RUNTIME_ABI_VERSION);
         result = -ELIBBAD;
         goto fail;
@@ -1604,7 +1626,7 @@ static int add_instance_graph(ct_process *process, ct_module *module)
     return instance->State == NULL ? -ENOMEM : 0;
 }
 
-static void *api_allocate(size_t size, const ct_managed_module_descriptor_v3 *descriptor)
+static void *api_allocate(size_t size, const ct_managed_module_descriptor_v4 *descriptor)
 {
     ct_execution_context *context = current_context();
     if (context == NULL || context->Process == NULL || descriptor == NULL) return NULL;
@@ -1728,7 +1750,7 @@ static const ct_type_descriptor *api_register_type(const void *value)
     return descriptor;
 }
 
-static void api_unregister_types(const ct_managed_module_descriptor_v3 *descriptor)
+static void api_unregister_types(const ct_managed_module_descriptor_v4 *descriptor)
 {
     ct_execution_context *context = current_context();
     ct_module *module = context == NULL ? NULL : context->Module;
@@ -1738,7 +1760,7 @@ static void api_unregister_types(const ct_managed_module_descriptor_v3 *descript
        provider loaded; release_module removes them immediately before dlclose. */
 }
 
-static void *api_current_module_state(const ct_managed_module_descriptor_v3 *descriptor)
+static void *api_current_module_state(const ct_managed_module_descriptor_v4 *descriptor)
 {
     ct_process *process = current_process();
     if (process == NULL) return NULL;
@@ -1761,9 +1783,9 @@ typedef struct ct_managed_call_frame_internal_v22 {
     uintptr_t Active;
 } ct_managed_call_frame_internal_v22;
 
-_Static_assert(sizeof(ct_managed_call_frame_internal_v22) <= sizeof(ct_managed_call_frame_v22),
+_Static_assert(sizeof(ct_managed_call_frame_internal_v22) <= sizeof(ct_managed_call_frame_v23),
     "managed call frame ABI storage is too small");
-_Static_assert(sizeof(uintptr_t) != 4u || offsetof(ct_managed_module_descriptor_v3, MaximumOverlayBytes) == 112u,
+_Static_assert(sizeof(uintptr_t) != 4u || offsetof(ct_managed_module_descriptor_v4, MaximumOverlayBytes) == 112u,
     "Module ABI 3 descriptor overlay offset changed");
 
 static const ct_overlay_entry_v3 *find_overlay(const ct_module *module, uint32_t id)
@@ -1930,7 +1952,7 @@ static int load_process_overlay(ct_process *process, ct_module *module, uint32_t
 }
 
 static uintptr_t overlay_body_address(ct_process *process, ct_module *module,
-    const ct_managed_call_target_v3 *target)
+    const ct_managed_call_target_v4 *target)
 {
     if (target->Placement == 0u) return target->Body;
     if (target->Placement != 1u || module->Descriptor == NULL || module->Descriptor->CallTargets == NULL) return 0u;
@@ -1952,8 +1974,8 @@ static void terminate_current_overlay_process(ct_process *process)
     for (;;) vTaskDelay(portMAX_DELAY);
 }
 
-static uintptr_t api_enter_managed_call(const ct_managed_module_descriptor_v3 *descriptor,
-    const ct_managed_call_target_v3 *call_target, ct_managed_call_frame_v22 *public_frame)
+static uintptr_t api_enter_managed_call(const ct_managed_module_descriptor_v4 *descriptor,
+    const ct_managed_call_target_v4 *call_target, ct_managed_call_frame_v23 *public_frame)
 {
     ct_execution_context *context = current_context();
     if (context == NULL || call_target == NULL || public_frame == NULL ||
@@ -1999,7 +2021,7 @@ static uintptr_t api_enter_managed_call(const ct_managed_module_descriptor_v3 *d
     return body;
 }
 
-static void api_leave_managed_call(ct_managed_call_frame_v22 *public_frame)
+static void api_leave_managed_call(ct_managed_call_frame_v23 *public_frame)
 {
     if (public_frame == NULL) abort();
     ct_managed_call_frame_internal_v22 *frame = (ct_managed_call_frame_internal_v22 *)(void *)public_frame;
@@ -2455,8 +2477,8 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
     ct_execution_context *context = current_context();
     ct_process *process = context == NULL ? NULL : context->Process;
     if (service == CT_RUNTIME_SERVICE_THREAD_ATTACH) {
-        if (context != NULL || payload == NULL || size != sizeof(ct_runtime_thread_attach_v22)) return -EINVAL;
-        const ct_runtime_thread_attach_v22 *request = payload;
+        if (context != NULL || payload == NULL || size != sizeof(ct_runtime_thread_attach_v23)) return -EINVAL;
+        const ct_runtime_thread_attach_v23 *request = payload;
         if (request->Size != sizeof(*request) || request->Process == NULL) return -EINVAL;
         const uintptr_t address = (uintptr_t)(void *)request->Process;
         const uintptr_t first = (uintptr_t)(void *)&s_processes[0];
@@ -2587,14 +2609,99 @@ static int32_t api_service(uint32_t service, void *payload, size_t size)
     return -ENOSYS;
 }
 
-static const ct_runtime_api_v22 s_runtime_api = {
-    sizeof(ct_runtime_api_v22), CTILDE_RUNTIME_ABI_VERSION, api_allocate, api_free, api_free, NULL, api_runtime_fault,
+static int32_t capability_file_open(const uint8_t *path, size_t length, uint8_t mode,
+    uint8_t access, uintptr_t *handle)
+{
+    if (handle == NULL) return -EINVAL;
+    *handle = 0;
+    ct_runtime_io_open_v19 request = { sizeof(request), path, length, mode, access, 0 };
+    const int32_t result = api_service(CT_RUNTIME_SERVICE_FILE_OPEN, &request, sizeof(request));
+    if (result == 0) *handle = request.Handle;
+    return result;
+}
+
+static int32_t capability_file_read(uintptr_t handle, uint8_t *data, size_t length, size_t *count, bool *eof)
+{
+    if (count == NULL || eof == NULL) return -EINVAL;
+    *count = 0;
+    *eof = false;
+    ct_runtime_io_transfer_v19 request = { sizeof(request), handle, data, length, 0, false };
+    const int32_t result = api_service(CT_RUNTIME_SERVICE_FILE_READ, &request, sizeof(request));
+    *count = request.Count;
+    *eof = request.Eof;
+    return result;
+}
+
+static int32_t capability_file_write(uintptr_t handle, const uint8_t *data, size_t length, size_t *count)
+{
+    if (count == NULL) return -EINVAL;
+    *count = 0;
+    ct_runtime_io_transfer_v19 request = { sizeof(request), handle, (uint8_t *)data, length, 0, false };
+    const int32_t result = api_service(CT_RUNTIME_SERVICE_FILE_WRITE, &request, sizeof(request));
+    *count = request.Count;
+    return result;
+}
+
+static int32_t capability_file_seek(uintptr_t handle, int64_t offset, uint8_t origin, int64_t *position)
+{
+    if (position == NULL) return -EINVAL;
+    *position = 0;
+    ct_runtime_io_seek_v19 request = { sizeof(request), handle, offset, origin, 0 };
+    const int32_t result = api_service(CT_RUNTIME_SERVICE_FILE_SEEK, &request, sizeof(request));
+    if (result == 0) *position = request.Value;
+    return result;
+}
+
+static int32_t capability_file_length(uintptr_t handle, int64_t *length)
+{
+    if (length == NULL) return -EINVAL;
+    *length = 0;
+    ct_runtime_io_value_v19 request = { sizeof(request), handle, 0 };
+    const int32_t result = api_service(CT_RUNTIME_SERVICE_FILE_LENGTH, &request, sizeof(request));
+    if (result == 0) *length = request.Value;
+    return result;
+}
+
+static int32_t capability_file_flush(uintptr_t handle)
+{
+    ct_runtime_io_handle_v19 request = { sizeof(request), handle };
+    return api_service(CT_RUNTIME_SERVICE_FILE_FLUSH, &request, sizeof(request));
+}
+
+static int32_t capability_file_close(uintptr_t handle)
+{
+    ct_runtime_io_handle_v19 request = { sizeof(request), handle };
+    return api_service(CT_RUNTIME_SERVICE_FILE_CLOSE, &request, sizeof(request));
+}
+
+static void capability_process_delay(uint32_t milliseconds) { vTaskDelay(pdMS_TO_TICKS(milliseconds)); }
+static uint64_t capability_process_clock(void) { return (uint64_t)esp_timer_get_time() / UINT64_C(1000); }
+
+static const ct_filesystem_api_v1 s_filesystem_api = {
+    sizeof(ct_filesystem_api_v1), 1u, capability_file_open, capability_file_read,
+    capability_file_write, capability_file_seek, capability_file_length, capability_file_flush, capability_file_close
+};
+static const ct_process_api_v1 s_process_api = {
+    sizeof(ct_process_api_v1), 1u, ct_managed_process_current, ct_managed_process_id,
+    ct_managed_process_cancellation_requested, capability_process_delay, capability_process_clock,
+    ctilde_managed_process_terminate_descendants
+};
+static const ct_core_api_v1 s_core_api = {
+    sizeof(ct_core_api_v1), 1u, api_allocate, api_free, api_free, api_runtime_fault
+};
+static const ct_buffer_api_v1 s_buffer_api = {
+    sizeof(ct_buffer_api_v1), 1u, memcpy, memmove, memset, memcmp, memchr,
+    ctilde_buffer_hash_bytes, ctilde_buffer_validate_utf8, ctilde_buffer_encode_rune,
+    ctilde_buffer_format_unsigned, ctilde_buffer_format_signed
+};
+static const ct_runtime_api_v23 s_runtime_api = {
+    sizeof(ct_runtime_api_v23), CTILDE_RUNTIME_ABI_VERSION, api_allocate, api_free, api_free, NULL, api_runtime_fault,
     api_register_type, api_unregister_types, api_current_process, api_current_module_state,
     api_current_thread_state, api_set_thread_state, ct_managed_process_cancellation_requested,
-    api_enter_managed_call, api_leave_managed_call, api_service
+    api_enter_managed_call, api_leave_managed_call, api_service, ctilde_managed_get_capability
 };
 
-const ct_runtime_api_v22 *ctilde_runtime_api_v22(void)
+const ct_runtime_api_v23 *ctilde_runtime_api_v23(void)
 {
     return &s_runtime_api;
 }
@@ -3654,6 +3761,15 @@ int ctilde_managed_runtime_initialize(void)
     s_termination_queue = xQueueCreateStatic(CONFIG_CTILDE_MANAGED_MAX_PROCESSES, sizeof(ct_termination_request),
         s_termination_queue_buffer, &s_termination_queue_storage);
     if (s_registry == NULL || s_reaper_queue == NULL || s_termination_queue == NULL) goto fail;
+    result = ctilde_managed_register_capability(CT_CAP_CORE, &s_core_api);
+    if (result != 0) goto fail;
+    result = ctilde_managed_register_capability(CT_CAP_BUFFER, &s_buffer_api);
+    if (result != 0) goto fail;
+    result = ctilde_managed_register_capability(CT_CAP_FILESYSTEM, &s_filesystem_api);
+    if (result != 0) goto fail;
+    result = ctilde_managed_register_capability(CT_CAP_PROCESS, &s_process_api);
+    if (result != 0) goto fail;
+    result = -ENOMEM;
     for (size_t stream = 0; stream < 3u; ++stream) {
         s_uart_streams[stream].Kind = CT_CONSOLE_ENDPOINT_UART;
         s_uart_streams[stream].WriteLock = xSemaphoreCreateMutex();

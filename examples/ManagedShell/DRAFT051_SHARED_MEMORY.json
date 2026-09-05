@@ -1,0 +1,957 @@
+{
+  "schemaVersion": 1,
+  "baseline": "37e4349870eab9fadef636798f72cae663b4a6b1",
+  "releaseComplete": false,
+  "configuration": "Shared services, incremental SFTP framing, relative paths, production SD logger",
+  "firmwareStaticRamBytes": {
+    "baseline": 181808,
+    "current": 181960,
+    "delta": 152
+  },
+  "firmwareImageBytes": 1050368,
+  "firmwareSha256": "3ab0c4d42f9f3612e01f5824b2f9228652ee5a25ef514fbf6b550a56c9e75f0a",
+  "modules": [
+    {
+      "module": "tests.allocator",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 11585,
+          "mutableDataBytes": 2836,
+          "ramResidentConstantsBytes": 1433,
+          "linkedResidentBytes": 15860,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 11385,
+          "mutableDataBytes": 2852,
+          "ramResidentConstantsBytes": 1457,
+          "linkedResidentBytes": 15700,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -200,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -160,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "commands.fs",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 30268,
+          "mutableDataBytes": 4136,
+          "ramResidentConstantsBytes": 1598,
+          "linkedResidentBytes": 36008,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 6144,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 29520,
+          "mutableDataBytes": 4152,
+          "ramResidentConstantsBytes": 1622,
+          "linkedResidentBytes": 35300,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 6144,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -748,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -708,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "examples.hello",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 14684,
+          "mutableDataBytes": 2776,
+          "ramResidentConstantsBytes": 1262,
+          "linkedResidentBytes": 18728,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 13936,
+          "mutableDataBytes": 2792,
+          "ramResidentConstantsBytes": 1286,
+          "linkedResidentBytes": 18020,
+          "sectionPaddingBytes": 6,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -748,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -708,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "memory",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 13040,
+          "mutableDataBytes": 2012,
+          "ramResidentConstantsBytes": 2353,
+          "linkedResidentBytes": 17408,
+          "sectionPaddingBytes": 3,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 12580,
+          "mutableDataBytes": 2028,
+          "ramResidentConstantsBytes": 2377,
+          "linkedResidentBytes": 16988,
+          "sectionPaddingBytes": 3,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -460,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -420,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "nano",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 31127,
+          "mutableDataBytes": 6280,
+          "ramResidentConstantsBytes": 1745,
+          "linkedResidentBytes": 39156,
+          "sectionPaddingBytes": 4,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 28304,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 30683,
+          "mutableDataBytes": 6296,
+          "ramResidentConstantsBytes": 1769,
+          "linkedResidentBytes": 38752,
+          "sectionPaddingBytes": 4,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 28304,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -444,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -404,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "net",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 10685,
+          "mutableDataBytes": 5176,
+          "ramResidentConstantsBytes": 1270,
+          "linkedResidentBytes": 17136,
+          "sectionPaddingBytes": 5,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 6448,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 10237,
+          "mutableDataBytes": 5192,
+          "ramResidentConstantsBytes": 1296,
+          "linkedResidentBytes": 16728,
+          "sectionPaddingBytes": 3,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 6448,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -448,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 26,
+          "linkedResidentBytes": -408,
+          "sectionPaddingBytes": -2,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "tests.overlay",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 18962,
+          "mutableDataBytes": 2756,
+          "ramResidentConstantsBytes": 2046,
+          "linkedResidentBytes": 23772,
+          "sectionPaddingBytes": 8,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 32768,
+          "stackApplicable": true,
+          "overlayRamBytes": 288,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 18514,
+          "mutableDataBytes": 2772,
+          "ramResidentConstantsBytes": 2070,
+          "linkedResidentBytes": 23364,
+          "sectionPaddingBytes": 8,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 32768,
+          "stackApplicable": true,
+          "overlayRamBytes": 288,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -448,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -408,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "tests.overlay.library",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 11584,
+          "mutableDataBytes": 2272,
+          "ramResidentConstantsBytes": 1382,
+          "linkedResidentBytes": 15240,
+          "sectionPaddingBytes": 2,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": null,
+          "stackApplicable": false,
+          "overlayRamBytes": 448,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 11140,
+          "mutableDataBytes": 2288,
+          "ramResidentConstantsBytes": 1406,
+          "linkedResidentBytes": 14836,
+          "sectionPaddingBytes": 2,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": null,
+          "stackApplicable": false,
+          "overlayRamBytes": 448,
+          "managedPayloadLimitBytes": 65536,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -444,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -404,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "sd",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 27031,
+          "mutableDataBytes": 5348,
+          "ramResidentConstantsBytes": 1181,
+          "linkedResidentBytes": 33568,
+          "sectionPaddingBytes": 8,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 26307,
+          "mutableDataBytes": 5364,
+          "ramResidentConstantsBytes": 1205,
+          "linkedResidentBytes": 32884,
+          "sectionPaddingBytes": 8,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -724,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -684,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "shell",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 14049,
+          "mutableDataBytes": 6248,
+          "ramResidentConstantsBytes": 1591,
+          "linkedResidentBytes": 21892,
+          "sectionPaddingBytes": 4,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 12288,
+          "stackApplicable": true,
+          "overlayRamBytes": 6368,
+          "managedPayloadLimitBytes": 131072,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 13777,
+          "mutableDataBytes": 6264,
+          "ramResidentConstantsBytes": 1616,
+          "linkedResidentBytes": 21660,
+          "sectionPaddingBytes": 3,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 12288,
+          "stackApplicable": true,
+          "overlayRamBytes": 6368,
+          "managedPayloadLimitBytes": 131072,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -272,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 25,
+          "linkedResidentBytes": -232,
+          "sectionPaddingBytes": -1,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "sshd",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 4597,
+          "mutableDataBytes": 1700,
+          "ramResidentConstantsBytes": 1072,
+          "linkedResidentBytes": 7376,
+          "sectionPaddingBytes": 7,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 196608,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 4633,
+          "mutableDataBytes": 1716,
+          "ramResidentConstantsBytes": 1099,
+          "linkedResidentBytes": 7452,
+          "sectionPaddingBytes": 4,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 196608,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": 36,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 27,
+          "linkedResidentBytes": 76,
+          "sectionPaddingBytes": -3,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "system.ssh",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 36858,
+          "mutableDataBytes": 11592,
+          "ramResidentConstantsBytes": 2907,
+          "linkedResidentBytes": 51360,
+          "sectionPaddingBytes": 3,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": null,
+          "stackApplicable": false,
+          "overlayRamBytes": 10112,
+          "managedPayloadLimitBytes": 131072,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 36702,
+          "mutableDataBytes": 11744,
+          "ramResidentConstantsBytes": 2969,
+          "linkedResidentBytes": 51420,
+          "sectionPaddingBytes": 5,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": null,
+          "stackApplicable": false,
+          "overlayRamBytes": 10112,
+          "managedPayloadLimitBytes": 131072,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -156,
+          "mutableDataBytes": 152,
+          "ramResidentConstantsBytes": 62,
+          "linkedResidentBytes": 60,
+          "sectionPaddingBytes": 2,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    },
+    {
+      "module": "taskmgr",
+      "baseline": {
+        "shared": {
+          "executableRamBytes": 15368,
+          "mutableDataBytes": 2148,
+          "ramResidentConstantsBytes": 1895,
+          "linkedResidentBytes": 19416,
+          "sectionPaddingBytes": 5,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "current": {
+        "shared": {
+          "executableRamBytes": 14956,
+          "mutableDataBytes": 2164,
+          "ramResidentConstantsBytes": 1919,
+          "linkedResidentBytes": 19044,
+          "sectionPaddingBytes": 5,
+          "loaderMetadataBytes": null,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 8192,
+          "stackApplicable": true,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 32768,
+          "processStateBytes": null,
+          "peakManagedAllocationBytes": null,
+          "peakNativeScratchBytes": null
+        },
+        "unknownCosts": [
+          "allocator overhead",
+          "loader metadata",
+          "per-process state",
+          "dynamic allocation peaks",
+          "native scratch peaks"
+        ]
+      },
+      "delta": {
+        "shared": {
+          "executableRamBytes": -412,
+          "mutableDataBytes": 16,
+          "ramResidentConstantsBytes": 24,
+          "linkedResidentBytes": -372,
+          "sectionPaddingBytes": 0,
+          "mappedFlashBytes": 0
+        },
+        "perProcess": {
+          "stackBytes": 0,
+          "overlayRamBytes": 0,
+          "managedPayloadLimitBytes": 0
+        }
+      }
+    }
+  ],
+  "netWorkloadRamReduction": null,
+  "limitations": [
+    "Linked section sizes do not measure dynamic peaks or fragmentation.",
+    "Firmware and each shared module are counted once per loaded graph.",
+    "Flash mapping is not implemented.",
+    "The first device samples used a diagnostic logger and are excluded from production comparisons.",
+    "Authenticated command and SFTP acceptance remain failed."
+  ]
+}

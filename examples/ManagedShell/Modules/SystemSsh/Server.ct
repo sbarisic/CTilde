@@ -196,7 +196,8 @@ internal sealed class SshConnection
         // ECDSA signs the exchange hash as a message. The native operation
         // accepts a digest, so hash that message before signing.
         byte[] signatureHash = new byte[32];
-        SshNative.Require(SshNative.Sha256(exchangeHash, 0, exchangeHash.Length, signatureHash));
+        SshNative.Require(SshNative.Sha256(exchangeHash, 0, exchangeHash.Length,
+            signatureHash));
         SshNative.Require(SshNative.P256Sign(hostKey, signatureHash, fixedSignature));
         byte[] signatureBlob = SignatureBlob(fixedSignature);
         SshPacketWriter reply = new SshPacketWriter(512);
@@ -1253,7 +1254,8 @@ public static class SshDaemon
             while (server.Poll(250u))
             {
                 SshServerStatus currentStatus = server.Status();
-                if (!reported || wasReady != currentStatus.NetworkReady || wasListening != currentStatus.Listening)
+                if (!reported || wasReady != currentStatus.NetworkReady || wasListening
+                    != currentStatus.Listening)
                 {
                     Console.Write("sshd: ");
                     Console.Write("network=");

@@ -285,20 +285,25 @@ internal sealed partial class CEmitter
 
     private void EmitUtf8ConversionSupport(CWriter writer, HashSet<string?> used)
     {
-        writer.WriteLine("static bool ct_utf8_validate_bytes(const uint8_t* data, size_t length)");
-        writer.WriteLine("{");
-        writer.WriteLine("    size_t index = 0u; while (index < length) {");
-        writer.WriteLine("        uint8_t first = data[index++]; if (first <= UINT8_C(0x7F)) continue;");
-        writer.WriteLine("        uint32_t scalar; size_t continuation;");
-        writer.WriteLine("        if (first >= UINT8_C(0xC2) && first <= UINT8_C(0xDF)) { scalar = (uint32_t)(first & UINT8_C(0x1F)); continuation = 1u; }");
-        writer.WriteLine("        else if (first >= UINT8_C(0xE0) && first <= UINT8_C(0xEF)) { scalar = (uint32_t)(first & UINT8_C(0x0F)); continuation = 2u; }");
-        writer.WriteLine("        else if (first >= UINT8_C(0xF0) && first <= UINT8_C(0xF4)) { scalar = (uint32_t)(first & UINT8_C(0x07)); continuation = 3u; }");
-        writer.WriteLine("        else return false;");
-        writer.WriteLine("        if (continuation > length - index) return false;");
-        writer.WriteLine("        for (size_t lane = 0u; lane < continuation; ++lane) { uint8_t next = data[index++]; if ((next & UINT8_C(0xC0)) != UINT8_C(0x80)) return false; scalar = (scalar << 6) | (uint32_t)(next & UINT8_C(0x3F)); }");
-        writer.WriteLine("        if ((continuation == 1u && scalar < UINT32_C(0x80)) || (continuation == 2u && scalar < UINT32_C(0x800)) || (continuation == 3u && scalar < UINT32_C(0x10000)) || (scalar >= UINT32_C(0xD800) && scalar <= UINT32_C(0xDFFF)) || scalar > UINT32_C(0x10FFFF)) return false;");
-        writer.WriteLine("    } return true;");
-        writer.WriteLine("}");
+        if (IsManagedModule)
+            writer.WriteLine("static bool ct_utf8_validate_bytes(const uint8_t* data, size_t length) { return ct_buffer_api->ValidateUtf8(data, length); }");
+        else
+        {
+            writer.WriteLine("static bool ct_utf8_validate_bytes(const uint8_t* data, size_t length)");
+            writer.WriteLine("{");
+            writer.WriteLine("    size_t index = 0u; while (index < length) {");
+            writer.WriteLine("        uint8_t first = data[index++]; if (first <= UINT8_C(0x7F)) continue;");
+            writer.WriteLine("        uint32_t scalar; size_t continuation;");
+            writer.WriteLine("        if (first >= UINT8_C(0xC2) && first <= UINT8_C(0xDF)) { scalar = (uint32_t)(first & UINT8_C(0x1F)); continuation = 1u; }");
+            writer.WriteLine("        else if (first >= UINT8_C(0xE0) && first <= UINT8_C(0xEF)) { scalar = (uint32_t)(first & UINT8_C(0x0F)); continuation = 2u; }");
+            writer.WriteLine("        else if (first >= UINT8_C(0xF0) && first <= UINT8_C(0xF4)) { scalar = (uint32_t)(first & UINT8_C(0x07)); continuation = 3u; }");
+            writer.WriteLine("        else return false;");
+            writer.WriteLine("        if (continuation > length - index) return false;");
+            writer.WriteLine("        for (size_t lane = 0u; lane < continuation; ++lane) { uint8_t next = data[index++]; if ((next & UINT8_C(0xC0)) != UINT8_C(0x80)) return false; scalar = (scalar << 6) | (uint32_t)(next & UINT8_C(0x3F)); }");
+            writer.WriteLine("        if ((continuation == 1u && scalar < UINT32_C(0x80)) || (continuation == 2u && scalar < UINT32_C(0x800)) || (continuation == 3u && scalar < UINT32_C(0x10000)) || (scalar >= UINT32_C(0xD800) && scalar <= UINT32_C(0xDFFF)) || scalar > UINT32_C(0x10FFFF)) return false;");
+            writer.WriteLine("    } return true;");
+            writer.WriteLine("}");
+        }
         writer.WriteLine("static ct_string* ct_utf8_copy_checked(const uint8_t* data, size_t length, bool throwing, bool missing_terminator, bool* success)");
         writer.WriteLine("{");
         writer.WriteLine("    if (success != NULL) *success = false;");

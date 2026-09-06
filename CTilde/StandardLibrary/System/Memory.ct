@@ -2,6 +2,10 @@ namespace System.Runtime;
 
 public static class Memory
 {
+    /// <summary>Allocates a zeroed byte array, or returns null if the length or allocation cannot be satisfied.</summary>
+    [Extern("ct_memory_try_allocate_bytes")]
+    public static byte[] TryAllocateBytes(int length);
+
     [Extern("ct_memory_retain")]
     [NoAlloc]
     public static unsafe void Retain(object value);

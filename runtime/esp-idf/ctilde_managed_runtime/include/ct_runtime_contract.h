@@ -95,6 +95,20 @@ typedef struct ct_filesystem_api_v1 {
     int32_t (*Close)(uintptr_t handle);
 } ct_filesystem_api_v1;
 
+/* Borrowed inputs are copied synchronously by Start before it returns. */
+typedef struct ct_process_utf8_v1 {
+    const uint8_t *Data;
+    size_t Length;
+} ct_process_utf8_v1;
+
+typedef struct ct_process_start_options_v1 {
+    uint32_t Size;
+    uint32_t Flags; /* bit 0: stdin, bit 1: stdout, bit 2: stderr */
+    uint32_t InputBufferBytes;
+    uint32_t OutputBufferBytes;
+    uint32_t ErrorBufferBytes;
+} ct_process_start_options_v1;
+
 typedef struct ct_process_api_v1 {
     uint32_t Size;
     uint32_t MajorVersion;
@@ -104,6 +118,8 @@ typedef struct ct_process_api_v1 {
     void (*Delay)(uint32_t milliseconds);
     uint64_t (*MonotonicMilliseconds)(void);
     void (*TerminateDescendants)(uint32_t id, uint32_t grace_milliseconds);
+    uintptr_t (*Start)(const ct_process_utf8_v1 *path, const ct_process_utf8_v1 *arguments,
+        size_t argument_count, const ct_process_start_options_v1 *options);
 } ct_process_api_v1;
 
 struct ct_runtime_api_v23 {

@@ -29,15 +29,15 @@ Keep `Vec2`, `Vec3`, and `Vec4` as scalar geometry types. The four fixed 16-byte
 
 ### Draft 0.51 lower-RAM programs
 
-The current stage and measurements are in [the implementation report](examples/ManagedShell/DRAFT051_PROGRESS.md). Remaining release gates are:
+The frozen execution order is in the [practical SSH checkpoint](examples/ManagedShell/SSH_XIP_PROGRESS.md). Complete RAM-loaded commands and interactive sessions before XIP. SFTP acceptance and general spans are deferred. Remaining release gates are:
 
 - [ ] Generate service calls through the capability contract and remove the SSH module's native adapter.
 - [ ] Share the remaining ARC, array, string, exception, and collection algorithms without changing ownership or exception behavior.
 - [ ] Implement the mapped-section package and ESP32 flash cache. Keep partition migration separate from ordinary flashing.
 - [ ] Add checked spans, scoped parameters, callable lifetime metadata, and buffer-taking library APIs.
-- [ ] Reuse SSH packet storage, use 16 KiB channel/SFTP chunks, and preserve larger transport packet reception and backpressure.
+- [ ] Reuse small SSH packet storage with fallible exact-size overflow. Preserve larger transport packet reception and backpressure.
 - [ ] Reduce fixed process storage and select smaller stacks only after measured stack acceptance.
-- [ ] Complete memory accounting, workload comparisons, mapping failure tests, and authenticated command, interactive, and SFTP acceptance.
+- [ ] Complete memory accounting, workload comparisons, mapping failure tests, and authenticated command and interactive acceptance.
 - [ ] Add the memory optimization profile with bounded temporary promotion and stronger reachability analysis.
 
 ### Other compiler work

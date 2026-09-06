@@ -23,8 +23,26 @@ function(ctilde_project_so project_name)
         "set(so_link_flags -shared ${CTILDE_MANAGED_SO_LINK_FLAGS}"
         _ctilde_project_so_source "${_ctilde_project_so_source}")
 
+    # The upstream custom commands track only the C source. Generated type
+    # layouts also affect unchanged constructor sources, so stale objects can
+    # allocate too few bytes. Track the compiler's complete include closure.
+    set(_ctilde_compile_command [=[COMMAND ${CMAKE_C_COMPILER} ${so_compile_flags} ${def_flags} ${include_flags} ${c_file} -o ${obj_file}]=])
+    set(_ctilde_dependency_command [=[COMMAND ${CMAKE_C_COMPILER} ${so_compile_flags} ${def_flags} ${include_flags} -MD -MF "${obj_file}.d" -MQ "${obj_file}" ${c_file} -o ${obj_file}
+                    DEPFILE "${obj_file}.d"
+                    VERBATIM]=])
+    string(FIND "${_ctilde_project_so_source}" "${_ctilde_compile_command}" _ctilde_compile_start)
+    if(_ctilde_compile_start LESS 0)
+        message(FATAL_ERROR "The installed elf_loader compile command is unsupported; header dependency tracking cannot be installed")
+    endif()
+    string(REPLACE "${_ctilde_compile_command}" "${_ctilde_dependency_command}"
+        _ctilde_project_so_source "${_ctilde_project_so_source}")
+
     set(_ctilde_generated_helper "${CMAKE_BINARY_DIR}/ctilde_project_so.generated.cmake")
     file(WRITE "${_ctilde_generated_helper}" "${_ctilde_project_so_source}")
     include("${_ctilde_generated_helper}")
     ctilde_project_so_impl(${project_name})
+    # Keep exact link inputs. Removed profile sources can leave stale objects.
+    string(JOIN "\n" _ctilde_object_manifest ${so_obj_files})
+    file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/ctilde-so-objects.txt"
+        CONTENT "${_ctilde_object_manifest}\n")
 endfunction()

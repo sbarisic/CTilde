@@ -4,8 +4,33 @@
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
+
+/* Use the generated process console bridge, including redirected SSH pipes. */
+extern void ct_runtime_console_write(const uint8_t *data, size_t length);
+extern size_t ct_runtime_console_read(uint8_t *data, size_t length, bool *eof);
+
+int32_t ct_shell_read_input(bool *eof)
+{
+    uint8_t value = 0u;
+    const size_t count = ct_runtime_console_read(&value, 1u, eof);
+    return count == 0u ? -1 : (int32_t)value;
+}
+
+static void memory_line(const char *format, ...)
+{
+    char line[160];
+    va_list arguments;
+    va_start(arguments, format);
+    const int length = vsnprintf(line, sizeof(line), format, arguments);
+    va_end(arguments);
+    if (length > 0) {
+        const size_t count = (size_t)length < sizeof(line) ? (size_t)length : sizeof(line) - 1u;
+        ct_runtime_console_write((const uint8_t *)line, count);
+    }
+}
 
 static const ct_managed_shell_host_api_v1 *host(void)
 {
@@ -73,7 +98,7 @@ void ct_shell_print_memory(void)
     const ct_managed_diagnostics_host_api_v1 *api = ct_managed_diagnostics_host_v1();
     if (api == NULL || api->Version != CT_MANAGED_DIAGNOSTICS_HOST_API_VERSION ||
         api->Size < sizeof(*api)) {
-        puts("free: memory diagnostics unavailable");
+        memory_line("free: memory diagnostics unavailable\n");
         return;
     }
     static const struct {
@@ -94,18 +119,18 @@ void ct_shell_print_memory(void)
         totals[index] = api->HeapGetTotalSize(pools[index].Kind);
         api->HeapGetInfo(&info[index], pools[index].Kind);
     }
-    printf("free heap: %zu, minimum: %zu\n",
+    memory_line("free heap: %zu, minimum: %zu\n",
         info[0].TotalFreeBytes, info[0].MinimumFreeBytes);
-    puts("RAM bytes (capability pools overlap; do not sum)");
-    printf("%-12s %10s %10s %10s %7s\n", "Pool", "Free", "Used", "Total", "Free %");
+    memory_line("RAM bytes (capability pools overlap; do not sum)\n");
+    memory_line("%-12s %10s %10s %10s %7s\n", "Pool", "Free", "Used", "Total", "Free %");
     for (size_t index = 0u; index < sizeof(pools) / sizeof(pools[0]); ++index) {
         if (totals[index] == 0u) {
-            printf("%-12s %s\n", pools[index].Name, "not configured");
+            memory_line("%-12s %s\n", pools[index].Name, "not configured");
         } else {
             const size_t free_bytes = info[index].TotalFreeBytes;
             const size_t used = totals[index] > free_bytes ? totals[index] - free_bytes : 0u;
             const unsigned tenths = (unsigned)((uint64_t)free_bytes * 1000u / totals[index]);
-            printf("%-12s %10zu %10zu %10zu %5u.%u%%\n", pools[index].Name,
+            memory_line("%-12s %10zu %10zu %10zu %5u.%u%%\n", pools[index].Name,
                 free_bytes, used, totals[index], tenths / 10u, tenths % 10u);
         }
     }

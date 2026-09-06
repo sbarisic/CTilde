@@ -1,0 +1,9 @@
+namespace System.Ssh;
+
+internal static class SshSubsystemFactory
+{
+    internal static ISshSubsystem Create(string name, string root)
+    {
+        return null;
+    }
+}

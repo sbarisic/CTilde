@@ -1005,6 +1005,8 @@ internal sealed partial class CEmitter
             var name = NameMangler.Array(array.ElementType!);
             writer.WriteLine($"struct {name} {{ ct_object Object; int32_t Length; {CTypeName(array.ElementType!)} Data[CT_FLEXIBLE_ARRAY]; }};");
             writer.WriteLine($"static {name}* ct_new_{name}(int32_t length, const char* file, int line) {{ if (length < 0) ct_raise_runtime_fault(CT_FAULT_OVERFLOW, \"CTA0001\", file, line); size_t size = ct_flexible_allocation_size((size_t)length, sizeof({CTypeName(array.ElementType!)}), offsetof({name}, Data), sizeof({name}), file, line); {name}* value = ({name}*)ct_alloc(size, file, line); ct_init_object(value, &{ArrayDescriptorName(array.ElementType!)}); value->Length = length; return value; }}");
+            if (array.ElementType == CType.Byte)
+                writer.WriteLine($"static {name}* ct_memory_try_allocate_bytes(int32_t length) {{ if (length < 0 || (size_t)length > SIZE_MAX - offsetof({name}, Data)) return NULL; size_t size = offsetof({name}, Data) + (size_t)length; if (size < sizeof({name})) size = sizeof({name}); {name}* value = ({name}*)ct_try_alloc(size, \"<try-allocate-bytes>\", 0); if (value == NULL) return NULL; ct_init_object(value, &{ArrayDescriptorName(array.ElementType!)}); value->Length = length; return value; }}");
         }
         if (_arrayTypes.Count > 0)
             writer.WriteLine();
@@ -1014,19 +1016,22 @@ internal sealed partial class CEmitter
     {
         if (IsManagedModule)
         {
-            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_core_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v4); if (value == NULL) ct_core_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
+            writer.WriteLine("static void* ct_try_alloc(size_t size, const char* file, int line) { (void)file; (void)line; void* value = ct_core_api->Allocate(size == 0u ? 1u : size, &ct_managed_module_v4); if (value != NULL) (void)memset(value, 0, size == 0u ? 1u : size); return value; }");
+            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_try_alloc(size, file, line); if (value == NULL) ct_core_api->RuntimeFault(\"CTM0001\", file, (int32_t)line); return value; }");
             writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_core_api->Free(value); }");
             return;
         }
         if (IsFreestanding || IsEspIdf && HasRuntimeImplementation(RuntimeImplementationRole.Allocate))
         {
-            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) {");
+            writer.WriteLine("static void* ct_try_alloc(size_t size, const char* file, int line) {");
+            writer.WriteLine("    (void)file; (void)line;");
             writer.WriteLine("    size_t payload = size == 0u ? 1u : size;");
             writer.WriteLine("    void* value = ct_runtime_allocate_bridge(payload);");
-            writer.WriteLine("    if (value == NULL) ct_fail(\"CTM0001\", file, line);");
+            writer.WriteLine("    if (value == NULL) return NULL;");
             writer.WriteLine(IsFreestanding ? "    (void)ct_memset(value, 0, payload);" : "    (void)memset(value, 0, payload);");
             writer.WriteLine("    return value;");
             writer.WriteLine("}");
+            writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_try_alloc(size, file, line); if (value == NULL) ct_fail(\"CTM0001\", file, line); return value; }");
             writer.WriteLine("static void ct_dealloc(void* value) { if (value != NULL) ct_runtime_free_bridge(value); }");
             return;
         }
@@ -1063,28 +1068,30 @@ internal sealed partial class CEmitter
             writer.WriteLine("static void ct_debug_registry_release(void) { ct_atomic_store_release(&ct_debug_registry_lock, 0u); }");
             writer.WriteLine("static void ct_debug_native_free(ct_debug_allocation* allocation) { free(allocation); }");
         }
-        writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) {");
+        writer.WriteLine("static void* ct_try_alloc(size_t size, const char* file, int line) {");
+        writer.WriteLine("    (void)file; (void)line;");
         writer.WriteLine("#if defined(CTILDE_CONFORMANCE)");
-        writer.WriteLine("    if (ct_test_allocation_failure_countdown == 0) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line);");
+        writer.WriteLine("    if (ct_test_allocation_failure_countdown == 0) return NULL;");
         writer.WriteLine("    if (ct_test_allocation_failure_countdown > 0) --ct_test_allocation_failure_countdown;");
         writer.WriteLine("#endif");
         if (EmitDebugObjects)
         {
             writer.WriteLine("    size_t payload = size == 0u ? 1u : size;");
-            writer.WriteLine($"    size_t guard = {(EmitDebugGuards ? "sizeof(uint32_t)" : "0u")}; if (payload > SIZE_MAX - sizeof(ct_debug_allocation) - guard) ct_fail(\"CTM0001\", file, line);");
+            writer.WriteLine($"    size_t guard = {(EmitDebugGuards ? "sizeof(uint32_t)" : "0u")}; if (payload > SIZE_MAX - sizeof(ct_debug_allocation) - guard) return NULL;");
             writer.WriteLine("    ct_debug_allocation* allocation = (ct_debug_allocation*)calloc(1u, sizeof(ct_debug_allocation) + payload + guard); void* value = allocation == NULL ? NULL : (void*)(allocation + 1);");
             writer.WriteLine("    if (value != NULL) { allocation->Size = payload; allocation->File = file; allocation->Line = (int32_t)line; ct_atomic_store_relaxed(&allocation->LastSite, UINT32_MAX); ct_debug_registry_acquire(); allocation->Next = ct_debug_live_head; if (ct_debug_live_head != NULL) ct_debug_live_head->Previous = allocation; ct_debug_live_head = allocation; ct_debug_registry_release(); (void)ct_atomic_fetch_add_relaxed(&ct_debug_live_count, 1u); (void)ct_atomic_fetch_add_relaxed(&ct_debug_allocation_count, 1u); }");
             if (EmitDebugGuards)
                 writer.WriteLine("    if (value != NULL) { uint32_t canary = UINT32_C(0xC71DE14D); (void)memcpy((uint8_t*)value + payload, &canary, sizeof(canary)); }");
-            writer.WriteLine("    if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); }");
+            writer.WriteLine("    if (value == NULL) return NULL;");
         }
         else
-            writer.WriteLine("    void* value = calloc(1u, size == 0u ? 1u : size); if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); }");
+            writer.WriteLine("    void* value = calloc(1u, size == 0u ? 1u : size); if (value == NULL) return NULL;");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_live_allocations, 1u);");
         writer.WriteLine("    (void)ct_atomic_fetch_add_relaxed(&ct_memory_total_allocations, 1u);");
         writer.WriteLine("#endif");
         writer.WriteLine("    return value; }");
+        writer.WriteLine("static void* ct_alloc(size_t size, const char* file, int line) { void* value = ct_try_alloc(size, file, line); if (value == NULL) { if (ct_runtime_faults_ready && ct_thread_current() != NULL) ct_raise_runtime_fault(CT_FAULT_OUT_OF_MEMORY, \"CTM0001\", file, line); ct_fail(\"CTM0001\", file, line); } return value; }");
         writer.WriteLine("static void ct_dealloc(void* value) { if (value == NULL) return;");
         writer.WriteLine("#if defined(CT_MEMORY_DIAGNOSTICS)");
         writer.WriteLine("    if (ct_atomic_fetch_sub_release(&ct_memory_live_allocations, 1u) == 0u) ct_fail(\"CTM0003\", \"<runtime>\", 0);");

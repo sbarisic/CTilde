@@ -13,12 +13,27 @@ internal sealed class SshChannelState
     internal uint RemoteMaximumPacket;
     internal Process Process;
     internal bool HasPty;
-    internal uint Columns;
-    internal uint Rows;
+    internal uint Columns = 80u;
+    internal uint Rows = 24u;
     internal bool Open;
     internal bool Started;
     internal bool SentClose;
-    internal SftpSession Sftp;
+    internal bool OutputEof;
+    internal bool ErrorEof;
+    internal byte[] InputQueue;
+    internal int InputHead;
+    internal int InputCount;
+    internal bool ReceivedEof;
+    internal ISshSubsystem Subsystem;
+
+    internal void UpdateTerminalSize(uint columns, uint rows)
+    {
+        // RFC 4254: zero dimensions do not replace the current size.
+        if (columns != 0u)
+            Columns = columns;
+        if (rows != 0u)
+            Rows = rows;
+    }
 }
 
 [Overlay("channels")]
@@ -40,6 +55,7 @@ internal sealed class SshConnection
     private long handshakeDeadline;
     private bool clientExtInfo;
     private bool strictKex;
+    private byte[] pumpBuffer;
 
     internal SshConnection(uint socket, SshServerOptions options, AuthorizedKeySet authorizedKeys,
         uint hostKey)
@@ -49,6 +65,7 @@ internal sealed class SshConnection
         this.hostKey = hostKey;
         transport = new SshTransport(socket, options.MaximumPacketBytes);
         channels = new SshChannelState[2];
+        pumpBuffer = new byte[2048];
     }
 
     internal bool Authenticated
@@ -661,7 +678,7 @@ internal sealed class SshConnection
         accepted.WriteByte((byte)91);
         accepted.WriteUInt32(remote);
         accepted.WriteUInt32((uint)slot);
-        accepted.WriteUInt32(65536u);
+        accepted.WriteUInt32(1024u);
         accepted.WriteUInt32(32768u);
         transport.SendPacket(accepted.ToArray());
     }
@@ -686,8 +703,11 @@ internal sealed class SshConnection
         SshPacketReader reader = new SshPacketReader(payload);
         reader.ReadByte();
         SshChannelState channel = Channel(reader.ReadUInt32());
-        channel.RemoteWindow += reader.ReadUInt32();
+        uint increment = reader.ReadUInt32();
         reader.RequireEnd();
+        if (increment > 4294967295u - channel.RemoteWindow)
+            throw new InvalidOperationException();
+        channel.RemoteWindow += increment;
     }
 
     private void ChannelData(byte[] payload)
@@ -695,20 +715,33 @@ internal sealed class SshConnection
         SshPacketReader reader = new SshPacketReader(payload);
         reader.ReadByte();
         SshChannelState channel = Channel(reader.ReadUInt32());
-        byte[] data = reader.ReadBytes();
+        int dataOffset;
+        int dataCount;
+        reader.ReadBytesRange(out dataOffset, out dataCount);
         reader.RequireEnd();
-        if (data.Length > 32768)
+        if (dataCount > 1024 || channel.ReceivedEof)
             throw new InvalidOperationException();
-        if (channel.Sftp != null)
-            channel.Sftp.Input(data);
+        if (channel.Subsystem != null)
+        {
+            byte[] data = new byte[dataCount];
+            for (int index = 0; index < dataCount; index++)
+                data[index] = payload[dataOffset + index];
+            channel.Subsystem.Input(data);
+            SendWindowAdjust(channel, (uint)dataCount);
+        }
         else if (channel.Process != null)
         {
-            int written;
-            channel.Process.StandardInput.TryWrite(data, 0, data.Length, 1000u, out written);
-            if (written != data.Length)
-                CloseChannel(channel, true);
+            if (dataCount > 1024 - channel.InputCount)
+                throw new InvalidOperationException();
+            if (channel.InputQueue == null)
+                channel.InputQueue = new byte[1024];
+            for (int index = 0; index < dataCount; index++)
+                channel.InputQueue[(channel.InputHead + channel.InputCount + index)
+                % 1024] = payload[dataOffset + index];
+            channel.InputCount += dataCount;
         }
-        SendWindowAdjust(channel, (uint)data.Length);
+        else
+            throw new InvalidOperationException();
     }
 
     private void ChannelEof(byte[] payload)
@@ -717,8 +750,30 @@ internal sealed class SshConnection
         reader.ReadByte();
         SshChannelState channel = Channel(reader.ReadUInt32());
         reader.RequireEnd();
-        if (channel.Process != null)
+        channel.ReceivedEof = true;
+        if (channel.Process != null && channel.InputCount == 0)
             channel.Process.StandardInput.Close();
+    }
+
+    [Overlay("channel-io")]
+    private void PumpInput(SshChannelState channel)
+    {
+        if (channel.InputCount == 0)
+            return;
+        int count = channel.InputCount;
+        if (count > 1024 - channel.InputHead)
+            count = 1024 - channel.InputHead;
+        int written;
+        channel.Process.StandardInput.TryWrite(channel.InputQueue, channel.InputHead,
+            count, 0u, out written);
+        if (written > 0)
+        {
+            channel.InputHead = (channel.InputHead + written) % 1024;
+            channel.InputCount -= written;
+            SendWindowAdjust(channel, (uint)written);
+            if (channel.ReceivedEof && channel.InputCount == 0)
+                channel.Process.StandardInput.Close();
+        }
     }
 
     private void ChannelClosed(byte[] payload)
@@ -747,22 +802,19 @@ internal sealed class SshConnection
             reader.ReadUInt32();
             reader.ReadBytes();
             reader.RequireEnd();
-            success = columns > 0u && rows > 0u;
-            if (success)
-            {
-                channel.HasPty = true;
-                channel.Columns = columns;
-                channel.Rows = rows;
-            }
+            success = true;
+            channel.HasPty = true;
+            channel.UpdateTerminalSize(columns, rows);
         }
-        else if (type == "window-change" && channel.Process != null)
+        else if (type == "window-change" && channel.Process != null && channel.HasPty)
         {
             uint columns = reader.ReadUInt32();
             uint rows = reader.ReadUInt32();
             reader.ReadUInt32();
             reader.ReadUInt32();
             reader.RequireEnd();
-            SendResize(channel, rows, columns);
+            channel.UpdateTerminalSize(columns, rows);
+            SendResize(channel, channel.Rows, channel.Columns);
             success = true;
         }
         else if (type == "shell" && !channel.Started)
@@ -782,9 +834,9 @@ internal sealed class SshConnection
         {
             string subsystem = reader.ReadString();
             reader.RequireEnd();
-            if (subsystem == "sftp")
+            channel.Subsystem = SshSubsystemFactory.Create(subsystem, options.SftpRoot);
+            if (channel.Subsystem != null)
             {
-                channel.Sftp = new SftpSession(options.SftpRoot);
                 channel.Started = true;
                 success = true;
             }
@@ -820,6 +872,9 @@ internal sealed class SshConnection
         info.RedirectStandardInput = true;
         info.RedirectStandardOutput = true;
         info.RedirectStandardError = true;
+        info.StandardInputBufferBytes = 1024u;
+        info.StandardOutputBufferBytes = 1024u;
+        info.StandardErrorBufferBytes = 1024u;
         Process process = Process.Start(info);
         if (process.Id == 0u)
             throw new InvalidOperationException();
@@ -832,24 +887,29 @@ internal sealed class SshConnection
     [Overlay("channel-io")]
     private void PumpChannels()
     {
-        byte[] buffer = new byte[4096];
+        byte[] buffer = pumpBuffer;
         for (int index = 0; index < channels.Length; index++)
         {
             SshChannelState channel = channels[index];
             if (channel == null)
                 continue;
-            if (channel.Sftp != null)
+            if (channel.Subsystem != null)
             {
-                byte[] output = channel.Sftp.Output();
+                byte[] output = channel.Subsystem.Output();
                 if (output != null)
                     SendChannelData(channel, output, false);
                 continue;
             }
             if (channel.Process == null)
                 continue;
-            PumpReader(channel, channel.Process.StandardOutput, buffer, false);
-            PumpReader(channel, channel.Process.StandardError, buffer, true);
-            if (channel.Process.HasExited)
+            PumpInput(channel);
+            if (!channel.OutputEof)
+                channel.OutputEof = PumpReader(channel, channel.Process.StandardOutput,
+                buffer, false);
+            if (!channel.ErrorEof)
+                channel.ErrorEof = PumpReader(channel, channel.Process.StandardError,
+                buffer, true);
+            if (channel.Process.HasExited && channel.OutputEof && channel.ErrorEof)
             {
                 int code = channel.Process.ExitCode;
                 SendExitStatus(channel, code);
@@ -859,33 +919,38 @@ internal sealed class SshConnection
     }
 
     [Overlay("channel-io")]
-    private void PumpReader(SshChannelState channel, ProcessPipeReader reader, byte[] buffer,
+    private bool PumpReader(SshChannelState channel, ProcessPipeReader reader, byte[] buffer,
         bool error)
     {
-        if (reader == null || channel.RemoteWindow == 0u)
-            return;
-        int maximum = (int)channel.RemoteWindow;
-        if (maximum > buffer.Length)
-            maximum = buffer.Length;
+        if (reader == null)
+            return true;
+        int maximum = buffer.Length;
+        if (channel.RemoteWindow < (uint)maximum)
+            maximum = (int)channel.RemoteWindow;
         if (maximum > (int)channel.RemoteMaximumPacket)
             maximum = (int)channel.RemoteMaximumPacket;
         int read;
         bool eof;
-        if (reader.TryRead(buffer, 0, maximum, 0u, out read, out eof) && read > 0)
-        {
-            byte[] data = new byte[read];
-            for (int index = 0; index < read; index++)
-                data[index] = buffer[index];
-            SendChannelData(channel, data, error);
-        }
+        if (!reader.TryRead(buffer, 0, maximum, 0u, out read, out eof))
+            return false;
+        if (read > 0)
+            SendChannelRange(channel, buffer, 0, read, error);
+        return eof;
     }
 
     [Overlay("channel-io")]
     private void SendChannelData(SshChannelState channel, byte[] data, bool error)
     {
-        if ((uint)data.Length > channel.RemoteWindow)
-            return;
-        SshPacketWriter writer = new SshPacketWriter(data.Length + 16);
+        SendChannelRange(channel, data, 0, data.Length, error);
+    }
+
+    [Overlay("channel-io")]
+    private void SendChannelRange(SshChannelState channel, byte[] data, int offset,
+        int count, bool error)
+    {
+        if ((uint)count > channel.RemoteWindow)
+            throw new InvalidOperationException();
+        SshPacketWriter writer = new SshPacketWriter(count + 16);
         if (error)
         {
             writer.WriteByte((byte)95);
@@ -897,9 +962,9 @@ internal sealed class SshConnection
             writer.WriteByte((byte)94);
             writer.WriteUInt32(channel.RemoteId);
         }
-        writer.WriteBytes(data);
+        writer.WriteBytes(data, offset, count);
         transport.SendPacket(writer.ToArray());
-        channel.RemoteWindow -= (uint)data.Length;
+        channel.RemoteWindow -= (uint)count;
     }
 
     private void SendWindowAdjust(SshChannelState channel, uint count)
@@ -922,7 +987,7 @@ internal sealed class SshConnection
 
     private void SendExitStatus(SshChannelState channel, int code)
     {
-        SshPacketWriter status = new SshPacketWriter(13);
+        SshPacketWriter status = new SshPacketWriter(25);
         status.WriteByte((byte)98);
         status.WriteUInt32(channel.RemoteId);
         status.WriteString("exit-status");
@@ -936,8 +1001,8 @@ internal sealed class SshConnection
         if (channel == null || !channel.Open)
             return;
         channel.Open = false;
-        if (channel.Sftp != null)
-            channel.Sftp.Close();
+        if (channel.Subsystem != null)
+            channel.Subsystem.Close();
         if (channel.Process != null)
         {
             channel.Process.StandardInput.Close();
@@ -951,7 +1016,7 @@ internal sealed class SshConnection
         }
         try
         {
-            if (!channel.SentClose)
+            if (!channel.SentClose && transport.Socket != 0u)
             {
                 SshPacketWriter eof = new SshPacketWriter(5);
                 eof.WriteByte((byte)96);
@@ -1098,9 +1163,8 @@ public sealed class SshServer
         try
         {
             SshConnection active = (SshConnection)connection;
-            uint extraClient;
-            if (SshNative.Accept(listener, 0u, out extraClient) == 0)
-                SshNative.Close(extraClient);
+            // Leave a reconnect in the bounded listen backlog until this
+            // connection closes. Its final packets may still need dispatch.
             if (!active.Poll(timeoutMilliseconds))
                 Disconnect();
             else

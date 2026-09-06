@@ -8,7 +8,9 @@
     "Configuration.ct",
     "Server.ct",
     "Subsystem.ct",
-    "Subsystem.None.ct"
+    "Subsystem.Sftp.ct",
+    "Sftp.ct",
+    "SftpFramer.ct"
   ],
   "espIdf": {
     "artifact": "managed-module"

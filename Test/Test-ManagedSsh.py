@@ -12,9 +12,9 @@ import time
 import uuid
 
 
-def run_owned(command, timeout):
+def run_owned(command, timeout, input_data=None):
     started = time.monotonic()
-    process = subprocess.Popen(command, stdin=subprocess.DEVNULL,
+    process = subprocess.Popen(command, stdin=subprocess.PIPE if input_data is not None else subprocess.DEVNULL,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                start_new_session=os.name != 'nt')
     job = None
@@ -35,7 +35,7 @@ def run_owned(command, timeout):
             raise ctypes.WinError(ctypes.get_last_error())
     timed_out = False
     try:
-        stdout, stderr = process.communicate(timeout=timeout)
+        stdout, stderr = process.communicate(input=input_data, timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
         if job:
@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--identity', required=True, type=Path)
     parser.add_argument('--known-hosts', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--sftp', action='store_true', help='Also test the optional SFTP development profile')
     parser.add_argument('--bytes', type=int, default=4096)
     parser.add_argument('--chunk', type=int, default=1024)
     parser.add_argument('--timeout', type=int, default=60)
@@ -87,36 +88,57 @@ def main():
     target = args.user + '@' + args.host
     report = dict(schemaVersion=1, passed=False, host=args.host, fileBytes=args.bytes,
                   chunkBytes=args.chunk,
-                  limitations=['No interactive, maximum-packet, rekey, or stack acceptance.'])
+                  limitations=['No resize, cancellation, stalled-client, maximum-packet, rekey, throughput, or stack acceptance.'])
     command = run_owned(['ssh', '-v', '-T', '-p', str(args.port), *common, target, 'free'], args.timeout)
     report['command'] = command
     report['authenticated'] = 'Authenticated to ' in command['stderr']
     report['commandPassed'] = command['exitCode'] == 0 and 'free heap:' in command['stdout']
-    upload = args.output.resolve() / 'upload.bin'
-    download = args.output.resolve() / ('download-' + uuid.uuid4().hex + '.bin')
-    upload.write_bytes(bytes((index * 31 + 7) % 256 for index in range(args.bytes)))
-    remote = '/draft051-' + uuid.uuid4().hex + '.bin'
-    batch = args.output.resolve() / 'transfer.batch'
-    batch.write_text('\n'.join([
-        'put ' + batch_quote(upload) + ' ' + batch_quote(remote),
-        'get ' + batch_quote(remote) + ' ' + batch_quote(download),
-        'rm ' + batch_quote(remote), 'bye', '']), encoding='utf-8')
-    sftp_command = ['sftp', '-P', str(args.port), *common, '-B', str(args.chunk), '-R', '1']
-    transfer = run_owned([*sftp_command, '-b', str(batch), target], args.timeout)
-    report['transfer'] = transfer
-    report['uploadSha256'] = hashlib.sha256(upload.read_bytes()).hexdigest()
-    report['downloadSha256'] = hashlib.sha256(download.read_bytes()).hexdigest() if download.exists() else None
-    report['transferPassed'] = transfer['exitCode'] == 0 and report['uploadSha256'] == report['downloadSha256']
-    if transfer['exitCode'] != 0:
-        cleanup = args.output.resolve() / 'cleanup.batch'
-        cleanup.write_text('-rm ' + batch_quote(remote) + '\nbye\n', encoding='utf-8')
-        report['cleanup'] = run_owned([*sftp_command, '-b', str(cleanup), target], args.timeout)
-        report['possiblyRemainingRemoteFile'] = remote if report['cleanup']['exitCode'] != 0 else None
-    report['passed'] = report['authenticated'] and report['commandPassed'] and report['transferPassed']
+    report['interactivePassed'] = False
+    report['interactiveEofPassed'] = False
+    report['reconnectPassed'] = False
+    if report['commandPassed']:
+        interactive = run_owned(['ssh', '-tt', '-p', str(args.port), *common, target], args.timeout,
+                                b'free\r\x04')
+        report['interactive'] = interactive
+        report['interactivePassed'] = interactive['exitCode'] == 0 and 'free heap:' in interactive['stdout']
+        interactive_eof = run_owned(['ssh', '-tt', '-p', str(args.port), *common, target], args.timeout,
+                                    b'free\r')
+        report['interactiveEof'] = interactive_eof
+        report['interactiveEofPassed'] = interactive_eof['exitCode'] == 0 and 'free heap:' in interactive_eof['stdout']
+        reconnect = run_owned(['ssh', '-T', '-p', str(args.port), *common, target, 'free'], args.timeout)
+        report['reconnect'] = reconnect
+        report['reconnectPassed'] = reconnect['exitCode'] == 0 and 'free heap:' in reconnect['stdout']
+    report['sftpRequested'] = args.sftp
+    if args.sftp:
+        upload = args.output.resolve() / 'upload.bin'
+        download = args.output.resolve() / ('download-' + uuid.uuid4().hex + '.bin')
+        upload.write_bytes(bytes((index * 31 + 7) % 256 for index in range(args.bytes)))
+        remote = '/draft051-' + uuid.uuid4().hex + '.bin'
+        batch = args.output.resolve() / 'transfer.batch'
+        batch.write_text('\n'.join([
+            'put ' + batch_quote(upload) + ' ' + batch_quote(remote),
+            'get ' + batch_quote(remote) + ' ' + batch_quote(download),
+            'rm ' + batch_quote(remote), 'bye', '']), encoding='utf-8')
+        sftp_command = ['sftp', '-P', str(args.port), *common, '-B', str(args.chunk), '-R', '1']
+        transfer = run_owned([*sftp_command, '-b', str(batch), target], args.timeout)
+        report['transfer'] = transfer
+        report['uploadSha256'] = hashlib.sha256(upload.read_bytes()).hexdigest()
+        report['downloadSha256'] = hashlib.sha256(download.read_bytes()).hexdigest() if download.exists() else None
+        report['transferPassed'] = transfer['exitCode'] == 0 and report['uploadSha256'] == report['downloadSha256']
+        if transfer['exitCode'] != 0:
+            cleanup = args.output.resolve() / 'cleanup.batch'
+            cleanup.write_text('-rm ' + batch_quote(remote) + '\nbye\n', encoding='utf-8')
+            report['cleanup'] = run_owned([*sftp_command, '-b', str(cleanup), target], args.timeout)
+            report['possiblyRemainingRemoteFile'] = remote if report['cleanup']['exitCode'] != 0 else None
+    report['passed'] = report['authenticated'] and report['commandPassed'] and report['interactivePassed'] and report['interactiveEofPassed'] and report['reconnectPassed'] and (not args.sftp or report['transferPassed'])
     (args.output / 'ssh-acceptance.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print('Public-key authentication:', report['authenticated'])
     print('Remote command:', report['commandPassed'])
-    print('SFTP hash comparison:', report['transferPassed'])
+    print('Interactive command:', report['interactivePassed'])
+    print('Interactive input EOF:', report['interactiveEofPassed'])
+    print('Reconnect:', report['reconnectPassed'])
+    if args.sftp:
+        print('SFTP hash comparison:', report['transferPassed'])
     return 0 if report['passed'] else 1
 
 

@@ -115,6 +115,9 @@ internal static partial class ConformanceTests
                         ProcessStartInfo info = new ProcessStartInfo("child.ctm", new string[0]);
                         info.RedirectStandardInput = true;
                         info.RedirectStandardOutput = true;
+                        info.StandardInputBufferBytes = 512u;
+                        info.StandardOutputBufferBytes = 1024u;
+                        info.StandardErrorBufferBytes = 2048u;
                         Process child = Process.Start(info);
                         byte[] data = new byte[8];
                         int written;
@@ -132,10 +135,10 @@ internal static partial class ConformanceTests
             var bundle = compilation.EmitCBundle();
             Assert(bundle.Success, string.Join(Environment.NewLine, bundle.Diagnostics));
             var generated = string.Join('\n', bundle.Artifacts.Select(artifact => artifact.Content));
-            Assert(generated.Contains("ct_managed_process_start_redirected", StringComparison.Ordinal) &&
+            Assert(generated.Contains("ct_managed_process_start_redirected_sized", StringComparison.Ordinal) &&
                 generated.Contains("ct_managed_process_pipe_write", StringComparison.Ordinal) &&
                 generated.Contains("ct_managed_process_pipe_close", StringComparison.Ordinal),
-                "Redirected process streams did not lower through Runtime ABI 22.");
+                "Redirected process streams did not lower through the sized process-start adapter.");
         });
     }
 }

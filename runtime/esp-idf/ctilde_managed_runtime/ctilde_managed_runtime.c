@@ -301,7 +301,6 @@ typedef struct ct_pending_termination {
 } ct_pending_termination;
 
 typedef struct ct_module_instance {
-    ct_module *Module;
     void *State;
     bool Initialized;
 } ct_module_instance;
@@ -350,6 +349,8 @@ struct ct_module {
     const ct_managed_module_descriptor_v4 *Descriptor;
     ct_module *Dependencies[CT_MAX_DEPENDENCIES];
     uint32_t DependencyCount;
+    ct_module **ProcessTopology;
+    uint32_t ProcessTopologyCount;
     uint32_t References;
     uint32_t ActiveCalls;
     uint32_t LiveAllocations;
@@ -420,10 +421,11 @@ struct ct_process {
     size_t HeapLimit;
     ct_allocation *Allocations;
     portMUX_TYPE AllocationLock;
-    ct_module_instance Instances[CT_MAX_PROCESS_MODULES];
+    ct_module_instance *Instances;
     uint32_t InstanceCount;
-    char *Arguments[CT_MAX_ARGUMENTS];
-    size_t ArgumentLengths[CT_MAX_ARGUMENTS];
+    char **Arguments;
+    void *ArgumentStorage;
+    size_t *ArgumentLengths;
     int32_t ArgumentCount;
     char *CurrentDirectory;
     ct_process_file *Files;
@@ -433,8 +435,6 @@ struct ct_process {
     ct_execution_context Context;
     StaticSemaphore_t CompletionStorage;
     SemaphoreHandle_t Completion;
-    StaticQueue_t MailboxStorage;
-    uint8_t MailboxBuffer[CT_MAILBOX_DEPTH * sizeof(ct_message *)];
     QueueHandle_t Mailbox;
     ct_console_endpoint *Streams[3];
     bool OwnsParentStream[3];
@@ -486,7 +486,7 @@ static ct_process *current_process(void)
     return context == NULL ? NULL : context->Process;
 }
 
-static ct_console_endpoint *create_pipe_endpoint(ct_process *owner, uint8_t stream)
+static ct_console_endpoint *create_pipe_endpoint(ct_process *owner, uint8_t stream, size_t capacity)
 {
     ct_console_endpoint *endpoint = calloc(1u, sizeof(*endpoint));
     if (endpoint == NULL) return NULL;
@@ -495,7 +495,7 @@ static ct_console_endpoint *create_pipe_endpoint(ct_process *owner, uint8_t stre
     endpoint->Children = 1u;
     endpoint->Owner = owner;
     endpoint->OwnerStream = stream;
-    endpoint->Buffer = xStreamBufferCreate(CT_PROCESS_PIPE_BYTES, 1u);
+    endpoint->Buffer = xStreamBufferCreate(capacity, 1u);
     endpoint->WriteLock = xSemaphoreCreateMutex();
     if (endpoint->Buffer == NULL || endpoint->WriteLock == NULL) {
         if (endpoint->Buffer != NULL) vStreamBufferDelete(endpoint->Buffer);
@@ -1590,6 +1590,8 @@ static void release_module(ct_module *module)
     xSemaphoreGive(s_registry);
     if (handle != NULL && dlclose(handle) != 0) abort();
     close_overlay_directory(module);
+    free(module->ProcessTopology);
+    module->ProcessTopology = NULL;
     xSemaphoreTake(s_registry, portMAX_DELAY);
     if (!module->Used || !module->Stopping || module->References != 0) {
         xSemaphoreGive(s_registry);
@@ -1611,19 +1613,55 @@ static ct_process *process_from_handle(uintptr_t handle)
     return NULL;
 }
 
-static int add_instance_graph(ct_process *process, ct_module *module)
+static int append_process_topology(ct_module *module, ct_module **modules, uint32_t *count)
 {
-    for (uint32_t index = 0; index < process->InstanceCount; ++index) if (process->Instances[index].Module == module) return 0;
-    for (uint32_t index = 0; index < module->DependencyCount; ++index) {
-        const int result = add_instance_graph(process, module->Dependencies[index]);
+    for (uint32_t index = 0u; index < *count; ++index)
+        if (modules[index] == module) return 0;
+    for (uint32_t index = 0u; index < module->DependencyCount; ++index) {
+        const int result = append_process_topology(module->Dependencies[index], modules, count);
         if (result != 0) return result;
     }
-    if (process->InstanceCount >= CT_MAX_PROCESS_MODULES) return -ENOSPC;
-    ct_module_instance *instance = &process->Instances[process->InstanceCount++];
-    instance->Module = module;
-    const size_t size = module->Descriptor->StaticStateSize == 0 ? 1 : module->Descriptor->StaticStateSize;
-    instance->State = calloc(1, size);
-    return instance->State == NULL ? -ENOMEM : 0;
+    if (*count == CT_MAX_PROCESS_MODULES) return -ENOSPC;
+    modules[(*count)++] = module;
+    return 0;
+}
+
+static int add_instance_graph(ct_process *process, ct_module *module)
+{
+    /* Root ownership already pins every dependency generation. */
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    if (module->ProcessTopology == NULL) {
+        ct_module *modules[CT_MAX_PROCESS_MODULES];
+        uint32_t count = 0u;
+        const int result = append_process_topology(module, modules, &count);
+        if (result != 0) { xSemaphoreGive(s_registry); return result; }
+        module->ProcessTopology = malloc(count * sizeof(*modules));
+        if (module->ProcessTopology == NULL) { xSemaphoreGive(s_registry); return -ENOMEM; }
+        memcpy(module->ProcessTopology, modules, count * sizeof(*modules));
+        module->ProcessTopologyCount = count;
+    }
+    xSemaphoreGive(s_registry);
+    process->Instances = calloc(module->ProcessTopologyCount, sizeof(*process->Instances));
+    if (process->Instances == NULL) return -ENOMEM;
+    for (uint32_t index = 0u; index < module->ProcessTopologyCount; ++index) {
+        ct_module *entry = module->ProcessTopology[index];
+        ct_module_instance *instance = &process->Instances[process->InstanceCount++];
+        const size_t size = entry->Descriptor->StaticStateSize == 0u ? 1u : entry->Descriptor->StaticStateSize;
+        instance->State = calloc(1u, size);
+        if (instance->State == NULL) return -ENOMEM;
+    }
+    return 0;
+}
+
+static void report_process_allocation_failure(const ct_process *process, const char *stage, size_t requested)
+{
+    ESP_LOGE(TAG, "CT_ALLOC_FAILURE {\"schemaVersion\":1,\"stage\":\"%s\","
+        "\"processId\":%u,\"requestedBytes\":%zu,\"quotaUsedBytes\":%zu,\"quotaLimitBytes\":%zu,"
+        "\"freeBytes\":%zu,\"largestBlockBytes\":%zu}", stage,
+        process == NULL ? 0u : (unsigned)process->Id, requested,
+        process == NULL ? 0u : __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE),
+        process == NULL ? 0u : process->HeapLimit,
+        heap_caps_get_free_size(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
 }
 
 static void *api_allocate(size_t size, const ct_managed_module_descriptor_v4 *descriptor)
@@ -1634,7 +1672,7 @@ static void *api_allocate(size_t size, const ct_managed_module_descriptor_v4 *de
     ct_process *process = context->Process;
     ct_module *module = NULL;
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
-        if (process->Instances[index].Module->Descriptor == descriptor) { module = process->Instances[index].Module; break; }
+        if (process->Root->ProcessTopology[index]->Descriptor == descriptor) { module = process->Root->ProcessTopology[index]; break; }
     }
     portENTER_CRITICAL(&process->AllocationLock);
     const size_t heap_bytes = __atomic_load_n(&process->HeapBytes, __ATOMIC_ACQUIRE);
@@ -1643,6 +1681,7 @@ static void *api_allocate(size_t size, const ct_managed_module_descriptor_v4 *de
         (process->HeapLimit != 0 && (heap_bytes > process->HeapLimit ||
             size > process->HeapLimit - heap_bytes))) {
         portEXIT_CRITICAL(&process->AllocationLock);
+        report_process_allocation_failure(process, "managed", size);
         end_runtime_operation(context);
         return NULL;
     }
@@ -1653,6 +1692,7 @@ static void *api_allocate(size_t size, const ct_managed_module_descriptor_v4 *de
         portENTER_CRITICAL(&process->AllocationLock);
         (void)__atomic_sub_fetch(&process->HeapBytes, size, __ATOMIC_ACQ_REL);
         portEXIT_CRITICAL(&process->AllocationLock);
+        report_process_allocation_failure(process, "managed", size);
         end_runtime_operation(context);
         return NULL;
     }
@@ -1765,7 +1805,7 @@ static void *api_current_module_state(const ct_managed_module_descriptor_v4 *des
     ct_process *process = current_process();
     if (process == NULL) return NULL;
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
-        if (process->Instances[index].Module->Descriptor == descriptor) return process->Instances[index].State;
+        if (process->Root->ProcessTopology[index]->Descriptor == descriptor) return process->Instances[index].State;
     }
     return NULL;
 }
@@ -1986,7 +2026,7 @@ static uintptr_t api_enter_managed_call(const ct_managed_module_descriptor_v4 *d
     if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_module *target = NULL;
     for (uint32_t index = 0; index < context->Process->InstanceCount; ++index) {
-        ct_module *module = context->Process->Instances[index].Module;
+        ct_module *module = context->Process->Root->ProcessTopology[index];
         if (module->Descriptor == descriptor) {
             target = module;
             break;
@@ -2184,7 +2224,7 @@ static bool process_uses_overlay_prefix(const ct_process *process, const char *p
 {
     if (process == NULL || prefix == NULL || !process->HasOverlays) return false;
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
-        const ct_module *module = process->Instances[index].Module;
+        const ct_module *module = process->Root->ProcessTopology[index];
         if (module != NULL && module->OverlayCount != 0u && path_has_prefix(module->Path, prefix)) return true;
     }
     return false;
@@ -2681,10 +2721,14 @@ static const ct_filesystem_api_v1 s_filesystem_api = {
     sizeof(ct_filesystem_api_v1), 1u, capability_file_open, capability_file_read,
     capability_file_write, capability_file_seek, capability_file_length, capability_file_flush, capability_file_close
 };
+static uintptr_t capability_process_start(const ct_process_utf8_v1 *path,
+    const ct_process_utf8_v1 *arguments, size_t argument_count,
+    const ct_process_start_options_v1 *options);
+
 static const ct_process_api_v1 s_process_api = {
     sizeof(ct_process_api_v1), 1u, ct_managed_process_current, ct_managed_process_id,
     ct_managed_process_cancellation_requested, capability_process_delay, capability_process_clock,
-    ctilde_managed_process_terminate_descendants
+    ctilde_managed_process_terminate_descendants, capability_process_start
 };
 static const ct_core_api_v1 s_core_api = {
     sizeof(ct_core_api_v1), 1u, api_allocate, api_free, api_free, api_runtime_fault
@@ -2796,10 +2840,11 @@ static void cleanup_process(ct_process *process, bool forced)
     if (!forced) {
         for (uint32_t index = process->InstanceCount; index > 0; --index) {
             ct_module_instance *instance = &process->Instances[index - 1];
+            ct_module *instance_module = process->Root->ProcessTopology[index - 1];
             if (instance->Initialized) {
-                if (!enter_context_call(&cleanup_context, instance->Module)) abort();
-                instance->Module->Descriptor->Finalize();
-                if (!leave_context_call(&cleanup_context, instance->Module)) abort();
+                if (!enter_context_call(&cleanup_context, instance_module)) abort();
+                instance_module->Descriptor->Finalize();
+                if (!leave_context_call(&cleanup_context, instance_module)) abort();
                 instance->Initialized = false;
             }
         }
@@ -2821,10 +2866,15 @@ static void cleanup_process(ct_process *process, bool forced)
         free(process->Instances[index - 1].State);
         process->Instances[index - 1].State = NULL;
     }
+    free(process->Instances);
+    process->Instances = NULL;
     process->InstanceCount = 0;
     ct_message *message = NULL;
-    while (xQueueReceive(process->Mailbox, &message, 0) == pdTRUE) free(message);
-    for (int32_t index = 0; index < process->ArgumentCount; ++index) { free(process->Arguments[index]); process->Arguments[index] = NULL; }
+    while (process->Mailbox != NULL && xQueueReceive(process->Mailbox, &message, 0) == pdTRUE) free(message);
+    free(process->ArgumentStorage);
+    process->ArgumentStorage = NULL;
+    process->Arguments = NULL;
+    process->ArgumentLengths = NULL;
     process->ArgumentCount = 0;
     xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_module *root = process->Root;
@@ -2890,9 +2940,10 @@ static void process_main(void *argument)
     __atomic_store_n(&s_published_process_ids[process_index], process->Id, __ATOMIC_RELEASE);
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
         ct_module_instance *instance = &process->Instances[index];
-        if (!enter_context_call(&process->Context, instance->Module)) api_runtime_fault("CTT0018", "<module-initialize>", 0);
-        instance->Module->Descriptor->Initialize();
-        if (!leave_context_call(&process->Context, instance->Module)) abort();
+        ct_module *instance_module = process->Root->ProcessTopology[index];
+        if (!enter_context_call(&process->Context, instance_module)) api_runtime_fault("CTT0018", "<module-initialize>", 0);
+        instance_module->Descriptor->Initialize();
+        if (!leave_context_call(&process->Context, instance_module)) abort();
         instance->Initialized = true;
     }
     process->Context.Module = process->Root;
@@ -2948,10 +2999,9 @@ static ct_process *allocate_process(void)
             process->CurrentDirectory[0] = '/';
             process->CurrentDirectory[1] = '\0';
             process->Completion = xSemaphoreCreateBinaryStatic(&process->CompletionStorage);
-            process->Mailbox = xQueueCreateStatic(CT_MAILBOX_DEPTH, sizeof(ct_message *), process->MailboxBuffer, &process->MailboxStorage);
-            if (process->Completion == NULL || process->Mailbox == NULL) {
+            if (process->Completion == NULL) {
                 if (process->Completion != NULL) vSemaphoreDelete(process->Completion);
-                if (process->Mailbox != NULL) vQueueDelete(process->Mailbox);
+                free(process->CurrentDirectory);
                 (void)memset(process, 0, sizeof(*process));
                 return NULL;
             }
@@ -2973,7 +3023,7 @@ static uintptr_t fail_unpublished_process_start(ct_process *process)
     __atomic_store_n(&process->State, CT_PROCESS_FAILED, __ATOMIC_RELEASE);
     cleanup_process(process, true);
     vSemaphoreDelete(process->Completion);
-    vQueueDelete(process->Mailbox);
+    if (process->Mailbox != NULL) vQueueDelete(process->Mailbox);
     close_process_parent_streams(process);
     xSemaphoreTake(s_registry, portMAX_DELAY);
     (void)memset(process, 0, sizeof(*process));
@@ -2987,14 +3037,49 @@ static void reserved_process_main(void *argument)
     process_main(argument);
 }
 
-static uintptr_t start_process_core(const void *path_value, const void *arguments_value,
-    bool redirect_input, bool redirect_output, bool redirect_error)
+static int copy_process_arguments(ct_process *process, const ct_process_utf8_v1 *arguments,
+    size_t argument_count, size_t argument_bytes)
 {
-    const ct_managed_string *path = (const ct_managed_string *)path_value;
-    const ct_managed_array *arguments = (const ct_managed_array *)arguments_value;
-    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || path == NULL || arguments == NULL || path->Length <= 0 || arguments->Length < 0 || arguments->Length > CT_MAX_ARGUMENTS) return 0;
+    const size_t argument_header_bytes = argument_count * (sizeof(char *) + sizeof(size_t));
+    process->ArgumentStorage = argument_bytes == 0u ? NULL : malloc(argument_bytes);
+    if (argument_bytes != 0u && process->ArgumentStorage == NULL) return -ENOMEM;
+    process->ArgumentCount = (int32_t)argument_count;
+    process->Arguments = process->ArgumentStorage;
+    process->ArgumentLengths = argument_count == 0u ? NULL :
+        (size_t *)(void *)(process->Arguments + argument_count);
+    size_t argument_offset = argument_header_bytes;
+    for (size_t index = 0; index < argument_count; ++index) {
+        const size_t length = arguments[index].Length;
+        process->Arguments[index] = (char *)process->ArgumentStorage + argument_offset;
+        argument_offset += length + 1u;
+        (void)memcpy(process->Arguments[index], arguments[index].Data, length);
+        process->Arguments[index][length] = '\0';
+        process->ArgumentLengths[index] = length;
+    }
+    return 0;
+}
+
+static uintptr_t start_process_core(const ct_process_utf8_v1 *path,
+    const ct_process_utf8_v1 *arguments, size_t argument_count,
+    const ct_process_start_options_v1 *options)
+{
+    if (!__atomic_load_n(&s_initialized, __ATOMIC_ACQUIRE) || path == NULL ||
+        path->Data == NULL || path->Length == 0u || argument_count > CT_MAX_ARGUMENTS ||
+        (arguments == NULL && argument_count != 0u) || options == NULL ||
+        options->Size < sizeof(*options) || (options->Flags & ~7u) != 0u) return 0;
+    const uint32_t capacities[3] = { options->InputBufferBytes, options->OutputBufferBytes,
+        options->ErrorBufferBytes };
+    for (size_t stream = 0u; stream < 3u; ++stream)
+        if ((options->Flags & (1u << stream)) != 0u &&
+            (capacities[stream] < 256u || capacities[stream] > CT_PROCESS_PIPE_BYTES)) return 0;
+    const size_t argument_header_bytes = argument_count * (sizeof(char *) + sizeof(size_t));
+    size_t argument_bytes = argument_header_bytes;
+    for (size_t index = 0u; index < argument_count; ++index) {
+        if (arguments[index].Data == NULL || arguments[index].Length >= SIZE_MAX - argument_bytes) return 0;
+        argument_bytes += arguments[index].Length + 1u;
+    }
     char path_buffer[CT_MODULE_PATH_MAX];
-    if (resolve_module_path_bytes(path->Data, (size_t)path->Length, path_buffer) != 0) return 0;
+    if (resolve_module_path_bytes(path->Data, path->Length, path_buffer) != 0) return 0;
     const char *overlay_chain[1] = { NULL };
     size_t reserved_overlay_bytes = 0u;
     uint32_t reserved_stack_bytes = 0u;
@@ -3008,11 +3093,12 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     xSemaphoreTake(s_registry, portMAX_DELAY);
     ct_process *process = allocate_process();
     xSemaphoreGive(s_registry);
-    if (process == NULL) return 0;
+    if (process == NULL) { report_process_allocation_failure(NULL, "process_state", sizeof(ct_process)); return 0; }
     ctilde_managed_memory_sample("process_state_created", process->Id);
     process->TaskCount = 1u;
     if (xTaskCreate(reserved_process_main, reserved_task_name, reserved_stack_bytes, process,
             tskIDLE_PRIORITY + 1, &process->MainTask) != pdPASS) {
+        report_process_allocation_failure(process, "stack", reserved_stack_bytes);
         ESP_LOGE(TAG, "Managed task reservation failed: stack=%u, free=%u, largest=%u",
             (unsigned)reserved_stack_bytes, (unsigned)heap_caps_get_free_size(MALLOC_CAP_8BIT),
             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
@@ -3024,6 +3110,7 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
         reserved_overlay = heap_caps_aligned_alloc(16u, reserved_overlay_bytes,
             MALLOC_CAP_EXEC | MALLOC_CAP_32BIT);
         if (reserved_overlay == NULL) {
+            report_process_allocation_failure(process, "overlay", reserved_overlay_bytes);
             ESP_LOGE(TAG, "Managed process overlay reservation failed: requested=%u, executable-free=%u, "
                 "executable-largest=%u", (unsigned)reserved_overlay_bytes,
                 (unsigned)heap_caps_get_free_size(MALLOC_CAP_EXEC | MALLOC_CAP_32BIT),
@@ -3049,10 +3136,9 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     (void)snprintf(process->RootName, sizeof(process->RootName), "%s", module->Name);
     process->State = CT_PROCESS_STARTING;
     process->HeapLimit = (size_t)module->Descriptor->HeapLimitBytes;
-    const bool redirects[3] = { redirect_input, redirect_output, redirect_error };
     for (size_t stream = 0; stream < 3u; ++stream) {
-        if (redirects[stream]) {
-            process->Streams[stream] = create_pipe_endpoint(process, (uint8_t)stream);
+        if ((options->Flags & (1u << stream)) != 0u) {
+            process->Streams[stream] = create_pipe_endpoint(process, (uint8_t)stream, capacities[stream]);
             process->OwnsParentStream[stream] = true;
         } else if (parent != NULL && parent->Streams[stream] != NULL) {
             process->Streams[stream] = retain_endpoint(parent->Streams[stream]);
@@ -3060,6 +3146,7 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
             process->Streams[stream] = retain_endpoint(&s_uart_streams[stream]);
         }
         if (process->Streams[stream] == NULL) {
+            report_process_allocation_failure(process, "pipe", capacities[stream]);
             ESP_LOGE(TAG, "Managed process %u stream %u allocation failed", (unsigned)process->Id,
                 (unsigned)stream);
             return fail_unpublished_process_start(process);
@@ -3067,25 +3154,19 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     }
     if (__atomic_load_n(&process->Streams[0]->ForegroundProcess, __ATOMIC_ACQUIRE) == 0u)
         __atomic_store_n(&process->Streams[0]->ForegroundProcess, process->Id, __ATOMIC_RELEASE);
-    process->ArgumentCount = arguments->Length;
-    ct_managed_string *const *values = (ct_managed_string *const *)(const void *)arguments->Data;
-    for (int32_t index = 0; index < arguments->Length; ++index) {
-        if (values[index] == NULL || values[index]->Length < 0) return fail_unpublished_process_start(process);
-        const size_t length = (size_t)values[index]->Length;
-        process->Arguments[index] = (char *)malloc(length + 1);
-        if (process->Arguments[index] == NULL) return fail_unpublished_process_start(process);
-        (void)memcpy(process->Arguments[index], values[index]->Data, length);
-        process->Arguments[index][length] = '\0';
-        process->ArgumentLengths[index] = length;
+    if (copy_process_arguments(process, arguments, argument_count, argument_bytes) != 0) {
+        report_process_allocation_failure(process, "arguments", argument_bytes);
+        return fail_unpublished_process_start(process);
     }
     const int instance_result = add_instance_graph(process, module);
     if (instance_result != 0) {
+        report_process_allocation_failure(process, "module_state", module->ProcessTopologyCount * sizeof(ct_module_instance));
         ESP_LOGE(TAG, "Managed process %u instance graph failed: %d", (unsigned)process->Id,
             instance_result);
         return fail_unpublished_process_start(process);
     }
     for (uint32_t index = 0; index < process->InstanceCount; ++index) {
-        ct_module *instance_module = process->Instances[index].Module;
+        ct_module *instance_module = process->Root->ProcessTopology[index];
         process->HasOverlays |= instance_module->Descriptor->HasOverlays != 0u;
         if (instance_module->MaximumOverlayBytes > process->OverlayWindowSize) {
             ESP_LOGE(TAG, "Managed process overlay graph changed after preflight: reserved=%u, required=%u",
@@ -3100,24 +3181,50 @@ static uintptr_t start_process_core(const void *path_value, const void *argument
     return (uintptr_t)process->Id;
 }
 
-uintptr_t ct_managed_process_start(const void *path_value, const void *arguments_value)
+static uintptr_t capability_process_start(const ct_process_utf8_v1 *path,
+    const ct_process_utf8_v1 *arguments, size_t argument_count,
+    const ct_process_start_options_v1 *options)
 {
     ct_execution_context *context = current_context();
     if (context != NULL && !begin_runtime_operation(context)) await_forced_task_deletion();
-    const uintptr_t result = start_process_core(path_value, arguments_value, false, false, false);
+    const uintptr_t result = start_process_core(path, arguments, argument_count, options);
     if (context != NULL) end_runtime_operation(context);
     return result;
 }
 
-uintptr_t ct_managed_process_start_redirected(const void *path_value, const void *arguments_value,
+uintptr_t ct_managed_process_start_redirected_sized(const void *path_value, const void *arguments_value,
+    bool redirect_input, bool redirect_output, bool redirect_error,
+    uint32_t input_bytes, uint32_t output_bytes, uint32_t error_bytes)
+{
+    const ct_managed_string *path = path_value;
+    const ct_managed_array *arguments = arguments_value;
+    if (path == NULL || path->Length <= 0 || arguments == NULL || arguments->Length < 0 ||
+        arguments->Length > CT_MAX_ARGUMENTS) return 0;
+    ct_process_utf8_v1 native_path = { path->Data, (size_t)path->Length };
+    ct_process_utf8_v1 native_arguments[CT_MAX_ARGUMENTS];
+    ct_managed_string *const *values = (ct_managed_string *const *)(const void *)arguments->Data;
+    for (int32_t index = 0; index < arguments->Length; ++index) {
+        if (values[index] == NULL || values[index]->Length < 0) return 0;
+        native_arguments[index] = (ct_process_utf8_v1){ values[index]->Data, (size_t)values[index]->Length };
+    }
+    const ct_process_start_options_v1 options = { sizeof(options),
+        (redirect_input ? 1u : 0u) | (redirect_output ? 2u : 0u) | (redirect_error ? 4u : 0u),
+        input_bytes, output_bytes, error_bytes };
+    return capability_process_start(&native_path, native_arguments, (size_t)arguments->Length, &options);
+}
+
+uintptr_t ct_managed_process_start(const void *path, const void *arguments)
+{
+    return ct_managed_process_start_redirected_sized(path, arguments, false, false, false,
+        CT_PROCESS_PIPE_BYTES, CT_PROCESS_PIPE_BYTES, CT_PROCESS_PIPE_BYTES);
+}
+
+uintptr_t ct_managed_process_start_redirected(const void *path, const void *arguments,
     bool redirect_input, bool redirect_output, bool redirect_error)
 {
-    ct_execution_context *context = current_context();
-    if (context != NULL && !begin_runtime_operation(context)) await_forced_task_deletion();
-    const uintptr_t result = start_process_core(path_value, arguments_value,
-        redirect_input, redirect_output, redirect_error);
-    if (context != NULL) end_runtime_operation(context);
-    return result;
+    return ct_managed_process_start_redirected_sized(path, arguments,
+        redirect_input, redirect_output, redirect_error,
+        CT_PROCESS_PIPE_BYTES, CT_PROCESS_PIPE_BYTES, CT_PROCESS_PIPE_BYTES);
 }
 
 uintptr_t ct_managed_process_try_open(uint32_t id)
@@ -3174,13 +3281,14 @@ bool ct_managed_process_pipe_read(uintptr_t handle, int32_t stream, void *buffer
         esp_timer_get_time() + (int64_t)timeout_milliseconds * INT64_C(1000);
     do {
         const size_t received = xStreamBufferReceive(endpoint->Buffer, buffer->Data + offset,
-            (size_t)count, count == 0 ? 0 : pdMS_TO_TICKS(10));
+            (size_t)count, count == 0 || timeout_milliseconds == 0u ? 0 : pdMS_TO_TICKS(10));
         if (received != 0u) { *bytes_read = (int32_t)received; return true; }
-        if (__atomic_load_n(&endpoint->ChildrenClosed, __ATOMIC_ACQUIRE)) {
+        if (__atomic_load_n(&endpoint->ChildrenClosed, __ATOMIC_ACQUIRE) &&
+            xStreamBufferBytesAvailable(endpoint->Buffer) == 0u) {
             *eof = true;
             return true;
         }
-        if (timeout_milliseconds == 0u) break;
+        if (count == 0 || timeout_milliseconds == 0u) break;
     } while (esp_timer_get_time() < deadline && !ct_managed_process_cancellation_requested());
     return false;
 }
@@ -3310,7 +3418,9 @@ static void advance_pending_terminations(void)
             }
             (void)__atomic_fetch_or(&process->RuntimeGate, CT_RUNTIME_GATE_STOPPED, __ATOMIC_ACQ_REL);
             ct_message *wake = NULL;
-            (void)xQueueSend(process->Mailbox, &wake, 0);
+            xSemaphoreTake(s_registry, portMAX_DELAY);
+            if (process->Mailbox != NULL) (void)xQueueSend(process->Mailbox, &wake, 0);
+            xSemaphoreGive(s_registry);
             pending->DrainingOperations = true;
         }
         if ((__atomic_load_n(&process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_COUNT) != 0)
@@ -3385,6 +3495,17 @@ void ct_managed_process_terminate(uintptr_t handle, uint32_t grace_milliseconds)
     }
 }
 
+/* Caller holds s_registry. Cleanup marks Cleaned before draining the queue. */
+static QueueHandle_t ensure_process_mailbox(ct_process *process)
+{
+    if (__atomic_load_n(&process->Cleaned, __ATOMIC_ACQUIRE) ||
+        (__atomic_load_n(&process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_STOPPED) != 0u)
+        return NULL;
+    if (process->Mailbox == NULL)
+        process->Mailbox = xQueueCreate(CT_MAILBOX_DEPTH, sizeof(ct_message *));
+    return process->Mailbox;
+}
+
 static bool send_process_message(uintptr_t handle, const void *payload_value, ct_execution_context *caller)
 {
     ct_process *process = process_from_handle(handle);
@@ -3398,12 +3519,13 @@ static bool send_process_message(uintptr_t handle, const void *payload_value, ct
     if (length != 0) (void)memcpy(message->Data, payload->Data, length);
     for (;;) {
         xSemaphoreTake(s_registry, portMAX_DELAY);
-        const bool accepting = !__atomic_load_n(&process->Cleaned, __ATOMIC_ACQUIRE) &&
+        const bool accepting = process->Id == (uint32_t)handle && !__atomic_load_n(&process->Cleaned, __ATOMIC_ACQUIRE) &&
             __atomic_load_n(&process->State, __ATOMIC_ACQUIRE) < CT_PROCESS_EXITED;
-        const BaseType_t sent = accepting ? xQueueSend(process->Mailbox, &message, 0) : pdFALSE;
+        QueueHandle_t mailbox = accepting ? ensure_process_mailbox(process) : NULL;
+        const BaseType_t sent = mailbox != NULL ? xQueueSend(mailbox, &message, 0) : pdFALSE;
         xSemaphoreGive(s_registry);
         if (sent == pdTRUE) return true;
-        if (!accepting) { free(message); return true; }
+        if (!accepting || mailbox == NULL) { free(message); return true; }
         if (caller != NULL &&
             (__atomic_load_n(&caller->Process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_STOPPED) != 0) {
             free(message);
@@ -3432,8 +3554,22 @@ bool ct_managed_process_try_receive(uintptr_t handle, uint32_t timeout_milliseco
     if (process == NULL || context == NULL || context->Process != process || context->Module == NULL || payload == NULL) return false;
     if (!begin_runtime_operation(context)) await_forced_task_deletion();
     ct_message *message = NULL;
-    const TickType_t ticks = timeout_milliseconds == UINT32_MAX ? portMAX_DELAY : pdMS_TO_TICKS(timeout_milliseconds);
-    if (xQueueReceive(process->Mailbox, &message, ticks) != pdTRUE) {
+    xSemaphoreTake(s_registry, portMAX_DELAY);
+    QueueHandle_t mailbox = ensure_process_mailbox(process);
+    xSemaphoreGive(s_registry);
+    const int64_t deadline = timeout_milliseconds == UINT32_MAX ? INT64_MAX :
+        esp_timer_get_time() + (int64_t)timeout_milliseconds * INT64_C(1000);
+    bool received = false;
+    while (mailbox != NULL) {
+        if (xQueueReceive(mailbox, &message, timeout_milliseconds == 0u ? 0u : 1u) == pdTRUE) {
+            received = true;
+            break;
+        }
+        if (timeout_milliseconds == 0u || esp_timer_get_time() >= deadline ||
+            (__atomic_load_n(&process->RuntimeGate, __ATOMIC_ACQUIRE) & CT_RUNTIME_GATE_STOPPED) != 0u)
+            break;
+    }
+    if (!received) {
         end_runtime_operation(context);
         return false;
     }
@@ -3682,6 +3818,7 @@ static const struct esp_elfsym s_symbols[] = {
     ESP_ELFSYM_EXPORT(ctilde_managed_thread_payload_free),
     ESP_ELFSYM_EXPORT(ctilde_managed_thread_exit),
     ESP_ELFSYM_EXPORT(ct_managed_process_start), ESP_ELFSYM_EXPORT(ct_managed_process_start_redirected),
+    ESP_ELFSYM_EXPORT(ct_managed_process_start_redirected_sized),
     ESP_ELFSYM_EXPORT(ct_managed_process_try_open), ESP_ELFSYM_EXPORT(ct_managed_process_current),
     ESP_ELFSYM_EXPORT(ct_managed_process_id),
     ESP_ELFSYM_EXPORT(ct_managed_process_get_state), ESP_ELFSYM_EXPORT(ct_managed_process_has_exited),
@@ -3694,7 +3831,7 @@ static const struct esp_elfsym s_symbols[] = {
     ESP_ELFSYM_EXPORT(ct_managed_process_pipe_read), ESP_ELFSYM_EXPORT(ct_managed_process_pipe_write),
     ESP_ELFSYM_EXPORT(ct_managed_process_pipe_close),
     ESP_ELFSYM_EXPORT(memcpy), ESP_ELFSYM_EXPORT(memset), ESP_ELFSYM_EXPORT(memcmp), ESP_ELFSYM_EXPORT(memchr),
-    ESP_ELFSYM_EXPORT(strlen), ESP_ELFSYM_EXPORT(strnlen), ESP_ELFSYM_EXPORT(snprintf), ESP_ELFSYM_EXPORT(fprintf), ESP_ELFSYM_EXPORT(fwrite),
+    ESP_ELFSYM_EXPORT(strlen), ESP_ELFSYM_EXPORT(strnlen), ESP_ELFSYM_EXPORT(snprintf), ESP_ELFSYM_EXPORT(vsnprintf), ESP_ELFSYM_EXPORT(fprintf), ESP_ELFSYM_EXPORT(fwrite),
     ESP_ELFSYM_EXPORT(fputc), ESP_ELFSYM_EXPORT(fputs), ESP_ELFSYM_EXPORT(fflush),
     ESP_ELFSYM_EXPORT(setjmp), ESP_ELFSYM_EXPORT(longjmp), ESP_ELFSYM_EXPORT(esp_err_to_name), ESP_ELFSYM_EXPORT(__getreent),
     ESP_ELFSYM_EXPORT(__extendsfdf2), ESP_ELFSYM_EXPORT(__udivdi3), ESP_ELFSYM_EXPORT(__umoddi3),

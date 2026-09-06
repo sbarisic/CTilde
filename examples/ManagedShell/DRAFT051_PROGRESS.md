@@ -2,6 +2,12 @@
 
 Draft 0.51 is not complete. The current compiler uses Runtime ABI 23 and Managed Module ABI 4. Rebuild firmware and modules together. Flash-mapped loading and safe spans are not available yet.
 
+## Practical SSH checkpoint
+
+The current implementation follows the [frozen SSH and XIP sequence](SSH_XIP_PROGRESS.md), using `cda18458` as its baseline.
+SFTP is now an optional source profile. General spans are deferred. Production XIP remains unavailable.
+The results below describe the earlier ABI foundation and remain historical.
+
 ## ABI 23 work in progress
 
 The comparison baseline is commit `37e4349870eab9fadef636798f72cae663b4a6b1`. Saved artifacts and reports are in `artifacts/draft051-abi23`.

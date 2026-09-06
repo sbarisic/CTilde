@@ -8,6 +8,363 @@ internal static partial class ConformanceTests
 {
     public static void RegisterPart45(ConformanceSuite suite)
     {
+        suite.Run("draft 0.51 SSH receive allocation shortage closes cleanly", () =>
+        {
+            var transport = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "SystemSsh", "Transport.ct"));
+            var start = transport.IndexOf("    internal byte[] ReceivePacket(", StringComparison.Ordinal);
+            var end = transport.IndexOf("    internal void SendPacket(", start, StringComparison.Ordinal);
+            var source = "using System; using System.Runtime; namespace System.Ssh;\n" + """
+                internal sealed class Receiver {
+                    private byte[] receiveHeader = new byte[4];
+                    private byte[] receiveTag = new byte[16];
+                    private byte[] receiveNonce = new byte[12];
+                    private byte[] inboundIv = new byte[12];
+                    private Exception receiveAllocationFailure = new InvalidOperationException();
+                    private int maximumPacket = 35000;
+                    private bool encrypted;
+                    private ulong inboundInvocation;
+                    private uint inboundCipher;
+                    private uint inboundSequence;
+                    internal bool Closed;
+                    private void Close() { Closed = true; }
+                    private void ReceiveExact(byte[] data, int offset, int count, uint timeout) {
+                        if (data == receiveHeader) data[3] = (byte)12;
+                        else data[0] = (byte)4;
+                    }
+                    private static void WriteNonce(byte[] basis, ulong invocation, byte[] result) {}
+                """ + transport[start..end] + "}\n" + """
+                internal static class SshWire {
+                    internal static uint ReadUInt32(byte[] data, int offset) { return (uint)data[3]; }
+                }
+                internal static class SshNative {
+                    internal static void Require(int result) {}
+                    internal static int AesOpen(uint cipher, byte[] nonce, byte[] header,
+                        byte[] body, byte[] tag, byte[] output) { return 0; }
+                }
+                public static class Program {
+                    [EntryPoint]
+                    public static void Main() {
+                        Check(0); Check(1);
+                        Receiver receiver = new Receiver();
+                        byte[] packet = receiver.ReceivePacket(0u);
+                        if (receiver.Closed || packet.Length != 7) throw new InvalidOperationException();
+                        Console.WriteLine("SSH_RECEIVE_SHORTAGE_OK");
+                    }
+                    private static void Check(int successfulAllocations) {
+                        Receiver receiver = new Receiver();
+                        bool caught = false;
+                        Memory.TestFailAllocationAfter(successfulAllocations);
+                        try { receiver.ReceivePacket(0u); }
+                        catch (InvalidOperationException) { caught = true; }
+                        finally { Memory.TestFailAllocationAfter(-1); }
+                        if (!caught || !receiver.Closed) throw new InvalidOperationException();
+                    }
+                }
+                """;
+            var result = CompileAndRun(source, conformance: true, memoryDiagnostics: true);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SSH_RECEIVE_SHORTAGE_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 SSH borrowed field ranges", () =>
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "Examples", "ManagedShell", "SystemSsh");
+            var transport = File.ReadAllText(Path.Combine(directory, "Transport.ct"));
+            var start = transport.IndexOf("internal sealed class SshPacketReader", StringComparison.Ordinal);
+            var end = transport.IndexOf("internal sealed class SshPacketWriter", start, StringComparison.Ordinal);
+            var source = "using System; using System.Text; namespace System.Ssh;\n" + transport[start..end] + """
+                internal static class SshWire {
+                    internal static uint ReadUInt32(byte[] data, int offset) {
+                        return (uint)data[offset] << 24 | (uint)data[offset + 1] << 16 |
+                            (uint)data[offset + 2] << 8 | (uint)data[offset + 3];
+                    }
+                }
+                public static class Program {
+                    [EntryPoint]
+                    public static void Main() {
+                        byte[] packet = new byte[11];
+                        packet[3] = (byte)3; packet[4] = (byte)65; packet[5] = (byte)66; packet[6] = (byte)67;
+                        SshPacketReader reader = new SshPacketReader(packet);
+                        int offset; int count;
+                        System.Runtime.Memory.TestFailAllocationAfter(0);
+                        reader.ReadBytesRange(out offset, out count);
+                        System.Runtime.Memory.TestFailAllocationAfter(-1);
+                        if (offset != 4 || count != 3 || reader.Position != 7 || reader.Remaining != 4)
+                            throw new InvalidOperationException();
+                        reader.ReadBytesRange(out offset, out count);
+                        reader.RequireEnd();
+                        if (offset != 11 || count != 0) throw new InvalidOperationException();
+                        reader = new SshPacketReader(packet);
+                        if (reader.ReadString() != "ABC") throw new InvalidOperationException();
+                        packet[3] = (byte)12;
+                        bool rejected = false;
+                        try { new SshPacketReader(packet).ReadBytesRange(out offset, out count); }
+                        catch (InvalidOperationException) { rejected = true; }
+                        if (!rejected) throw new InvalidOperationException();
+                        Console.WriteLine("SSH_RANGES_OK");
+                    }
+                }
+                """;
+            var result = CompileAndRun(source, conformance: true, memoryDiagnostics: true);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SSH_RANGES_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 fallible byte arrays support guarded allocations", () =>
+        {
+            const string source = """
+                using System;
+                using System.Runtime;
+                public static class Program {
+                    [EntryPoint]
+                    public static void Main() {
+                        for (int index = 0; index < 40; index++) Use(index);
+                        Console.WriteLine("TRY_BYTES_GUARDS_OK");
+                    }
+                    private static void Use(int index) {
+                        byte[] bytes = Memory.TryAllocateBytes(128);
+                        if (bytes == null || bytes[127] != 0) throw new InvalidOperationException();
+                        bytes[127] = (byte)index;
+                    }
+                }
+                """;
+            var result = CompileAndRun(source, new CompilationOptions(
+                DebugInformation: DebugInformationMode.Instrumented, DebugMemory: DebugMemoryMode.Guarded));
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("TRY_BYTES_GUARDS_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 fallible byte arrays preserve allocation accounting", () =>
+        {
+            const string source = """
+                using System;
+                using System.Runtime;
+                public static class Program {
+                    [Extern("ct_memory_diagnostic_live_allocations")]
+                    public static uint LiveAllocations();
+                    [Extern("ct_memory_diagnostic_live_objects")]
+                    public static uint LiveObjects();
+                    [EntryPoint]
+                    public static void Main() {
+                        uint allocations = LiveAllocations();
+                        uint objects = LiveObjects();
+                        Run();
+                        if (LiveAllocations() != allocations || LiveObjects() != objects)
+                            throw new InvalidOperationException();
+                        Console.WriteLine("TRY_BYTES_OK");
+                    }
+                    private static void Run() {
+                        if (Memory.TryAllocateBytes(-1) != null) throw new InvalidOperationException();
+                        Memory.TestFailAllocationAfter(0);
+                        byte[] missing = Memory.TryAllocateBytes(35000);
+                        Memory.TestFailAllocationAfter(-1);
+                        if (missing != null) throw new InvalidOperationException();
+                        byte[] empty = Memory.TryAllocateBytes(0);
+                        if (empty == null || empty.Length != 0) throw new InvalidOperationException();
+                        byte[] bytes = Memory.TryAllocateBytes(128);
+                        if (bytes == null || bytes.Length != 128) throw new InvalidOperationException();
+                        for (int index = 0; index < bytes.Length; index++) {
+                            if (bytes[index] != 0) throw new InvalidOperationException();
+                            bytes[index] = (byte)index;
+                        }
+                        try {
+                            byte[] temporary = Memory.TryAllocateBytes(17);
+                            temporary[0] = (byte)7;
+                            throw new InvalidOperationException();
+                        } catch (InvalidOperationException) { }
+                    }
+                }
+                """;
+            var result = CompileAndRun(source, memoryDiagnostics: true, conformance: true);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("TRY_BYTES_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 shell distinguishes empty polls and EOF", () =>
+        {
+            var editor = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "Shell", "ShellEditor.ct"));
+            var start = editor.IndexOf("    private static int ReadInput()", StringComparison.Ordinal);
+            var end = editor.IndexOf("    private static bool ReadEscape(", start, StringComparison.Ordinal);
+            var source = "using System; public static class Program {\n" + editor[start..end] + """
+                [EntryPoint]
+                public static void Main() {
+                    if (ReadInput() != 'X' || ShellHost.Calls != 3 || ReadInput() != -1 || ShellHost.Calls != 4)
+                        throw new InvalidOperationException();
+                    Process.IsCancellationRequested = true;
+                    if (ReadInput() != -1 || ShellHost.Calls != 4) throw new InvalidOperationException();
+                    Console.WriteLine("SHELL_INPUT_EOF_OK");
+                }
+                }
+                internal static class Process { internal static bool IsCancellationRequested; }
+                internal static class ShellHost {
+                    internal static int Calls;
+                    internal static int ReadInput(out bool eof) {
+                        Calls++;
+                        eof = Calls == 4;
+                        if (Calls == 3) return 'X';
+                        return -1;
+                    }
+                }
+                """;
+            var result = CompileAndRun(source);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SHELL_INPUT_EOF_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 shell consumes complete CSI input", () =>
+        {
+            var editor = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "Shell", "ShellEditor.ct"));
+            var start = editor.IndexOf("    private static bool ReadEscape(", StringComparison.Ordinal);
+            var end = editor.IndexOf("    public string ReadLine(", start, StringComparison.Ordinal);
+            var source = "using System; public static class Program {\n" +
+                "private static int ReadInput() { return Console.Read(); }\n" + editor[start..end] + """
+                [EntryPoint]
+                public static void Main() {
+                    Check(false, 0); Check(false, 0); Check(false, 0);
+                    Check(true, 456); Check(true, 68);
+                    Console.WriteLine("SHELL_CSI_OK");
+                }
+                private static void Check(bool expected, int expectedCode) {
+                    if (Console.Read() != 27) throw new InvalidOperationException();
+                    int code;
+                    bool result = ReadEscape(out code);
+                    if (result != expected || code != expectedCode || Console.Read() != 'X')
+                        throw new InvalidOperationException();
+                }
+                }
+                """;
+            var result = CompileAndRun(source,
+                standardInput: "\u001b[8;24;80tX\u001b[?25lX\u001b[999999999999999999999999~X\u001b[200~X\u001b[1;5DX");
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SHELL_CSI_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 SSH zero terminal dimensions", () =>
+        {
+            var server = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,
+                "Examples", "ManagedShell", "SystemSsh", "Server.ct"));
+            var start = server.IndexOf("internal sealed class SshChannelState", StringComparison.Ordinal);
+            var end = server.IndexOf("[Overlay(\"channels\")]", start, StringComparison.Ordinal);
+            var source = "using System; using System.Diagnostics; namespace System.Ssh;\n" +
+                "internal interface ISshSubsystem {}\n" + server[start..end] + """
+                public static class Program {
+                    [EntryPoint]
+                    public static void Main() {
+                        SshChannelState channel = new SshChannelState();
+                        channel.UpdateTerminalSize(0u, 0u);
+                        Check(channel, 80u, 24u);
+                        channel.UpdateTerminalSize(120u, 40u);
+                        Check(channel, 120u, 40u);
+                        channel.UpdateTerminalSize(0u, 50u);
+                        Check(channel, 120u, 50u);
+                        channel.UpdateTerminalSize(90u, 0u);
+                        Check(channel, 90u, 50u);
+                        Console.WriteLine("SSH_TERMINAL_SIZE_OK");
+                    }
+                    private static void Check(SshChannelState channel, uint columns, uint rows) {
+                        if (channel.Columns != columns || channel.Rows != rows)
+                            throw new InvalidOperationException();
+                    }
+                }
+                """;
+            var result = CompileAndRun(source);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SSH_TERMINAL_SIZE_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 SSH exit-status packet", () =>
+        {
+            var directory = Path.Combine(AppContext.BaseDirectory, "Examples", "ManagedShell", "SystemSsh");
+            var transport = File.ReadAllText(Path.Combine(directory, "Transport.ct"));
+            var server = File.ReadAllText(Path.Combine(directory, "Server.ct"));
+            var protocol = File.ReadAllText(Path.Combine(directory, "Protocol.ct"));
+            var writerStart = transport.IndexOf("internal sealed class SshPacketWriter", StringComparison.Ordinal);
+            var writerEnd = transport.IndexOf("internal sealed class SshTransport", writerStart, StringComparison.Ordinal);
+            var statusStart = server.IndexOf("    private void SendExitStatus(", StringComparison.Ordinal);
+            var statusEnd = server.IndexOf("    private void CloseChannel(", statusStart, StringComparison.Ordinal);
+            var wireStart = protocol.IndexOf("    internal static uint ReadUInt32(", StringComparison.Ordinal);
+            var wireEnd = protocol.IndexOf("    internal static bool IsSupportedAlgorithm(", wireStart, StringComparison.Ordinal);
+            var requireStart = protocol.LastIndexOf("    private static void Require(", StringComparison.Ordinal);
+            var helpers = "using System; using System.Text; namespace System.Ssh;\n" +
+                transport[writerStart..writerEnd] + "internal static class SshWire {\n" +
+                protocol[wireStart..wireEnd] + protocol[requireStart..];
+            helpers = Regex.Replace(helpers, "\\[Overlay\\(\"[^\"]+\"\\)\\]", "");
+            var source = "using System; namespace System.Ssh;\n" + """
+                internal sealed class SshChannelState { internal uint RemoteId; }
+                internal sealed class CaptureTransport {
+                    internal byte[] Packet;
+                    internal void SendPacket(byte[] packet) { Packet = packet; }
+                }
+                internal sealed class Connection {
+                    private CaptureTransport transport = new CaptureTransport();
+                    internal byte[] Encode(int code) {
+                        SshChannelState channel = new SshChannelState();
+                        channel.RemoteId = 42u;
+                        SendExitStatus(channel, code);
+                        return transport.Packet;
+                    }
+                """ + server[statusStart..statusEnd] + "}\n" + """
+                public static class Program {
+                    [EntryPoint]
+                    public static void Main() {
+                        Check(0); Check(7); Check(-1);
+                        Console.WriteLine("SSH_EXIT_STATUS_OK");
+                    }
+                    private static void Check(int code) {
+                        byte[] packet = new Connection().Encode(code);
+                        if (packet.Length != 25 || packet[0] != 98 ||
+                            SshWire.ReadUInt32(packet, 1) != 42u ||
+                            SshWire.ReadUInt32(packet, 5) != 11u || packet[20] != 0 ||
+                            System.Text.Encoding.UTF8.GetString(packet, 9, 11) != "exit-status" ||
+                            SshWire.ReadUInt32(packet, 21) != (uint)code)
+                            throw new InvalidOperationException();
+                    }
+                }
+                """;
+            var result = CompileAndRun([SyntaxTree.ParseText(helpers, "Transport.ct"),
+                SyntaxTree.ParseText(source, "test.ct")], memoryDiagnostics: true);
+            Assert(result.ExitCode == 0 && result.StandardOutput.Contains("SSH_EXIT_STATUS_OK", StringComparison.Ordinal),
+                result.StandardOutput + result.StandardError);
+        });
+
+        suite.Run("draft 0.51 overlay packaging drains both tool streams", () =>
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            ManagedOverlayPackager.Run("dotnet",
+                [System.Reflection.Assembly.GetExecutingAssembly().Location, "--capture-child", "flood"], deadline.Token);
+        });
+
+        suite.Run("draft 0.51 overlay object manifest excludes stale profiles", () =>
+        {
+            var directory = Path.Combine(Path.GetTempPath(), "ctilde-object-manifest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(directory);
+            try
+            {
+                var current = Path.Combine(directory, "current.o");
+                var stale = Path.Combine(directory, "stale.o");
+                var manifest = Path.Combine(directory, "objects.txt");
+                File.WriteAllText(current, "current");
+                File.WriteAllText(stale, "stale");
+                File.WriteAllText(manifest, current + "\n");
+                Assert(ManagedOverlayPackager.ReadObjectManifest(manifest, directory).SequenceEqual([current]),
+                    "A stale profile object entered the overlay link.");
+                File.WriteAllText(manifest, current + "\n" + current + "\n");
+                bool rejected = false;
+                try { ManagedOverlayPackager.ReadObjectManifest(manifest, directory); }
+                catch (NativeBuildException) { rejected = true; }
+                Assert(rejected, "Duplicate link inputs were accepted.");
+                File.WriteAllText(manifest, Path.Combine(directory, "missing.o") + "\n");
+                rejected = false;
+                try { ManagedOverlayPackager.ReadObjectManifest(manifest, directory); }
+                catch (NativeBuildException) { rejected = true; }
+                Assert(rejected, "A missing link input was accepted.");
+            }
+            finally { Directory.Delete(directory, recursive: true); }
+        });
+
         suite.Run("draft 0.51 SFTP rooted relative paths", () =>
         {
             var protocol = File.ReadAllText(Path.Combine(AppContext.BaseDirectory,

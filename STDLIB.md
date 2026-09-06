@@ -413,11 +413,13 @@ Hosted and Cosmopolitan terminate through their process adapter. Freestanding di
 
 ## Runtime memory
 
-`System.Runtime.Memory` exposes two unsafe production interop operations:
+`System.Runtime.Memory` provides fallible byte-array allocation and two unsafe interop operations:
 
 ```csharp
 public static class Memory
 {
+    public static byte[] TryAllocateBytes(int length);
+
     [NoAlloc]
     public static unsafe void Retain(object value);
 
@@ -425,6 +427,8 @@ public static class Memory
     public static unsafe void Release(object value);
 }
 ```
+
+`TryAllocateBytes` returns a zeroed byte array. It returns `null` if the length is negative, the size cannot be represented, or allocation fails. A successful array uses normal ARC ownership, process quotas, and allocation diagnostics. This method does not change the failure behavior of `new`.
 
 `Retain` and `Release` manipulate an additional untracked ARC ownership count. `null` is a no-op. These methods require an unsafe method or block. Unbalanced calls can leak memory, create dangling references, or double-release an object. Normal C~ code does not need them.
 
@@ -646,3 +650,10 @@ The initial Cosmopolitan x64 audit has passed one portable managed-runtime APE o
 The checked library roadmap includes SIMD buffer operations and safe long-lived native-resource storage. Later work can add wall-clock calendars, culture-aware formatting, Unicode casing and normalization, and regular expressions. Unicode escape syntax remains language work rather than a standard-library helper. [TODO.md](TODO.md) contains the active list.
 
 Project binding manifests can add generated source-compatible ESP-IDF APIs alongside this handwritten surface. Their tracked C~ declarations use ordinary extern and ownership contracts, while project-private adapters consume the installed public headers, native constants, validated initializer macros, nested configuration fields, bounded fixed UTF-8 arrays, and selected output structures. Generated APIs are project declarations, not additions to the embedded standard library. `[NoAlloc]` describes only C~-heap behavior; a generated ESP-IDF call may allocate native memory. Long-lived owned-resource fields and retained callback lifetime rules remain deferred. Generated bindings do not infer `[InterruptSafe]`.
+
+### Redirected process buffer capacities
+
+`ProcessStartInfo` exposes `StandardInputBufferBytes`, `StandardOutputBufferBytes`, and `StandardErrorBufferBytes`.
+Each defaults to 8,192 bytes. Redirected streams accept capacities from 256 through 8,192 bytes.
+Startup ignores the capacity of a stream that is not redirected. Invalid redirected capacities reject startup.
+Pipe operations retain partial-transfer semantics. Callers must check the transferred byte count, including when `TryWrite` returns false.

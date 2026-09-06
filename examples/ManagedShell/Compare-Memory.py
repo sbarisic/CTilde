@@ -68,7 +68,7 @@ def compare(before, after):
                 accounting='Shared costs are counted once per loaded module. Do not sum all modules unless all are loaded.',
                 devicePeaks=None, netWorkloadRamReduction=None,
                 pending=['device allocation and native scratch peaks', 'simultaneously loaded graph',
-                         'startup and execution latency', 'authenticated SSH and SFTP'])
+                         'startup and execution latency', 'authenticated SSH commands and interactive sessions'])
 
 
 def main():

@@ -565,3 +565,12 @@ Class instances, arrays, dynamic strings, boxes, exception objects, and referenc
 Compiler-generated ownership operations use private inline retain/release fast paths. Retain performs the atomic compare/exchange directly. Release performs the release decrement directly and enters the attached thread's existing destruction worklist only when it removes the final reference. The public `ct_retain` and `ct_release` functions remain strict attachment-checked wrappers, including for null. Final release performs an acquire fence before pushing the object through `ReleaseNext`; a drain already in progress pushes newly dead objects onto that same worklist, so long destruction chains do not recurse on the C stack. Class drops cover the full base layout, array drops cover reference-bearing inline elements, and boxes and structures recursively drop nested references. String and array drops free only their single enclosing allocations. Matching generated retain helpers preserve nested structure ownership during by-value copies.
 
 Exception frames, pending actions, defer captures, and ownership cleanup records use automatic storage and do not call `ct_alloc`. Static fields own their values until process termination; static and empty strings are immortal. Reference cycles leak. `CT_MEMORY_DIAGNOSTICS` enables conformance-only live-object and live-allocation counters without adding a production API or cost.
+
+### Sized native process startup
+
+Runtime ABI 23 appends `Start` to `ct_process_api_v1`. Consumers must request a table large enough to contain this operation.
+`ct_process_start_options_v1` contains `Size`, `Flags`, `InputBufferBytes`, `OutputBufferBytes`, and `ErrorBufferBytes`.
+Flag bits 0, 1, and 2 select redirected stdin, stdout, and stderr. Other flag bits are invalid.
+Each redirected capacity must be 256 through 8,192 bytes. Unused capacities have no effect.
+Paths and arguments use `ct_process_utf8_v1` pointer/length ranges. The operation copies all required bytes before returning and retains no borrowed pointers.
+The operation returns a process handle, or zero if validation or startup fails. Existing start entry points retain their 8,192-byte pipe defaults.

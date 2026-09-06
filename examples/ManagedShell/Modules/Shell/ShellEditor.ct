@@ -82,26 +82,46 @@ internal sealed class ShellEditor
         return history[historyIndex];
     }
 
+    private static int ReadInput()
+    {
+        while (!Process.IsCancellationRequested)
+        {
+            bool eof;
+            int value = ShellHost.ReadInput(out eof);
+            if (value >= 0)
+                return value;
+            if (eof)
+                return -1;
+        }
+        return -1;
+    }
+
     private static bool ReadEscape(out int code)
     {
         code = 0;
-        int second = Console.Read();
+        int second = ReadInput();
         if (second != '[')
             return false;
-        int value = Console.Read();
+        int value = ReadInput();
+        int number = 0;
+        bool simpleNumber = true;
+        // Consume the complete CSI sequence, including resize notifications
+        // and unknown parameters. They must not become command text.
+        while (value >= 32 && value <= 63)
+        {
+            if (simpleNumber && value >= '0' && value <= '9' && number <= 1024)
+                number = number * 10 + value - '0';
+            else
+                simpleNumber = false;
+            value = ReadInput();
+        }
         if (value == 'A' || value == 'B' || value == 'C' || value == 'D' || value
             == 'H' || value == 'F')
         {
             code = value;
             return true;
         }
-        int number = 0;
-        while (value >= '0' && value <= '9')
-        {
-            number = number * 10 + value - '0';
-            value = Console.Read();
-        }
-        if (value != '~')
+        if (value != '~' || !simpleNumber || number > 1024)
             return false;
         code = 256 + number;
         return true;
@@ -117,9 +137,13 @@ internal sealed class ShellEditor
         Console.Write(prompt);
         while (!Process.IsCancellationRequested)
         {
-            int value = Console.Read();
+            int value = ReadInput();
             if (value < 0)
-                continue;
+            {
+                if (line.Length != 0)
+                    return line;
+                return null;
+            }
             if (value == 27)
             {
                 int code;

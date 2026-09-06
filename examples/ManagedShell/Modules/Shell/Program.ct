@@ -8,6 +8,9 @@ namespace Examples.ManagedShell;
 
 internal static class ShellHost
 {
+    [Extern("ct_shell_read_input")]
+    internal static int ReadInput(out bool eof);
+
     [Extern("ct_shell_process_count")]
     internal static uint ProcessCount();
 

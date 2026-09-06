@@ -1,0 +1,10 @@
+namespace System.Ssh;
+
+internal interface ISshSubsystem
+{
+    void Input(byte[] data);
+
+    byte[] Output();
+
+    void Close();
+}

@@ -174,7 +174,7 @@ test("public-key authentication signs the session identifier and request prefix"
 });
 
 test("session channels retain the bounded window and shared-shell routing contract", () => {
-  assert.match(server, /accepted\.WriteUInt32\(65536u\)/);
+  assert.match(server, /accepted\.WriteUInt32\(1024u\)/);
   assert.match(server, /state\.RemoteMaximumPacket > 32768u/);
   assert.match(server, /StartShell\(channel, "--ssh", ""\)/);
   assert.match(server, /StartShell\(channel, "--exec", command\)/);

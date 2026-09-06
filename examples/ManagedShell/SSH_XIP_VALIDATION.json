@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 2,
+  "releaseComplete": false,
+  "comparisonBaseline": "cda18458b9ea1d8572c200c3c2aa9608db1128a5",
+  "versions": {
+    "draft": "0.51",
+    "runtimeAbi": 23,
+    "managedModuleAbi": 4
+  },
+  "stage": "reduced-allocation RAM SSH",
+  "host": {
+    "fullFirmwareAnd13Modules": "passed",
+    "existingSizeBudgets": "passed",
+    "transitiveHeaderDependencies": "passed",
+    "pipeEofSanitizers": "passed",
+    "processStorageSanitizers": "passed",
+    "productionAllocatorConcurrentOperations": 64000,
+    "focusedDraft051Conformance": 14,
+    "sshJavascriptFixtures": 8,
+    "fast": "pending for this stage",
+    "compiledSshExitStatusPacket": "passed for zero, positive, and negative codes",
+    "nativeShellConsoleRouting": "passed",
+    "compiledSshZeroTerminalDimensions": "passed",
+    "focusedDraft051ConformanceNote": "Integrated run: 14 passed, 283 skipped, 297 registered.",
+    "borrowedFieldRanges": "passed with allocation failure injected",
+    "fallibleReceiveAllocation": "Host failure injection passed; hardware large-payload disconnect and subsequent login passed. SD allocation-log correlation pending.",
+    "fallibleReceiveEsp32Build": "passed; basic device retest passed"
+  },
+  "staticComparison": {
+    "firmwareRamDeltaBytes": -9216,
+    "systemSshLinkedRamDeltaBytes": -9068,
+    "netWorkloadRamReduction": null,
+    "measuredDevicePeaks": null,
+    "systemSshLinkedRamDeltaScope": "ram-fallible-receive snapshot; same 13 modules as the baseline.",
+    "shellLinkedRamDeltaBytes": 144,
+    "sshdLinkedRamDeltaBytes": 8,
+    "report": "artifacts/ssh-xip/fallible-static-comparison.json"
+  },
+  "regressions": {
+    "staleChannelConstructor": {
+      "beforeAllocationBytes": 56,
+      "afterAllocationBytes": 76,
+      "verification": "Xtensa object disassembly"
+    },
+    "zeroWindowEof": "Buffered output remains available until consumed; a zero-byte read detects EOF only when empty.",
+    "exitStatusWriter": {
+      "beforeCapacityBytes": 13,
+      "requiredAndAfterCapacityBytes": 25
+    },
+    "nativeFreeRouting": "Uses the generated process console bridge instead of libc stdout.",
+    "terminalDimensions": "Zero dimensions retain the current size, initially 80 columns and 24 rows.",
+    "rapidReconnect": "A new connection stays in the bounded listen backlog until the active connection finishes."
+  },
+  "device": {
+    "partitionLayoutChanged": false,
+    "preservedNonModuleFiles": 6,
+    "firmwareSha256": "eb6d801cef5e18fe0469b02e0539d064d32027cef933fbfb5174d0e44ab6c1e9",
+    "storageSha256": "4a423cdf275abcf303460617555a1fccc6f060c86f28255fc02493cece2609df",
+    "retest": "Fallible receive image passed basic SSH and eight extended checks. Full checkpoint remains incomplete.",
+    "headerFixedRun": {
+      "authenticated": true,
+      "childExitCode": 0,
+      "panicObserved": false,
+      "sshExitStatus": -1,
+      "outputDestination": "UART instead of SSH",
+      "listeningFreeHeapSampleBytes": 39512,
+      "childFreeHeapSampleBytes": 8784
+    },
+    "outputFixedRun": {
+      "authenticated": true,
+      "commandPassed": true,
+      "interactivePassed": false,
+      "reconnectPassed": true,
+      "interactiveFailure": "Immediate reconnect was rejected before the previous connection finished cleanup. An isolated attempt then failed PTY allocation."
+    },
+    "basicSsh": {
+      "command": true,
+      "interactive": true,
+      "inputEof": true,
+      "immediateReconnect": true,
+      "report": "artifacts/ssh-xip/ssh-fallible/ssh-acceptance.json"
+    },
+    "controls": {
+      "schemaVersion": 1,
+      "passed": true,
+      "checks": {
+        "resizeDuringInput": true,
+        "fragmentedCsi": true,
+        "promptCtrlC": true,
+        "rekey": true,
+        "uartWhileClientStalled": true,
+        "stalledClientAnd1024Window": true,
+        "nonzeroExitStatus": true,
+        "overflowDisconnectAndSubsequentLogin": true
+      },
+      "limitations": [
+        "Prompt Ctrl+C is not foreground-child cancellation acceptance.",
+        "No maximum-packet, separate-stderr, throughput, or stack acceptance."
+      ],
+      "overflowPayloadBytes": 32768,
+      "overflowLimitation": "Correlate with the production allocation-failure log; this does not prove maximum-packet success when memory is available.",
+      "report": "artifacts/ssh-xip/controls-fallible/report.json"
+    },
+    "stalledDisconnectReconnect": "passed",
+    "minimumFreeHeapSinceBootBytes": 2688,
+    "minimumFreeHeapNote": "Final since-boot counter after basic, control, and pressure runs; not an isolated workload peak.",
+    "repeatedBasicSessions": 9,
+    "workingImageSnapshot": "artifacts/ssh-xip/ram-ssh-working",
+    "reusableControlScript": "Test/Test-ManagedSshControls.py passed all seven control checks on the EOF-fixed image.",
+    "installedImageSnapshot": "artifacts/ssh-xip/ram-fallible-receive",
+    "basicRunMinimumFreeHeapSinceBootBytes": 5328,
+    "finalCleanup": {
+      "uartResponsive": true,
+      "freeHeapSampleBytes": 39220,
+      "sshdManagedPayloadBytes": 523,
+      "completedChildHeapBytes": 0,
+      "completedChildTasks": 0,
+      "loadedModules": [
+        "shell",
+        "sshd",
+        "system.ssh"
+      ],
+      "report": "artifacts/ssh-xip/fallible-final-uart.txt"
+    },
+    "serialPortReleased": true
+  },
+  "pending": [
+    "complete SSH functional checkpoint",
+    "foreground-child cancellation, separate stderr, partial resize writes, and maximum-packet success",
+    "SD allocation-failure log correlation for overflow pressure",
+    "small reusable RX/TX and fallible overflow",
+    "direct typed capabilities",
+    "production persistent XIP",
+    "cache and MMU capacity",
+    "buffer and stack measurements",
+    "final Fast validation",
+    "100 lifecycle cycles"
+  ],
+  "sftpAcceptance": "excluded",
+  "artifactDirectory": "artifacts/ssh-xip"
+}

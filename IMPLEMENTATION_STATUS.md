@@ -4,7 +4,7 @@ Last reviewed: 2026-09-06
 
 ## Current state
 
-The lower-RAM work for Draft 0.51 remains in progress. The compiler now uses Runtime ABI 23 and Managed Module ABI 4. Firmware and modules require a coordinated rebuild. The new capability registry and shared buffer helpers extend the existing memory accounting and runtime cleanup work. Production flash mapping and lifetime-checked spans are not implemented. Net RAM reduction and authenticated SSH/SFTP acceptance remain pending. See [progress and validation limits](examples/ManagedShell/DRAFT051_PROGRESS.md).
+The lower-RAM work for Draft 0.51 remains in progress. The compiler now uses Runtime ABI 23 and Managed Module ABI 4. Firmware and modules require a coordinated rebuild. The new capability registry and shared buffer helpers extend the existing memory accounting and runtime cleanup work. Production flash mapping and lifetime-checked spans are not implemented. RAM-loaded authenticated commands and interactive sessions pass focused device checks. Full SSH acceptance and net workload RAM measurements remain pending. The current default excludes SFTP. See the [practical SSH checkpoint](examples/ManagedShell/SSH_XIP_PROGRESS.md). See [progress and validation limits](examples/ManagedShell/DRAFT051_PROGRESS.md).
 
 C~ has one compiler path:
 

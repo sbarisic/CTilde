@@ -151,9 +151,10 @@ internal static class ProcessRuntime
     [Extern("ct_managed_process_start")]
     internal static nuint Start(string path, string[] args);
 
-    [Extern("ct_managed_process_start_redirected")]
+    [Extern("ct_managed_process_start_redirected_sized")]
     internal static nuint StartRedirected(string path, string[] args, bool redirectInput,
-        bool redirectOutput, bool redirectError);
+        bool redirectOutput, bool redirectError, uint inputBytes, uint outputBytes,
+        uint errorBytes);
 
     [Extern("ct_managed_process_try_open")]
     [NoAlloc]
@@ -243,6 +244,12 @@ public sealed class ProcessStartInfo
     public bool RedirectStandardInput;
     public bool RedirectStandardOutput;
     public bool RedirectStandardError;
+    /// <summary>Redirected stdin capacity in bytes, from 256 through 8192.</summary>
+    public uint StandardInputBufferBytes;
+    /// <summary>Redirected stdout capacity in bytes, from 256 through 8192.</summary>
+    public uint StandardOutputBufferBytes;
+    /// <summary>Redirected stderr capacity in bytes, from 256 through 8192.</summary>
+    public uint StandardErrorBufferBytes;
 
     public ProcessStartInfo(string fileName, string[] arguments)
     {
@@ -255,6 +262,9 @@ public sealed class ProcessStartInfo
         RedirectStandardInput = false;
         RedirectStandardOutput = false;
         RedirectStandardError = false;
+        StandardInputBufferBytes = 8192u;
+        StandardOutputBufferBytes = 8192u;
+        StandardErrorBufferBytes = 8192u;
     }
 }
 
@@ -346,7 +356,9 @@ public sealed class Process
         if (startInfo == null)
             throw new ArgumentNullException();
         nuint value = ProcessRuntime.StartRedirected(startInfo.FileName, startInfo.Arguments,
-            startInfo.RedirectStandardInput, startInfo.RedirectStandardOutput, startInfo.RedirectStandardError);
+            startInfo.RedirectStandardInput, startInfo.RedirectStandardOutput, startInfo.RedirectStandardError,
+            startInfo.StandardInputBufferBytes, startInfo.StandardOutputBufferBytes,
+            startInfo.StandardErrorBufferBytes);
         Process process = new Process(value);
         if (startInfo.RedirectStandardInput)
             process.standardInput = new ProcessPipeWriter(value, 0);

@@ -41,7 +41,10 @@ internal static class ManagedOverlayPackager
             throw new NativeBuildException("Managed overlays can be packaged only for ESP32/Xtensa.");
 
         var objectDirectory = Path.Combine(request.EspIdfBuildDirectory, "so_objs");
-        var objectPaths = Directory.Exists(objectDirectory)
+        var objectManifest = Path.Combine(request.EspIdfBuildDirectory, "ctilde-so-objects.txt");
+        var objectPaths = File.Exists(objectManifest)
+            ? ReadObjectManifest(objectManifest, objectDirectory)
+            : Directory.Exists(objectDirectory)
             ? Directory.EnumerateFiles(objectDirectory, "*.o", SearchOption.TopDirectoryOnly).Order(StringComparer.Ordinal).ToArray()
             : [];
         if (objectPaths.Length == 0)
@@ -559,16 +562,44 @@ internal static class ManagedOverlayPackager
         Run(compiler, arguments);
     }
 
-    private static void Run(string executable, IEnumerable<string> arguments)
+    internal static string[] ReadObjectManifest(string manifest, string objectDirectory)
+    {
+        var root = Path.GetFullPath(objectDirectory);
+        var paths = File.ReadAllLines(manifest).Where(line => !string.IsNullOrWhiteSpace(line))
+            .Select(Path.GetFullPath).Order(StringComparer.Ordinal).ToArray();
+        foreach (var path in paths)
+            if (!string.Equals(Path.GetDirectoryName(path), root, OperatingSystem.IsWindows()
+                    ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal) ||
+                !path.EndsWith(".o", StringComparison.Ordinal) || !File.Exists(path))
+                throw new NativeBuildException($"Invalid managed-module object in '{manifest}': '{path}'.");
+        if (paths.Distinct(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal).Count() != paths.Length)
+            throw new NativeBuildException($"Duplicate managed-module object in '{manifest}'.");
+        return paths;
+    }
+
+    internal static void Run(string executable, IEnumerable<string> arguments, CancellationToken cancellationToken = default)
     {
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         using var process = Process.Start(start) ?? throw new NativeBuildException($"Could not start '{executable}'.");
-        var output = process.StandardOutput.ReadToEnd();
-        var error = process.StandardError.ReadToEnd();
-        process.WaitForExit();
+        var output = process.StandardOutput.ReadToEndAsync();
+        var error = process.StandardError.ReadToEndAsync();
+        try
+        {
+            process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+            throw;
+        }
+        finally
+        {
+            Task.WhenAll(output, error).GetAwaiter().GetResult();
+        }
         if (process.ExitCode != 0)
-            throw new NativeBuildException($"Overlay packaging tool '{Path.GetFileName(executable)}' failed: {(error + output).Trim()}");
+            throw new NativeBuildException($"Overlay packaging tool '{Path.GetFileName(executable)}' failed: {(error.Result + output.Result).Trim()}");
     }
 
     private static void ValidateNoOverlayLoadSections(string path)

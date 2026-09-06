@@ -16,7 +16,7 @@ internal sealed class SftpDirectoryState
 }
 
 [Overlay("sftp-core")]
-internal sealed class SftpSession
+internal sealed class SftpSession : ISshSubsystem
 {
     private const uint StatusOk = 0u;
     private const uint StatusEof = 1u;
@@ -45,7 +45,7 @@ internal sealed class SftpSession
         generations = new uint[8];
     }
 
-    internal void Input(byte[] data)
+    public void Input(byte[] data)
     {
         int position = 0;
         while (position < data.Length)
@@ -57,7 +57,7 @@ internal sealed class SftpSession
         }
     }
 
-    internal byte[] Output()
+    public byte[] Output()
     {
         if (outputCount == 0)
             return null;
@@ -68,7 +68,7 @@ internal sealed class SftpSession
         return value;
     }
 
-    internal void Close()
+    public void Close()
     {
         for (int index = 0; index < files.Length; index++)
             CloseSlot(index);

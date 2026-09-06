@@ -228,6 +228,9 @@ bool ctilde_managed_storage_prefix_busy(const char *prefix);
 uintptr_t ct_managed_process_start(const void *path, const void *arguments);
 uintptr_t ct_managed_process_start_redirected(const void *path, const void *arguments,
     bool redirect_input, bool redirect_output, bool redirect_error);
+uintptr_t ct_managed_process_start_redirected_sized(const void *path, const void *arguments,
+    bool redirect_input, bool redirect_output, bool redirect_error,
+    uint32_t input_bytes, uint32_t output_bytes, uint32_t error_bytes);
 uintptr_t ct_managed_process_try_open(uint32_t id);
 uintptr_t ct_managed_process_current(void);
 uint32_t ct_managed_process_id(uintptr_t handle);
